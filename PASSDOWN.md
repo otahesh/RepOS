@@ -1,7 +1,7 @@
 # RepOS — Engineering Passdown
 
-**Date:** 2026-05-02  
-**Status:** v1 complete, ready for production deployment  
+**Date:** 2026-05-03  
+**Status:** v1 deployed, hardened operationally (backup + log rotation + CI to GHCR live); auth (CF Access whole-host) implementation in flight  
 **Repo:** `otahesh/RepOS` (GitHub, public)
 
 ---
@@ -25,8 +25,13 @@ The design reference (`RepOS.html` + 6 JSX files at the repo root) is a Figma-st
 | Frontend — design system, layout, charts | ✅ Build clean, zero TS errors |
 | Frontend — Settings / token management UI | ✅ |
 | Production deployment (Unraid + Cloudflare) | ✅ Single `RepOS` container, br0 macvlan at `192.168.88.65`, public via Cloudflare Tunnel as `repos.jpmtech.com`, `/api/tokens/*` gated by Cloudflare Access |
-| User login / session system | ❌ Out of scope for v1 — frontend uses `PLACEHOLDER_USER_ID` |
-| iOS Shortcut file (`.shortcut`) | ❌ Not published yet |
+| Postgres backup | ✅ s6 longrun → daily `pg_dump` 03:15 UTC → `/config/backups/repos-*.dump.gz`, 14-day retention, restore runbook below |
+| Log rotation | ✅ s6-log per service for postgres/api/nginx, 100 MB × 7 archives, gzipped — at `/config/log/{postgres,api,nginx}` |
+| CI (GitHub Actions) | ✅ `.github/workflows/test.yml` (typecheck on PR) + `docker.yml` (build + push to `ghcr.io/otahesh/repos` on main) |
+| Frontend URL routing | ✅ `VITE_API_URL=` (empty) — `/api/foo` resolved via same-origin nginx (was `VITE_API_URL=/api` which produced `/api/api/foo` 404s) |
+| iOS Shortcut build recipe | ✅ `docs/shortcuts/health-weight-sync.md` — text-only build instructions (no `.shortcut` bundle, since those are signed per-device) |
+| User login / session system | 🟡 In flight — implementing CF Access whole-host auth derived from `Cf-Access-Jwt-Assertion` JWT email claim |
+| iOS Shortcut `.shortcut` bundle | ❌ Not published — users build from the recipe locally |
 
 ---
 
@@ -131,7 +136,7 @@ All 13 tests must pass before merging to `main`. They use a fresh isolated test 
 |---|---|
 | Server | Unraid NAS at `192.168.88.2` (hostname `Tower`) |
 | SSH | `ssh unraid` (alias on dev Mac; key at `~/.ssh/unraid`, root user) |
-| Production container | `RepOS` — single image built from `docker/Dockerfile`, image lives only on Unraid (no GHCR yet) |
+| Production container | `RepOS` — single image built from `docker/Dockerfile`, pushed to `ghcr.io/otahesh/repos:{latest,sha-<short>}` by GitHub Actions on every push to `main` |
 | Container network | `br0` macvlan, pinned IP `192.168.88.65`, MAC `02:42:c0:a8:58:41` |
 | Persistent volume | `/mnt/user/appdata/repos/config` → `/config` inside container |
 | Env file (secrets) | `/mnt/user/appdata/repos/.env` (root-owned, 600) — `POSTGRES_PASSWORD`, `ADMIN_API_KEY`, etc. |
@@ -141,26 +146,57 @@ All 13 tests must pass before merging to `main`. They use a fresh isolated test 
 | Build context | `/mnt/user/appdata/repos/build/` (rsynced from dev Mac); rebuild with `docker build -t repos:latest -f docker/Dockerfile .` |
 | Docker restart | `unless-stopped` |
 
-**Build + redeploy cycle:**
+**Build + redeploy cycle (CI-driven, preferred):**
+```bash
+# 1. Push commits to main. CI runs .github/workflows/docker.yml,
+#    builds the image, and pushes ghcr.io/otahesh/repos:{latest,sha-<short>}.
+git push origin main
+# Watch: https://github.com/otahesh/RepOS/actions
+
+# 2. After CI is green, pull + redeploy on Unraid:
+ssh unraid '
+  docker pull ghcr.io/otahesh/repos:latest && \
+  docker stop RepOS && docker rm RepOS && \
+  docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
+    --mac-address 02:42:c0:a8:58:41 --restart unless-stopped \
+    --env-file /mnt/user/appdata/repos/.env \
+    -e PUID=99 -e PGID=100 \
+    -v /mnt/user/appdata/repos/config:/config \
+    ghcr.io/otahesh/repos:latest
+'
+```
+
+To roll back, substitute `:latest` with a previous `:sha-<short>` tag in both `pull` and `run`.
+
+**One-time GHCR setup (after the first green CI run):** the package is created `private` by default. Make it `public` so Unraid can pull without auth:
+GitHub → your profile → Packages → `repos` → Package settings → Danger Zone → Change visibility → Public.
+
+**Legacy / emergency rebuild path (when GHCR is unreachable):**
 ```bash
 # from dev Mac, repo root:
-rsync -a --delete \
-  --exclude=node_modules --exclude=dist --exclude=.git \
-  --exclude='**/.env' --exclude='**/.env.local' \
-  --exclude=docs --exclude=tasks \
-  ./ unraid:/mnt/user/appdata/repos/build/
+rsync -av --delete \
+  --exclude=.git --exclude=node_modules --exclude=dist \
+  --exclude=.env --exclude=.env.local --exclude=.DS_Store \
+  --exclude=.vscode --exclude=coverage --exclude='*.log' \
+  /Users/jasonmeyer.ict/Projects/RepOS/ \
+  unraid:/mnt/user/appdata/repos/build/
 
 ssh unraid 'cd /mnt/user/appdata/repos/build && docker build -t repos:latest -f docker/Dockerfile .'
-ssh unraid 'docker stop RepOS && docker rm RepOS'
-ssh unraid 'docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
-  --mac-address 02:42:c0:a8:58:41 --restart unless-stopped \
-  --env-file /mnt/user/appdata/repos/.env \
-  -e PUID=99 -e PGID=100 \
-  -v /mnt/user/appdata/repos/config:/config \
-  repos:latest'
+# (same docker stop/rm/run cycle as above, but with the local repos:latest tag)
 ```
 
 The `/config` volume persists postgres data across container recreations — your DB survives a rebuild.
+
+**Restore from backup:**
+```bash
+docker exec -it RepOS ls -lt /config/backups/                                    # pick newest
+docker exec -it RepOS s6-rc -d change api                                        # quiesce writes
+docker exec -it RepOS s6-setuidgid postgres psql -h /tmp -U postgres -d postgres \
+  -c "DROP DATABASE IF EXISTS repos WITH (FORCE); CREATE DATABASE repos OWNER repos;"
+docker exec -it RepOS sh -c "gunzip -c /config/backups/repos-<timestamp>.dump.gz \
+  | s6-setuidgid postgres pg_restore -h /tmp -U postgres -d repos --no-owner --role=repos --exit-on-error"
+docker exec -it RepOS s6-rc -u change api
+```
 
 **Local dev DB:** the standalone `repos-postgres` container that previously held dev data has been retired. To run `npm test` locally now, either spin up a separate dev Postgres on your machine (any container with `repos`/`repos`/`repos_dev_pw`/`repos`) or accept that tests run only inside the production container path.
 
@@ -216,7 +252,9 @@ The token management endpoints (`POST/GET/DELETE /api/tokens`) are gated by an `
 
 ## Database Schema
 
-Five migrations in `api/src/db/migrations/`, tracked in a `_migrations` table. The runner is idempotent — `npm run migrate` is safe to re-run.
+Six migrations in `api/src/db/migrations/` (`001`–`006`, where `006` adds the `text_pattern_ops` index for `LIKE 'prefix:%'`), tracked in a `_migrations` table. The runner is idempotent — `npm run migrate` is safe to re-run.
+
+Auth migration `007_users_auth.sql` (CF Access whole-host) is in flight — adds `display_name`, `last_seen_at`, and a UNIQUE index on `lower(email)`.
 
 ```sql
 -- Core tables (abbreviated)
@@ -268,16 +306,15 @@ Full findings in `tasks/security-report.md`. Summary:
 - Public exposure new gates: ✅ `ADMIN_API_KEY` startup guard refuses to boot in production if unset; nginx-in-container enforces 256k body cap, per-IP rate limits (`/api/` 10r/s, `/api/tokens` 2r/s); Cloudflare Access on `/api/tokens/*`
 
 **Open (v2 hardening):**
-- Postgres backup / WAL story — no automated backups yet; revisit before declaring Release
-- Log rotation — per-service logs at `/config/log/{postgres,api,nginx}` grow unbounded
 - Move token minting out-of-band (CLI) to eliminate the admin HTTP surface entirely
-- GHCR image push + CI rebuild (currently building locally on Unraid)
-- Frontend bundle code-splitting (588kb chunk, dominated by Recharts)
+- Frontend bundle code-splitting (588 kb chunk, dominated by Recharts)
+- Postgres WAL archiving / point-in-time recovery — current daily logical backup is sufficient for alpha; revisit if RPO < 24h becomes a real requirement
+- Backup off-box destination — currently lives on the same Unraid box as the source DB; mirror to NAS share or remote target before declaring Release
 
 **Production checklist (status):**
 - [x] `ADMIN_API_KEY` set to a 64-hex-char secret in `/mnt/user/appdata/repos/.env`
 - [x] TLS terminated at Cloudflare's edge (nginx-in-container is plain HTTP on the LAN — that's correct for a tunnel)
-- [x] `VITE_API_URL=/api` baked into the frontend build for same-origin
+- [x] `VITE_API_URL=` (empty) baked into the frontend build for same-origin (set to `/api` would double the prefix and produce `/api/api/...` 404s)
 - [x] `api/.env` is `.gitignore`d (verified)
 - [x] Postgres bound to `127.0.0.1` only (verified: `nc -zv 192.168.88.65 5432` from LAN → connection refused)
 - [x] `/api/tokens` gated by Cloudflare Access (verified: 302 to CF challenge URL)
