@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RepOS — Hi-fi prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: 'Inter Tight', system-ui, sans-serif; }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+  button:focus { outline: none; }
+
+  /* Tweaks panel */
+  .tweaks-panel {
+    position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+    background: #10141C; color: #E8EEF7;
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px; padding: 14px 16px;
+    width: 260px;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    display: none;
+  }
+  .tweaks-panel.on { display: block; }
+  .tweaks-panel h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 600; letter-spacing: 1.4px;
+    margin: 0 0 12px; color: #9BA7BA;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .tweaks-panel h3 .dot { width: 6px; height: 6px; border-radius: 10px; background: #6BE28B; box-shadow: 0 0 6px #6BE28B; }
+  .tw-row { margin-bottom: 10px; }
+  .tw-row > label {
+    display: block; font-size: 11px; color: #9BA7BA;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.8px;
+    margin-bottom: 6px; text-transform: uppercase;
+  }
+  .tw-seg {
+    display: flex; gap: 2px; background: #161C26; padding: 2px;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
+  }
+  .tw-seg button {
+    flex: 1; border: none; background: transparent; color: #9BA7BA;
+    padding: 6px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    text-transform: uppercase; font-family: 'JetBrains Mono', monospace;
+  }
+  .tw-seg button.on {
+    background: #4D8DFF; color: #fff;
+    box-shadow: 0 2px 8px rgba(77,141,255,0.3);
+  }
+  .tw-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+  }
+  .tw-toggle span { font-size: 12px; color: #E8EEF7; }
+  .tw-switch {
+    width: 32px; height: 18px; border-radius: 100px;
+    background: #161C26; border: 1px solid rgba(255,255,255,0.14);
+    position: relative; cursor: pointer;
+  }
+  .tw-switch::after {
+    content: ''; position: absolute; top: 1px; left: 1px;
+    width: 14px; height: 14px; border-radius: 100px;
+    background: #9BA7BA; transition: all 0.15s ease;
+  }
+  .tw-switch.on { background: #4D8DFF; border-color: #4D8DFF; }
+  .tw-switch.on::after { left: 15px; background: #fff; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="tweaks" class="tweaks-panel">
+  <h3>TWEAKS <span class="dot"></span></h3>
+  <div class="tw-row">
+    <label>Theme</label>
+    <div class="tw-seg" id="tw-theme">
+      <button data-v="dark">Dark</button>
+      <button data-v="light">Light</button>
+    </div>
+  </div>
+  <div class="tw-row">
+    <label>Persona</label>
+    <div class="tw-seg" id="tw-persona">
+      <button data-v="beginner">Beginner</button>
+      <button data-v="advanced">Advanced</button>
+    </div>
+  </div>
+  <div class="tw-row tw-toggle">
+    <span>Science callouts</span>
+    <div class="tw-switch" id="tw-science"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="mobile-live.jsx"></script>
+<script type="text/babel" src="desktop-dashboard.jsx"></script>
+<script type="text/babel" src="health-sync.jsx"></script>
+
+<script type="text/babel">
+const TWEAKS_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "dark",
+  "persona": "beginner",
+  "science": true
+}/*EDITMODE-END*/;
+
+function App() {
+  const [state, setState] = React.useState(() => {
+    try { return { ...TWEAKS_DEFAULTS, ...JSON.parse(localStorage.getItem('repos-tweaks') || '{}') }; }
+    catch { return TWEAKS_DEFAULTS; }
+  });
+  const { theme, persona, science } = state;
+  const t = REPOS_TOKENS[theme];
+
+  const update = (patch) => {
+    const next = { ...state, ...patch };
+    setState(next);
+    try { localStorage.setItem('repos-tweaks', JSON.stringify(next)); } catch {}
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: patch }, '*');
+  };
+
+  // Wire Tweaks panel
+  React.useEffect(() => {
+    const wire = (id, key, values) => {
+      const el = document.getElementById(id);
+      el.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('on', btn.dataset.v === state[key]);
+        btn.onclick = () => update({ [key]: btn.dataset.v });
+      });
+    };
+    wire('tw-theme', 'theme');
+    wire('tw-persona', 'persona');
+    const sw = document.getElementById('tw-science');
+    sw.classList.toggle('on', !!science);
+    sw.onclick = () => update({ science: !science });
+  }, [state]);
+
+  // Edit mode availability
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      const d = e.data || {};
+      if (d.type === '__activate_edit_mode') document.getElementById('tweaks').classList.add('on');
+      if (d.type === '__deactivate_edit_mode') document.getElementById('tweaks').classList.remove('on');
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  return (
+    <DesignCanvas>
+      {/* Hero strip: desktop + mobile side-by-side */}
+      <DCSection
+        title="RepOS · Home + Live"
+        subtitle="Desktop program dashboard (left) + mobile mid-workout logging (right). One mesocycle, two surfaces."
+        gap={56}
+      >
+        <DCArtboard label="DESKTOP · 1440 × 1300 · Home + Health Sync" width={1440} height={1300}>
+          <DesktopDashboard theme={theme} persona={persona} science={science} />
+        </DCArtboard>
+
+        <DCArtboard label="MOBILE · 402 × 956 · Live Workout" width={402} height={956} style={{
+          background: 'transparent', boxShadow: 'none', borderRadius: 48,
+        }}>
+          <MobileLive theme={theme} persona={persona} science={science} />
+        </DCArtboard>
+
+        <DCPostIt top={40} left={-140} rotate={-3} width={220}>
+          Guiding idea: ONE mesocycle, TWO devices. Phone stays brutal & fast. Desktop flexes on charts.
+        </DCPostIt>
+
+        <DCPostIt bottom={80} right={-150} rotate={2} width={200}>
+          Volume heat-map uses MEV→MAV→MRV landmarks, so the page teaches RP-style programming quietly.
+        </DCPostIt>
+
+        <DCPostIt bottom={-30} left={620} rotate={-1.5} width={240}>
+          Sync source spec moved to Settings → Integrations. Home screen stays focused on training.
+        </DCPostIt>
+      </DCSection>
+
+      {/* Supporting notes strip */}
+      <DCSection title="Settings · Integrations" subtitle="Where the sync source lives — config, not home.">
+        <DCArtboard label="DESKTOP · 1440 × 900 · Settings · Integrations" width={1440} height={900}>
+          <SettingsIntegrations theme={theme} />
+        </DCArtboard>
+      </DCSection>
+
+      {/* System notes */}
+      <DCSection title="System notes" subtitle="The primitives driving both surfaces.">
+        <DCArtboard label="DESIGN SYSTEM" width={680} height={360} style={{
+          background: t.bg, color: t.text, padding: 28,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.06)',
+        }}>
+          <SystemCard />
+        </DCArtboard>
+
+        <DCArtboard label="COPY VOICE" width={420} height={360} style={{
+          background: '#10141C', color: '#E8EEF7', padding: 28,
+        }}>
+          <VoiceCard />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+function SystemCard() {
+  return (
+    <div style={{ fontFamily: REPOS_FONTS.ui, height: '100%' }}>
+      <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 10, color: '#9BA7BA', letterSpacing: 1.4, marginBottom: 14 }}>
+        REPOS · SYSTEM · V0.1
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, marginBottom: 6, color: '#E8EEF7' }}>
+        Tech-forward dark blue, built for grit.
+      </div>
+      <div style={{ fontSize: 13, color: '#9BA7BA', lineHeight: 1.5, marginBottom: 20, maxWidth: 540 }}>
+        Numbers lead every screen. Blue signals effort and intent. Heat-maps turn RP volume landmarks into
+        a glance. Typography uses Inter Tight for UI and JetBrains Mono for every data point — weight, reps, RPE, PR delta.
+      </div>
+      {/* Swatches */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginBottom: 18 }}>
+        {[
+          { n: 'ACCENT', c: '#4D8DFF' },
+          { n: 'GOOD · PR', c: '#6BE28B' },
+          { n: 'WARN · MAV', c: '#F5B544' },
+          { n: 'DANGER · MRV', c: '#FF6A6A' },
+          { n: 'SURFACE', c: '#10141C' },
+          { n: 'BG', c: '#0A0D12' },
+        ].map(s => (
+          <div key={s.n}>
+            <div style={{
+              height: 42, borderRadius: 6, background: s.c,
+              border: '1px solid rgba(255,255,255,0.08)',
+            }} />
+            <div style={{
+              fontFamily: REPOS_FONTS.mono, fontSize: 9, color: '#9BA7BA',
+              letterSpacing: 0.6, marginTop: 4,
+            }}>{s.n}</div>
+            <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 9, color: '#5A6577' }}>{s.c}</div>
+          </div>
+        ))}
+      </div>
+      {/* Type scale */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 14 }}>
+        <div>
+          <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 42, fontWeight: 700, color: '#E8EEF7', letterSpacing: -1.5, lineHeight: 1 }}>195</div>
+          <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 9, color: '#5A6577', marginTop: 4 }}>DISPLAY · 56 · MONO</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#E8EEF7', letterSpacing: -0.5 }}>Barbell Bench Press</div>
+          <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 9, color: '#5A6577', marginTop: 4 }}>H1 · 22 · INTER TIGHT 700</div>
+        </div>
+        <div>
+          <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 10, color: '#4D8DFF', letterSpacing: 1.2 }}>EX 01 / 04</div>
+          <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 9, color: '#5A6577', marginTop: 4 }}>META · 10 · MONO · 1.2LS</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VoiceCard() {
+  const lines = [
+    { k: 'CTA', v: 'LOCK IT IN' },
+    { k: 'SUB', v: 'ONE IN THE TANK' },
+    { k: 'PROGRESS', v: 'ADD 5.' },
+    { k: 'DELOAD', v: 'RESPECT THE TAPER' },
+    { k: 'EMPTY', v: 'NOTHING LOGGED. GO.' },
+    { k: 'WARN', v: 'CLOSE TO MRV — EASE IT.' },
+  ];
+  return (
+    <div style={{ fontFamily: REPOS_FONTS.ui, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontFamily: REPOS_FONTS.mono, fontSize: 10, color: '#9BA7BA', letterSpacing: 1.4, marginBottom: 14 }}>
+        VOICE · GRITTY · CONFIDENT
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, marginBottom: 16, color: '#E8EEF7', textWrap: 'pretty' }}>
+        Short sentences. Verbs first. No fluff.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+        {lines.map(l => (
+          <div key={l.k} style={{
+            display: 'grid', gridTemplateColumns: '90px 1fr',
+            padding: '10px 0', borderTop: '1px solid rgba(255,255,255,0.08)',
+            alignItems: 'center',
+          }}>
+            <div style={{
+              fontFamily: REPOS_FONTS.mono, fontSize: 10,
+              color: '#5A6577', letterSpacing: 1.2,
+            }}>{l.k}</div>
+            <div style={{
+              fontFamily: REPOS_FONTS.ui, fontSize: 15, fontWeight: 600,
+              color: '#E8EEF7', letterSpacing: -0.2,
+            }}>{l.v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{
+        fontFamily: REPOS_FONTS.mono, fontSize: 10, color: '#5A6577',
+        marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)',
+        letterSpacing: 0.4, lineHeight: 1.5,
+      }}>
+        Ref · RP volume landmarks (Schoenfeld et al. 2019); stimulus-to-fatigue programming heuristics.
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
