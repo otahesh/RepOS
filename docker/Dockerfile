@@ -49,6 +49,13 @@ COPY --from=frontend-builder /build/frontend/dist     /app/frontend
 COPY docker/nginx/repos.conf  /etc/nginx/http.d/default.conf
 COPY docker/root/             /
 
+# Override Alpine nginx's main-level error_log so startup errors hit stderr
+# (where s6-log can capture them) instead of /var/log/nginx/error.log.
+# The leading whitespace match handles Alpine's tab-indented directive.
+RUN sed -i \
+      -e 's|^[[:space:]]*error_log .*|error_log /dev/stderr warn;|' \
+      /etc/nginx/nginx.conf
+
 # Make all script files executable (COPY does not preserve unless explicit)
 RUN find /etc/s6-overlay -type f \( -name 'run' -o -name 'up' -o -path '*scripts*' \) -exec chmod +x {} + && \
     chmod +x /usr/local/bin/repos-backup.sh

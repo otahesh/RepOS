@@ -1,0 +1,3 @@
+#!/usr/bin/with-contenv bash
+mkdir -p /config/log/api
+exec s6-log -bp -- n7 s100000000 '!gzip -nq9' /config/log/api

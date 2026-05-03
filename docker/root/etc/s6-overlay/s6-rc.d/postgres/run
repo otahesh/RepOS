@@ -1,3 +1,6 @@
 #!/usr/bin/with-contenv bash
-mkdir -p /config/log/postgres
-exec s6-setuidgid postgres /usr/bin/postgres -D /config/postgres -c log_destination=stderr -k /tmp 2>&1
+exec s6-setuidgid postgres /usr/bin/postgres -D /config/postgres \
+  -c log_destination=stderr \
+  -c logging_collector=off \
+  -c log_line_prefix='%m [%p] %q%u@%d ' \
+  -k /tmp

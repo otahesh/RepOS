@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bash
+mkdir -p /config/log/postgres
+chown postgres:postgres /config/log/postgres
+exec s6-setuidgid postgres s6-log -bp -- n7 s100000000 T '!gzip -nq9' /config/log/postgres
