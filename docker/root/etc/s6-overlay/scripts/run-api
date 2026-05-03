@@ -1,0 +1,12 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+DB="${POSTGRES_DB:-repos}"
+USER="${POSTGRES_USER:-repos}"
+export DATABASE_URL="postgres://${USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${DB}"
+export NODE_ENV="${NODE_ENV:-production}"
+export HOST=127.0.0.1
+export PORT=3001
+
+cd /app/api
+exec node dist/index.js

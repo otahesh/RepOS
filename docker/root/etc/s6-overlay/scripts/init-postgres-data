@@ -1,0 +1,49 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+# Validate env values that get interpolated into SQL or filesystem paths later.
+# Reject anything outside [A-Za-z0-9_] for user/db; reject single-quote and
+# backslash in the password to keep the bootstrap heredoc safe.
+: "${POSTGRES_PASSWORD:?FATAL: POSTGRES_PASSWORD must be set}"
+USER_NAME="${POSTGRES_USER:-repos}"
+DB_NAME="${POSTGRES_DB:-repos}"
+[[ "$USER_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "FATAL: POSTGRES_USER contains invalid characters" >&2; exit 1; }
+[[ "$DB_NAME"   =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "FATAL: POSTGRES_DB contains invalid characters" >&2; exit 1; }
+[[ "$POSTGRES_PASSWORD" != *\'* && "$POSTGRES_PASSWORD" != *\\* ]] || { echo "FATAL: POSTGRES_PASSWORD must not contain ' or \\" >&2; exit 1; }
+
+PGDATA=/config/postgres
+mkdir -p "$PGDATA"
+chown -R postgres:postgres "$PGDATA"
+chmod 700 "$PGDATA"
+
+if [ ! -f "$PGDATA/PG_VERSION" ]; then
+  echo "First run: initializing postgres data dir at $PGDATA"
+  pwfile=$(mktemp)
+  chown postgres:postgres "$pwfile"
+  printf '%s' "$POSTGRES_PASSWORD" > "$pwfile"
+  chmod 600 "$pwfile"
+  s6-setuidgid postgres /usr/bin/initdb \
+    -D "$PGDATA" \
+    --auth-local=trust \
+    --auth-host=scram-sha-256 \
+    --username=postgres \
+    --pwfile="$pwfile" \
+    --encoding=UTF8
+  rm -f "$pwfile"
+
+  # Lock down network exposure: loopback only.
+  sed -i "s|^#*listen_addresses.*|listen_addresses = '127.0.0.1'|" "$PGDATA/postgresql.conf"
+  echo "unix_socket_directories = '/tmp'" >> "$PGDATA/postgresql.conf"
+
+  # Trust local socket (root inside container talks via socket as postgres);
+  # require scram on TCP loopback (API connects this way).
+  cat > "$PGDATA/pg_hba.conf" <<HBA
+local   all   all                trust
+host    all   all   127.0.0.1/32 scram-sha-256
+host    all   all   ::1/128      scram-sha-256
+HBA
+
+  # Mark first-run so init-postgres-bootstrap knows to create role + db.
+  touch "$PGDATA/.bootstrap-needed"
+  chown postgres:postgres "$PGDATA/.bootstrap-needed"
+fi

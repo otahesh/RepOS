@@ -1,0 +1,3 @@
+#!/usr/bin/with-contenv bash
+mkdir -p /config/log/postgres
+exec s6-setuidgid postgres /usr/bin/postgres -D /config/postgres -c log_destination=stderr -k /tmp 2>&1

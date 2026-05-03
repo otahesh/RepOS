@@ -1,0 +1,39 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+PGDATA=/config/postgres
+[ -f "$PGDATA/.bootstrap-needed" ] || exit 0
+
+/etc/s6-overlay/scripts/wait-for-postgres
+
+DB="${POSTGRES_DB:-repos}"
+USER="${POSTGRES_USER:-repos}"
+
+# Re-validate (init-postgres-data already did this on first run, but a manual
+# rerun could land here directly). Same regex contract.
+[[ "$USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "FATAL: POSTGRES_USER invalid" >&2; exit 1; }
+[[ "$DB"   =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "FATAL: POSTGRES_DB invalid"   >&2; exit 1; }
+[[ "$POSTGRES_PASSWORD" != *\'* && "$POSTGRES_PASSWORD" != *\\* ]] || { echo "FATAL: POSTGRES_PASSWORD invalid" >&2; exit 1; }
+
+# Use the unix socket with trust auth — no superuser password needed here.
+# Heredoc is unquoted ('SQL' would prevent expansion); bash strips backslashes
+# from \$\$ so psql sees the proper $$ DO-block delimiters.
+psql -h /tmp -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${USER}') THEN
+    CREATE ROLE "${USER}" LOGIN PASSWORD '${POSTGRES_PASSWORD}';
+  END IF;
+END
+\$\$;
+SQL
+
+# CREATE DATABASE cannot run inside a DO block. \gexec only works on script
+# input streams (heredoc / -f), NOT inside a -c argument — so use a heredoc.
+psql -h /tmp -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
+SELECT format('CREATE DATABASE %I OWNER %I', '${DB}', '${USER}')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DB}')\gexec
+SQL
+
+rm -f "$PGDATA/.bootstrap-needed"
+echo "Bootstrap complete: role=${USER} db=${DB}"

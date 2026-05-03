@@ -1,0 +1,11 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+/etc/s6-overlay/scripts/wait-for-postgres
+
+DB="${POSTGRES_DB:-repos}"
+USER="${POSTGRES_USER:-repos}"
+export DATABASE_URL="postgres://${USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${DB}"
+
+cd /app/api
+node dist/db/migrate.js
