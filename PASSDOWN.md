@@ -18,14 +18,14 @@ The design reference (`RepOS.html` + 6 JSX files at the repo root) is a Figma-st
 
 | Area | State |
 |---|---|
-| Postgres schema (5 migrations) | ✅ Applied to production DB |
-| Backend API (4 endpoints + auth) | ✅ All 13 spec tests passing |
-| Auth middleware (argon2id, prefix-indexed) | ✅ |
-| Security hardening | ✅ See `tasks/security-report.md` |
+| Postgres schema (6 migrations) | ✅ Applied to production DB |
+| Backend API (4 endpoints + auth) | ✅ 14 tests passing (added calendar-invalid date case) |
+| Auth middleware (argon2id, prefix-indexed) | ✅ Index now uses `text_pattern_ops` for LIKE-prefix |
+| Security hardening | ✅ helmet, log redaction, ADMIN_API_KEY guard, pg pool limits, token-revoke owner check, calendar-valid dates — all shipped |
 | Frontend — design system, layout, charts | ✅ Build clean, zero TS errors |
 | Frontend — Settings / token management UI | ✅ |
-| NginxProxyManager routing (Unraid) | ❌ Not configured — API not yet publicly reachable |
-| User login / session system | ❌ Out of scope for v1 |
+| Production deployment (Unraid + Cloudflare) | ✅ Single `RepOS` container, br0 macvlan at `192.168.88.65`, public via Cloudflare Tunnel as `repos.jpmtech.com`, `/api/tokens/*` gated by Cloudflare Access |
+| User login / session system | ❌ Out of scope for v1 — frontend uses `PLACEHOLDER_USER_ID` |
 | iOS Shortcut file (`.shortcut`) | ❌ Not published yet |
 
 ---
@@ -41,7 +41,7 @@ RepOS/
 │   │   ├── db/
 │   │   │   ├── client.ts   — pg Pool
 │   │   │   ├── migrate.ts  — idempotent migration runner
-│   │   │   └── migrations/ — 001–005 SQL files
+│   │   │   └── migrations/ — 001–006 SQL files (006 = token prefix index)
 │   │   ├── middleware/
 │   │   │   └── auth.ts     — Bearer token auth
 │   │   ├── routes/
@@ -129,16 +129,40 @@ All 13 tests must pass before merging to `main`. They use a fresh isolated test 
 
 | Component | Details |
 |---|---|
-| Server | Unraid NAS at `192.168.88.2` |
-| SSH | `ssh -i ~/.ssh/unraid root@192.168.88.2` (alias: `ssh unraid`) |
-| Postgres | Docker container `repos-postgres` (postgres:16-alpine) |
-| DB port | `192.168.88.2:5432` |
-| DB name / user / pass | `repos` / `repos` / `repos_dev_pw` |
-| Data volume | `/mnt/user/appdata/repos-postgres` |
-| Proxy | NginxProxyManager is installed on Unraid — **not yet configured for RepOS** |
+| Server | Unraid NAS at `192.168.88.2` (hostname `Tower`) |
+| SSH | `ssh unraid` (alias on dev Mac; key at `~/.ssh/unraid`, root user) |
+| Production container | `RepOS` — single image built from `docker/Dockerfile`, image lives only on Unraid (no GHCR yet) |
+| Container network | `br0` macvlan, pinned IP `192.168.88.65`, MAC `02:42:c0:a8:58:41` |
+| Persistent volume | `/mnt/user/appdata/repos/config` → `/config` inside container |
+| Env file (secrets) | `/mnt/user/appdata/repos/.env` (root-owned, 600) — `POSTGRES_PASSWORD`, `ADMIN_API_KEY`, etc. |
+| Internal services | postgres on `127.0.0.1:5432` (loopback only), Fastify API on `127.0.0.1:3001`, nginx on `:80` |
+| Public ingress | Cloudflare Tunnel (`CloudflaredTunnel` container, host netns) → `repos.jpmtech.com` → `http://192.168.88.65:80` |
+| Edge auth | Cloudflare Access app `RepOS Admin Tokens` gates `/api/tokens` to a single email (defense in depth on top of `ADMIN_API_KEY`) |
+| Build context | `/mnt/user/appdata/repos/build/` (rsynced from dev Mac); rebuild with `docker build -t repos:latest -f docker/Dockerfile .` |
 | Docker restart | `unless-stopped` |
 
-**To expose the API publicly:** configure NginxProxyManager to proxy `api.repos.app` → `localhost:3001` (the API needs to be running on the Unraid host or in a container with the port exposed). Then set `VITE_API_URL=https://api.repos.app` in the frontend build.
+**Build + redeploy cycle:**
+```bash
+# from dev Mac, repo root:
+rsync -a --delete \
+  --exclude=node_modules --exclude=dist --exclude=.git \
+  --exclude='**/.env' --exclude='**/.env.local' \
+  --exclude=docs --exclude=tasks \
+  ./ unraid:/mnt/user/appdata/repos/build/
+
+ssh unraid 'cd /mnt/user/appdata/repos/build && docker build -t repos:latest -f docker/Dockerfile .'
+ssh unraid 'docker stop RepOS && docker rm RepOS'
+ssh unraid 'docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
+  --mac-address 02:42:c0:a8:58:41 --restart unless-stopped \
+  --env-file /mnt/user/appdata/repos/.env \
+  -e PUID=99 -e PGID=100 \
+  -v /mnt/user/appdata/repos/config:/config \
+  repos:latest'
+```
+
+The `/config` volume persists postgres data across container recreations — your DB survives a rebuild.
+
+**Local dev DB:** the standalone `repos-postgres` container that previously held dev data has been retired. To run `npm test` locally now, either spin up a separate dev Postgres on your machine (any container with `repos`/`repos`/`repos_dev_pw`/`repos`) or accept that tests run only inside the production container path.
 
 ---
 
@@ -229,25 +253,34 @@ The sync pill in the topbar and the sync status on the Settings page call `GET /
 
 Full findings in `tasks/security-report.md`. Summary:
 
-**Fixed (shipped):**
+**Fixed (shipped in alpha-prep + monolithic-container deploy):**
 - C-1: Unauthenticated token minting → `X-Admin-Key` guard on all token routes
 - H-1: O(n) argon2 full-table-scan auth → prefix-indexed token format
 - H-2: Unbounded backfill array → 500-item hard cap
 - H-3: Rate-limit counter leaked outside transactions → explicit `PoolClient` for backfill
 - L-1: `NaN`/`Infinity` bypassed weight validation → `!isFinite()` guard
 - M-2: Sync status cache lacked `private` directive → fixed
+- M-1: ✅ `@fastify/helmet` registered + log redaction for `Authorization` / `X-Admin-Key`
+- M-3: ✅ `DELETE /api/tokens/:id` requires `user_id` query param (UPDATE matches both)
+- L-2: ✅ Calendar-invalid dates (`2026-13-01`) now return clean 400 via UTC round-trip
+- L-3: ✅ pg Pool bounded (max=20, connection/idle timeouts, per-session `statement_timeout=5s`)
+- H-1 follow-up: ✅ Migration 006 adds `text_pattern_ops` index on `device_tokens.token_hash` for the `LIKE 'prefix:%'` access pattern
+- Public exposure new gates: ✅ `ADMIN_API_KEY` startup guard refuses to boot in production if unset; nginx-in-container enforces 256k body cap, per-IP rate limits (`/api/` 10r/s, `/api/tokens` 2r/s); Cloudflare Access on `/api/tokens/*`
 
 **Open (v2 hardening):**
-- M-1: No security headers — add `@fastify/helmet`
-- M-3: Token revocation scoping — `DELETE /api/tokens/:id` should verify ownership
-- L-2: Date regex accepts invalid calendar dates (e.g. `2024-99-99`) → validate with `Date` parse
-- L-3: pg Pool has no configured limits or statement timeout
-- H-1 follow-up: Add a functional index on `left(token_hash, 16)` for prefix lookup at scale
+- Postgres backup / WAL story — no automated backups yet; revisit before declaring Release
+- Log rotation — per-service logs at `/config/log/{postgres,api,nginx}` grow unbounded
+- Move token minting out-of-band (CLI) to eliminate the admin HTTP surface entirely
+- GHCR image push + CI rebuild (currently building locally on Unraid)
+- Frontend bundle code-splitting (588kb chunk, dominated by Recharts)
 
-**Production checklist before going live:**
-- [ ] Set `ADMIN_API_KEY` to a high-entropy secret in the production environment
-- [ ] Configure NginxProxyManager to terminate TLS — never run the API over plain HTTP
-- [ ] Set `VITE_API_URL` in the frontend build to the production API hostname
+**Production checklist (status):**
+- [x] `ADMIN_API_KEY` set to a 64-hex-char secret in `/mnt/user/appdata/repos/.env`
+- [x] TLS terminated at Cloudflare's edge (nginx-in-container is plain HTTP on the LAN — that's correct for a tunnel)
+- [x] `VITE_API_URL=/api` baked into the frontend build for same-origin
+- [x] `api/.env` is `.gitignore`d (verified)
+- [x] Postgres bound to `127.0.0.1` only (verified: `nc -zv 192.168.88.65 5432` from LAN → connection refused)
+- [x] `/api/tokens` gated by Cloudflare Access (verified: 302 to CF challenge URL)
 - [ ] Confirm `api/.env` is not committed (`.gitignore` covers it; double-check)
 
 ---
