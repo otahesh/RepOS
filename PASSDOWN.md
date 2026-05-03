@@ -30,7 +30,7 @@ The design reference (`RepOS.html` + 6 JSX files at the repo root) is a Figma-st
 | CI (GitHub Actions) | ✅ `.github/workflows/test.yml` (typecheck on PR) + `docker.yml` (build + push to `ghcr.io/otahesh/repos` on main) |
 | Frontend URL routing | ✅ `VITE_API_URL=` (empty) — `/api/foo` resolved via same-origin nginx (was `VITE_API_URL=/api` which produced `/api/api/foo` 404s) |
 | iOS Shortcut build recipe | ✅ `docs/shortcuts/health-weight-sync.md` — text-only build instructions (no `.shortcut` bundle, since those are signed per-device) |
-| User login / session system | 🟡 In flight — implementing CF Access whole-host auth derived from `Cf-Access-Jwt-Assertion` JWT email claim |
+| User login / session system | 🟡 In flight — code landed (CF Access whole-host auth derived from `Cf-Access-Jwt-Assertion` JWT email claim); waiting on dashboard config + flag flip |
 | iOS Shortcut `.shortcut` bundle | ❌ Not published — users build from the recipe locally |
 
 ---
@@ -142,7 +142,7 @@ All 13 tests must pass before merging to `main`. They use a fresh isolated test 
 | Env file (secrets) | `/mnt/user/appdata/repos/.env` (root-owned, 600) — `POSTGRES_PASSWORD`, `ADMIN_API_KEY`, etc. |
 | Internal services | postgres on `127.0.0.1:5432` (loopback only), Fastify API on `127.0.0.1:3001`, nginx on `:80` |
 | Public ingress | Cloudflare Tunnel (`CloudflaredTunnel` container, host netns) → `repos.jpmtech.com` → `http://192.168.88.65:80` |
-| Edge auth | Cloudflare Access app `RepOS Admin Tokens` gates `/api/tokens` to a single email (defense in depth on top of `ADMIN_API_KEY`) |
+| Edge auth | Cloudflare Access app `RepOS Admin Tokens` gates `/api/tokens` to a single email (defense in depth on top of `ADMIN_API_KEY`). Will be folded into a new whole-host CF Access app when auth lands; retire the old app once the whole-host app is verified to avoid serving two AUDs to the browser. |
 | Build context | `/mnt/user/appdata/repos/build/` (rsynced from dev Mac); rebuild with `docker build -t repos:latest -f docker/Dockerfile .` |
 | Docker restart | `unless-stopped` |
 
@@ -310,6 +310,29 @@ Full findings in `tasks/security-report.md`. Summary:
 - Frontend bundle code-splitting (588 kb chunk, dominated by Recharts)
 - Postgres WAL archiving / point-in-time recovery — current daily logical backup is sufficient for alpha; revisit if RPO < 24h becomes a real requirement
 - Backup off-box destination — currently lives on the same Unraid box as the source DB; mirror to NAS share or remote target before declaring Release
+
+**CF Access whole-host auth — operator runbook (when flipping the flag on):**
+
+1. Zero Trust → Access → Applications → **Add an application** → Self-hosted, domain `repos.jpmtech.com` (no path), session 24h, identity provider One-Time PIN, policy Allow with `jason@jpmtech.com` (extend allowlist over time). Copy the **Application Audience (AUD) Tag**.
+2. Add a second application: domain `repos.jpmtech.com`, **path** `api/health/*`, policy **Bypass** with selector Everyone. The bearer-only Shortcut path needs this so origin-side JWT verification doesn't fire on machine traffic.
+3. Append to `/mnt/user/appdata/repos/.env` (root:root, 600): `CF_ACCESS_ENABLED=true`, `CF_ACCESS_TEAM_DOMAIN=jpmtech.cloudflareaccess.com`, `CF_ACCESS_AUD=<paste from step 1>`, optionally `CF_ACCESS_ALLOWED_EMAILS=jason@jpmtech.com` (defense-in-depth allowlist at the origin).
+4. Restart container: `ssh unraid 'docker restart RepOS'`.
+5. Verify in incognito browser: hit `https://repos.jpmtech.com` → CF challenge → enter email → PIN → app loads → DevTools shows `/api/me` returns 200 with your email.
+6. **Retire the old `RepOS Admin Tokens` Access app** (the new whole-host app supersedes it). Avoids serving two AUDs to the same browser session — the origin's JWT verifier accepts only one AUD value.
+
+**Break-glass — merge two user rows by email (when allowlist email changes):**
+```sql
+-- Suppose 'old@x.com' has user_id A and 'new@x.com' has user_id B; you
+-- want to migrate A's data onto B and delete A.
+BEGIN;
+UPDATE health_weight_samples  SET user_id = 'B' WHERE user_id = 'A';
+UPDATE device_tokens          SET user_id = 'B' WHERE user_id = 'A';
+UPDATE health_sync_status     SET user_id = 'B' WHERE user_id = 'A';
+UPDATE weight_write_log       SET user_id = 'B' WHERE user_id = 'A';
+DELETE FROM users WHERE id = 'A';
+COMMIT;
+```
+Note: `health_weight_samples` has UNIQUE(user_id, sample_date, source); if both A and B have a row for the same (date, source), the UPDATE fails on the duplicate. Resolve case-by-case before running.
 
 **Production checklist (status):**
 - [x] `ADMIN_API_KEY` set to a 64-hex-char secret in `/mnt/user/appdata/repos/.env`
