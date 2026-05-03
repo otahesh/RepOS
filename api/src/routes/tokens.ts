@@ -1,33 +1,30 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { randomBytes } from 'crypto';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
+import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 
-// Admin key guard: when ADMIN_API_KEY is set, the X-Admin-Key header must match.
-// When unset (local dev / test environments), the check is skipped.
-// In production, always set ADMIN_API_KEY to a high-entropy secret.
-async function requireAdminKey(req: FastifyRequest, reply: FastifyReply) {
-  const adminKey = process.env.ADMIN_API_KEY;
-  if (!adminKey) return; // unset → open (dev/test only)
-  if (req.headers['x-admin-key'] !== adminKey) {
-    return reply.code(401).send({ error: 'unauthorized' });
-  }
+// Token mint / list / revoke. Two auth modes:
+//   - admin   : body/query supplies user_id (CLI, tests, ops scripts).
+//               Gated by X-Admin-Key when ADMIN_API_KEY is set.
+//   - cf_access: user_id derived from the verified CF Access JWT — body /
+//                query user_id is ignored. The browser path.
+// `requireAdminKeyOrCfAccess` sets req.authMode + req.userId accordingly.
+
+function userIdFromReq(req: any, fallback: string | undefined): string | undefined {
+  return req.authMode === 'cf_access' ? (req.userId as string) : fallback;
 }
 
 export async function tokenRoutes(app: FastifyInstance) {
-  // Mint a new device token — protected by admin API key in production
-  app.post<{ Body: { user_id: string; label?: string } }>(
+  app.post<{ Body: { user_id?: string; label?: string } }>(
     '/tokens',
-    { preHandler: requireAdminKey },
+    { preHandler: requireAdminKeyOrCfAccess },
     async (req, reply) => {
-      const { user_id, label } = req.body;
-      if (!user_id) return reply.code(400).send({ error: 'user_id required' });
+      const userId = userIdFromReq(req, req.body.user_id);
+      if (!userId) return reply.code(400).send({ error: 'user_id required' });
 
-      // Token format: "<16-hex-prefix>.<64-hex-secret>"
-      // Stored as "<prefix>:<argon2hash>" so auth can do a fast indexed lookup
-      // instead of scanning the full table and running argon2 on every row.
-      const prefix = randomBytes(8).toString('hex'); // 16 hex chars
-      const secret = randomBytes(32).toString('hex'); // 64 hex chars
+      const prefix = randomBytes(8).toString('hex');
+      const secret = randomBytes(32).toString('hex');
       const plaintext = `${prefix}.${secret}`;
       const hash = await argon2.hash(secret);
       const storedHash = `${prefix}:${hash}`;
@@ -35,45 +32,43 @@ export async function tokenRoutes(app: FastifyInstance) {
       const { rows } = await db.query(
         `INSERT INTO device_tokens (user_id, token_hash, label)
          VALUES ($1, $2, $3) RETURNING id, created_at`,
-        [user_id, storedHash, label ?? null],
+        [userId, storedHash, req.body.label ?? null],
       );
 
       return reply.code(201).send({ id: rows[0].id, token: plaintext, created_at: rows[0].created_at });
     },
   );
 
-  // List active tokens for a user — protected by admin API key in production
   app.get<{ Querystring: { user_id?: string } }>(
     '/tokens',
-    { preHandler: requireAdminKey },
+    { preHandler: requireAdminKeyOrCfAccess },
     async (req, reply) => {
-      const { user_id } = req.query;
-      if (!user_id) return reply.code(400).send({ error: 'user_id required' });
+      const userId = userIdFromReq(req, req.query.user_id);
+      if (!userId) return reply.code(400).send({ error: 'user_id required' });
 
       const { rows } = await db.query(
         `SELECT id, label, created_at, last_used_at
          FROM device_tokens
          WHERE user_id = $1 AND revoked_at IS NULL
          ORDER BY created_at DESC`,
-        [user_id],
+        [userId],
       );
       return reply.send(rows);
     },
   );
 
-  // Revoke a token — protected by admin API key in production.
-  // user_id is required so a leaked admin key can't enumerate or revoke tokens
-  // belonging to other users; the UPDATE only matches when both id and user_id agree.
   app.delete<{ Params: { id: string }; Querystring: { user_id?: string } }>(
     '/tokens/:id',
-    { preHandler: requireAdminKey },
+    { preHandler: requireAdminKeyOrCfAccess },
     async (req, reply) => {
-      const { user_id } = req.query;
-      if (!user_id) return reply.code(400).send({ error: 'user_id required' });
+      const userId = userIdFromReq(req, req.query.user_id);
+      if (!userId) return reply.code(400).send({ error: 'user_id required' });
+      // The user_id+id pair guards against a leaked admin key revoking a
+      // different user's tokens — the UPDATE only fires when both match.
       const { rowCount } = await db.query(
         `UPDATE device_tokens SET revoked_at = now()
          WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [req.params.id, user_id],
+        [req.params.id, userId],
       );
       if (!rowCount) return reply.code(404).send({ error: 'not found' });
       return reply.code(204).send();
