@@ -1,2 +1,2 @@
 #!/usr/bin/with-contenv bash
-exec /etc/s6-overlay/scripts/run-api
+exec /etc/s6-overlay/scripts/run-api 2>&1
