@@ -44,7 +44,11 @@ function readCfAccessJwt(req: FastifyRequest): string | undefined {
 function buildLoginUrl(req: FastifyRequest): string {
   const teamDomain = process.env.CF_ACCESS_TEAM_DOMAIN ?? '';
   const host = (req.headers.host as string | undefined) ?? '';
-  return `https://${teamDomain}/cdn-cgi/access/login/${host}${req.url}`;
+  // After CF Access login, the user is redirected back to the original URL.
+  // For /api/* paths that's a raw JSON response, which is ugly UX. Land on
+  // the SPA root instead so the AuthProvider can re-bootstrap normally.
+  const target = req.url.startsWith('/api/') ? '/' : req.url;
+  return `https://${teamDomain}/cdn-cgi/access/login/${host}${target}`;
 }
 
 export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) {
