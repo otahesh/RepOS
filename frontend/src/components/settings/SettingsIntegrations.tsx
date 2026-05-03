@@ -98,7 +98,7 @@ export default function SettingsIntegrations() {
     if (revoking) return
     setRevoking(id)
     try {
-      const res = await fetch(`${API_BASE}/api/tokens/${id}`, { method: 'DELETE' })
+      const res = await fetch(`${API_BASE}/api/tokens/${id}?user_id=${PLACEHOLDER_USER_ID}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setTokens(prev => prev.filter(t => t.id !== id))
     } catch (err) {

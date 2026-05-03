@@ -40,7 +40,7 @@ beforeAll(async () => {
   });
   const { id: rid, token: plain } = r.json<{ id: string; token: string }>();
   revokedToken = plain;
-  await app.inject({ method: 'DELETE', url: `/api/tokens/${rid}` });
+  await app.inject({ method: 'DELETE', url: `/api/tokens/${rid}?user_id=${userId}` });
 }, 30_000);
 
 afterAll(async () => {

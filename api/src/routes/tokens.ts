@@ -61,15 +61,19 @@ export async function tokenRoutes(app: FastifyInstance) {
     },
   );
 
-  // Revoke a token — protected by admin API key in production
-  app.delete<{ Params: { id: string } }>(
+  // Revoke a token — protected by admin API key in production.
+  // user_id is required so a leaked admin key can't enumerate or revoke tokens
+  // belonging to other users; the UPDATE only matches when both id and user_id agree.
+  app.delete<{ Params: { id: string }; Querystring: { user_id?: string } }>(
     '/tokens/:id',
     { preHandler: requireAdminKey },
     async (req, reply) => {
+      const { user_id } = req.query;
+      if (!user_id) return reply.code(400).send({ error: 'user_id required' });
       const { rowCount } = await db.query(
         `UPDATE device_tokens SET revoked_at = now()
-         WHERE id = $1 AND revoked_at IS NULL`,
-        [req.params.id],
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [req.params.id, user_id],
       );
       if (!rowCount) return reply.code(404).send({ error: 'not found' });
       return reply.code(204).send();
