@@ -125,6 +125,12 @@ describe('POST /api/health/weight', () => {
     expect(res.json().field).toBe('date');
   });
 
+  it('7b. calendar-invalid date "2026-13-01" → 400, field=date', async () => {
+    const res = await post({ ...base, date: '2026-13-01' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().field).toBe('date');
+  });
+
   it('8. no bearer token → 401', async () => {
     const res = await app.inject({
       method: 'POST', url: '/api/health/weight', body: base,

@@ -10,13 +10,28 @@ const VALID_SOURCES = ['Apple Health', 'Manual', 'Withings', 'Renpho'] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}:\d{2}$/;
 
+function isValidCalendarDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  // Date constructor accepts overflow (e.g. month 13 → Jan next year), so
+  // reverse-check that the parsed Date round-trips to the same Y-M-D.
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+function isValidTime(s: string): boolean {
+  if (!TIME_RE.test(s)) return false;
+  const [h, m, sec] = s.split(':').map(Number);
+  return h < 24 && m < 60 && sec < 60;
+}
+
 function validate(body: any): { error: string; field: string } | null {
   const { weight_lbs, date, time, source } = body;
   if (weight_lbs == null || typeof weight_lbs !== 'number' || !isFinite(weight_lbs) || weight_lbs < 50.0 || weight_lbs > 600.0)
     return { error: 'weight_lbs must be between 50.0 and 600.0', field: 'weight_lbs' };
-  if (!date || !DATE_RE.test(date))
-    return { error: 'date must be YYYY-MM-DD', field: 'date' };
-  if (!time || !TIME_RE.test(time))
+  if (!date || !isValidCalendarDate(date))
+    return { error: 'date must be a valid YYYY-MM-DD calendar date', field: 'date' };
+  if (!time || !isValidTime(time))
     return { error: 'time must be HH:MM:SS', field: 'time' };
   if (!VALID_SOURCES.includes(source))
     return { error: `source must be one of: ${VALID_SOURCES.join(', ')}`, field: 'source' };
