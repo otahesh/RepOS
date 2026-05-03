@@ -17,7 +17,7 @@ export async function syncRoutes(app: FastifyInstance) {
       [(req as any).userId],
     );
 
-    reply.header('Cache-Control', 'max-age=60');
+    reply.header('Cache-Control', 'private, max-age=60');
     return row ?? { source: null, last_success_at: null, state: 'broken' };
   });
 }

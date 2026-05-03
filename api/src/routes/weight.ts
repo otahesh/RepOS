@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import type { PoolClient } from 'pg';
 import { requireAuth } from '../middleware/auth.js';
 import { db } from '../db/client.js';
 import { computeStats } from '../services/stats.js';
+
+const MAX_BACKFILL_SAMPLES = 500;
 
 const VALID_SOURCES = ['Apple Health', 'Manual', 'Withings', 'Renpho'] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -9,7 +12,7 @@ const TIME_RE = /^\d{2}:\d{2}:\d{2}$/;
 
 function validate(body: any): { error: string; field: string } | null {
   const { weight_lbs, date, time, source } = body;
-  if (weight_lbs == null || typeof weight_lbs !== 'number' || weight_lbs < 50.0 || weight_lbs > 600.0)
+  if (weight_lbs == null || typeof weight_lbs !== 'number' || !isFinite(weight_lbs) || weight_lbs < 50.0 || weight_lbs > 600.0)
     return { error: 'weight_lbs must be between 50.0 and 600.0', field: 'weight_lbs' };
   if (!date || !DATE_RE.test(date))
     return { error: 'date must be YYYY-MM-DD', field: 'date' };
@@ -20,12 +23,14 @@ function validate(body: any): { error: string; field: string } | null {
   return null;
 }
 
-async function upsertSample(userId: string, body: any, ip: string) {
+// client param allows backfill to share its transaction so rate-limit increments roll back on error
+async function upsertSample(userId: string, body: any, ip: string, client?: PoolClient) {
+  const qr = client ?? db;
   const { weight_lbs, date, time, source } = body;
   const rounded = Math.round(weight_lbs * 10) / 10;
 
   // Rate limit: >5 writes per (user, date) per calendar day
-  const { rows: [logRow] } = await db.query(
+  const { rows: [logRow] } = await qr.query(
     `INSERT INTO weight_write_log (user_id, log_date, write_count)
      VALUES ($1, $2, 1)
      ON CONFLICT (user_id, log_date) DO UPDATE
@@ -38,7 +43,7 @@ async function upsertSample(userId: string, body: any, ip: string) {
   }
 
   // Dedupe check
-  const { rows: existing } = await db.query(
+  const { rows: existing } = await qr.query(
     `SELECT id, weight_lbs::float AS weight_lbs FROM health_weight_samples
      WHERE user_id = $1 AND sample_date = $2 AND source = $3`,
     [userId, date, source],
@@ -50,7 +55,7 @@ async function upsertSample(userId: string, body: any, ip: string) {
   if (existing.length > 0) {
     const diff = Math.abs(rounded - existing[0].weight_lbs);
     if (diff > 0.05) {
-      await db.query(
+      await qr.query(
         `UPDATE health_weight_samples SET weight_lbs = $1, sample_time = $2, updated_at = now()
          WHERE id = $3`,
         [rounded, time, existing[0].id],
@@ -58,7 +63,7 @@ async function upsertSample(userId: string, body: any, ip: string) {
     }
     id = existing[0].id;
   } else {
-    const { rows } = await db.query(
+    const { rows } = await qr.query(
       `INSERT INTO health_weight_samples (user_id, sample_date, sample_time, weight_lbs, source)
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [userId, date, time, rounded, source],
@@ -68,7 +73,7 @@ async function upsertSample(userId: string, body: any, ip: string) {
   }
 
   // Update sync status
-  await db.query(
+  await qr.query(
     `INSERT INTO health_sync_status (user_id, source, last_fired_at, last_success_at, last_error, consecutive_failures)
      VALUES ($1, $2, now(), now(), NULL, 0)
      ON CONFLICT (user_id) DO UPDATE SET
@@ -93,20 +98,31 @@ export async function weightRoutes(app: FastifyInstance) {
   app.post('/weight/backfill', { preHandler: requireAuth }, async (req, reply) => {
     const { samples } = req.body as { samples: any[] };
     if (!Array.isArray(samples)) return reply.code(400).send({ error: 'samples must be an array' });
+    if (samples.length > MAX_BACKFILL_SAMPLES)
+      return reply.code(400).send({ error: `samples array exceeds maximum of ${MAX_BACKFILL_SAMPLES} items` });
 
+    // Validate all items before touching the DB
+    for (const sample of samples) {
+      const err = validate(sample);
+      if (err) return reply.code(400).send(err);
+    }
+
+    // Use an explicit client so the transaction covers rate-limit increments too —
+    // a mid-batch error rolls back everything including write_count increments.
+    const client = await db.connect();
     let created = 0, deduped = 0;
-    await db.query('BEGIN');
     try {
+      await client.query('BEGIN');
       for (const sample of samples) {
-        const err = validate(sample);
-        if (err) { await db.query('ROLLBACK'); return reply.code(400).send(err); }
-        const result = await upsertSample((req as any).userId, sample, req.ip);
+        const result = await upsertSample((req as any).userId, sample, req.ip, client);
         if (result.status === 201) created++; else deduped++;
       }
-      await db.query('COMMIT');
+      await client.query('COMMIT');
     } catch (e) {
-      await db.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw e;
+    } finally {
+      client.release();
     }
 
     return reply.send({ created, deduped });

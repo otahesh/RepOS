@@ -1,0 +1,79 @@
+/* RepOS — global base styles */
+
+:root {
+  --color-bg: #0A0D12;
+  --color-surface: #10141C;
+  --color-surface2: #161C26;
+  --color-surface3: #1E2632;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+  --color-text: #E8EEF7;
+  --color-text-dim: #9BA7BA;
+  --color-text-mute: #5A6577;
+  --color-accent: #4D8DFF;
+  --color-accent-glow: rgba(77, 141, 255, 0.18);
+  --color-accent-dim: rgba(77, 141, 255, 0.45);
+  --color-good: #6BE28B;
+  --color-warn: #F5B544;
+  --color-danger: #FF6A6A;
+
+  --font-ui: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-mute);
+}
