@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { TOKENS, FONTS, API_BASE } from '../../tokens'
+import { TOKENS, FONTS } from '../../tokens'
+import { apiFetch } from '../../auth'
 import BodyweightChart, { WeightSample } from './BodyweightChart'
 import TrendStats from './TrendStats'
 
@@ -32,7 +33,7 @@ export default function DesktopDashboard() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await fetch(`${API_BASE}/api/health/weight?range=90d`)
+      const res = await apiFetch('/api/health/weight?range=90d')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json: WeightData = await res.json()
       setData(json)

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { TOKENS, FONTS, API_BASE, PLACEHOLDER_USER_ID } from '../../tokens'
+import { TOKENS, FONTS } from '../../tokens'
+import { apiFetch, useCurrentUser } from '../../auth'
 import Icon from '../Icon'
 import TokenTable, { TokenRow } from './TokenTable'
 import GenerateTokenModal from './GenerateTokenModal'
@@ -27,6 +28,12 @@ function formatDateTime(isoString: string | null): string {
 }
 
 export default function SettingsIntegrations() {
+  const { user } = useCurrentUser()
+  // Transition mode: when CF Access feature flag is off, the API is in admin-key
+  // mode and requires `?user_id=` / body `user_id`. We detect by the placeholder
+  // sentinel email. Once CF Access is fully on, this branch goes dead.
+  const isLegacyAdminMode = user?.email === 'placeholder@local'
+
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [syncLoading, setSyncLoading] = useState(true)
   const [tokens, setTokens] = useState<TokenRow[]>([])
@@ -39,7 +46,7 @@ export default function SettingsIntegrations() {
 
   const fetchSync = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/health/sync/status`)
+      const res = await apiFetch('/api/health/sync/status')
       if (res.ok) {
         const data: SyncStatus = await res.json()
         setSync(data)
@@ -52,9 +59,13 @@ export default function SettingsIntegrations() {
   }, [])
 
   const fetchTokens = useCallback(async () => {
+    if (!user) return
     try {
       setTokensLoading(true)
-      const res = await fetch(`${API_BASE}/api/tokens?user_id=${PLACEHOLDER_USER_ID}`)
+      const path = isLegacyAdminMode
+        ? `/api/tokens?user_id=${encodeURIComponent(user.id)}`
+        : '/api/tokens'
+      const res = await apiFetch(path)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: TokenRow[] = await res.json()
       setTokens(data)
@@ -64,7 +75,7 @@ export default function SettingsIntegrations() {
     } finally {
       setTokensLoading(false)
     }
-  }, [])
+  }, [user, isLegacyAdminMode])
 
   useEffect(() => {
     void fetchSync()
@@ -72,16 +83,16 @@ export default function SettingsIntegrations() {
   }, [fetchSync, fetchTokens])
 
   const handleGenerate = async () => {
-    if (generating) return
+    if (generating || !user) return
     setGenerating(true)
     try {
-      const res = await fetch(`${API_BASE}/api/tokens`, {
+      const body = isLegacyAdminMode
+        ? { user_id: user.id, label: generateLabel.trim() || 'iOS Shortcut' }
+        : { label: generateLabel.trim() || 'iOS Shortcut' }
+      const res = await apiFetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: PLACEHOLDER_USER_ID,
-          label: generateLabel.trim() || 'iOS Shortcut',
-        }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json() as { token: string; id: string }
@@ -95,10 +106,13 @@ export default function SettingsIntegrations() {
   }
 
   const handleRevoke = async (id: string) => {
-    if (revoking) return
+    if (revoking || !user) return
     setRevoking(id)
     try {
-      const res = await fetch(`${API_BASE}/api/tokens/${id}?user_id=${PLACEHOLDER_USER_ID}`, { method: 'DELETE' })
+      const path = isLegacyAdminMode
+        ? `/api/tokens/${id}?user_id=${encodeURIComponent(user.id)}`
+        : `/api/tokens/${id}`
+      const res = await apiFetch(path, { method: 'DELETE' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setTokens(prev => prev.filter(t => t.id !== id))
     } catch (err) {

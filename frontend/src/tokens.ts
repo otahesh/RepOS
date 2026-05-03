@@ -30,7 +30,4 @@ export const FONTS = {
   mono: '"JetBrains Mono", "SF Mono", ui-monospace, monospace',
 } as const;
 
-// Hardcoded placeholder user_id — no auth in v1
-export const PLACEHOLDER_USER_ID = '00000000-0000-0000-0000-000000000001';
-
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';

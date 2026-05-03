@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { TOKENS, FONTS, API_BASE } from '../tokens'
+import { TOKENS, FONTS } from '../tokens'
+import { apiFetch } from '../auth'
 import Icon from './Icon'
 
 interface SyncStatus {
@@ -26,8 +27,8 @@ export default function MobileWeightChip() {
   const fetchData = useCallback(async () => {
     try {
       const [syncRes, weightRes] = await Promise.all([
-        fetch(`${API_BASE}/api/health/sync/status`),
-        fetch(`${API_BASE}/api/health/weight?range=7d`),
+        apiFetch('/api/health/sync/status'),
+        apiFetch('/api/health/weight?range=7d'),
       ])
       if (syncRes.ok) {
         const s: SyncStatus = await syncRes.json()

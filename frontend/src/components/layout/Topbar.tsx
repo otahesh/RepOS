@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { TOKENS, FONTS, API_BASE } from '../../tokens'
+import { TOKENS, FONTS } from '../../tokens'
+import { apiFetch } from '../../auth'
 import Icon from '../Icon'
 
 interface SyncStatus {
@@ -33,7 +34,7 @@ export default function Topbar() {
 
   const fetchSync = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/health/sync/status`)
+      const res = await apiFetch('/api/health/sync/status')
       if (!res.ok) throw new Error('non-ok')
       const data: SyncStatus = await res.json()
       setSync(data)
