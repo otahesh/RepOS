@@ -35,10 +35,10 @@ RUN apk add --no-cache \
 # Verify postgres binaries are where the s6 scripts expect them.
 # Alpine's postgresql16 package puts binaries in /usr/bin/. Fail the build
 # loudly if a future Alpine release moves them.
-RUN test -x /usr/bin/postgres && test -x /usr/bin/initdb && test -x /usr/bin/pg_isready
+RUN test -x /usr/bin/postgres && test -x /usr/bin/initdb && test -x /usr/bin/pg_isready && test -x /usr/bin/pg_dump
 
 # App layout (lsio uses /config for persistent data; /app for read-only code)
-RUN mkdir -p /app/api /app/frontend /config
+RUN mkdir -p /app/api /app/frontend /config /config/backups /config/log/backup
 
 COPY --from=api-builder      /build/api/dist          /app/api/dist
 COPY --from=api-builder      /build/api/node_modules  /app/api/node_modules
@@ -50,7 +50,8 @@ COPY docker/nginx/repos.conf  /etc/nginx/http.d/default.conf
 COPY docker/root/             /
 
 # Make all script files executable (COPY does not preserve unless explicit)
-RUN find /etc/s6-overlay -type f \( -name 'run' -o -name 'up' -o -path '*scripts*' \) -exec chmod +x {} +
+RUN find /etc/s6-overlay -type f \( -name 'run' -o -name 'up' -o -path '*scripts*' \) -exec chmod +x {} + && \
+    chmod +x /usr/local/bin/repos-backup.sh
 
 # lsio's stock cont-init.d chowns /config recursively to abc:abc (PUID:PGID).
 # That would steal /config/postgres from the postgres user (uid 70) on every

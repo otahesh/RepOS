@@ -1,0 +1,31 @@
+#!/usr/bin/with-contenv bash
+# Schedules /usr/local/bin/repos-backup.sh once per day at the configured
+# UTC hour:minute. Sleeps in-process; s6 supervises this longrun, so any
+# crash here is restarted automatically. We compute the next-run epoch
+# with pure shell arithmetic because busybox `date` (Alpine) does NOT
+# support GNU-style `-d "today HH:MM:SS"`.
+set -u
+
+BACKUP_HOUR="${REPOS_BACKUP_HOUR:-3}"
+BACKUP_MIN="${REPOS_BACKUP_MIN:-15}"
+
+mkdir -p /config/log/backup
+
+while :; do
+  now_s="$(date -u +%s)"
+  secs_today=$(( now_s % 86400 ))
+  target_secs=$(( BACKUP_HOUR * 3600 + BACKUP_MIN * 60 ))
+  sleep_for=$(( target_secs - secs_today ))
+  if [ "$sleep_for" -le 0 ]; then
+    sleep_for=$(( sleep_for + 86400 ))
+  fi
+
+  echo "[backup] sleeping ${sleep_for}s until next run" \
+    >> /config/log/backup/scheduler.log
+  sleep "$sleep_for"
+
+  /usr/local/bin/repos-backup.sh \
+    >> /config/log/backup/scheduler.log 2>&1 \
+    || echo "[backup] run failed, will retry tomorrow" \
+       >> /config/log/backup/scheduler.log
+done
