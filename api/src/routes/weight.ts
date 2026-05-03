@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
-import { requireAuth } from '../middleware/auth.js';
+import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
 import { computeStats } from '../services/stats.js';
 
@@ -101,7 +101,7 @@ async function upsertSample(userId: string, body: any, ip: string, client?: Pool
 }
 
 export async function weightRoutes(app: FastifyInstance) {
-  app.post('/weight', { preHandler: requireAuth }, async (req, reply) => {
+  app.post('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const body = req.body as any;
     const err = validate(body);
     if (err) return reply.code(400).send(err);
@@ -110,7 +110,7 @@ export async function weightRoutes(app: FastifyInstance) {
     return reply.code(status).send(resBody);
   });
 
-  app.post('/weight/backfill', { preHandler: requireAuth }, async (req, reply) => {
+  app.post('/weight/backfill', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const { samples } = req.body as { samples: any[] };
     if (!Array.isArray(samples)) return reply.code(400).send({ error: 'samples must be an array' });
     if (samples.length > MAX_BACKFILL_SAMPLES)
@@ -143,7 +143,7 @@ export async function weightRoutes(app: FastifyInstance) {
     return reply.send({ created, deduped });
   });
 
-  app.get('/weight', { preHandler: requireAuth }, async (req, reply) => {
+  app.get('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const { range = '90d' } = req.query as { range?: string };
     const rangeMap: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '1y': 365, 'all': 36500 };
     const days = rangeMap[range] ?? 90;

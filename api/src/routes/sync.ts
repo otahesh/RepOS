@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { requireAuth } from '../middleware/auth.js';
+import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
 
 export async function syncRoutes(app: FastifyInstance) {
-  app.get('/sync/status', { preHandler: requireAuth }, async (req, reply) => {
+  app.get('/sync/status', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const { rows: [row] } = await db.query(
       `SELECT source, last_success_at,
          CASE
