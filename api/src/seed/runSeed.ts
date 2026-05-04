@@ -48,11 +48,11 @@ export async function runSeed(input: RunSeedInput): Promise<RunSeedResult> {
              contraindications, requires_shoulder_flexion_overhead,
              loads_spine_in_flexion, loads_spine_axially, requires_hip_internal_rotation,
              requires_ankle_dorsiflexion, requires_wrist_extension_loaded,
-             created_by, seed_generation, archived_at, updated_at
+             created_by, seed_key, seed_generation, archived_at, updated_at
            ) VALUES (
              $1,$2,$3,$4,$5::movement_pattern,$6::peak_tension_length,$7::jsonb,
              $8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,
-             'system',$20,NULL,now()
+             'system',$20,$21,NULL,now()
            )
            ON CONFLICT (slug) DO UPDATE SET
              name=EXCLUDED.name,
@@ -73,6 +73,7 @@ export async function runSeed(input: RunSeedInput): Promise<RunSeedResult> {
              requires_hip_internal_rotation=EXCLUDED.requires_hip_internal_rotation,
              requires_ankle_dorsiflexion=EXCLUDED.requires_ankle_dorsiflexion,
              requires_wrist_extension_loaded=EXCLUDED.requires_wrist_extension_loaded,
+             seed_key=EXCLUDED.seed_key,
              seed_generation=EXCLUDED.seed_generation,
              archived_at=NULL,
              updated_at=now()
@@ -85,7 +86,7 @@ export async function runSeed(input: RunSeedInput): Promise<RunSeedResult> {
             e.contraindications, e.requires_shoulder_flexion_overhead,
             e.loads_spine_in_flexion, e.loads_spine_axially,
             e.requires_hip_internal_rotation, e.requires_ankle_dorsiflexion,
-            e.requires_wrist_extension_loaded, generation,
+            e.requires_wrist_extension_loaded, input.key, generation,
           ],
         );
         await client.query(`DELETE FROM exercise_muscle_contributions WHERE exercise_id=$1`, [row.id]);
@@ -100,12 +101,14 @@ export async function runSeed(input: RunSeedInput): Promise<RunSeedResult> {
       }
 
       const slugs = input.entries.map(e => e.slug);
+      // $1 = seed_key; slug params start at $2
       const { rowCount: archived } = await client.query(
         `UPDATE exercises SET archived_at=now()
          WHERE created_by='system' AND archived_at IS NULL
-           AND slug NOT IN (${slugs.map((_, i) => `$${i + 1}`).join(',')})
+           AND seed_key=$1
+           AND slug NOT IN (${slugs.map((_, i) => `$${i + 2}`).join(',')})
            AND seed_generation IS NOT NULL`,
-        slugs,
+        [input.key, ...slugs],
       );
 
       await client.query(
