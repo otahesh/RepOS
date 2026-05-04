@@ -70,3 +70,23 @@ describe('equipment profile (spec §9.2)', () => {
     expect(r.json<any>().kettlebells).toBeDefined();
   });
 });
+
+describe('POST /api/equipment/profile/preset/:name', () => {
+  it('garage_gym preset → user gets canonical profile', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/equipment/profile/preset/garage_gym', headers: auth(),
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.dumbbells).toEqual({ min_lb: 5, max_lb: 50, increment_lb: 5 });
+    expect(body.adjustable_bench).toEqual({ incline: true, decline: true });
+    expect(body.pullup_bar).toBe(true);
+  });
+
+  it('unknown preset → 400', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/equipment/profile/preset/martian_gym', headers: auth(),
+    });
+    expect(r.statusCode).toBe(400);
+  });
+});
