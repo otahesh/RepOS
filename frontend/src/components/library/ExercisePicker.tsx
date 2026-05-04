@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { listExercises, type Exercise } from '../../lib/api/exercises.ts';
+import { getEquipmentProfile, type EquipmentProfile } from '../../lib/api/equipment.ts';
+import { allPredicatesSatisfied, type PredicateT } from '../../lib/api/predicates.ts';
 
 export type PickerProps = {
   onPick: (e: Exercise) => void;
@@ -21,18 +23,24 @@ export function ExercisePicker({ onPick, defaultEquipmentToggle = true }: Picker
   const [q, setQ] = useState('');
   const [muscles, setMuscles] = useState<Set<string>>(new Set());
   const [equipOnly, setEquipOnly] = useState(defaultEquipmentToggle);
+  const [profile, setProfile] = useState<EquipmentProfile | null>(null);
 
   useEffect(() => { listExercises().then(setAll).catch(() => setAll([])); }, []);
+  useEffect(() => {
+    getEquipmentProfile().then(setProfile).catch(() => setProfile({ _v: 1 }));
+  }, []);
 
   const filtered = useMemo(() => {
     return all.filter(e => {
       if (q && !e.name.toLowerCase().includes(q.toLowerCase()) && !e.slug.includes(q.toLowerCase())) return false;
       if (muscles.size > 0 && ![...muscles].some(g => GROUP_TO_SLUGS[g]?.includes(e.primary_muscle))) return false;
-      // equipOnly: stub for now — true wiring requires user equipment_profile + per-exercise pass check
-      void equipOnly;
+      if (equipOnly && profile) {
+        const reqs = (e.required_equipment?.requires ?? []) as PredicateT[];
+        if (!allPredicatesSatisfied(reqs, profile)) return false;
+      }
       return true;
     });
-  }, [all, q, muscles, equipOnly]);
+  }, [all, q, muscles, equipOnly, profile]);
 
   return (
     <div style={{ background: '#10141C', borderRadius: 12, padding: 16, fontFamily: 'Inter Tight' }}>
