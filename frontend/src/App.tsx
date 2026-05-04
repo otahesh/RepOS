@@ -7,6 +7,7 @@ import { AuthProvider, AuthGate } from './auth'
 import { EquipmentWizard } from './components/onboarding/EquipmentWizard'
 import { EquipmentEditor } from './components/settings/EquipmentEditor'
 import { getEquipmentProfile, isProfileEmpty, type EquipmentProfile } from './lib/api/equipment'
+import { ExercisePickerDemo } from './components/library/ExercisePickerDemo'
 
 function AppInner() {
   const [profile, setProfile] = useState<EquipmentProfile | null>(null)
@@ -22,6 +23,7 @@ function AppInner() {
             <Route index element={<DesktopDashboard />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
+            {import.meta.env.DEV && <Route path="dev/picker" element={<ExercisePickerDemo />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
