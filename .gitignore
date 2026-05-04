@@ -19,3 +19,6 @@ npm-debug.log*
 .DS_Store
 .vscode/
 *.swp
+
+# Superpowers brainstorm session artifacts (visual companion)
+.superpowers/
