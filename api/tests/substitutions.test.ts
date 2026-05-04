@@ -28,16 +28,12 @@ describe('substitutions (spec §9.3)', () => {
   });
 
   it('13. zero viable subs → no_equipment_match with closest_partial', async () => {
-    // Test User 1 with NO dumbbells at all
-    const noDB = { ...TEST_USER_1_PROFILE, dumbbells: false };
-    // Pick an obscure target whose only viable subs all need DBs
-    const r = await findSubstitutions('barbell-bench-press', noDB);
-    if (r?.subs.length === 0) {
-      expect(r.reason).toBe('no_equipment_match');
-      expect(r.closest_partial).toBeDefined();
-    }
-    // If the seed includes a non-DB sub, this assertion needs to relax;
-    // adjust the noDB profile narrower or pick a different target.
+    // Only a recumbent bike — satisfies zero push_horizontal alternatives.
+    const onlyRecumbent = { _v: 1, recumbent_bike: { resistance_levels: 12 } };
+    const r = await findSubstitutions('barbell-bench-press', onlyRecumbent);
+    expect(r?.subs).toEqual([]);
+    expect(r?.reason).toBe('no_equipment_match');
+    expect(r?.closest_partial).toBeDefined();
   });
 
   it('14. partial-predicate match excluded (NOT partial-credit)', async () => {

@@ -30,6 +30,28 @@
 
 These can re-enter via v3 user-created exercises with explicit warning UX.
 
+## Vocabulary Gaps (v1 movement_pattern limitations)
+
+The 11 v1 movement patterns (`push_horizontal`, `push_vertical`, `pull_horizontal`,
+`pull_vertical`, `squat`, `hinge`, `lunge`, `carry`, `rotation`, `anti_rotation`,
+`gait`) do not have a native representation for open-chain knee isolation exercises.
+
+**Workarounds in effect:**
+
+- `leg-extension-machine` is classified as `push_vertical` — the closest functional
+  analog (press the lever forward/up, lower-body equivalent of a vertical press).
+  This is intentional and prevents the substitution engine from returning leg
+  extension as a candidate sub for back squat or front squat (closed-chain squat
+  pattern). It is **not** biomechanically precise.
+
+- `leg-curl-machine` is classified as `pull_vertical` — parallel reasoning (pull the
+  lever down/back, lower-body equivalent of a vertical pull). Prevents leg curl from
+  appearing as a hinge-pattern substitute for RDL or deadlift variants.
+
+**v1.5 action item:** Add `knee_extension` and `knee_flexion` movement patterns to
+the schema vocabulary, then re-classify these two entries. Track in the exercise
+library roadmap issue.
+
 ## Adding a new equipment type
 
 1. Add the key to `api/src/services/equipmentRegistry.ts`

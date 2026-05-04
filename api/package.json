@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "migrate:prod": "node dist/db/migrate.js",
     "test": "vitest run --no-file-parallelism",
-    "seed": "tsx src/seed/runSeed.ts"
+    "seed": "tsx src/seed/runSeed.ts",
+    "validate": "tsx src/seed/validate-cli.ts"
   },
   "keywords": [],
   "author": "",
