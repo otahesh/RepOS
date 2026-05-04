@@ -44,3 +44,41 @@ describe('exercises schema (migration 009)', () => {
     await db.query(`DELETE FROM exercises WHERE id=$1`, [r.id]);
   });
 });
+
+describe('exercise_muscle_contributions (migration 010)', () => {
+  it('cascades on exercise delete', async () => {
+    const { rows: [ex] } = await db.query(
+      `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
+                              skill_complexity,loading_demand,systemic_fatigue)
+       VALUES ('test-cascade','x',
+               (SELECT id FROM muscles WHERE slug='chest'),
+               'push_horizontal','mid',3,3,3) RETURNING id`
+    );
+    await db.query(
+      `INSERT INTO exercise_muscle_contributions (exercise_id,muscle_id,contribution)
+       VALUES ($1,(SELECT id FROM muscles WHERE slug='chest'),1.0)`, [ex.id]
+    );
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex.id]);
+    const { rows } = await db.query(
+      `SELECT 1 FROM exercise_muscle_contributions WHERE exercise_id=$1`, [ex.id]
+    );
+    expect(rows.length).toBe(0);
+  });
+
+  it('rejects contribution > 1.0', async () => {
+    const { rows: [ex] } = await db.query(
+      `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
+                              skill_complexity,loading_demand,systemic_fatigue)
+       VALUES ('test-bad-contrib','x',
+               (SELECT id FROM muscles WHERE slug='chest'),
+               'push_horizontal','mid',3,3,3) RETURNING id`
+    );
+    await expect(
+      db.query(
+        `INSERT INTO exercise_muscle_contributions (exercise_id,muscle_id,contribution)
+         VALUES ($1,(SELECT id FROM muscles WHERE slug='chest'),1.5)`, [ex.id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex.id]);
+  });
+});
