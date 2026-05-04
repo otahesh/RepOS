@@ -1,19 +1,40 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { TOKENS, FONTS } from '../../tokens'
+import { useCurrentUser } from '../../auth'
 import Icon from '../Icon'
+
+function monogram(displayName: string | null | undefined, email: string): string {
+  const trimmedName = displayName?.trim() ?? ''
+  if (trimmedName) {
+    const parts = trimmedName.split(/\s+/)
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+  const trimmedEmail = email.trim()
+  if (trimmedEmail) return trimmedEmail[0].toUpperCase()
+  return 'U'
+}
 
 const NAV_ITEMS = [
   { name: 'Today', icon: 'flame' as const, to: '/', exact: true },
-  { name: 'Program', icon: 'calendar' as const, to: '/program' },
-  { name: 'Library', icon: 'dumbbell' as const, to: '/library' },
-  { name: 'Progress', icon: 'trend' as const, to: '/progress' },
-  { name: 'Cardio', icon: 'heart' as const, to: '/cardio' },
   { name: 'Settings', icon: 'settings' as const, to: '/settings/integrations' },
 ]
 
 export default function Sidebar() {
   const location = useLocation()
   const isSettings = location.pathname.startsWith('/settings')
+  const { user, status } = useCurrentUser()
+
+  // AuthGate blocks render until status leaves 'loading', so user is non-null
+  // here in both 'authenticated' and 'disabled' (placeholder) modes.
+  const isPlaceholder = status === 'disabled'
+  const trimmedName = user?.display_name?.trim() ?? ''
+  const emailLocal = user?.email.split('@')[0]?.trim() ?? ''
+  const primary = isPlaceholder
+    ? 'GUEST'
+    : (trimmedName || emailLocal || 'USER').toUpperCase()
+  const secondary = isPlaceholder ? 'placeholder mode' : (user?.email ?? '')
+  const initials = isPlaceholder ? 'G' : monogram(user?.display_name, user?.email ?? '')
 
   return (
     <aside style={{
@@ -58,49 +79,6 @@ export default function Sidebar() {
           letterSpacing: 1,
           color: TOKENS.text,
         }}>REPOS</span>
-      </div>
-
-      {/* Mesocycle meta */}
-      <div style={{
-        padding: '10px 12px',
-        marginBottom: 20,
-        background: TOKENS.surface2,
-        borderRadius: 8,
-        border: `1px solid ${TOKENS.line}`,
-      }}>
-        <div style={{
-          fontFamily: FONTS.mono,
-          fontSize: 9,
-          color: TOKENS.textMute,
-          letterSpacing: 1.2,
-          marginBottom: 4,
-        }}>MESOCYCLE</div>
-        <div style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: TOKENS.text,
-          marginBottom: 6,
-        }}>Hypertrophy · Block 2</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{
-            flex: 1,
-            height: 4,
-            background: TOKENS.surface3,
-            borderRadius: 100,
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              height: '100%',
-              width: '60%',
-              background: TOKENS.accent,
-            }} />
-          </div>
-          <span style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            color: TOKENS.textDim,
-          }}>W3/5</span>
-        </div>
       </div>
 
       {/* Nav */}
@@ -202,14 +180,24 @@ export default function Sidebar() {
           fontWeight: 700,
           color: '#fff',
           flexShrink: 0,
-        }}>KH</div>
+        }}>{initials}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: TOKENS.text }}>K. HARRIS</div>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: TOKENS.text,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>{primary}</div>
           <div style={{
             fontSize: 10,
             color: TOKENS.textMute,
             fontFamily: FONTS.mono,
-          }}>6mo · INT</div>
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>{secondary}</div>
         </div>
         <Icon name="settings" size={14} color={TOKENS.textMute} />
       </div>

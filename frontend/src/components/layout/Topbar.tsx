@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { TOKENS, FONTS } from '../../tokens'
 import { apiFetch } from '../../auth'
-import Icon from '../Icon'
 
 interface SyncStatus {
   source: string
@@ -135,47 +134,6 @@ export default function Topbar() {
           )}
         </div>
 
-        {/* Week button */}
-        <button style={{
-          height: 36,
-          padding: '0 14px',
-          borderRadius: 8,
-          border: `1px solid ${TOKENS.lineStrong}`,
-          background: TOKENS.surface2,
-          color: TOKENS.textDim,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: FONTS.ui,
-          fontSize: 13,
-          fontWeight: 500,
-          whiteSpace: 'nowrap',
-        }}>
-          <Icon name="calendar" size={14} color={TOKENS.textDim} />
-          WEEK 3 · APR 06 – 12
-        </button>
-
-        {/* CTA */}
-        <button style={{
-          height: 36,
-          padding: '0 16px',
-          borderRadius: 8,
-          border: 'none',
-          background: TOKENS.accent,
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: FONTS.ui,
-          fontSize: 13,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          textTransform: 'uppercase',
-          boxShadow: `0 4px 14px -4px ${TOKENS.accentDim}`,
-        }}>
-          <Icon name="flame" size={14} color="#fff" />
-          START SESSION
-        </button>
       </div>
     </header>
   )
