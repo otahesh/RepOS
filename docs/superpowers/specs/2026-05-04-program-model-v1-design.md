@@ -25,7 +25,6 @@ The v1 Program model turns a curated template into a real, day-by-day plan a use
 - **Cardio first-class**: separate `planned_cardio_blocks` table; modality + duration/distance + HR/RPE zone targets
 - **Term-of-art tooltip** component + dictionary applied across every term-of-art surface (Library v1 backfill included)
 - **Adherence / recovery flags** as advisory toasts (overreaching, bodyweight crash via `health_weight_samples`, stalled-PR)
-- **Stub schema** for v2 contraindication filtering (`users.injury_flags`, `exercises.contraindications`)
 - **`set_logs` and `mesocycle_run_events` tables** created as prereqs for #3 and for forensic auditing
 - **Seed runner refactor** to adapter-driven generic, so `program_templates` reuses the same hash-keyed runner Library v1 introduced
 
@@ -40,7 +39,7 @@ The v1 Program model turns a curated template into a real, day-by-day plan a use
 | Multiple concurrent active mesocycles | v2 |
 | Auto-upgrade of customized programs when template version bumps | v2 (re-fork from latest is the v1 answer) |
 | Backend-served glossary dictionary | v1.1 (frontend constant in v1) |
-| Per-injury contraindication filtering UI/logic | v2 (stub schema lands now) |
+| Per-injury contraindication filtering UI/logic | v2 (schema + types in v2; no v1 stub) |
 | Manual mid-meso deload trigger | v1.5 |
 | Pure cardio programs (5K plan, marathon plan) | Sub-project #7 |
 | User-authored programs (blank-slate) | v3 |
@@ -105,12 +104,12 @@ Per project memory `project_device_split.md`, every UI surface is classified:
 
 ### 3.2 Schema
 
-Six new tables + two stub fields on existing tables. Migration numbering starts at `014`.
+Six new tables. Migration numbering starts at `014`; nine migrations total (014–022).
 
 #### 3.2.1 Enums (migration `014_program_kind_enums.sql`)
 
 ```sql
-CREATE TYPE day_workout_kind   AS ENUM ('strength','cardio','hybrid','rest');
+CREATE TYPE day_workout_kind   AS ENUM ('strength','cardio','hybrid');
 CREATE TYPE program_status     AS ENUM ('draft','active','paused','completed','archived');
 CREATE TYPE mesocycle_run_event_type AS ENUM (
   'started','paused','resumed','day_overridden','set_overridden',
@@ -130,7 +129,9 @@ CREATE TABLE IF NOT EXISTS program_templates (
   description     TEXT NOT NULL DEFAULT '',
   weeks           SMALLINT NOT NULL CHECK (weeks BETWEEN 1 AND 16),
   days_per_week   SMALLINT NOT NULL CHECK (days_per_week BETWEEN 1 AND 7),
-  -- canonical structure: { _v:1, days:[ { idx, kind, name, blocks:[ { exercise_slug, mev, mav, target_reps_low, target_reps_high, target_rir, rest_sec, cardio?:{...} } ] } ] }
+  -- canonical structure: { _v:1, days:[ { idx, day_offset, kind, name, blocks:[ { exercise_slug, mev, mav, target_reps_low, target_reps_high, target_rir, rest_sec, cardio?:{...} } ] } ] }
+  -- day_offset: integer 0..6 days from each week's anchor for this training day (e.g. [0,1,3,4] = Mon/Tue/Thu/Fri when start_date is a Monday).
+  -- Validator enforces strictly-increasing offsets within a week, no duplicates, and within-week range 0..6. Implicit rest on dates between start_date..(start_date+weeks*7-1) without a day_workout row.
   structure       JSONB NOT NULL,
   version         INT  NOT NULL DEFAULT 1,
   created_by      TEXT NOT NULL DEFAULT 'system' CHECK (created_by IN ('system','user')),
@@ -256,7 +257,7 @@ CREATE TABLE IF NOT EXISTS set_logs (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   planned_set_id    UUID NOT NULL REFERENCES planned_sets(id) ON DELETE CASCADE,
   performed_reps    SMALLINT,
-  performed_load_kg NUMERIC(6,2),
+  performed_load_lbs NUMERIC(5,1),
   performed_rir     SMALLINT,
   performed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   notes             TEXT
@@ -279,30 +280,19 @@ CREATE TABLE IF NOT EXISTS mesocycle_run_events (
 CREATE INDEX IF NOT EXISTS idx_meso_events_run ON mesocycle_run_events(run_id, occurred_at);
 ```
 
-#### 3.2.10 Stub fields on existing tables — migration `023_v2_contraindication_stubs.sql`
-
-```sql
-ALTER TABLE users      ADD COLUMN IF NOT EXISTS injury_flags     JSONB    NOT NULL DEFAULT '{}';
-ALTER TABLE exercises  ADD COLUMN IF NOT EXISTS contraindications TEXT[]  NOT NULL DEFAULT '{}';
-```
-
-Plus matching TypeScript anchor types so v2 widens rather than reinvents:
-
-- `frontend/src/lib/types/injuryFlags.ts` → `export type InjuryFlags = Record<string, never>;` (empty in v1)
-- `api/src/types/injuryFlags.ts` → mirror
-
 ### 3.3 Service layer — three primitives
 
 #### `materializeMesocycle(user_program_id, start_date, start_tz)`
 
 Called from `POST /api/programs/:id/start`. In a single SERIALIZABLE transaction:
 1. Verify no active run for this user (rely on partial unique index; translate `23505` → 409).
-2. Resolve `template_id` + `template_version` → load `template.structure`.
-3. Apply `customizations` JSONB to derive the effective structure.
-4. INSERT `mesocycle_run`.
-5. For each `(week_idx, day_idx)`, compute `scheduled_date = start_date + (week_idx - 1) * 7 + day_idx` (in `start_tz`); INSERT `day_workout`.
-6. For each block in each day, run the **auto-ramp formula** (§6.2) to compute `(target_reps_low/high, target_rir, sets_count)` for that week; bulk INSERT all `planned_sets` rows via `INSERT ... SELECT FROM unnest(...)` form. Cardio blocks bulk INSERT into `planned_cardio_blocks`.
-7. Append `mesocycle_run_events` row with `event_type='started'`.
+2. Verify `user_program.template_version === program_templates.version` for the referenced template. Mismatch → 409 `{error:'template_outdated', latest_version, must_refork:true}`. Drafts that sat through a template bump must be re-forked; no auto-upgrade. Templates with `template_id IS NULL` (future user-authored programs) skip this check.
+3. Resolve `template_id` + `template_version` → load `template.structure`.
+4. Apply `customizations` JSONB to derive the effective structure.
+5. INSERT `mesocycle_run`.
+6. For each `(week_idx, day)` in the resolved structure, compute `scheduled_date = start_date + (week_idx - 1) * 7 + day.day_offset` (in `start_tz`); INSERT `day_workout`. Rest is implicit — dates without a `day_workout` row that fall between `start_date` and `start_date + weeks*7 - 1` are rest days.
+7. For each block in each day, run the **auto-ramp formula** (§5.2) to compute `(target_reps_low/high, target_rir, sets_count)` for that week; bulk INSERT all `planned_sets` rows via `INSERT ... SELECT FROM unnest(...)` form. Cardio blocks bulk INSERT into `planned_cardio_blocks`.
+8. Append `mesocycle_run_events` row with `event_type='started'`.
 
 Expected ~400 `planned_sets` + ~10 `planned_cardio_blocks` + ~30 `day_workouts` rows for a 5-week × 4-day program. Single tx, ~30 ms warm.
 
@@ -313,19 +303,26 @@ Indexed equality lookup on `(mesocycle_run_id, scheduled_date)` joined to `exerc
 ```ts
 // pseudocode
 async function getTodayWorkout(userId: string): Promise<TodayWorkout> {
-  const todayLocal = computeUserLocalDate(userId);   // uses mesocycle_runs.start_tz
-  const day = await db.query(`SELECT ... FROM day_workouts ...`, [...]);
-  if (!day) return { state: 'rest_or_no_run' };
+  const run = await loadActiveRun(userId);
+  if (!run) return { state: 'no_active_run' };
+  const todayLocal = computeUserLocalDate(run.start_tz);
+  const lastDate = addDays(run.start_date, run.weeks * 7 - 1);
+  if (todayLocal < run.start_date || todayLocal > lastDate) return { state: 'no_active_run' };
+  const day = await db.query(
+    `SELECT ... FROM day_workouts WHERE mesocycle_run_id=$1 AND scheduled_date=$2`,
+    [run.id, todayLocal]
+  );
+  if (!day) return { state: 'rest', run_id: run.id, scheduled_date: todayLocal };
   const sets = await db.query(`SELECT ... FROM planned_sets JOIN exercises ...`, [day.id]);
   const cardio = await db.query(`SELECT ... FROM planned_cardio_blocks JOIN exercises ...`, [day.id]);
   const profile = await loadEquipmentProfile(userId);
-  return attachSubstitutionSuggestions({ day, sets, cardio }, profile);
+  return attachSubstitutionSuggestions({ state: 'workout', day, sets, cardio, run_id: run.id }, profile);
 }
 ```
 
 #### `computeVolumeRollup(mesocycle_run_id)`
 
-Returns sets-per-week per muscle via `planned_sets × exercise_muscle_contributions` (Library v1's join table) summed by `week_idx`, plus per-muscle MEV/MAV/MRV landmarks. Cardio emits `minutes_by_modality`, not strength sets.
+Returns **planned (prescribed) volume**: sets-per-week per muscle via `planned_sets × exercise_muscle_contributions` (Library v1's join table) summed by `week_idx`, plus per-muscle MEV/MAV/MRV landmarks. Cardio emits `minutes_by_modality`, not strength sets. The *performed*-volume rollup (which substitutes `set_logs` rows for non-skipped sets and falls back to `planned_sets` for the rest) ships with sub-project #3 — #4's heatmap will then surface both prescription and adherence.
 
 ### 3.4 API surface
 
@@ -342,10 +339,9 @@ All routes under `/api/programs/*`, `/api/user-programs/*`, `/api/mesocycles/*`,
 | POST | `/api/user-programs/:id/start` | bearer/cf | materialize `mesocycle_run` (SERIALIZABLE tx) |
 | GET | `/api/mesocycles/:id` | bearer/cf | run detail |
 | GET | `/api/mesocycles/today` | bearer/cf | **#3 hot path** |
-| PATCH | `/api/planned-sets/:id` | bearer/cf | per-day override; 409 if `scheduled_date < today_local` |
+| PATCH | `/api/planned-sets/:id` | bearer/cf | per-day override; 409 if `scheduled_date < today_local` (past sets are read-only history per Q9; today and future days are editable) |
 | POST | `/api/planned-sets/:id/substitute` | bearer/cf | accept substitution suggestion |
-| POST | `/api/planned-sets/:id/log` | bearer/cf | hint hook for #3 — accepts logged set, marks complete (writes `set_logs` once #3 wires it) |
-| GET | `/api/mesocycles/:id/volume-rollup` | bearer/cf | **#4 feed** |
+| GET | `/api/mesocycles/:id/volume-rollup` | bearer/cf | **#4 feed** — planned/prescribed volume only in v1; performed-volume rollup ships with #3 |
 
 All inputs validated with Zod schemas under `api/src/schemas/`.
 
@@ -392,7 +388,7 @@ export type TermKey = 'RIR'|'RPE'|'MEV'|'MAV'|'MRV'|'mesocycle'|'deload'|'hypert
 export const TERMS: Record<TermKey, TermDef> = { /* ... */ };
 ```
 
-**Coverage rule**: any term keyed in the `TERMS` dictionary, when it appears in JSX outside of `frontend/src/lib/terms.ts` and outside of a `<Term k="…">` wrapper, is a CI failure. Implementation: a Node script that imports `TERMS`, derives the regex of all keys + their `short`/`full` forms, and `grep`s the React tree. Wired into the same `npm run validate` step the seed validator already uses.
+**Coverage rule**: any term keyed in the `TERMS` dictionary, when it appears in JSX text or string-literal attribute outside `frontend/src/lib/terms.ts` and outside a `<Term k="…">` wrapper, is a CI failure. Implementation: an AST-aware script (`@babel/parser` + `@babel/traverse`) that imports `TERMS` and walks JSX text-node children + JSX string-attribute values for each `.tsx` under `frontend/src/`, matching as whole-word tokens against `short` and `full` forms (case-sensitive for acronyms, case-insensitive for multi-word phrases). Skips comments, identifiers, imports, and non-JSX strings. Wired into the same `npm run validate` step the seed validator already uses.
 
 ### 3.7 Seed runner refactor
 
@@ -477,15 +473,14 @@ Sourced from RP `Scientific Principles of Hypertrophy Training` (Israetel 2021).
 For week `w` of an `N`-week mesocycle (deload = week N):
 
 ```
-sets_in_week(w) = round( MEV + (MRV_target - MEV) × (w - 1) / max(N - 2, 1) )
-where MRV_target = min(MRV - 2, MAV + 2)
-sets_in_week(N) = round(MEV / 2)         // deload
+MRV_target      = MRV - 1                                                    // ramp ceiling = "redline minus one"
+sets_in_week(w) = round( MEV + (MRV_target - MEV) × (w - 1) / max(N - 2, 1) ) // accumulation weeks 1..N-1
+sets_in_week(N) = round(MEV / 2)                                             // deload
 ```
 
-- **Compound increment**: +1 set/muscle/week
-- **Isolation increment**: +2 set/muscle/week
+The ramp produces sets-per-muscle-per-week. The materializer distributes those sets across that muscle's blocks-of-the-week proportional to each block's MEV-allocation in the template (so a muscle's compound block gets the bulk of any added sets while a small isolation block gets fewer). Per-block per-week increments emerge from this distribution; no separate "+1 / +2" rule.
 
-The formula is encoded in `materializeMesocycle` service code and writes concrete `planned_sets` rows. Templates carry `mev` + `mav` per block; `MRV` per muscle is referenced from the per-muscle landmark table (above) until v2 makes it user-editable.
+Templates carry `mev` + `mav` per block; `MRV` per muscle is referenced from the per-muscle landmark table (above) until v2 makes it user-editable. The formula is encoded in `materializeMesocycle` service code and writes concrete `planned_sets` rows.
 
 ### 5.3 RIR schedule
 
@@ -537,11 +532,13 @@ Service-layer function (no public endpoint in v1 — sub-project #4 will expose 
 
 ### 7.2 Adherence / recovery flags
 
-Daily job evaluates and surfaces advisory toasts (dismissible, store dismissals to avoid nagging):
+Daily job evaluates and surfaces advisory toasts (dismissible; dismissals stored per (user, flag, week) to avoid nagging). Flag eligibility tracks data availability — flags whose data dependency lives in `set_logs` ship with sub-project #3 against the same scaffold.
 
-- **Overreaching**: ≥3 sessions in past 7d at RIR 0 on compounds AND weekly volume ≥ MAV → "Recovery debt accumulating — consider deload."
-- **Bodyweight crash**: `health_weight_samples.trend_7d_lbs ≤ -2.0` AND program goal ≠ cut → "Weight dropping fast — under-fueling will stall progress."
-- **Stalled PR**: 3 consecutive sessions same exercise, no load/rep increase, RIR=0 → "Plateau — deload or substitute."
+- **Bodyweight crash** (ships in #2; data already in `health_weight_samples`): `trend_7d_lbs ≤ -2.0` AND program goal ≠ cut → "Weight dropping fast — under-fueling will stall progress."
+- **Overreaching** (deferred to #3 — depends on `set_logs`): ≥3 sessions in past 7d at RIR 0 on compounds AND weekly volume ≥ MAV → "Recovery debt accumulating — consider deload."
+- **Stalled PR** (deferred to #3 — depends on `set_logs`): 3 consecutive sessions same exercise, no load/rep increase, RIR=0 → "Plateau — deload or substitute."
+
+Sub-project #2 ships the bodyweight-crash evaluator + the `recovery_flag_dismissals` storage + the toast surface. #3 wires the two `set_logs`-dependent evaluators into the same scaffold without schema or surface changes.
 
 ### 7.3 Frequency limits
 
@@ -600,7 +597,7 @@ Acceptance: ~40 API test cases + ~10 service-layer tests + ~6 service-layer edge
 
 ### 8.4 Migration / seed tests
 
-Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → `applied=false`. Remove a template from seed → soft-archive; existing forks unaffected. Validator rejects: duplicate slug, unknown exercise slug ref, day_idx out of range, week_idx gap, MEV > MAV violation, cardio block referencing non-cardio exercise.
+Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → `applied=false`. Remove a template from seed → soft-archive; existing forks unaffected. Validator rejects: duplicate slug, unknown exercise slug ref, day_idx out of range, day_offset outside 0..6, day_offset duplicate or non-monotonic within a week, week_idx gap, MEV > MAV violation, cardio block referencing non-cardio exercise.
 
 ---
 
@@ -611,7 +608,7 @@ Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → 
 3. **Verify `device_tokens.scopes` is `TEXT[]` not Postgres ENUM** before assuming the `program:write` scope needs no migration. Check `\d device_tokens` in PR description.
 4. **`set_logs` is a hard prereq for sub-project #3** — #3's PR is gated on this table existing. Documented in #2's spec, not #3's.
 5. **Materialize-at-start drift on travel**: instrument a metric for `now()::date - scheduled_date` skew; spikes >1 day mean a TZ crossing. "Shift schedule" action prepared but not shipped in v1.
-6. **`<Term>` coverage CI check**: grep / ESLint rule fails build if a term-of-art keyword appears outside `<Term>` or `lib/terms.ts`. Backfill Library v1 surfaces as part of #2's frontend work.
+6. **`<Term>` coverage CI check**: AST-aware Node script (`@babel/parser` + `@babel/traverse`) walks JSX text nodes and string-attribute values; fails build if a `TERMS` keyword appears unwrapped. Whole-word match only (substring matches are not failures). Backfill Library v1 surfaces as part of #2's frontend work.
 7. **Library v1 backfill scope**: `peak_tension_length`, `push_horizontal`, `pull_horizontal`, `push_vertical`, `pull_vertical`, `hinge`, `squat`, `lunge`, `carry`, `rotation`, `anti_rotation` — all appear in `<ExercisePicker>` and need `<Term>` wrapping.
 
 ---
@@ -636,7 +633,7 @@ Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → 
 ## 11. Critical files / impl pointers
 
 ### New
-- `api/src/db/migrations/014_program_kind_enums.sql` … `023_v2_contraindication_stubs.sql` (10 migrations)
+- `api/src/db/migrations/014_program_kind_enums.sql` … `022_mesocycle_run_events.sql` (9 migrations)
 - `api/src/seed/programTemplates.ts` (3 program_template entries)
 - `api/src/seed/adapters/exercises.ts` (extracted from existing runSeed)
 - `api/src/seed/adapters/programTemplates.ts`
@@ -655,7 +652,6 @@ Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → 
 - `frontend/src/lib/terms.ts` (new)
 - `frontend/src/components/Term.tsx`
 - `frontend/src/components/programs/*` (ProgramCatalog, ForkWizard, ProgramPage, TodayCard, MesocycleRecap, TodayWorkoutMobile, MidSessionSwapSheet)
-- `frontend/src/lib/types/injuryFlags.ts`, `api/src/types/injuryFlags.ts`
 
 ### Refactored (touched, not rewritten)
 - `api/src/seed/runSeed.ts` — adapter-driven generic runner
@@ -677,7 +673,7 @@ Mirror existing `tests/seed/runner.test.ts` patterns. Re-run identical seed → 
 | v2 | RIR 0 ceiling for isolation final week | Tracked here |
 | v2 | Stimulus reports (SF/JFR/Pump/Burn) with onboarding | Tracked here |
 | v2 | User-editable per-muscle MEV/MAV/MRV | Tracked here |
-| v2 | Per-injury contraindication filtering | Stub schema lands now |
+| v2 | Per-injury contraindication filtering | Schema + types added in v2 (no v1 stub) |
 | v2 | Multiple concurrent active mesocycles | Tracked here |
 | v2 | Auto-upgrade of customized programs on template version bump | Tracked here |
 | v3 | Blank-slate program authoring | Tracked here |
