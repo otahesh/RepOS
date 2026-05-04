@@ -82,3 +82,14 @@ describe('exercise_muscle_contributions (migration 010)', () => {
     await db.query(`DELETE FROM exercises WHERE id=$1`, [ex.id]);
   });
 });
+
+describe('users.equipment_profile (migration 011)', () => {
+  it('defaults to versioned empty object', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING equipment_profile`,
+      [`vitest.eq.${Date.now()}@repos.test`]
+    );
+    expect(u.equipment_profile).toEqual({ _v: 1 });
+    await db.query(`DELETE FROM users WHERE email LIKE 'vitest.eq.%'`);
+  });
+});
