@@ -1,7 +1,7 @@
 # RepOS — Engineering Passdown
 
 **Date:** 2026-05-03  
-**Status:** v1 deployed, hardened operationally (backup + log rotation + CI to GHCR live); auth (CF Access whole-host) implementation in flight  
+**Status:** v1 deployed and live — CF Access whole-host auth on, iOS Shortcut + Personal Automation in production, non-v1 placeholder UI stripped, pg DeprecationWarning resolved  
 **Repo:** `otahesh/RepOS` (GitHub, public)
 
 ---
@@ -24,13 +24,14 @@ The design reference (`RepOS.html` + 6 JSX files at the repo root) is a Figma-st
 | Security hardening | ✅ helmet, log redaction, ADMIN_API_KEY guard, pg pool limits, token-revoke owner check, calendar-valid dates — all shipped |
 | Frontend — design system, layout, charts | ✅ Build clean, zero TS errors |
 | Frontend — Settings / token management UI | ✅ |
-| Production deployment (Unraid + Cloudflare) | ✅ Single `RepOS` container, br0 macvlan at `192.168.88.65`, public via Cloudflare Tunnel as `repos.jpmtech.com`, `/api/tokens/*` gated by Cloudflare Access |
+| Production deployment (Unraid + Cloudflare) | ✅ Single `RepOS` container, br0 macvlan at `192.168.88.65`, public via Cloudflare Tunnel as `repos.jpmtech.com`, **whole host** gated by Cloudflare Access (`RepOS` app, AUD `49200ae5...`) with a Bypass app on `/api/health/*` for the iOS Shortcut bearer flow |
 | Postgres backup | ✅ s6 longrun → daily `pg_dump` 03:15 UTC → `/config/backups/repos-*.dump.gz`, 14-day retention, restore runbook below |
 | Log rotation | ✅ s6-log per service for postgres/api/nginx, 100 MB × 7 archives, gzipped — at `/config/log/{postgres,api,nginx}` |
 | CI (GitHub Actions) | ✅ `.github/workflows/test.yml` (typecheck on PR) + `docker.yml` (build + push to `ghcr.io/otahesh/repos` on main) |
 | Frontend URL routing | ✅ `VITE_API_URL=` (empty) — `/api/foo` resolved via same-origin nginx (was `VITE_API_URL=/api` which produced `/api/api/foo` 404s) |
-| iOS Shortcut build recipe | ✅ `docs/shortcuts/health-weight-sync.md` — text-only build instructions (no `.shortcut` bundle, since those are signed per-device) |
-| User login / session system | 🟡 In flight — code landed (CF Access whole-host auth derived from `Cf-Access-Jwt-Assertion` JWT email claim); waiting on dashboard config + flag flip |
+| iOS Shortcut build recipe | ✅ `docs/shortcuts/health-weight-sync.md` — verified against iOS 26.4.2 (Calculate × 2.20462 for kg→lb, inline JSON in Get Contents of URL, `is not empty` for the If condition). Some action labels marked "iOS 26 spot-check" for future builders to confirm. |
+| iOS Shortcut Personal Automation | ✅ Time-of-Day 7:30 AM Daily, Run Immediately, runs `RepOS Daily Weight Sync`. (Apple does NOT expose a Health-event trigger in current iOS — Time-of-Day is the only path.) |
+| User login / session system | ✅ CF Access whole-host auth live. `/api/me` derives identity from `Cf-Access-Jwt-Assertion` JWT email claim; auto-provisions on first hit. Frontend `useCurrentUser()` + `AuthGate` in `frontend/src/auth.tsx`; sidebar pill renders the resolved user. |
 | iOS Shortcut `.shortcut` bundle | ❌ Not published — users build from the recipe locally |
 
 ---
@@ -281,9 +282,11 @@ weight_write_log          (user_id UUID FK, log_date DATE, write_count INT,
 | `/` | `DesktopDashboard` | Live chart, fetches `GET /api/health/weight?range=90d` |
 | `/settings/integrations` | `SettingsIntegrations` | Token management, sync status |
 
-The frontend currently has **no login system**. All authenticated API calls will return 401 until a user session is wired up. For now, `PLACEHOLDER_USER_ID` in `frontend/src/tokens.ts` is a hardcoded UUID used for token operations. Replace this when you build auth.
+The catch-all route redirects everything else to `/`. Non-v1 nav items (Program, Library, Progress, Cardio) and the `START SESSION` / Week-selector / Mesocycle scaffolding from the original prototype have been stripped from the live UI — only Today + Settings remain.
 
-The sync pill in the topbar and the sync status on the Settings page call `GET /api/health/sync/status` without a Bearer token — these will show "SYNC ERROR" gracefully until auth is connected.
+Auth: `frontend/src/auth.tsx` exposes `apiFetch`, `AuthProvider`, `useCurrentUser`, and `AuthGate`. `AuthGate` blocks render until `/api/me` resolves. With `CF_ACCESS_ENABLED=true` in production the app loads the auto-provisioned user (display_name, email, timezone). The transitional `PLACEHOLDER_USER_ID` constant remains in `auth.tsx` only as the `disabled`-status fallback for cf-access-disabled deploys; remove it when CF Access is permanent.
+
+Sync pill on the topbar polls `GET /api/health/sync/status` via `apiFetch` (cookie-bearing same-origin) every 60s — it'll show `SYNC ERROR` only on a real network failure, not on auth issues, since the cookie carries CF Access through.
 
 ---
 
@@ -301,7 +304,7 @@ Full findings in `tasks/security-report.md`. Summary:
 - M-1: ✅ `@fastify/helmet` registered + log redaction for `Authorization` / `X-Admin-Key`
 - M-3: ✅ `DELETE /api/tokens/:id` requires `user_id` query param (UPDATE matches both)
 - L-2: ✅ Calendar-invalid dates (`2026-13-01`) now return clean 400 via UTC round-trip
-- L-3: ✅ pg Pool bounded (max=20, connection/idle timeouts, per-session `statement_timeout=5s`)
+- L-3: ✅ pg Pool bounded (max=20, connection/idle timeouts, per-session `statement_timeout=5s` set as native Pool option in `client.ts` — was previously an unawaited `db.on('connect', ...)` SET that fired the `client.query() when client is already executing` DeprecationWarning on every concurrent-pool path; fix sends statement_timeout in the connection startup parameters before the client is checked out). `migrate.ts` was simultaneously refactored to pin a single client across BEGIN/sql/COMMIT (transactions weren't actually wrapping anything before — Pool-level `db.query` calls may use different clients) and to clear `statement_timeout` for the migration session so future long-running migrations aren't capped by the runtime 5s.
 - H-1 follow-up: ✅ Migration 006 adds `text_pattern_ops` index on `device_tokens.token_hash` for the `LIKE 'prefix:%'` access pattern
 - Public exposure new gates: ✅ `ADMIN_API_KEY` startup guard refuses to boot in production if unset; nginx-in-container enforces 256k body cap, per-IP rate limits (`/api/` 10r/s, `/api/tokens` 2r/s); Cloudflare Access on `/api/tokens/*`
 
@@ -311,14 +314,14 @@ Full findings in `tasks/security-report.md`. Summary:
 - Postgres WAL archiving / point-in-time recovery — current daily logical backup is sufficient for alpha; revisit if RPO < 24h becomes a real requirement
 - Backup off-box destination — currently lives on the same Unraid box as the source DB; mirror to NAS share or remote target before declaring Release
 
-**CF Access whole-host auth — operator runbook (when flipping the flag on):**
+**CF Access whole-host auth — operator runbook (already live; kept here for future re-enablement / disaster recovery):**
 
 1. Zero Trust → Access → Applications → **Add an application** → Self-hosted, domain `repos.jpmtech.com` (no path), session 24h, identity provider One-Time PIN, policy Allow with `jason@jpmtech.com` (extend allowlist over time). Copy the **Application Audience (AUD) Tag**.
 2. Add a second application: domain `repos.jpmtech.com`, **path** `api/health/*`, policy **Bypass** with selector Everyone. The bearer-only Shortcut path needs this so origin-side JWT verification doesn't fire on machine traffic.
 3. Append to `/mnt/user/appdata/repos/.env` (root:root, 600): `CF_ACCESS_ENABLED=true`, `CF_ACCESS_TEAM_DOMAIN=jpmtech.cloudflareaccess.com`, `CF_ACCESS_AUD=<paste from step 1>`, optionally `CF_ACCESS_ALLOWED_EMAILS=jason@jpmtech.com` (defense-in-depth allowlist at the origin).
 4. Restart container: `ssh unraid 'docker restart RepOS'`.
 5. Verify in incognito browser: hit `https://repos.jpmtech.com` → CF challenge → enter email → PIN → app loads → DevTools shows `/api/me` returns 200 with your email.
-6. **Retire the old `RepOS Admin Tokens` Access app** (the new whole-host app supersedes it). Avoids serving two AUDs to the same browser session — the origin's JWT verifier accepts only one AUD value.
+6. ~~**Retire the old `RepOS Admin Tokens` Access app**~~ ✅ Done 2026-05-03. The legacy path-scoped app has been deleted; the whole-host `RepOS` app is the only AUD issuer (verified by AUD probe on `/`, `/api/tokens`, `/settings/integrations` — all `49200ae5...`).
 
 **Break-glass — merge two user rows by email (when allowlist email changes):**
 ```sql
@@ -340,7 +343,12 @@ Note: `health_weight_samples` has UNIQUE(user_id, sample_date, source); if both 
 - [x] `VITE_API_URL=` (empty) baked into the frontend build for same-origin (set to `/api` would double the prefix and produce `/api/api/...` 404s)
 - [x] `api/.env` is `.gitignore`d (verified)
 - [x] Postgres bound to `127.0.0.1` only (verified: `nc -zv 192.168.88.65 5432` from LAN → connection refused)
-- [x] `/api/tokens` gated by Cloudflare Access (verified: 302 to CF challenge URL)
+- [x] Whole-host gated by Cloudflare Access; `/api/health/*` correctly bypassed (verified by AUD probe + 401 on no-bearer POST)
+- [x] CF Access startup guard refuses boot when `CF_ACCESS_ENABLED=true` && (`CF_ACCESS_AUD` || `CF_ACCESS_TEAM_DOMAIN`) is missing
+- [x] CI green on `main` (`.github/workflows/{test,docker}.yml`); GHCR package `ghcr.io/otahesh/repos` is public (verified by anonymous `docker pull` from Unraid)
+- [x] Legacy `RepOS Admin Tokens` Access app deleted — single AUD `49200ae5...` served on every gated path
+- [x] Pino DeprecationWarning resolved (no `client.query() ... already executing` after deploy of `4fcad6c4...`)
+- [x] iOS Shortcut Personal Automation set up on iPhone (Time of Day 7:30 AM Daily)
 - [ ] Confirm `api/.env` is not committed (`.gitignore` covers it; double-check)
 
 ---
