@@ -5,6 +5,7 @@ import DesktopDashboard from './components/dashboard/DesktopDashboard'
 import SettingsIntegrations from './components/settings/SettingsIntegrations'
 import { AuthProvider, AuthGate } from './auth'
 import { EquipmentWizard } from './components/onboarding/EquipmentWizard'
+import { EquipmentEditor } from './components/settings/EquipmentEditor'
 import { getEquipmentProfile, isProfileEmpty, type EquipmentProfile } from './lib/api/equipment'
 
 function AppInner() {
@@ -20,6 +21,7 @@ function AppInner() {
           <Route path="/" element={<AppShell />}>
             <Route index element={<DesktopDashboard />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
+            <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
