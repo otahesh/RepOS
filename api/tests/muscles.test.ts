@@ -1,8 +1,11 @@
 import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
+import { buildApp } from '../src/app.js';
+type App = Awaited<ReturnType<typeof buildApp>>;
+let app: App;
 
-afterAll(async () => { await db.end(); });
+beforeAll(async () => { app = await buildApp(); });
 
 describe('muscles seed (migration 008)', () => {
   it('has exactly 12 rows after migration', async () => {
@@ -32,3 +35,21 @@ describe('muscles seed (migration 008)', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('GET /api/muscles', () => {
+  it('returns all 12 muscles ordered by display_order', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/muscles' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ muscles: any[] }>();
+    expect(body.muscles).toHaveLength(12);
+    expect(body.muscles[0].slug).toBe('chest');
+    expect(body.muscles[11].slug).toBe('calves');
+  });
+
+  it('sets cache header', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/muscles' });
+    expect(res.headers['cache-control']).toContain('max-age=86400');
+  });
+});
+
+afterAll(async () => { await app.close(); await db.end(); });

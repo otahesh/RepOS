@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import { weightRoutes } from './routes/weight.js';
 import { syncRoutes } from './routes/sync.js';
 import { tokenRoutes } from './routes/tokens.js';
+import { muscleRoutes } from './routes/muscles.js';
 import { requireCfAccess } from './middleware/cfAccess.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -25,6 +26,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(sensible);
   await app.register(tokenRoutes, { prefix: '/api' });
+  await app.register(muscleRoutes, { prefix: '/api' });
   await app.register(weightRoutes, { prefix: '/api/health' });
   await app.register(syncRoutes, { prefix: '/api/health' });
 
