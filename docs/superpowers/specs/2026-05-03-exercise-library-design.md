@@ -541,7 +541,7 @@ Visual language: matches `mobile-live.jsx` density. Reuses `Chip`, `LoggedSetRow
 
 These are real prereqs but live outside the Library spec:
 
-1. **Off-box Postgres backups** — currently backups exist on the same Unraid box (PASSDOWN). Equipment profile is user-authored data; alpha-end declaration must be gated on off-box mirror. Tracked separately as infra work.
+1. **In-app DB recovery (*arr-style snapshots)** — off-box backups are already handled out-of-band by the Unraid host's own backup process; that requirement is satisfied. What's still missing is in-application snapshot/restore for DB corruption recovery, modeled after Sonarr/Radarr/Lidarr: periodic compressed `pg_dump` to `/mnt/user/appdata/repos/backups/` (which the host backup picks up automatically), retention policy (keep last N or X days), Settings UI to list snapshots, trigger a manual snapshot, and restore from any snapshot. Equipment profile is user-authored data; alpha-end declaration is gated on this recovery system shipping. Tracked as a separate small sub-project (~Sub-project #9 — "DB Recovery"), not a Library-spec deliverable.
 2. **Heatmap mockup update** — the existing `desktop-dashboard.jsx` shows 9 rows; the schema has 12 muscles rendered as 6 group rollups. Sub-project #4 will reconcile this; not a Library-spec deliverable.
 3. **Sub-project #2 (Program model)** — exercise picker has no live consumer until #2 ships. v1 of the Library can be built and tested standalone, but the UI is not exercised end-to-end without #2.
 
