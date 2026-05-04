@@ -36,7 +36,7 @@ export const EquipmentProfileSchema = z.object({
   stationary_bike: z.boolean().optional(),
   rowing_erg: z.boolean().optional(),
   outdoor_cycling: z.boolean().optional(),
-}).strict()
+}).passthrough()
   .superRefine((val, ctx) => {
     for (const key of Object.keys(val)) {
       if (key === '_v') continue;
