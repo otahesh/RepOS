@@ -3,17 +3,14 @@ import 'dotenv/config';
 
 const { Pool } = pg;
 
+// `statement_timeout` is sent as part of the connection startup parameters
+// before the client is handed to user code — using the native Pool option
+// (vs a `connect` event handler running an unawaited `SET`) avoids the
+// overlapping-query DeprecationWarning from pg.
 export const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
-});
-
-// Apply per-session statement_timeout on every new connection.
-// 5s caps any single query — prevents one stuck query from hanging the API.
-db.on('connect', (client) => {
-  client.query('SET statement_timeout = 5000').catch((err) => {
-    console.error('failed to set statement_timeout', err);
-  });
+  statement_timeout: 5_000,
 });
