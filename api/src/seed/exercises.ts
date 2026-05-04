@@ -707,8 +707,8 @@ export const exercises: ExerciseSeed[] = [
   {
     slug: 'cable-woodchop-high-to-low',
     name: 'Cable Wood Chop (High to Low)',
-    primary_muscle: 'side_delt',
-    muscle_contributions: { side_delt: 1.0, upper_back: 0.3, triceps: 0.2 },
+    primary_muscle: 'upper_back',
+    muscle_contributions: { upper_back: 1.0, side_delt: 0.4, triceps: 0.3 },
     movement_pattern: 'rotation',
     peak_tension_length: 'mid',
     required_equipment: { _v: 1, requires: [{ type: 'cable_stack' }] },
@@ -727,8 +727,8 @@ export const exercises: ExerciseSeed[] = [
   {
     slug: 'dumbbell-rotational-chop',
     name: 'Dumbbell Rotational Chop',
-    primary_muscle: 'side_delt',
-    muscle_contributions: { side_delt: 1.0, upper_back: 0.3, triceps: 0.2 },
+    primary_muscle: 'upper_back',
+    muscle_contributions: { upper_back: 1.0, side_delt: 0.4, triceps: 0.3 },
     movement_pattern: 'rotation',
     peak_tension_length: 'mid',
     required_equipment: { _v: 1, requires: [{ type: 'dumbbells', min_pair_lb: 10 }] },
@@ -749,8 +749,8 @@ export const exercises: ExerciseSeed[] = [
   {
     slug: 'cable-pallof-press',
     name: 'Cable Pallof Press',
-    primary_muscle: 'triceps',
-    muscle_contributions: { triceps: 1.0, front_delt: 0.3 },
+    primary_muscle: 'upper_back',
+    muscle_contributions: { upper_back: 1.0, triceps: 0.3 },
     movement_pattern: 'anti_rotation',
     peak_tension_length: 'mid',
     required_equipment: { _v: 1, requires: [{ type: 'cable_stack' }] },
