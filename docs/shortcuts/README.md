@@ -6,7 +6,7 @@ Build instructions and operational runbooks for the iOS Shortcuts that interact 
 
 | Shortcut | Purpose | Trigger | Doc |
 |---|---|---|---|
-| RepOS Daily Weight Sync | Reads the most-recent Apple Health Body Mass sample and POSTs it to `/api/health/weight` | Personal Automation — Time of Day (default 07:30 daily) **or** Health · Body Mass Updated (iOS 17+) | [`health-weight-sync.md`](./health-weight-sync.md) |
+| RepOS Daily Weight Sync | Reads the most-recent Apple Health Body Mass sample and POSTs it to `/api/health/weight` | Personal Automation — Time of Day (default 07:30 daily). Apple does not currently expose a Health-event trigger in Personal Automations. | [`health-weight-sync.md`](./health-weight-sync.md) |
 
 ## Why text instructions instead of a `.shortcut` bundle
 
