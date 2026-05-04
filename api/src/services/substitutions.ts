@@ -1,10 +1,5 @@
 import { db } from '../db/client.js';
-import { compilePredicates as _compilePredicates } from './predicateCompiler.js';
-import { Predicate as _Predicate, type PredicateT } from '../schemas/predicate.js';
-
-// _compilePredicates and _Predicate are reserved for the v3 SQL-translatable
-// scaling path. In v1 we evaluate predicates in JS for clarity; when the
-// catalog grows, swap to the SQL compiler (T9) for a single-query path.
+import type { PredicateT } from '../schemas/predicate.js';
 
 export type SubResult = {
   from: { slug: string; name: string };
@@ -36,71 +31,66 @@ export async function findSubstitutions(
     return { from: { slug: targetSlug, name: target.name }, subs: [], truncated: false, reason: 'no_equipment_profile' };
   }
 
-  // 1. Find candidates that pass equipment predicates
-  // We have to do per-row predicate compilation because each candidate's
-  // required_equipment differs. Use a single big query with JSONB ops by
-  // letting SQL evaluate each candidate's requires[] array against $1.
-  const candidates = await db.query<{
+  // Single query: fetch all candidates with scores computed inline via
+  // correlated subquery for overlap. Eliminates the N+1 per-candidate
+  // overlap queries that existed before. Predicate satisfaction stays in TS
+  // where it's already correct and well-tested (Path C).
+  const { rows: candidates } = await db.query<{
     id: string; slug: string; name: string;
     movement_pattern: string; primary_muscle_id: number;
     required_equipment: { _v: number; requires: PredicateT[] };
+    pattern_score: number; primary_score: number; overlap_score: number;
   }>(
-    `SELECT id, slug, name, movement_pattern, primary_muscle_id, required_equipment
-     FROM exercises
-     WHERE id <> $1 AND archived_at IS NULL`,
-    [target.id],
+    `SELECT
+       e.id, e.slug, e.name, e.movement_pattern, e.primary_muscle_id, e.required_equipment,
+       ((e.movement_pattern = $2)::int * 1000) AS pattern_score,
+       ((e.primary_muscle_id = $3)::int * 500) AS primary_score,
+       COALESCE((
+         SELECT (SUM(LEAST(t.contribution, c.contribution)) * 100)::int
+         FROM exercise_muscle_contributions t
+         JOIN exercise_muscle_contributions c
+           ON c.exercise_id = e.id AND c.muscle_id = t.muscle_id
+         WHERE t.exercise_id = $1
+       ), 0) AS overlap_score
+     FROM exercises e
+     WHERE e.id <> $1 AND e.archived_at IS NULL`,
+    [target.id, target.movement_pattern, target.primary_muscle_id],
   );
 
-  type Scored = { row: typeof candidates.rows[number]; score: number; reason: string; pattern_match: boolean };
-  const passing: Scored[] = [];
   const profile = userEquipmentProfile;
 
-  for (const row of candidates.rows) {
-    const reqs = (row.required_equipment?.requires ?? []) as PredicateT[];
-    if (!allPredicatesSatisfied(reqs, profile)) continue;
-
-    let score = 0;
-    let reason = '';
-    const patternMatch = row.movement_pattern === target.movement_pattern;
-    const primaryMatch = row.primary_muscle_id === target.primary_muscle_id;
-    if (patternMatch) { score += 1000; reason = 'Same pattern'; }
-    if (primaryMatch) { score += 500; reason = reason ? `${reason} · same primary` : 'Same primary muscle'; }
-
-    // Overlap subscore via SUM(LEAST(target.contribution, candidate.contribution))
-    const { rows: [overlap] } = await db.query<{ overlap: number }>(
-      `SELECT COALESCE(SUM(LEAST(t.contribution, c.contribution)), 0)::float8 AS overlap
-       FROM exercise_muscle_contributions t
-       JOIN exercise_muscle_contributions c ON c.muscle_id = t.muscle_id
-       WHERE t.exercise_id=$1 AND c.exercise_id=$2`,
-      [target.id, row.id],
-    );
-    score += Math.round(overlap.overlap * 100);
-
-    if (score < SCORE_FLOOR) continue;
-    passing.push({ row, score, reason: reason || 'Muscle overlap', pattern_match: patternMatch });
-  }
-
-  passing.sort((a, b) => (b.score - a.score) || a.row.slug.localeCompare(b.row.slug));
+  const passing = candidates
+    .filter(c => allPredicatesSatisfied((c.required_equipment?.requires ?? []) as PredicateT[], profile))
+    .map(c => {
+      const score = c.pattern_score + c.primary_score + c.overlap_score;
+      let reason = '';
+      if (c.pattern_score > 0) { reason = 'Same pattern'; }
+      if (c.primary_score > 0) { reason = reason ? `${reason} · same primary` : 'Same primary muscle'; }
+      if (!reason) reason = 'Muscle overlap';
+      return { ...c, score, reason };
+    })
+    .filter(c => c.score >= SCORE_FLOOR)
+    .sort((a, b) => (b.score - a.score) || a.slug.localeCompare(b.slug));
 
   if (passing.length === 0) {
-    // Find closest partial: same pattern, ignore equipment
-    const { rows: [partial] } = await db.query<{ slug: string; name: string }>(
-      `SELECT slug, name FROM exercises
-       WHERE id <> $1 AND archived_at IS NULL AND movement_pattern=$2
-       ORDER BY slug ASC LIMIT 1`,
-      [target.id, target.movement_pattern],
-    );
+    // Score-based closest_partial: highest-scored candidate from the full
+    // set (equipment-agnostic), so the suggestion is relevant not alphabetical.
+    const closestPartial = candidates
+      .map(c => ({ ...c, score: c.pattern_score + c.primary_score + c.overlap_score }))
+      .filter(c => c.score >= SCORE_FLOOR)
+      .sort((a, b) => (b.score - a.score) || a.slug.localeCompare(b.slug))[0];
+
     return {
       from: { slug: targetSlug, name: target.name },
       subs: [], truncated: false, reason: 'no_equipment_match',
-      closest_partial: partial ? { slug: partial.slug, name: partial.name } : undefined,
+      closest_partial: closestPartial ? { slug: closestPartial.slug, name: closestPartial.name } : undefined,
     };
   }
 
   const sliced = passing.slice(0, TRUNCATION);
   return {
     from: { slug: targetSlug, name: target.name },
-    subs: sliced.map(s => ({ slug: s.row.slug, name: s.row.name, score: s.score, reason: s.reason })),
+    subs: sliced.map(s => ({ slug: s.slug, name: s.name, score: s.score, reason: s.reason })),
     truncated: passing.length > TRUNCATION,
     ...(passing.length > TRUNCATION ? { total_matches: passing.length } : {}),
   };
