@@ -29,7 +29,7 @@ export const ExerciseSeedSchema = z.object({
   name: z.string().min(1).max(120),
   parent_slug: z.string().regex(/^[a-z0-9-]+$/).optional(),
   primary_muscle: z.enum(MUSCLE_SLUGS),
-  muscle_contributions: z.record(z.enum(MUSCLE_SLUGS), z.number().min(0.05).max(1.0)),
+  muscle_contributions: z.partialRecord(z.enum(MUSCLE_SLUGS), z.number().min(0.05).max(1.0)),
   movement_pattern: z.enum(MOVEMENT_PATTERNS),
   peak_tension_length: z.enum(PEAK_TENSION),
   required_equipment: RequiredEquipment,
