@@ -44,3 +44,50 @@ describe('GET /api/exercises (spec §9.4)', () => {
     expect(Date.now() - start).toBeLessThan(50);
   });
 });
+
+describe('GET /api/exercises/:slug/substitutions', () => {
+  let userId: string;
+  let token: string;
+  beforeAll(async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email, equipment_profile)
+       VALUES ($1, $2::jsonb) RETURNING id`,
+      [`vitest.subs.${Date.now()}@repos.test`, JSON.stringify({
+        _v: 1,
+        dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 },
+        adjustable_bench: { incline: true, decline: true },
+      })],
+    );
+    userId = u.id;
+    const mint = await app.inject({
+      method: 'POST', url: '/api/tokens',
+      body: { user_id: userId, label: 'sub-test' },
+    });
+    token = mint.json<{ token: string }>().token;
+  });
+  afterAll(async () => {
+    if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
+  });
+
+  it('returns ranked subs for an authed user', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/exercises/barbell-bench-press/substitutions',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.from.slug).toBe('barbell-bench-press');
+    expect(Array.isArray(body.subs)).toBe(true);
+    expect(r.headers['cache-control']).toContain('private');
+  });
+
+  it('returns 404 for unknown slug', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/exercises/missing/substitutions',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
+import { findSubstitutions } from '../services/substitutions.js';
+import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 
 export async function exerciseRoutes(app: FastifyInstance) {
   app.get('/exercises', async (_req, reply) => {
@@ -50,4 +52,21 @@ export async function exerciseRoutes(app: FastifyInstance) {
     reply.header('cache-control', 'public, max-age=300, stale-while-revalidate=86400');
     return rows[0];
   });
+
+  app.get<{ Params: { slug: string } }>(
+    '/exercises/:slug/substitutions',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+      const { rows } = await db.query<{ equipment_profile: Record<string, unknown> }>(
+        `SELECT equipment_profile FROM users WHERE id=$1`, [userId]
+      );
+      if (rows.length === 0) { reply.code(404); return { error: 'user not found' }; }
+      const result = await findSubstitutions(req.params.slug, rows[0].equipment_profile);
+      if (!result) { reply.code(404); return { error: 'exercise not found', field: 'slug' }; }
+      reply.header('cache-control', 'private, max-age=60');
+      reply.header('vary', 'Authorization');
+      return result;
+    },
+  );
 }
