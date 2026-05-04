@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { PoolClient } from 'pg';
 import { db } from '../db/client.js';
 import { validateSeed } from './validate.js';
 import type { ExerciseSeed } from '../schemas/exerciseSeed.js';
@@ -130,7 +131,7 @@ export async function runSeed(input: RunSeedInput): Promise<RunSeedResult> {
   }
 }
 
-async function loadMuscleIds(client: any): Promise<Map<string, number>> {
+async function loadMuscleIds(client: PoolClient): Promise<Map<string, number>> {
   const { rows } = await client.query<{ slug: string; id: number }>(
     `SELECT slug, id FROM muscles`,
   );
