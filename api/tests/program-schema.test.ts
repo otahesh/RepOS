@@ -558,3 +558,89 @@ describe('set_logs (migration 022)', () => {
     }
   });
 });
+
+describe('mesocycle_run_events (migration 023)', () => {
+  it('cascades on mesocycle_run delete', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.mre.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      const { rows: [up] } = await db.query(
+        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+        [u.id]
+      );
+      const { rows: [r] } = await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+        [up.id, u.id]
+      );
+      const { rows: [ev] } = await db.query(
+        `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
+         VALUES ($1,'started','{"who":"test"}'::jsonb) RETURNING id`,
+        [r.id]
+      );
+      expect(Number(ev.id)).toBeGreaterThan(0); // BIGSERIAL — pg returns string for bigint, coerce
+      await db.query(`DELETE FROM mesocycle_runs WHERE id=$1`, [r.id]);
+      const { rows } = await db.query(
+        `SELECT 1 FROM mesocycle_run_events WHERE id=$1`, [ev.id]
+      );
+      expect(rows.length).toBe(0);
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+
+  it('rejects unknown event_type', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.mre2.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      const { rows: [up] } = await db.query(
+        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+        [u.id]
+      );
+      const { rows: [r] } = await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+        [up.id, u.id]
+      );
+      await expect(
+        db.query(
+          `INSERT INTO mesocycle_run_events (run_id, event_type)
+           VALUES ($1,'time_traveled')`,
+          [r.id]
+        )
+      ).rejects.toThrow();
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+
+  it('payload defaults to empty object', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.mre3.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      const { rows: [up] } = await db.query(
+        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+        [u.id]
+      );
+      const { rows: [r] } = await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+        [up.id, u.id]
+      );
+      const { rows: [ev] } = await db.query(
+        `INSERT INTO mesocycle_run_events (run_id, event_type)
+         VALUES ($1,'started') RETURNING payload`,
+        [r.id]
+      );
+      expect(ev.payload).toEqual({});
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+});
