@@ -99,6 +99,8 @@ describe('resolveUserProgramStructure', () => {
       const result = await resolveUserProgramStructure(userProgramId, userId);
       expect(result).not.toBeNull();
       expect(result!.effective_structure.days[0].blocks[0].exercise_slug).toBe('goblet-squat');
+      // set_count_delta defaults to 0 on all blocks
+      expect(result!.effective_structure.days[0].blocks[0].set_count_delta).toBe(0);
     } finally {
       await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
     }
@@ -174,6 +176,49 @@ describe('resolveUserProgramStructure', () => {
       expect(result!.latest_run_id).toBe(run.id);
     } finally {
       await db.query(`DELETE FROM mesocycle_runs WHERE id=$1`, [run.id]);
+    }
+  });
+
+  it('10. set_count_overrides stamps set_count_delta on the matching block', async () => {
+    await db.query(
+      `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
+      [JSON.stringify({
+        set_count_overrides: [
+          { week_idx: 1, day_idx: 0, block_idx: 0, delta: 1 },
+          { week_idx: 1, day_idx: 1, block_idx: 0, delta: -1 },
+        ],
+      }), userProgramId],
+    );
+    try {
+      const r = await resolveUserProgramStructure(userProgramId, userId);
+      expect(r).not.toBeNull();
+      expect(r!.effective_structure.days[0].blocks[0].set_count_delta).toBe(1);
+      expect(r!.effective_structure.days[1].blocks[0].set_count_delta).toBe(-1);
+      // Other blocks default to 0
+      expect(r!.effective_structure.days[2].blocks[0].set_count_delta).toBe(0);
+    } finally {
+      await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
+    }
+  });
+
+  it('11. swap with stale from_slug (current block no longer matches) is skipped', async () => {
+    await db.query(
+      `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
+      [JSON.stringify({
+        swaps: [
+          { week_idx: 1, day_idx: 0, block_idx: 0,
+            from_slug: 'never-existed-this-name', to_slug: 'goblet-squat' }
+        ],
+      }), userProgramId],
+    );
+    try {
+      const r = await resolveUserProgramStructure(userProgramId, userId);
+      expect(r).not.toBeNull();
+      // Swap was stale → block keeps its original exercise_slug
+      expect(r!.effective_structure.days[0].blocks[0].exercise_slug).toBe(origFirstSlug);
+      expect(r!.effective_structure.days[0].blocks[0].exercise_slug).not.toBe('goblet-squat');
+    } finally {
+      await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
     }
   });
 });

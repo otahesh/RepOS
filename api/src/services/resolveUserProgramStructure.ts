@@ -11,6 +11,7 @@ import { db } from '../db/client.js';
 
 type Block = {
   exercise_slug: string;
+  set_count_delta?: number;
   [key: string]: unknown;
 };
 
@@ -114,6 +115,13 @@ export async function resolveUserProgramStructure(
 
   // ── Apply week-1 overlays ──────────────────────────────────────────────────
 
+  // 0. Initialize set_count_delta on every block (default 0)
+  for (const day of structure.days) {
+    for (const block of day.blocks) {
+      block.set_count_delta = 0;
+    }
+  }
+
   // 1. day_offset_overrides (week_idx === 1)
   for (const ov of cust.day_offset_overrides ?? []) {
     if (ov.week_idx !== 1) continue;
@@ -121,17 +129,27 @@ export async function resolveUserProgramStructure(
     if (day) day.day_offset = ov.new_day_offset;
   }
 
-  // 2. swaps (week_idx === 1)
+  // 2. swaps (week_idx === 1) — only apply if from_slug matches current block
   for (const sw of cust.swaps ?? []) {
     if (sw.week_idx !== 1) continue;
     const day = structure.days.find(d => d.idx === sw.day_idx);
     if (!day) continue;
     const block = day.blocks[sw.block_idx];
-    if (block) block.exercise_slug = sw.to_slug;
+    if (block && block.exercise_slug === sw.from_slug) {
+      block.exercise_slug = sw.to_slug;
+    }
   }
 
-  // 3. set_count_overrides: soft annotation — skip in v1 (actual set count
-  //    comes from materialization; structure JSON doesn't carry a set count field).
+  // 3. set_count_overrides: stamp delta onto matching blocks
+  for (const ov of cust.set_count_overrides ?? []) {
+    if (ov.week_idx !== 1) continue;
+    const day = structure.days.find(d => d.idx === ov.day_idx);
+    if (!day) continue;
+    const block = day.blocks[ov.block_idx];
+    if (block) {
+      block.set_count_delta = (block.set_count_delta ?? 0) + ov.delta;
+    }
+  }
 
   // 4. skipped_days (week_idx === 1): filter out matching days
   const skippedIdxs = new Set(
