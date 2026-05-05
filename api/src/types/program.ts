@@ -3,6 +3,42 @@
 // `pg` returns Postgres NUMERIC as JS string by default; we model that
 // faithfully (services convert to number where arithmetic is needed).
 
+// ---------------------------------------------------------------------------
+// Template structure — the JSONB `structure` column shape validated app-side.
+// ---------------------------------------------------------------------------
+
+export type TemplateBlock = {
+  exercise_slug: string;
+  mev: number;
+  mav: number;
+  target_reps_low: number;
+  target_reps_high: number;
+  target_rir: number;
+  rest_sec: number;
+  /** Primary movement pattern for frequency / fatigue scheduling rules. */
+  movement_pattern?: string;
+  cardio?: {
+    target_duration_sec?: number;
+    target_distance_m?: number;
+    target_zone?: number;
+  };
+};
+
+export type TemplateDayDef = {
+  idx: number;
+  day_offset: number;
+  kind: 'strength' | 'cardio' | 'hybrid';
+  name: string;
+  blocks: TemplateBlock[];
+};
+
+export type ProgramTemplateStructure = {
+  _v: 1;
+  days: TemplateDayDef[];
+};
+
+// ---------------------------------------------------------------------------
+
 export type ProgramStatus =
   | 'draft' | 'active' | 'paused' | 'completed' | 'archived';
 
