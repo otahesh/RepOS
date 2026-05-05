@@ -5,6 +5,9 @@ import { runSeed } from '../../src/seed/runSeed.js';
 import { makeExerciseSeedAdapter } from '../../src/seed/adapters/exercises.js';
 import { exercises } from '../../src/seed/exercises.js';
 
+// This is the sole test file that mutates rows with seed_key='exercises'.
+// If a future test also touches that key, the file-parallel race risk on
+// `archived` and the active-row invariant must be re-evaluated.
 describe('exercises seed (production smoke)', () => {
   afterAll(async () => { await db.end(); });
 
