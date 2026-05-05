@@ -10,6 +10,7 @@ import {
   evaluateAll,
   bodyweightCrashEvaluator,
   registerEvaluator,
+  type EvaluatedFlag,
 } from '../services/recoveryFlags.js';
 import { isDismissed } from '../services/recoveryFlagDismissals.js';
 
@@ -21,15 +22,12 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
   app.get('/recovery-flags', { preHandler: requireBearerOrCfAccess }, async (req) => {
     const userId = (req as any).userId as string;
 
-    // Resolve active run context (type requires runId + weekIdx even if unused by evaluator)
-    const { rows: [run] } = await db.query<{ id: string; current_week: number }>(
-      `SELECT id, current_week FROM mesocycle_runs WHERE user_id=$1 AND status='active' LIMIT 1`,
-      [userId],
-    );
+    // v1 only ships bodyweight_crash which doesn't read run context; future
+    // evaluators (overreaching, stalled_pr) will populate these from active mesocycle_run.
     const ctx = {
       userId,
-      runId: run?.id ?? null,
-      weekIdx: run?.current_week ?? 1,
+      runId: null as string | null,
+      weekIdx: 1,
     };
 
     // Compute current ISO-week Monday for dismissal lookup (TZ-stable via Postgres)
@@ -37,12 +35,11 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
       `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
     );
 
-    const all = await evaluateAll(ctx);
-    const triggered = all.filter(f => f.triggered === true);
+    const triggered = (await evaluateAll(ctx))
+      .filter((f): f is Extract<EvaluatedFlag, { triggered: true }> => f.triggered);
 
     const flags: Array<{ flag: string; message: string; trend_7d_lbs?: number }> = [];
     for (const f of triggered) {
-      if (!f.triggered) continue; // narrow type
       const dismissed = await isDismissed({ userId, flag: f.key, weekStart: week_start });
       if (dismissed) continue;
       flags.push({

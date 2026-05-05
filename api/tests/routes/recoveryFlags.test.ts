@@ -4,7 +4,7 @@
 // to avoid collision with the top-level beforeEach(_resetRegistryForTest) there.
 
 import 'dotenv/config';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
 import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from '../helpers/program-fixtures.js';
@@ -14,6 +14,17 @@ type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 let userId: string;
 let token: string;
+
+async function seedCrashingWeights(uid: string) {
+  await db.query(`DELETE FROM health_weight_samples WHERE user_id=$1`, [uid]);
+  for (let i = 0; i < 8; i++) {
+    await db.query(
+      `INSERT INTO health_weight_samples (user_id, sample_date, sample_time, weight_lbs, source)
+       VALUES ($1, (CURRENT_DATE - ($2::int * INTERVAL '1 day'))::date, '08:00', $3, 'Manual')`,
+      [uid, 7 - i, 200 - i * 0.5],
+    );
+  }
+}
 
 // Helpers for goal=cut test
 let cutUserId: string;
@@ -35,15 +46,7 @@ beforeAll(async () => {
   token = mint.json<{ token: string }>().token;
 
   // Seed weight data: 8 days descending so trend ≤ -2.0 (same pattern as unit test)
-  // i=0 → 7 days ago (oldest), i=7 → today
-  for (let i = 0; i < 8; i++) {
-    await db.query(
-      `INSERT INTO health_weight_samples (user_id, sample_date, sample_time, weight_lbs, source)
-       VALUES ($1, (CURRENT_DATE - ($2::int * INTERVAL '1 day'))::date, '08:00', $3, 'Manual')
-       ON CONFLICT (user_id, sample_date, source) DO UPDATE SET weight_lbs=EXCLUDED.weight_lbs`,
-      [userId, 7 - i, 200 - i * 0.5],
-    );
-  }
+  await seedCrashingWeights(userId);
 
   // ---- Cut-goal user ----
   const cu = await mkUser({ prefix: 'vitest.rf-route-cut' });
@@ -57,14 +60,7 @@ beforeAll(async () => {
   cutToken = cutMint.json<{ token: string }>().token;
 
   // Seed same crashing weight data for cut user
-  for (let i = 0; i < 8; i++) {
-    await db.query(
-      `INSERT INTO health_weight_samples (user_id, sample_date, sample_time, weight_lbs, source)
-       VALUES ($1, (CURRENT_DATE - ($2::int * INTERVAL '1 day'))::date, '08:00', $3, 'Manual')
-       ON CONFLICT (user_id, sample_date, source) DO UPDATE SET weight_lbs=EXCLUDED.weight_lbs`,
-      [cutUserId, 7 - i, 200 - i * 0.5],
-    );
-  }
+  await seedCrashingWeights(cutUserId);
 
   // Seed cut-goal user with an active mesocycle_run + user_program (goal='cut')
   const tpl = await mkTemplate({
@@ -106,6 +102,12 @@ afterAll(async () => {
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 
 describe('GET /api/recovery-flags', () => {
+  beforeEach(async () => {
+    // Ensure dismissals don't bleed across tests regardless of execution order.
+    await db.query(`DELETE FROM recovery_flag_dismissals WHERE user_id = $1`, [userId]);
+    await db.query(`DELETE FROM recovery_flag_dismissals WHERE user_id = $1`, [cutUserId]);
+  });
+
   it('returns bodyweight_crash flag when trend ≤ -2.0 and no cut goal', async () => {
     const r = await app.inject({
       method: 'GET',
