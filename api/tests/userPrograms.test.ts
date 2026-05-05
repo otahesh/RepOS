@@ -39,24 +39,26 @@ const auth = () => ({ authorization: `Bearer ${token}` });
 describe('GET /api/user-programs', () => {
   it('lists only my non-archived programs', async () => {
     // mine
-    await app.inject({
+    const fork = await app.inject({
       method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
     });
+    const myUpId = fork.json<{ id: string }>().id;
     // someone else's
     const { rows: [tmpl] } = await db.query(
       `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
     );
-    await db.query(
+    const { rows: [otherUp] } = await db.query<{ id: string }>(
       `INSERT INTO user_programs (user_id, template_id, template_version, name)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4) RETURNING id`,
       [otherUserId, tmpl.id, tmpl.version, tmpl.name],
     );
 
     const r = await app.inject({ method: 'GET', url: '/api/user-programs', headers: auth() });
     expect(r.statusCode).toBe(200);
-    const body = r.json<{ programs: any[] }>();
-    expect(body.programs.every(p => p.user_id === userId || p.user_id === undefined)).toBe(true);
-    expect(body.programs.length).toBeGreaterThanOrEqual(1);
+    const body = r.json<{ programs: { id: string }[] }>();
+    const ids = body.programs.map(p => p.id);
+    expect(ids).toContain(myUpId);
+    expect(ids).not.toContain(otherUp.id);
   });
 
   it('401 without auth', async () => {
