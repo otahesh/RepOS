@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
-import { materializeMesocycle } from '../src/services/materializeMesocycle.js';
+import { materializeMesocycle, ActiveRunExistsError } from '../src/services/materializeMesocycle.js';
 
 let userId: string; let templateId: string; let userProgramId: string;
 
@@ -102,5 +102,97 @@ describe('materializeMesocycle (spec §3.3 step list)', () => {
     // Week 4 (last accum, N=5) should equal MRV-1 = 21
     const w4Total = rows.filter(r => r.week_idx === 4).reduce((s, r) => s + r.sets, 0);
     expect(w4Total).toBe(21);
+  });
+});
+
+describe('materializeMesocycle concurrency (spec §9 guardrail)', () => {
+  it('50 parallel starts on the same user_program — exactly one survives, others 409', async () => {
+    // Build a fresh user + draft program for this test.
+    const { rows: [u2] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.hammer.${Date.now()}@repos.test`],
+    );
+    const { rows: [up2] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, 1, 'Hammer run', 'draft') RETURNING id`,
+      [u2.id, templateId],
+    );
+
+    const calls = Array.from({ length: 50 }, () =>
+      materializeMesocycle({
+        userProgramId: up2.id, startDate: '2026-05-04', startTz: 'America/New_York',
+      }).then(r => ({ ok: true as const, run_id: r.run_id }))
+       .catch(e => ({ ok: false as const, err: e }))
+    );
+    const results = await Promise.all(calls);
+
+    const survivors = results.filter(r => r.ok);
+    const losers    = results.filter(r => !r.ok);
+
+    expect(survivors.length).toBe(1);
+    // Every loser must be the documented 409 (ActiveRunExistsError) or a
+    // SERIALIZABLE retry-needed (40001) bubbling — not e.g. 5xx.
+    for (const l of losers) {
+      const code = (l as any).err?.code ?? (l as any).err?.constructor?.name;
+      const isExpected =
+        l.err instanceof ActiveRunExistsError ||
+        code === '40001' /* serialization_failure */ ||
+        code === '23505' /* unique_violation surfacing past our wrap */;
+      expect(isExpected).toBe(true);
+    }
+
+    // DB state: exactly one active mesocycle_run for this user.
+    const { rows: [{ n }] } = await db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM mesocycle_runs WHERE user_id=$1 AND status='active'`,
+      [u2.id],
+    );
+    expect(n).toBe(1);
+
+    // No orphaned planned_sets/day_workouts from rolled-back txs.
+    const { rows: [{ orphans }] } = await db.query<{ orphans: number }>(
+      `SELECT COUNT(*)::int AS orphans FROM day_workouts dw
+       LEFT JOIN mesocycle_runs mr ON mr.id=dw.mesocycle_run_id
+       WHERE mr.id IS NULL`,
+    );
+    expect(orphans).toBe(0);
+
+    await db.query(`DELETE FROM users WHERE id=$1`, [u2.id]);
+  });
+
+  it('template_version mismatch → 409 template_outdated', async () => {
+    // Bump the template version, then try to materialize against the stale draft.
+    await db.query(`UPDATE program_templates SET version=2 WHERE id=$1`, [templateId]);
+    const { rows: [u3] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.outdated.${Date.now()}@repos.test`],
+    );
+    const { rows: [up3] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, 1, 'Stale draft', 'draft') RETURNING id`,
+      [u3.id, templateId],
+    );
+    await expect(
+      materializeMesocycle({ userProgramId: up3.id, startDate: '2026-05-04', startTz: 'America/New_York' })
+    ).rejects.toMatchObject({ code: 'template_outdated', latest_version: 2, status: 409 });
+    await db.query(`DELETE FROM users WHERE id=$1`, [u3.id]);
+    await db.query(`UPDATE program_templates SET version=1 WHERE id=$1`, [templateId]);
+  });
+
+  it('bulk insert uses UNNEST not row-by-row (tx duration upper bound)', async () => {
+    // Indirect proof: a 5-week × 1-day template materializes in well under
+    // the time row-by-row inserts would take. Hard cap 1500ms in CI.
+    const { rows: [u4] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.bulk.${Date.now()}@repos.test`],
+    );
+    const { rows: [up4] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, 1, 'Bulk-shape', 'draft') RETURNING id`,
+      [u4.id, templateId],
+    );
+    const t0 = Date.now();
+    await materializeMesocycle({ userProgramId: up4.id, startDate: '2026-05-04', startTz: 'America/New_York' });
+    expect(Date.now() - t0).toBeLessThan(1500);
+    await db.query(`DELETE FROM users WHERE id=$1`, [u4.id]);
   });
 });
