@@ -49,3 +49,40 @@ describe('GET /api/program-templates', () => {
     }
   });
 });
+
+describe('GET /api/program-templates/:slug', () => {
+  it('returns full structure for a known slug', async () => {
+    const r = await app.inject({
+      method: 'GET', url: '/api/program-templates/full-body-3-day',
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.slug).toBe('full-body-3-day');
+    expect(body.structure._v).toBe(1);
+    expect(Array.isArray(body.structure.days)).toBe(true);
+  });
+
+  it('404 on unknown slug', async () => {
+    const r = await app.inject({
+      method: 'GET', url: '/api/program-templates/does-not-exist',
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('404 on archived template (treats as gone)', async () => {
+    const { rows } = await db.query(
+      `INSERT INTO program_templates
+       (slug, name, weeks, days_per_week, structure, archived_at)
+       VALUES ('vitest-archived-detail', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now())
+       RETURNING id`
+    );
+    try {
+      const r = await app.inject({
+        method: 'GET', url: '/api/program-templates/vitest-archived-detail',
+      });
+      expect(r.statusCode).toBe(404);
+    } finally {
+      await db.query(`DELETE FROM program_templates WHERE id=$1`, [rows[0].id]);
+    }
+  });
+});
