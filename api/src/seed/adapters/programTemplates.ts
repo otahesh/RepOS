@@ -6,7 +6,16 @@ import {
 } from '../../schemas/programTemplate.js';
 import type { SeedAdapter } from '../runSeed.js';
 
-const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema);
+const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema)
+  .superRefine((arr, ctx) => {
+    const seen = new Set<string>();
+    arr.forEach((tpl, i) => {
+      if (seen.has(tpl.slug)) {
+        ctx.addIssue({ code: 'custom', message: `duplicate slug: ${tpl.slug}`, path: [i, 'slug'] });
+      }
+      seen.add(tpl.slug);
+    });
+  });
 
 // Canonical-key JSON: deterministic key order, used for structure-changed comparison.
 function canonicalize(value: unknown): string {
