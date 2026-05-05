@@ -29,4 +29,65 @@ describe('programTemplate validator', () => {
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/exercise_slug.*made-up-slug/i);
   });
+
+  it('rejects day_idx >= days_per_week', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const bad: ProgramTemplateSeed = {
+      ...baseTpl,
+      days_per_week: 1,
+      structure: { _v: 1, days: [{ ...minimalDay, idx: 2 }] },
+    };
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/day.*idx|out of range/i);
+  });
+
+  it('rejects day_offset outside 0..6', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const bad: ProgramTemplateSeed = {
+      ...baseTpl,
+      structure: { _v: 1, days: [{ ...minimalDay, day_offset: 7 }] },
+    };
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/day_offset/);
+  });
+
+  it('rejects duplicate day_offset within a week', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const dupOffset: ProgramTemplateSeed = {
+      ...baseTpl, days_per_week: 2,
+      structure: { _v: 1, days: [
+        { ...minimalDay, idx: 0, day_offset: 1 },
+        { ...minimalDay, idx: 1, day_offset: 1 },
+      ]},
+    };
+    const r = adapter.validate([dupOffset]);
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects non-monotonic day_offset within a week', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const reversed: ProgramTemplateSeed = {
+      ...baseTpl, days_per_week: 2,
+      structure: { _v: 1, days: [
+        { ...minimalDay, idx: 0, day_offset: 3 },
+        { ...minimalDay, idx: 1, day_offset: 1 },
+      ]},
+    };
+    const r = adapter.validate([reversed]);
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects block where MEV > MAV', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const bad: ProgramTemplateSeed = {
+      ...baseTpl,
+      structure: { _v: 1, days: [{ ...minimalDay,
+        blocks: [{ ...minimalDay.blocks[0], mev: 5, mav: 3 }] }] },
+    };
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/mev.*mav|mav.*mev/i);
+  });
 });
