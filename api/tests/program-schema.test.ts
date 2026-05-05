@@ -220,3 +220,70 @@ describe('mesocycle_runs (migration 017)', () => {
     await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
   });
 });
+
+describe('day_workouts (migration 018)', () => {
+  async function mkRun(): Promise<{ user_id: string; run_id: string }> {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.dw.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    const { rows: [up] } = await db.query(
+      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+      [u.id]
+    );
+    const { rows: [r] } = await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+       VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+      [up.id, u.id]
+    );
+    return { user_id: u.id, run_id: r.id };
+  }
+
+  it('rejects status outside planned|in_progress|completed|skipped', async () => {
+    const { user_id, run_id } = await mkRun();
+    await expect(
+      db.query(
+        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
+         VALUES ($1,1,0,'2026-01-05','strength','Mon','running')`,
+        [run_id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+
+  it('rejects duplicate (run, week_idx, day_idx)', async () => {
+    const { user_id, run_id } = await mkRun();
+    await db.query(
+      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+       VALUES ($1,1,0,'2026-01-05','strength','Mon')`,
+      [run_id]
+    );
+    let code: string | undefined;
+    try {
+      await db.query(
+        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+         VALUES ($1,1,0,'2026-01-06','strength','Mon dup')`,
+        [run_id]
+      );
+    } catch (e: any) { code = e.code; }
+    expect(code).toBe('23505');
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+
+  it('cardio kind is accepted but rest is NOT a kind (use absent row for rest)', async () => {
+    const { user_id, run_id } = await mkRun();
+    await db.query(
+      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+       VALUES ($1,1,0,'2026-01-05','cardio','Z2')`,
+      [run_id]
+    );
+    await expect(
+      db.query(
+        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+         VALUES ($1,1,1,'2026-01-06','rest','Off')`,
+        [run_id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+});
