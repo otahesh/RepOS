@@ -55,6 +55,68 @@ export const programTemplates: ProgramTemplateSeed[] = [
       ],
     },
   },
-  // upper-lower-4-day appended in D.7
+  {
+    slug: 'upper-lower-4-day',
+    name: 'Upper / Lower 4-Day Hypertrophy',
+    description:
+      'Mon Upper Heavy / Tue Lower Heavy / Thu Upper Volume / Fri Lower Volume. The canonical RP shape for intermediate hypertrophy. Equipment minimum: garage gym (barbell, rack, dumbbells, adjustable bench, pull-up bar).',
+    weeks: 5,
+    days_per_week: 4,
+    structure: {
+      _v: 1,
+      days: [
+        {
+          idx: 0,
+          day_offset: 0,
+          kind: 'strength',
+          name: 'Upper Heavy',
+          blocks: [
+            { exercise_slug: 'barbell-bench-press',            mev: 3, mav: 5, target_reps_low: 5,  target_reps_high: 7,  target_rir: 2, rest_sec: 180 },
+            { exercise_slug: 'barbell-bent-over-row',          mev: 3, mav: 5, target_reps_low: 6,  target_reps_high: 8,  target_rir: 2, rest_sec: 180 },
+            { exercise_slug: 'barbell-overhead-press-standing',mev: 2, mav: 4, target_reps_low: 6,  target_reps_high: 8,  target_rir: 2, rest_sec: 150 },
+            { exercise_slug: 'dumbbell-curl',                  mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 90  },
+            { exercise_slug: 'dumbbell-skull-crusher',         mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 90  },
+          ],
+        },
+        {
+          idx: 1,
+          day_offset: 1,
+          kind: 'strength',
+          name: 'Lower Heavy',
+          blocks: [
+            { exercise_slug: 'barbell-back-squat',           mev: 3, mav: 5, target_reps_low: 5,  target_reps_high: 7,  target_rir: 2, rest_sec: 210 },
+            { exercise_slug: 'barbell-romanian-deadlift',    mev: 2, mav: 4, target_reps_low: 6,  target_reps_high: 8,  target_rir: 2, rest_sec: 180 },
+            { exercise_slug: 'dumbbell-bulgarian-split-squat',mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 10, target_rir: 2, rest_sec: 120 },
+            { exercise_slug: 'dumbbell-standing-calf-raise', mev: 2, mav: 3, target_reps_low: 10, target_reps_high: 15, target_rir: 1, rest_sec: 60  },
+          ],
+        },
+        {
+          idx: 2,
+          day_offset: 3,
+          kind: 'strength',
+          name: 'Upper Volume',
+          blocks: [
+            { exercise_slug: 'incline-dumbbell-bench-press', mev: 3, mav: 5, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 120 },
+            { exercise_slug: 'pullup',                       mev: 3, mav: 5, target_reps_low: 6,  target_reps_high: 10, target_rir: 1, rest_sec: 150 },
+            { exercise_slug: 'dumbbell-lateral-raise',       mev: 3, mav: 5, target_reps_low: 12, target_reps_high: 15, target_rir: 1, rest_sec: 60  },
+            { exercise_slug: 'dumbbell-rear-delt-raise',     mev: 3, mav: 4, target_reps_low: 12, target_reps_high: 15, target_rir: 1, rest_sec: 60  },
+            { exercise_slug: 'dumbbell-hammer-curl',         mev: 2, mav: 3, target_reps_low: 10, target_reps_high: 15, target_rir: 1, rest_sec: 75  },
+          ],
+        },
+        {
+          idx: 3,
+          day_offset: 4,
+          kind: 'strength',
+          name: 'Lower Volume',
+          blocks: [
+            { exercise_slug: 'dumbbell-romanian-deadlift', mev: 3, mav: 5, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 150 },
+            { exercise_slug: 'dumbbell-walking-lunge',     mev: 2, mav: 4, target_reps_low: 10, target_reps_high: 12, target_rir: 1, rest_sec: 120 },
+            { exercise_slug: 'dumbbell-hip-thrust',        mev: 3, mav: 5, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 120 },
+            { exercise_slug: 'dumbbell-standing-calf-raise',mev: 3, mav: 4, target_reps_low: 12, target_reps_high: 20, target_rir: 1, rest_sec: 60  },
+          ],
+        },
+      ],
+    },
+  },
   // strength-cardio-3+2 appended in D.8
 ];

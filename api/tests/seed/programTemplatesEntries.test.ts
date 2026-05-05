@@ -11,4 +11,12 @@ describe('programTemplates entries (lineup)', () => {
     const parsed = ProgramTemplateSeedSchema.safeParse(t);
     expect(parsed.success).toBe(true);
   });
+
+  it('includes upper-lower-4-day with 4 days/week, day_offsets [0,1,3,4]', () => {
+    const t = programTemplates.find(p => p.slug === 'upper-lower-4-day');
+    expect(t).toBeDefined();
+    expect(t!.days_per_week).toBe(4);
+    expect(t!.structure.days.map(d => d.day_offset)).toEqual([0, 1, 3, 4]);
+    expect(ProgramTemplateSeedSchema.safeParse(t).success).toBe(true);
+  });
 });
