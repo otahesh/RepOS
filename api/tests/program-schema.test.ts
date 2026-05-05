@@ -727,3 +727,22 @@ describe('device_tokens scopes (migration 025)', () => {
     }
   });
 });
+
+describe('users.goal (migration 026)', () => {
+  it('users.goal default maintain, CHECK in (cut|maintain|bulk)', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id, goal`,
+      [`vitest.goal.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      expect(u.goal).toBe('maintain');
+      let code: string | undefined;
+      try {
+        await db.query(`UPDATE users SET goal = 'recomp' WHERE id = $1`, [u.id]);
+      } catch (e: any) { code = e.code; }
+      expect(code).toBe('23514');
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+});
