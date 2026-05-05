@@ -4,6 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { getTodayWorkout } from '../src/services/getTodayWorkout.js';
 import { materializeMesocycle } from '../src/services/materializeMesocycle.js';
+import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from './helpers/program-fixtures.js';
 
 let userId: string; let templateId: string; let userProgramId: string; let runId: string;
 
@@ -22,26 +23,16 @@ const TEMPLATE = {
 };
 
 beforeAll(async () => {
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email, equipment_profile)
-     VALUES ($1, $2::jsonb) RETURNING id`,
-    [
-      `vitest.today.${Date.now()}@repos.test`,
-      JSON.stringify({ _v: 1, dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 }, adjustable_bench: { incline: true, decline: false } }),
-    ],
-  );
+  const u = await mkUser({
+    prefix: 'vitest.today',
+    equipment_profile: { _v: 1, dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 }, adjustable_bench: { incline: true, decline: false } },
+  });
   userId = u.id;
-  const { rows: [t] } = await db.query(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, 5, 2, $3::jsonb, 1, 'system') RETURNING id`,
-    [`vitest-today-${Date.now()}`, 'Vitest today', JSON.stringify(TEMPLATE)],
-  );
+  const t = await mkTemplate({
+    prefix: 'vitest-today', name: 'Vitest today', weeks: 5, daysPerWeek: 2, structure: TEMPLATE,
+  });
   templateId = t.id;
-  const { rows: [up] } = await db.query(
-    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-     VALUES ($1, $2, 1, 'Vitest today run', 'draft') RETURNING id`,
-    [userId, templateId],
-  );
+  const up = await mkUserProgram({ userId, templateId, name: 'Vitest today run' });
   userProgramId = up.id;
 
   // Start a run with start_date = 2026-05-04 (a Monday) in NY tz.
@@ -50,8 +41,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
-  if (templateId) await db.query(`DELETE FROM program_templates WHERE id=$1`, [templateId]);
+  await cleanupUser(userId);
+  await cleanupTemplate(templateId);
   await db.end();
 });
 
@@ -91,26 +82,21 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
   it('DST spring-forward day still resolves once', async () => {
     // The run starts 05-04, post-DST. Force a different shorter run that
     // straddles DST forward (2026-03-08).
-    const { rows: [u2] } = await db.query(
-      `INSERT INTO users (email, equipment_profile) VALUES ($1, $2::jsonb) RETURNING id`,
-      [`vitest.today.dst.${Date.now()}@repos.test`, JSON.stringify({ _v: 1 })],
-    );
-    const { rows: [up2] } = await db.query(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-       VALUES ($1, $2, 1, 'DST run', 'draft') RETURNING id`,
-      [u2.id, templateId],
-    );
-    await materializeMesocycle({ userProgramId: up2.id, startDate: '2026-03-08', startTz: 'America/New_York' });
+    const u2 = await mkUser({ prefix: 'vitest.today.dst', equipment_profile: { _v: 1 } });
+    try {
+      const up2 = await mkUserProgram({ userId: u2.id, templateId, name: 'DST run' });
+      await materializeMesocycle({ userProgramId: up2.id, startDate: '2026-03-08', startTz: 'America/New_York' });
 
-    const before = await getTodayWorkout(u2.id, new Date('2026-03-08T06:00:00Z')); // 01:00 EST
-    const after  = await getTodayWorkout(u2.id, new Date('2026-03-08T08:00:00Z')); // 04:00 EDT
-    expect(before.state === 'workout' || before.state === 'rest').toBe(true);
-    expect(after.state).toBe(before.state);
-    if (before.state === 'workout' && after.state === 'workout') {
-      expect(after.day.id).toBe(before.day.id);
+      const before = await getTodayWorkout(u2.id, new Date('2026-03-08T06:00:00Z')); // 01:00 EST
+      const after  = await getTodayWorkout(u2.id, new Date('2026-03-08T08:00:00Z')); // 04:00 EDT
+      expect(before.state === 'workout' || before.state === 'rest').toBe(true);
+      expect(after.state).toBe(before.state);
+      if (before.state === 'workout' && after.state === 'workout') {
+        expect(after.day.id).toBe(before.day.id);
+      }
+    } finally {
+      await cleanupUser(u2.id);
     }
-
-    await db.query(`DELETE FROM users WHERE id=$1`, [u2.id]);
   });
 
   it('TZ-change-mid-mesocycle still resolves to start_tz', async () => {
@@ -122,33 +108,28 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
   });
 
   it('leap-year boundary (Feb 29 → Mar 1) resolves correctly', async () => {
-    const { rows: [u3] } = await db.query(
-      `INSERT INTO users (email, equipment_profile) VALUES ($1, $2::jsonb) RETURNING id`,
-      [`vitest.today.leap.${Date.now()}@repos.test`, JSON.stringify({ _v: 1 })],
-    );
-    const { rows: [up3] } = await db.query(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-       VALUES ($1, $2, 1, 'Leap', 'draft') RETURNING id`,
-      [u3.id, templateId],
-    );
-    await materializeMesocycle({ userProgramId: up3.id, startDate: '2028-02-29', startTz: 'UTC' });
+    const u3 = await mkUser({ prefix: 'vitest.today.leap', equipment_profile: { _v: 1 } });
+    try {
+      const up3 = await mkUserProgram({ userId: u3.id, templateId, name: 'Leap' });
+      await materializeMesocycle({ userProgramId: up3.id, startDate: '2028-02-29', startTz: 'UTC' });
 
-    const feb29 = await getTodayWorkout(u3.id, new Date('2028-02-29T12:00:00Z'));
-    const mar1  = await getTodayWorkout(u3.id, new Date('2028-03-01T12:00:00Z'));
-    expect(feb29.state).toBe('workout'); // day_offset 0
-    expect(mar1.state).toBe('rest');     // day_offset 2 falls on 03-02
-
-    await db.query(`DELETE FROM users WHERE id=$1`, [u3.id]);
+      const feb29 = await getTodayWorkout(u3.id, new Date('2028-02-29T12:00:00Z'));
+      const mar1  = await getTodayWorkout(u3.id, new Date('2028-03-01T12:00:00Z'));
+      expect(feb29.state).toBe('workout'); // day_offset 0
+      expect(mar1.state).toBe('rest');     // day_offset 2 falls on 03-02
+    } finally {
+      await cleanupUser(u3.id);
+    }
   });
 
   it('between runs (run completed, none active) → no_active_run', async () => {
-    const { rows: [u5] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.today.between.${Date.now()}@repos.test`],
-    );
-    const r = await getTodayWorkout(u5.id, new Date('2026-05-04T16:00:00Z'));
-    expect(r.state).toBe('no_active_run');
-    await db.query(`DELETE FROM users WHERE id=$1`, [u5.id]);
+    const u5 = await mkUser({ prefix: 'vitest.today.between' });
+    try {
+      const r = await getTodayWorkout(u5.id, new Date('2026-05-04T16:00:00Z'));
+      expect(r.state).toBe('no_active_run');
+    } finally {
+      await cleanupUser(u5.id);
+    }
   });
 
   it('equipment-fit failure attaches suggested_substitution', async () => {

@@ -10,6 +10,7 @@ import {
 } from '../src/services/recoveryFlagDismissals.js';
 import 'dotenv/config';
 import { db } from '../src/db/client.js';
+import { mkUser, cleanupUser } from './helpers/program-fixtures.js';
 
 describe('recoveryFlags registry (spec §7.2)', () => {
   it('registry accepts a stub evaluator without errors (#3-ready)', () => {
@@ -47,14 +48,11 @@ beforeEach(() => {
 let userId: string;
 
 beforeAll(async () => {
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.bw.${Date.now()}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'vitest.bw' });
   userId = u.id;
 });
 afterAll(async () => {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
+  await cleanupUser(userId);
   await db.end();
 });
 

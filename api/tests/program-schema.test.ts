@@ -1,6 +1,8 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
+import { mkUser, mkUserProgram, cleanupUser } from './helpers/program-fixtures.js';
 
 afterAll(async () => { await db.end(); });
 
@@ -97,44 +99,48 @@ describe('program_templates (migration 015)', () => {
 
 describe('user_programs (migration 016)', () => {
   it('cascades on user delete', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.up.${Date.now()}@repos.test`]
-    );
-    const { rows: [t] } = await db.query(
-      `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-       VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb) RETURNING id`,
-      [`tpl-up-${Date.now()}`]
-    );
-    const { rows: [up] } = await db.query(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name)
-       VALUES ($1,$2,1,'mine') RETURNING id, customizations, status`,
-      [u.id, t.id]
-    );
-    expect(up.customizations).toEqual({});
-    expect(up.status).toBe('draft');
+    const u = await mkUser({ prefix: 'vitest.up' });
+    let templateId: string | undefined;
+    try {
+      const { rows: [t] } = await db.query(
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
+         VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb) RETURNING id`,
+        [`tpl-up-${randomUUID()}`]
+      );
+      templateId = t.id;
+      const { rows: [up] } = await db.query(
+        `INSERT INTO user_programs (user_id, template_id, template_version, name)
+         VALUES ($1,$2,1,'mine') RETURNING id, customizations, status`,
+        [u.id, t.id]
+      );
+      expect(up.customizations).toEqual({});
+      expect(up.status).toBe('draft');
 
-    await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
-    const { rows } = await db.query(
-      `SELECT 1 FROM user_programs WHERE id=$1`, [up.id]
-    );
-    expect(rows.length).toBe(0);
-    await db.query(`DELETE FROM program_templates WHERE id=$1`, [t.id]);
+      await cleanupUser(u.id);
+      const { rows } = await db.query(
+        `SELECT 1 FROM user_programs WHERE id=$1`, [up.id]
+      );
+      expect(rows.length).toBe(0);
+    } finally {
+      // user already deleted in body on success path; cleanupUser is idempotent.
+      await cleanupUser(u.id);
+      if (templateId) await db.query(`DELETE FROM program_templates WHERE id=$1`, [templateId]);
+    }
   });
 
   it('rejects status outside enum', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.up2.${Date.now()}@repos.test`]
-    );
-    await expect(
-      db.query(
-        `INSERT INTO user_programs (user_id, name, status)
-         VALUES ($1,'x','running'::program_status)`,
-        [u.id]
-      )
-    ).rejects.toThrow();
-    await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    const u = await mkUser({ prefix: 'vitest.up2' });
+    try {
+      await expect(
+        db.query(
+          `INSERT INTO user_programs (user_id, name, status)
+           VALUES ($1,'x','running'::program_status)`,
+          [u.id]
+        )
+      ).rejects.toThrow();
+    } finally {
+      await cleanupUser(u.id);
+    }
   });
 
   it('partial index excludes archived rows', async () => {
@@ -147,90 +153,90 @@ describe('user_programs (migration 016)', () => {
 });
 
 describe('mesocycle_runs (migration 017)', () => {
-  async function mkUserProgram(): Promise<{ user_id: string; up_id: string }> {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.mr.${Date.now()}.${Math.random()}@repos.test`]
-    );
-    const { rows: [up] } = await db.query(
-      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'mine') RETURNING id`,
-      [u.id]
-    );
+  async function mkUserAndProgram(prefix: string): Promise<{ user_id: string; up_id: string }> {
+    const u = await mkUser({ prefix });
+    const up = await mkUserProgram({ userId: u.id, name: 'mine' });
     return { user_id: u.id, up_id: up.id };
   }
 
   it('partial unique index allows multiple non-active rows', async () => {
-    const { user_id, up_id } = await mkUserProgram();
-    await db.query(
-      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-       VALUES ($1,$2,'2026-01-01','America/New_York',5,'completed')`,
-      [up_id, user_id]
-    );
-    await db.query(
-      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-       VALUES ($1,$2,'2026-02-01','America/New_York',5,'completed')`,
-      [up_id, user_id]
-    );
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
-  });
-
-  it('partial unique index allows one active and one paused per user', async () => {
-    const { user_id, up_id } = await mkUserProgram();
-    await db.query(
-      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-       VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
-      [up_id, user_id]
-    );
-    await db.query(
-      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-       VALUES ($1,$2,'2026-02-01','UTC',5,'paused')`,
-      [up_id, user_id]
-    );
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
-  });
-
-  it('rejects a SECOND active row for same user with 23505', async () => {
-    const { user_id, up_id } = await mkUserProgram();
-    await db.query(
-      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-       VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
-      [up_id, user_id]
-    );
-    let code: string | undefined;
+    const { user_id, up_id } = await mkUserAndProgram('vitest.mr');
     try {
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
-         VALUES ($1,$2,'2026-02-01','UTC',5,'active')`,
+         VALUES ($1,$2,'2026-01-01','America/New_York',5,'completed')`,
         [up_id, user_id]
       );
-    } catch (e: any) { code = e.code; }
-    expect(code).toBe('23505');
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+      await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+         VALUES ($1,$2,'2026-02-01','America/New_York',5,'completed')`,
+        [up_id, user_id]
+      );
+    } finally {
+      await cleanupUser(user_id);
+    }
+  });
+
+  it('partial unique index allows one active and one paused per user', async () => {
+    const { user_id, up_id } = await mkUserAndProgram('vitest.mr');
+    try {
+      await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+         VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
+        [up_id, user_id]
+      );
+      await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+         VALUES ($1,$2,'2026-02-01','UTC',5,'paused')`,
+        [up_id, user_id]
+      );
+    } finally {
+      await cleanupUser(user_id);
+    }
+  });
+
+  it('rejects a SECOND active row for same user with 23505', async () => {
+    const { user_id, up_id } = await mkUserAndProgram('vitest.mr');
+    try {
+      await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+         VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
+        [up_id, user_id]
+      );
+      let code: string | undefined;
+      try {
+        await db.query(
+          `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+           VALUES ($1,$2,'2026-02-01','UTC',5,'active')`,
+          [up_id, user_id]
+        );
+      } catch (e: any) { code = e.code; }
+      expect(code).toBe('23505');
+    } finally {
+      await cleanupUser(user_id);
+    }
   });
 
   it('start_tz is NOT NULL', async () => {
-    const { user_id, up_id } = await mkUserProgram();
-    await expect(
-      db.query(
-        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, weeks)
-         VALUES ($1,$2,'2026-01-01',5)`,
-        [up_id, user_id]
-      )
-    ).rejects.toThrow();
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+    const { user_id, up_id } = await mkUserAndProgram('vitest.mr');
+    try {
+      await expect(
+        db.query(
+          `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, weeks)
+           VALUES ($1,$2,'2026-01-01',5)`,
+          [up_id, user_id]
+        )
+      ).rejects.toThrow();
+    } finally {
+      await cleanupUser(user_id);
+    }
   });
 });
 
 describe('day_workouts (migration 018)', () => {
   async function mkRun(): Promise<{ user_id: string; run_id: string }> {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.dw.${Date.now()}.${Math.random()}@repos.test`]
-    );
-    const { rows: [up] } = await db.query(
-      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-      [u.id]
-    );
+    const u = await mkUser({ prefix: 'vitest.dw' });
+    const up = await mkUserProgram({ userId: u.id, name: 'p' });
     const { rows: [r] } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
@@ -241,63 +247,66 @@ describe('day_workouts (migration 018)', () => {
 
   it('rejects status outside planned|in_progress|completed|skipped', async () => {
     const { user_id, run_id } = await mkRun();
-    await expect(
-      db.query(
-        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
-         VALUES ($1,1,0,'2026-01-05','strength','Mon','running')`,
-        [run_id]
-      )
-    ).rejects.toThrow();
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+    try {
+      await expect(
+        db.query(
+          `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
+           VALUES ($1,1,0,'2026-01-05','strength','Mon','running')`,
+          [run_id]
+        )
+      ).rejects.toThrow();
+    } finally {
+      await cleanupUser(user_id);
+    }
   });
 
   it('rejects duplicate (run, week_idx, day_idx)', async () => {
     const { user_id, run_id } = await mkRun();
-    await db.query(
-      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-       VALUES ($1,1,0,'2026-01-05','strength','Mon')`,
-      [run_id]
-    );
-    let code: string | undefined;
     try {
       await db.query(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-         VALUES ($1,1,0,'2026-01-06','strength','Mon dup')`,
+         VALUES ($1,1,0,'2026-01-05','strength','Mon')`,
         [run_id]
       );
-    } catch (e: any) { code = e.code; }
-    expect(code).toBe('23505');
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+      let code: string | undefined;
+      try {
+        await db.query(
+          `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+           VALUES ($1,1,0,'2026-01-06','strength','Mon dup')`,
+          [run_id]
+        );
+      } catch (e: any) { code = e.code; }
+      expect(code).toBe('23505');
+    } finally {
+      await cleanupUser(user_id);
+    }
   });
 
   it('cardio kind is accepted but rest is NOT a kind (use absent row for rest)', async () => {
     const { user_id, run_id } = await mkRun();
-    await db.query(
-      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-       VALUES ($1,1,0,'2026-01-05','cardio','Z2')`,
-      [run_id]
-    );
-    await expect(
-      db.query(
+    try {
+      await db.query(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-         VALUES ($1,1,1,'2026-01-06','rest','Off')`,
+         VALUES ($1,1,0,'2026-01-05','cardio','Z2')`,
         [run_id]
-      )
-    ).rejects.toThrow();
-    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+      );
+      await expect(
+        db.query(
+          `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+           VALUES ($1,1,1,'2026-01-06','rest','Off')`,
+          [run_id]
+        )
+      ).rejects.toThrow();
+    } finally {
+      await cleanupUser(user_id);
+    }
   });
 });
 
 describe('planned_sets (migration 019)', () => {
   async function mkDay(): Promise<{ user_id: string; day_id: string; ex_id: string }> {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.ps.${Date.now()}.${Math.random()}@repos.test`]
-    );
-    const { rows: [up] } = await db.query(
-      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-      [u.id]
-    );
+    const u = await mkUser({ prefix: 'vitest.ps' });
+    const up = await mkUserProgram({ userId: u.id, name: 'p' });
     const { rows: [r] } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
@@ -313,7 +322,7 @@ describe('planned_sets (migration 019)', () => {
                               skill_complexity,loading_demand,systemic_fatigue)
        VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
                'push_horizontal','mid',3,3,3) RETURNING id`,
-      [`ps-test-ex-${Date.now()}-${Math.random().toString(36).slice(2,8)}`]
+      [`ps-test-ex-${randomUUID()}`]
     );
     return { user_id: u.id, day_id: d.id, ex_id: ex.id };
   }
@@ -400,14 +409,8 @@ describe('planned_sets (migration 019)', () => {
 
 describe('planned_cardio_blocks (migration 021)', () => {
   async function mkCardioDay(): Promise<{ user_id: string; day_id: string; ex_id: string }> {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.pcb.${Date.now()}.${Math.random()}@repos.test`]
-    );
-    const { rows: [up] } = await db.query(
-      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-      [u.id]
-    );
+    const u = await mkUser({ prefix: 'vitest.pcb' });
+    const up = await mkUserProgram({ userId: u.id, name: 'p' });
     const { rows: [r] } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
@@ -423,7 +426,7 @@ describe('planned_cardio_blocks (migration 021)', () => {
                               skill_complexity,loading_demand,systemic_fatigue)
        VALUES ($1,'Treadmill',(SELECT id FROM muscles WHERE slug='quads'),
                'gait','mid',1,1,1) RETURNING id`,
-      [`pcb-test-ex-${Date.now()}-${Math.random().toString(36).slice(2,8)}`]
+      [`pcb-test-ex-${randomUUID()}`]
     );
     return { user_id: u.id, day_id: d.id, ex_id: ex.id };
   }
@@ -510,16 +513,10 @@ describe('set_logs (migration 022)', () => {
   });
 
   it('cascades when planned_set is deleted', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.sl.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const u = await mkUser({ prefix: 'vitest.sl' });
     let ex_id: string | undefined;
     try {
-      const { rows: [up] } = await db.query(
-        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-        [u.id]
-      );
+      const up = await mkUserProgram({ userId: u.id, name: 'p' });
       const { rows: [r] } = await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
          VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
@@ -535,7 +532,7 @@ describe('set_logs (migration 022)', () => {
                                 skill_complexity,loading_demand,systemic_fatigue)
          VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
                  'push_horizontal','mid',3,3,3) RETURNING id`,
-        [`sl-test-ex-${Date.now()}-${Math.random().toString(36).slice(2,8)}`]
+        [`sl-test-ex-${randomUUID()}`]
       );
       ex_id = ex.id;
       const { rows: [ps] } = await db.query(
@@ -553,7 +550,7 @@ describe('set_logs (migration 022)', () => {
       const { rows } = await db.query(`SELECT 1 FROM set_logs WHERE id=$1`, [sl.id]);
       expect(rows.length).toBe(0);
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(u.id);
       if (ex_id) await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
     }
   });
@@ -561,10 +558,7 @@ describe('set_logs (migration 022)', () => {
 
 describe('recovery_flag_dismissals (migration 024)', () => {
   it('rejects duplicate (user, flag, week_start)', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.rfd.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const u = await mkUser({ prefix: 'vitest.rfd' });
     try {
       await db.query(
         `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
@@ -581,15 +575,12 @@ describe('recovery_flag_dismissals (migration 024)', () => {
       } catch (e: any) { code = e.code; }
       expect(code).toBe('23505');
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(u.id);
     }
   });
 
   it('rejects unknown flag value via CHECK', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.rfd2.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const u = await mkUser({ prefix: 'vitest.rfd2' });
     try {
       let code: string | undefined;
       try {
@@ -601,93 +592,68 @@ describe('recovery_flag_dismissals (migration 024)', () => {
       } catch (e: any) { code = e.code; }
       expect(code).toBe('23514');
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(u.id);
     }
   });
 });
 
 describe('mesocycle_run_events (migration 023)', () => {
-  it('cascades on mesocycle_run delete', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.mre.${Date.now()}.${Math.random()}@repos.test`]
+  async function mkRunForEvents(prefix: string): Promise<{ user_id: string; run_id: string }> {
+    const u = await mkUser({ prefix });
+    const up = await mkUserProgram({ userId: u.id, name: 'p' });
+    const { rows: [r] } = await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+       VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+      [up.id, u.id]
     );
+    return { user_id: u.id, run_id: r.id };
+  }
+
+  it('cascades on mesocycle_run delete', async () => {
+    const { user_id, run_id } = await mkRunForEvents('vitest.mre');
     try {
-      const { rows: [up] } = await db.query(
-        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-        [u.id]
-      );
-      const { rows: [r] } = await db.query(
-        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
-         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-        [up.id, u.id]
-      );
       const { rows: [ev] } = await db.query(
         `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
          VALUES ($1,'started','{"who":"test"}'::jsonb) RETURNING id`,
-        [r.id]
+        [run_id]
       );
       expect(Number(ev.id)).toBeGreaterThan(0); // BIGSERIAL — pg returns string for bigint, coerce
-      await db.query(`DELETE FROM mesocycle_runs WHERE id=$1`, [r.id]);
+      await db.query(`DELETE FROM mesocycle_runs WHERE id=$1`, [run_id]);
       const { rows } = await db.query(
         `SELECT 1 FROM mesocycle_run_events WHERE id=$1`, [ev.id]
       );
       expect(rows.length).toBe(0);
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(user_id);
     }
   });
 
   it('rejects unknown event_type', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.mre2.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const { user_id, run_id } = await mkRunForEvents('vitest.mre2');
     try {
-      const { rows: [up] } = await db.query(
-        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-        [u.id]
-      );
-      const { rows: [r] } = await db.query(
-        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
-         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-        [up.id, u.id]
-      );
       await expect(
         db.query(
           `INSERT INTO mesocycle_run_events (run_id, event_type)
            VALUES ($1,'time_traveled')`,
-          [r.id]
+          [run_id]
         )
       ).rejects.toThrow();
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(user_id);
     }
   });
 
   it('payload defaults to empty object', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.mre3.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const { user_id, run_id } = await mkRunForEvents('vitest.mre3');
     try {
-      const { rows: [up] } = await db.query(
-        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
-        [u.id]
-      );
-      const { rows: [r] } = await db.query(
-        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
-         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-        [up.id, u.id]
-      );
       const { rows: [ev] } = await db.query(
         `INSERT INTO mesocycle_run_events (run_id, event_type)
          VALUES ($1,'started') RETURNING payload`,
-        [r.id]
+        [run_id]
       );
       expect(ev.payload).toEqual({});
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(user_id);
     }
   });
 });
@@ -711,38 +677,34 @@ describe('device_tokens scopes (migration 025)', () => {
   });
 
   it('default scopes is health:weight:write singleton', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.dts.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const u = await mkUser({ prefix: 'vitest.dts' });
     try {
       const { rows: [t] } = await db.query(
         `INSERT INTO device_tokens (user_id, token_hash, label)
          VALUES ($1, $2, $3) RETURNING scopes`,
-        [u.id, `tok-${Date.now()}-${Math.random().toString(36).slice(2,8)}:hash`, 'test']
+        [u.id, `tok-${randomUUID()}:hash`, 'test']
       );
       expect(t.scopes).toEqual(['health:weight:write']);
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(u.id);
     }
   });
 });
 
 describe('users.goal (migration 026)', () => {
   it('users.goal default maintain, CHECK in (cut|maintain|bulk)', async () => {
-    const { rows: [u] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id, goal`,
-      [`vitest.goal.${Date.now()}.${Math.random()}@repos.test`]
-    );
+    const u = await mkUser({ prefix: 'vitest.goal' });
     try {
-      expect(u.goal).toBe('maintain');
+      // mkUser doesn't return goal; fetch it.
+      const { rows: [row] } = await db.query<{ goal: string }>(`SELECT goal FROM users WHERE id=$1`, [u.id]);
+      expect(row.goal).toBe('maintain');
       let code: string | undefined;
       try {
         await db.query(`UPDATE users SET goal = 'recomp' WHERE id = $1`, [u.id]);
       } catch (e: any) { code = e.code; }
       expect(code).toBe('23514');
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      await cleanupUser(u.id);
     }
   });
 });

@@ -4,6 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { computeVolumeRollup } from '../src/services/volumeRollup.js';
 import { materializeMesocycle } from '../src/services/materializeMesocycle.js';
+import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from './helpers/program-fixtures.js';
 
 let userId: string; let templateId: string; let runId: string;
 
@@ -28,29 +29,18 @@ const TEMPLATE = {
 };
 
 beforeAll(async () => {
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.rollup.${Date.now()}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'vitest.rollup' });
   userId = u.id;
-  const { rows: [t] } = await db.query(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, 5, 1, $3::jsonb, 1, 'system') RETURNING id`,
-    [`vitest-rollup-${Date.now()}`, 'Rollup', JSON.stringify(TEMPLATE)],
-  );
+  const t = await mkTemplate({ prefix: 'vitest-rollup', name: 'Rollup', weeks: 5, daysPerWeek: 1, structure: TEMPLATE });
   templateId = t.id;
-  const { rows: [up] } = await db.query(
-    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-     VALUES ($1, $2, 1, 'Rollup run', 'draft') RETURNING id`,
-    [userId, templateId],
-  );
+  const up = await mkUserProgram({ userId, templateId, name: 'Rollup run' });
   const r = await materializeMesocycle({ userProgramId: up.id, startDate: '2026-05-04', startTz: 'UTC' });
   runId = r.run_id;
 });
 
 afterAll(async () => {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
-  if (templateId) await db.query(`DELETE FROM program_templates WHERE id=$1`, [templateId]);
+  await cleanupUser(userId);
+  await cleanupTemplate(templateId);
   await db.end();
 });
 

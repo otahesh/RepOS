@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { materializeMesocycle, ActiveRunExistsError } from '../src/services/materializeMesocycle.js';
+import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from './helpers/program-fixtures.js';
 
 let userId: string; let templateId: string; let userProgramId: string;
 
@@ -20,30 +21,22 @@ const MIN_TEMPLATE_STRUCTURE = {
 };
 
 beforeAll(async () => {
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.materialize.${Date.now()}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'vitest.materialize' });
   userId = u.id;
 
-  const { rows: [t] } = await db.query(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, 5, 1, $3::jsonb, 1, 'system') RETURNING id`,
-    [`vitest-materialize-${Date.now()}`, 'Vitest minimal', JSON.stringify(MIN_TEMPLATE_STRUCTURE)],
-  );
+  const t = await mkTemplate({
+    prefix: 'vitest-materialize', name: 'Vitest minimal', weeks: 5, daysPerWeek: 1,
+    structure: MIN_TEMPLATE_STRUCTURE,
+  });
   templateId = t.id;
 
-  const { rows: [up] } = await db.query(
-    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-     VALUES ($1, $2, 1, 'Vitest run', 'draft') RETURNING id`,
-    [userId, templateId],
-  );
+  const up = await mkUserProgram({ userId, templateId, name: 'Vitest run' });
   userProgramId = up.id;
 });
 
 afterAll(async () => {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
-  if (templateId) await db.query(`DELETE FROM program_templates WHERE id=$1`, [templateId]);
+  await cleanupUser(userId);
+  await cleanupTemplate(templateId);
   await db.end();
 });
 
@@ -108,92 +101,78 @@ describe('materializeMesocycle (spec §3.3 step list)', () => {
 describe('materializeMesocycle concurrency (spec §9 guardrail)', () => {
   it('50 parallel starts on the same user_program — exactly one survives, others 409', async () => {
     // Build a fresh user + draft program for this test.
-    const { rows: [u2] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.hammer.${Date.now()}@repos.test`],
-    );
-    const { rows: [up2] } = await db.query(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-       VALUES ($1, $2, 1, 'Hammer run', 'draft') RETURNING id`,
-      [u2.id, templateId],
-    );
+    const u2 = await mkUser({ prefix: 'vitest.hammer' });
+    try {
+      const up2 = await mkUserProgram({ userId: u2.id, templateId, name: 'Hammer run' });
 
-    const calls = Array.from({ length: 50 }, () =>
-      materializeMesocycle({
-        userProgramId: up2.id, startDate: '2026-05-04', startTz: 'America/New_York',
-      }).then(r => ({ ok: true as const, run_id: r.run_id }))
-       .catch(e => ({ ok: false as const, err: e }))
-    );
-    const results = await Promise.all(calls);
+      const calls = Array.from({ length: 50 }, () =>
+        materializeMesocycle({
+          userProgramId: up2.id, startDate: '2026-05-04', startTz: 'America/New_York',
+        }).then(r => ({ ok: true as const, run_id: r.run_id }))
+         .catch(e => ({ ok: false as const, err: e }))
+      );
+      const results = await Promise.all(calls);
 
-    const survivors = results.filter(r => r.ok);
-    const losers    = results.filter(r => !r.ok);
+      const survivors = results.filter(r => r.ok);
+      const losers    = results.filter(r => !r.ok);
 
-    expect(survivors.length).toBe(1);
-    // Every loser must be the documented 409 (ActiveRunExistsError) or a
-    // SERIALIZABLE retry-needed (40001) bubbling — not e.g. 5xx.
-    for (const l of losers) {
-      const code = (l as any).err?.code ?? (l as any).err?.constructor?.name;
-      const isExpected =
-        l.err instanceof ActiveRunExistsError ||
-        code === '40001' /* serialization_failure */ ||
-        code === '23505' /* unique_violation surfacing past our wrap */;
-      expect(isExpected).toBe(true);
+      expect(survivors.length).toBe(1);
+      // Every loser must be the documented 409 (ActiveRunExistsError) or a
+      // SERIALIZABLE retry-needed (40001) bubbling — not e.g. 5xx.
+      for (const l of losers) {
+        const code = (l as any).err?.code ?? (l as any).err?.constructor?.name;
+        const isExpected =
+          l.err instanceof ActiveRunExistsError ||
+          code === '40001' /* serialization_failure */ ||
+          code === '23505' /* unique_violation surfacing past our wrap */;
+        expect(isExpected).toBe(true);
+      }
+
+      // DB state: exactly one active mesocycle_run for this user.
+      const { rows: [{ n }] } = await db.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM mesocycle_runs WHERE user_id=$1 AND status='active'`,
+        [u2.id],
+      );
+      expect(n).toBe(1);
+
+      // I-2: prove the survivor's full payload committed (not just the parent row).
+      const survivorRunId = (survivors[0] as { ok: true; run_id: string }).run_id;
+      const { rows: [{ dws }] } = await db.query<{ dws: number }>(
+        `SELECT COUNT(*)::int AS dws FROM day_workouts WHERE mesocycle_run_id=$1`,
+        [survivorRunId],
+      );
+      expect(dws).toBe(5);
+      const { rows: [{ ps }] } = await db.query<{ ps: number }>(
+        `SELECT COUNT(*)::int AS ps FROM planned_sets ps
+         JOIN day_workouts dw ON dw.id=ps.day_workout_id
+         WHERE dw.mesocycle_run_id=$1`,
+        [survivorRunId],
+      );
+      expect(ps).toBeGreaterThan(0);
+
+      // No orphaned planned_sets/day_workouts from rolled-back txs.
+      const { rows: [{ orphans }] } = await db.query<{ orphans: number }>(
+        `SELECT COUNT(*)::int AS orphans FROM day_workouts dw
+         LEFT JOIN mesocycle_runs mr ON mr.id=dw.mesocycle_run_id
+         WHERE mr.id IS NULL`,
+      );
+      expect(orphans).toBe(0);
+    } finally {
+      await cleanupUser(u2.id);
     }
-
-    // DB state: exactly one active mesocycle_run for this user.
-    const { rows: [{ n }] } = await db.query<{ n: number }>(
-      `SELECT COUNT(*)::int AS n FROM mesocycle_runs WHERE user_id=$1 AND status='active'`,
-      [u2.id],
-    );
-    expect(n).toBe(1);
-
-    // I-2: prove the survivor's full payload committed (not just the parent row).
-    const survivorRunId = (survivors[0] as { ok: true; run_id: string }).run_id;
-    const { rows: [{ dws }] } = await db.query<{ dws: number }>(
-      `SELECT COUNT(*)::int AS dws FROM day_workouts WHERE mesocycle_run_id=$1`,
-      [survivorRunId],
-    );
-    expect(dws).toBe(5);
-    const { rows: [{ ps }] } = await db.query<{ ps: number }>(
-      `SELECT COUNT(*)::int AS ps FROM planned_sets ps
-       JOIN day_workouts dw ON dw.id=ps.day_workout_id
-       WHERE dw.mesocycle_run_id=$1`,
-      [survivorRunId],
-    );
-    expect(ps).toBeGreaterThan(0);
-
-    // No orphaned planned_sets/day_workouts from rolled-back txs.
-    const { rows: [{ orphans }] } = await db.query<{ orphans: number }>(
-      `SELECT COUNT(*)::int AS orphans FROM day_workouts dw
-       LEFT JOIN mesocycle_runs mr ON mr.id=dw.mesocycle_run_id
-       WHERE mr.id IS NULL`,
-    );
-    expect(orphans).toBe(0);
-
-    await db.query(`DELETE FROM users WHERE id=$1`, [u2.id]);
   });
 
   it('template_version mismatch → 409 template_outdated', async () => {
     // Bump the template version, then try to materialize against the stale draft.
     await db.query(`UPDATE program_templates SET version=2 WHERE id=$1`, [templateId]);
-    let u3Id: string | undefined;
+    const u3 = await mkUser({ prefix: 'vitest.outdated' });
     try {
-      const { rows: [u3] } = await db.query(
-        `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-        [`vitest.outdated.${Date.now()}@repos.test`],
-      );
-      u3Id = u3.id;
-      const { rows: [up3] } = await db.query(
-        `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-         VALUES ($1, $2, 1, 'Stale draft', 'draft') RETURNING id`,
-        [u3.id, templateId],
-      );
+      const up3 = await mkUserProgram({ userId: u3.id, templateId, name: 'Stale draft' });
       await expect(
         materializeMesocycle({ userProgramId: up3.id, startDate: '2026-05-04', startTz: 'America/New_York' })
       ).rejects.toMatchObject({ code: 'template_outdated', latest_version: 2, status: 409 });
     } finally {
-      if (u3Id) await db.query(`DELETE FROM users WHERE id=$1`, [u3Id]);
+      await cleanupUser(u3.id);
       await db.query(`UPDATE program_templates SET version=1 WHERE id=$1`, [templateId]);
     }
   });
@@ -201,18 +180,14 @@ describe('materializeMesocycle concurrency (spec §9 guardrail)', () => {
   it('bulk insert uses UNNEST not row-by-row (tx duration upper bound)', async () => {
     // Indirect proof: a 5-week × 1-day template materializes in well under
     // the time row-by-row inserts would take. Hard cap 1500ms in CI.
-    const { rows: [u4] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.bulk.${Date.now()}@repos.test`],
-    );
-    const { rows: [up4] } = await db.query(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-       VALUES ($1, $2, 1, 'Bulk-shape', 'draft') RETURNING id`,
-      [u4.id, templateId],
-    );
-    const t0 = Date.now();
-    await materializeMesocycle({ userProgramId: up4.id, startDate: '2026-05-04', startTz: 'America/New_York' });
-    expect(Date.now() - t0).toBeLessThan(1500);
-    await db.query(`DELETE FROM users WHERE id=$1`, [u4.id]);
+    const u4 = await mkUser({ prefix: 'vitest.bulk' });
+    try {
+      const up4 = await mkUserProgram({ userId: u4.id, templateId, name: 'Bulk-shape' });
+      const t0 = Date.now();
+      await materializeMesocycle({ userProgramId: up4.id, startDate: '2026-05-04', startTz: 'America/New_York' });
+      expect(Date.now() - t0).toBeLessThan(1500);
+    } finally {
+      await cleanupUser(u4.id);
+    }
   });
 });

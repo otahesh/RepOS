@@ -3,21 +3,15 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { computeWeeklyJointStress, JointStressWarning } from '../src/services/jointStress.js';
+import { mkUser, mkUserProgram, cleanupUser, cleanupExercises } from './helpers/program-fixtures.js';
 
 let userId: string; let runId: string; let dwId: string;
 let benchId: string; let deadliftId: string;
 
 beforeAll(async () => {
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.joint.${Date.now()}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'vitest.joint' });
   userId = u.id;
-  const { rows: [up] } = await db.query(
-    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-     VALUES ($1, NULL, NULL, 'Joint test', 'draft') RETURNING id`,
-    [userId],
-  );
+  const up = await mkUserProgram({ userId, templateId: null, name: 'Joint test' });
   const { rows: [run] } = await db.query(
     `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
      VALUES ($1, $2, '2026-05-04', 'UTC', 5, 'active') RETURNING id`,
@@ -67,8 +61,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
-  if (deadliftId) await db.query(`DELETE FROM exercises WHERE id IN ($1,$2)`, [deadliftId, benchId]);
+  await cleanupUser(userId);
+  await cleanupExercises([deadliftId, benchId]);
   await db.end();
 });
 
