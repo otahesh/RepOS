@@ -50,10 +50,7 @@ export class ActiveRunExistsError extends Error {
   toJSON() { return { error: 'active_run_exists' }; }
 }
 
-export async function materializeMesocycle(input: MaterializeInput): Promise<MaterializeResult> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) {
-    throw new Error('startDate must be YYYY-MM-DD');
-  }
+async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -277,4 +274,26 @@ export async function materializeMesocycle(input: MaterializeInput): Promise<Mat
   } finally {
     client.release();
   }
+}
+
+export async function materializeMesocycle(input: MaterializeInput): Promise<MaterializeResult> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) {
+    throw new Error('startDate must be YYYY-MM-DD');
+  }
+  const MAX_ATTEMPTS = 5;
+  let lastErr: any;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      return await runOnce(input);
+    } catch (e: any) {
+      lastErr = e;
+      // Retry only on SERIALIZABLE serialization_failure (40001).
+      // Do NOT retry on ActiveRunExistsError, TemplateOutdatedError, or 23505 from
+      // the partial unique index — those are deterministic outcomes.
+      if (e?.code !== '40001') throw e;
+      const backoffMs = 5 * Math.pow(5, attempt); // 5, 25, 125, 625, 3125
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+  }
+  throw lastErr;
 }
