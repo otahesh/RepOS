@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { resolveUserProgramStructure } from '../services/resolveUserProgramStructure.js';
 
 export async function userProgramRoutes(app: FastifyInstance) {
   app.get('/user-programs', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
@@ -14,4 +15,18 @@ export async function userProgramRoutes(app: FastifyInstance) {
     );
     return { programs: rows };
   });
+
+  app.get<{ Params: { id: string } }>(
+    '/user-programs/:id',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+      const resolved = await resolveUserProgramStructure(req.params.id, userId);
+      if (!resolved) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      return resolved;
+    },
+  );
 }

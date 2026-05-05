@@ -64,3 +64,41 @@ describe('GET /api/user-programs', () => {
     expect(r.statusCode).toBe(401);
   });
 });
+
+describe('GET /api/user-programs/:id', () => {
+  let upId: string;
+  beforeAll(async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    upId = r.json<any>().id;
+  });
+
+  it('returns user_program with effective structure resolved (customizations overlay applied)', async () => {
+    // Inject a rename customization
+    await db.query(
+      `UPDATE user_programs SET customizations='{"name_override":"My Program"}'::jsonb WHERE id=$1`,
+      [upId],
+    );
+    const r = await app.inject({ method: 'GET', url: `/api/user-programs/${upId}`, headers: auth() });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.id).toBe(upId);
+    expect(body.effective_structure).toBeDefined();
+    expect(body.effective_structure.days).toBeDefined();
+    expect(body.effective_name).toBe('My Program');
+  });
+
+  it("404 on someone else's program (no leak)", async () => {
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+    );
+    const { rows: [other] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const r = await app.inject({ method: 'GET', url: `/api/user-programs/${other.id}`, headers: auth() });
+    expect(r.statusCode).toBe(404);
+  });
+});
