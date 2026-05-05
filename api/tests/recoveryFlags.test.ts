@@ -113,9 +113,9 @@ describe('bodyweight-crash evaluator (spec §7.2)', () => {
 describe('recovery_flag_dismissals (spec §7.2)', () => {
   // Canonical schema: (user_id, flag, week_start DATE) — no run_id/week_idx.
   // week_start is the Monday of the ISO week the flag fired.
-  const weekStart1 = '2026-04-28'; // Monday of week containing 2026-05-04
-  const weekStart2 = '2026-05-05'; // next week
-  const weekStart3 = '2026-05-12'; // week after that
+  const weekStart1 = '2026-04-27'; // Monday of ISO week 18 (containing 2026-05-04 today)
+  const weekStart2 = '2026-05-04'; // Monday of ISO week 19
+  const weekStart3 = '2026-05-11'; // Monday of ISO week 20
 
   it('records a dismissal and reads it back', async () => {
     await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
