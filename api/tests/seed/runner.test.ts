@@ -1,8 +1,30 @@
 import 'dotenv/config';
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import { db } from '../../src/db/client.js';
-import { runSeed } from '../../src/seed/runSeed.js';
+import { runSeed, type SeedAdapter } from '../../src/seed/runSeed.js';
 import type { ExerciseSeed } from '../../src/schemas/exerciseSeed.js';
+import type { PoolClient } from 'pg';
+import { makeExerciseSeedAdapter } from '../../src/seed/adapters/exercises.js';
+
+type StubEntry = { slug: string; payload: number };
+
+const stubAdapter: SeedAdapter<StubEntry> = {
+  validate: (entries) => ({
+    success: true as const,
+    data: entries,
+  }) as any,
+  upsertOne: async (_tx: PoolClient, _e, _g) => { /* no-op */ },
+  archiveMissing: async (_tx, _key, _g) => 0,
+};
+
+describe('runSeed (generic adapter contract)', () => {
+  it('exposes SeedAdapter<T> + opts shape', () => {
+    expect(typeof runSeed).toBe('function');
+    const fn: (opts: { key: string; entries: StubEntry[]; adapter: SeedAdapter<StubEntry> })
+      => Promise<{ applied: boolean; archived: number }> = runSeed;
+    expect(fn).toBeDefined();
+  });
+});
 
 const A: ExerciseSeed = {
   slug: 'runner-test-a', name: 'A', primary_muscle: 'chest',
@@ -31,7 +53,7 @@ afterAll(async () => {
 
 describe('runSeed', () => {
   it('first run inserts entries and writes _seed_meta', async () => {
-    const r = await runSeed({ key: 'runner-test', entries: [A, B] });
+    const r = await runSeed({ key: 'runner-test', entries: [A, B], adapter: makeExerciseSeedAdapter('runner-test') });
     expect(r.applied).toBe(true);
     expect(r.upserted).toBe(2);
     expect(r.archived).toBe(0);
@@ -42,13 +64,13 @@ describe('runSeed', () => {
   });
 
   it('second run with identical input skips (hash match)', async () => {
-    const r = await runSeed({ key: 'runner-test', entries: [A, B] });
+    const r = await runSeed({ key: 'runner-test', entries: [A, B], adapter: makeExerciseSeedAdapter('runner-test') });
     expect(r.applied).toBe(false);
     expect(r.reason).toBe('hash_unchanged');
   });
 
   it('removing entry B soft-archives it; A stays', async () => {
-    const r = await runSeed({ key: 'runner-test', entries: [A] });
+    const r = await runSeed({ key: 'runner-test', entries: [A], adapter: makeExerciseSeedAdapter('runner-test') });
     expect(r.applied).toBe(true);
     expect(r.archived).toBe(1);
     const { rows } = await db.query(
