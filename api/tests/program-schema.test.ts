@@ -496,3 +496,65 @@ describe('planned_cardio_blocks (migration 021)', () => {
     }
   });
 });
+
+describe('set_logs (migration 022)', () => {
+  it('performed_load_lbs is NUMERIC(5,1) — accepts 405.5, rejects 1000.0', async () => {
+    const { rows: [c] } = await db.query(
+      `SELECT column_name, data_type, numeric_precision, numeric_scale
+         FROM information_schema.columns
+        WHERE table_name='set_logs' AND column_name='performed_load_lbs'`
+    );
+    expect(c.data_type).toBe('numeric');
+    expect(c.numeric_precision).toBe(5);
+    expect(c.numeric_scale).toBe(1);
+  });
+
+  it('cascades when planned_set is deleted', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.sl.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    let ex_id: string | undefined;
+    try {
+      const { rows: [up] } = await db.query(
+        `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+        [u.id]
+      );
+      const { rows: [r] } = await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+         VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+        [up.id, u.id]
+      );
+      const { rows: [d] } = await db.query(
+        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+         VALUES ($1,1,0,'2026-01-05','strength','Mon') RETURNING id`,
+        [r.id]
+      );
+      const { rows: [ex] } = await db.query(
+        `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
+                                skill_complexity,loading_demand,systemic_fatigue)
+         VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
+                 'push_horizontal','mid',3,3,3) RETURNING id`,
+        [`sl-test-ex-${Date.now()}-${Math.random().toString(36).slice(2,8)}`]
+      );
+      ex_id = ex.id;
+      const { rows: [ps] } = await db.query(
+        `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                    target_reps_low, target_reps_high, target_rir, rest_sec)
+         VALUES ($1,0,0,$2,8,12,2,120) RETURNING id`,
+        [d.id, ex.id]
+      );
+      const { rows: [sl] } = await db.query(
+        `INSERT INTO set_logs (planned_set_id, performed_reps, performed_load_lbs, performed_rir)
+         VALUES ($1,10,225.5,2) RETURNING id`,
+        [ps.id]
+      );
+      await db.query(`DELETE FROM planned_sets WHERE id=$1`, [ps.id]);
+      const { rows } = await db.query(`SELECT 1 FROM set_logs WHERE id=$1`, [sl.id]);
+      expect(rows.length).toBe(0);
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+      if (ex_id) await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+    }
+  });
+});
