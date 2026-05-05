@@ -37,7 +37,30 @@ export function validateFrequencyLimits(structure: ProgramTemplateStructure): Sc
   return out;
 }
 
-export function validateCardioScheduling(_structure: ProgramTemplateStructure): ScheduleWarning[] {
-  // Implemented in B.14
-  return [];
+export function validateCardioScheduling(structure: ProgramTemplateStructure): ScheduleWarning[] {
+  const out: ScheduleWarning[] = [];
+  const HEAVY_LOWER_PATTERNS = new Set(['squat', 'hinge', 'lunge']);
+  const isHeavyLower = (d: ProgramTemplateStructure['days'][number]) =>
+    d.blocks.some((b: any) => HEAVY_LOWER_PATTERNS.has(b.movement_pattern) && (b.target_rir ?? 99) <= 2);
+  const hasInterval = (d: ProgramTemplateStructure['days'][number]) =>
+    d.blocks.some((b: any) => b.cardio && (b.cardio.target_zone === 4 || b.cardio.target_zone === 5));
+
+  // Same-day Z4/Z5 + heavy lower
+  for (const d of structure.days) {
+    if (isHeavyLower(d) && hasInterval(d)) {
+      out.push({ code: 'cardio_interval_too_close', severity: 'warn', day_idx: d.idx,
+        message: 'Z4/Z5 cardio same day as heavy lower — interference is high. Move to a different day or downgrade to Z2 ≤ 30 min.' });
+    }
+  }
+  // Day-before heavy-lower with HIIT
+  const sorted = [...structure.days].sort((a, b) => a.day_offset - b.day_offset);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1], curr = sorted[i];
+    if (curr.day_offset - prev.day_offset !== 1) continue;
+    if (hasInterval(prev) && isHeavyLower(curr)) {
+      out.push({ code: 'hiit_day_before_heavy_lower', severity: 'warn', day_idx: curr.idx,
+        message: 'HIIT the day before heavy lower — quad fatigue carries. Swap day order or move HIIT 48h away.' });
+    }
+  }
+  return out;
 }
