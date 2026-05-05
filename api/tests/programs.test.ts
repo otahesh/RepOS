@@ -86,3 +86,71 @@ describe('GET /api/program-templates/:slug', () => {
     }
   });
 });
+
+describe('POST /api/program-templates/:slug/fork', () => {
+  let userId: string; let token: string;
+  beforeAll(async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.fork.${Date.now()}@repos.test`],
+    );
+    userId = u.id;
+    const mint = await app.inject({
+      method: 'POST', url: '/api/tokens', body: { user_id: userId, label: 'fork-test' }
+    });
+    token = mint.json<{ token: string }>().token;
+  });
+  afterAll(async () => {
+    if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
+  });
+  const auth = () => ({ authorization: `Bearer ${token}` });
+
+  it('401/503 without auth (CF Access disabled in tests)', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork',
+    });
+    // No Bearer token + CF Access disabled = 503; valid pattern tested via other endpoints
+    expect([401, 503]).toContain(r.statusCode);
+  });
+
+  it('201 creates user_program with template_id + template_version, status=draft, structure NOT copied', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json<any>();
+    expect(body.id).toBeDefined();
+    expect(body.template_id).toBeDefined();
+    expect(body.template_version).toBeGreaterThanOrEqual(1);
+    expect(body.status).toBe('draft');
+    expect(body.customizations).toEqual({});
+    // structure must NOT be carried on user_programs (Q16)
+    expect(body.structure).toBeUndefined();
+    // verify in DB
+    const { rows } = await db.query(
+      `SELECT template_id, template_version, status FROM user_programs WHERE id=$1`,
+      [body.id],
+    );
+    expect(rows[0].status).toBe('draft');
+  });
+
+  it('two forks of the same template produce independent rows', async () => {
+    const r1 = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    const r2 = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    expect(r1.statusCode).toBe(201);
+    expect(r2.statusCode).toBe(201);
+    expect(r1.json<any>().id).not.toBe(r2.json<any>().id);
+  });
+
+  it('404 on unknown slug', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/martian-program/fork', headers: auth(),
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});
