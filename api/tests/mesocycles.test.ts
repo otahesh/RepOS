@@ -138,3 +138,54 @@ describe('GET /api/mesocycles/today', () => {
     expect(r.statusCode).toBe(401);
   });
 });
+
+describe('GET /api/mesocycles/:id/volume-rollup', () => {
+  it('returns sets-per-week per muscle + cardio minutes_by_modality + landmarks', async () => {
+    const r = await app.inject({
+      method: 'GET', url: `/api/mesocycles/${runId}/volume-rollup`, headers: auth(),
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.run_id).toBe(runId);
+    expect(Array.isArray(body.weeks)).toBe(true);
+    expect(body.weeks.length).toBeGreaterThan(0);
+    const w0 = body.weeks[0];
+    expect(typeof w0.week_idx).toBe('number');
+    expect(Array.isArray(w0.muscles)).toBe(true);
+    expect(w0.minutes_by_modality).toBeDefined();
+    // each muscle has embedded MEV/MAV/MRV landmarks
+    if (w0.muscles.length > 0) {
+      const m = w0.muscles[0];
+      expect(typeof m.muscle).toBe('string');
+      expect(typeof m.sets).toBe('number');
+      expect(typeof m.mev).toBe('number');
+      expect(typeof m.mav).toBe('number');
+      expect(typeof m.mrv).toBe('number');
+    }
+  });
+
+  it("404 on someone else's run", async () => {
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+    );
+    const { rows: [up2] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const { rows: [other] } = await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1, $2, '2026-05-04', 'America/New_York', 5, 'completed') RETURNING id`,
+      [up2.id, otherUserId],
+    );
+    const r = await app.inject({
+      method: 'GET', url: `/api/mesocycles/${other.id}/volume-rollup`, headers: auth(),
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('401 without auth', async () => {
+    const r = await app.inject({ method: 'GET', url: `/api/mesocycles/${runId}/volume-rollup` });
+    expect(r.statusCode).toBe(401);
+  });
+});
