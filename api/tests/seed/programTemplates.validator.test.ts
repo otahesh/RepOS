@@ -79,6 +79,16 @@ describe('programTemplate validator', () => {
     expect(r.success).toBe(false);
   });
 
+  it('rejects an unknown week_idx field on day (single-week canonical shape)', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const bad = {
+      ...baseTpl,
+      structure: { _v: 1, days: [{ ...minimalDay, week_idx: 1 }] },
+    } as any;
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+  });
+
   it('rejects block where MEV > MAV', () => {
     const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
     const bad: ProgramTemplateSeed = {

@@ -35,7 +35,7 @@ const Day = z.object({
   kind: z.enum(['strength','cardio','hybrid']),
   name: z.string().min(1).max(60),
   blocks: z.array(Block).min(1).max(20),
-});
+}).strict();
 
 const Structure = z.object({
   _v: z.literal(1),
@@ -72,7 +72,7 @@ export const ProgramTemplateSchema = z.object({
   weeks: z.number().int().min(1).max(16),
   days_per_week: z.number().int().min(1).max(7),
   structure: Structure,
-}).refine(t => t.structure.days.length === t.days_per_week,
+}).strict().refine(t => t.structure.days.length === t.days_per_week,
   { message: 'structure.days.length must equal days_per_week', path: ['days_per_week'] });
 
 // Reconciliation-addendum aliases: D's seed adapter imports these alternative names.
