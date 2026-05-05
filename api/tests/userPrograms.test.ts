@@ -288,4 +288,17 @@ describe('POST /api/user-programs/:id/start', () => {
     });
     expect(r.statusCode).toBe(400);
   });
+
+  it('start_date in response is TZ-stable YYYY-MM-DD (not shifted by runtime TZ)', async () => {
+    const r = await app.inject({
+      method: 'POST', url: `/api/user-programs/${upId}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json<any>();
+    expect(body.start_date).toBe('2026-05-04');
+    // Sanity: the response field should be a string, not a Date or shifted ISO
+    expect(typeof body.start_date).toBe('string');
+    expect(body.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });

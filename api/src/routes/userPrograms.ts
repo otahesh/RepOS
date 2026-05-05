@@ -178,18 +178,14 @@ export async function userProgramRoutes(app: FastifyInstance) {
         });
         // Enrich response with mesocycle_runs row
         const { rows: [run] } = await db.query(
-          `SELECT id, start_date, start_tz, weeks, status, current_week
+          `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks, status, current_week
            FROM mesocycle_runs WHERE id=$1`,
           [run_id],
         );
         reply.code(201);
-        // Normalize date column to YYYY-MM-DD string
-        const startDateStr = (run.start_date instanceof Date)
-          ? run.start_date.toISOString().slice(0, 10)
-          : String(run.start_date).slice(0, 10);
         return {
           mesocycle_run_id: run.id,
-          start_date: startDateStr,
+          start_date: run.start_date,
           start_tz: run.start_tz,
           weeks: run.weeks,
           status: run.status,
