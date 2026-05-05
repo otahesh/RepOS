@@ -6,17 +6,6 @@ import {
 } from '../../schemas/programTemplate.js';
 import type { SeedAdapter } from '../runSeed.js';
 
-const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema)
-  .superRefine((arr, ctx) => {
-    const seen = new Set<string>();
-    arr.forEach((tpl, i) => {
-      if (seen.has(tpl.slug)) {
-        ctx.addIssue({ code: 'custom', message: `duplicate slug: ${tpl.slug}`, path: [i, 'slug'] });
-      }
-      seen.add(tpl.slug);
-    });
-  });
-
 // Canonical-key JSON: deterministic key order, used for structure-changed comparison.
 function canonicalize(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
@@ -28,49 +17,74 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export const programTemplateSeedAdapter: SeedAdapter<ProgramTemplateSeed> = {
-  validate: (entries) => ProgramTemplateSeedArraySchema.safeParse(entries),
+export function makeProgramTemplateAdapter(
+  knownExerciseSlugs: Set<string>,
+): SeedAdapter<ProgramTemplateSeed> {
+  const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema)
+    .superRefine((arr, ctx) => {
+      const seen = new Set<string>();
+      arr.forEach((tpl, tplIdx) => {
+        if (seen.has(tpl.slug)) {
+          ctx.addIssue({ code: 'custom', message: `duplicate slug: ${tpl.slug}`, path: [tplIdx, 'slug'] });
+        }
+        seen.add(tpl.slug);
+        tpl.structure.days.forEach((day, dayIdx) => {
+          day.blocks.forEach((block, blockIdx) => {
+            if (!knownExerciseSlugs.has(block.exercise_slug)) {
+              ctx.addIssue({
+                code: 'custom',
+                message: `unknown exercise_slug: ${block.exercise_slug}`,
+                path: [tplIdx, 'structure', 'days', dayIdx, 'blocks', blockIdx, 'exercise_slug'],
+              });
+            }
+          });
+        });
+      });
+    });
 
-  upsertOne: async (tx, e, generation) => {
-    // Look up existing structure to decide if version bumps.
-    const { rows: existing } = await tx.query<{ structure: unknown; version: number }>(
-      `SELECT structure, version FROM program_templates WHERE slug=$1`, [e.slug]
-    );
-    let nextVersion = 1;
-    if (existing[0]) {
-      const oldCanon = canonicalize(existing[0].structure);
-      const newCanon = canonicalize(e.structure);
-      nextVersion = oldCanon === newCanon ? existing[0].version : existing[0].version + 1;
-    }
+  return {
+    validate: (entries) => ProgramTemplateSeedArraySchema.safeParse(entries),
 
-    await tx.query(
-      `INSERT INTO program_templates (
-         slug, name, description, weeks, days_per_week, structure, version,
-         created_by, seed_key, seed_generation, archived_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'system',$8,$9,NULL,now())
-       ON CONFLICT (slug) DO UPDATE SET
-         name=EXCLUDED.name,
-         description=EXCLUDED.description,
-         weeks=EXCLUDED.weeks,
-         days_per_week=EXCLUDED.days_per_week,
-         structure=EXCLUDED.structure,
-         version=EXCLUDED.version,
-         seed_key=EXCLUDED.seed_key,
-         seed_generation=EXCLUDED.seed_generation,
-         archived_at=NULL,
-         updated_at=now()`,
-      [e.slug, e.name, e.description ?? '', e.weeks, e.days_per_week,
-       JSON.stringify(e.structure), nextVersion, 'program_templates', generation],
-    );
-  },
+    upsertOne: async (tx, e, generation) => {
+      const { rows: existing } = await tx.query<{ structure: unknown; version: number }>(
+        `SELECT structure, version FROM program_templates WHERE slug=$1`, [e.slug]
+      );
+      let nextVersion = 1;
+      if (existing[0]) {
+        const oldCanon = canonicalize(existing[0].structure);
+        const newCanon = canonicalize(e.structure);
+        nextVersion = oldCanon === newCanon ? existing[0].version : existing[0].version + 1;
+      }
 
-  archiveMissing: async (tx, key, generation) => {
-    const { rowCount } = await tx.query(
-      `UPDATE program_templates SET archived_at=now(), updated_at=now()
-       WHERE created_by='system' AND archived_at IS NULL AND seed_key=$1
-         AND seed_generation IS NOT NULL AND seed_generation < $2`,
-      [key, generation],
-    );
-    return rowCount ?? 0;
-  },
-};
+      await tx.query(
+        `INSERT INTO program_templates (
+           slug, name, description, weeks, days_per_week, structure, version,
+           created_by, seed_key, seed_generation, archived_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'system',$8,$9,NULL,now())
+         ON CONFLICT (slug) DO UPDATE SET
+           name=EXCLUDED.name,
+           description=EXCLUDED.description,
+           weeks=EXCLUDED.weeks,
+           days_per_week=EXCLUDED.days_per_week,
+           structure=EXCLUDED.structure,
+           version=EXCLUDED.version,
+           seed_key=EXCLUDED.seed_key,
+           seed_generation=EXCLUDED.seed_generation,
+           archived_at=NULL,
+           updated_at=now()`,
+        [e.slug, e.name, e.description ?? '', e.weeks, e.days_per_week,
+         JSON.stringify(e.structure), nextVersion, 'program_templates', generation],
+      );
+    },
+
+    archiveMissing: async (tx, key, generation) => {
+      const { rowCount } = await tx.query(
+        `UPDATE program_templates SET archived_at=now(), updated_at=now()
+         WHERE created_by='system' AND archived_at IS NULL AND seed_key=$1
+           AND seed_generation IS NOT NULL AND seed_generation < $2`,
+        [key, generation],
+      );
+      return rowCount ?? 0;
+    },
+  };
+}

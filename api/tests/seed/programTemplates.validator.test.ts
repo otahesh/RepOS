@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { programTemplateSeedAdapter } from '../../src/seed/adapters/programTemplates.js';
+import { makeProgramTemplateAdapter } from '../../src/seed/adapters/programTemplates.js';
 import type { ProgramTemplateSeed } from '../../src/schemas/programTemplate.js';
 
 const minimalDay = {
@@ -13,8 +13,20 @@ const baseTpl: ProgramTemplateSeed = {
 
 describe('programTemplate validator', () => {
   it('rejects duplicate slug', () => {
-    const r = programTemplateSeedAdapter.validate([baseTpl, { ...baseTpl, name: 'A2' }]);
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const r = adapter.validate([baseTpl, { ...baseTpl, name: 'A2' }]);
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/duplicate slug/i);
+  });
+
+  it('rejects unknown exercise_slug reference', () => {
+    const adapter = makeProgramTemplateAdapter(new Set(['dumbbell-bench-press']));
+    const bad: ProgramTemplateSeed = {
+      ...baseTpl,
+      structure: { _v: 1, days: [{ ...minimalDay, blocks: [{ ...minimalDay.blocks[0], exercise_slug: 'made-up-slug' }] }] },
+    };
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/exercise_slug.*made-up-slug/i);
   });
 });
