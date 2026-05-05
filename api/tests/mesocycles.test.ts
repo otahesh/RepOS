@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { db } from '../src/db/client.js';
 
@@ -11,6 +11,10 @@ let token: string;
 let runId: string;
 
 beforeAll(async () => {
+  // Pin system time so getTodayWorkout sees today_local = 2026-05-04 (Mon)
+  // in America/New_York — day 1 of the full-body-3-day run.
+  vi.setSystemTime(new Date('2026-05-04T15:00:00.000Z'));
+
   app = await buildApp();
   const { rows: [u] } = await db.query(
     `INSERT INTO users (email) VALUES ($1) RETURNING id`,
@@ -40,6 +44,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vi.useRealTimers();
   if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
   if (otherUserId) await db.query(`DELETE FROM users WHERE id=$1`, [otherUserId]);
   await app.close();
@@ -85,6 +90,51 @@ describe('GET /api/mesocycles/:id', () => {
 
   it('401 without auth', async () => {
     const r = await app.inject({ method: 'GET', url: `/api/mesocycles/${runId}` });
+    expect(r.statusCode).toBe(401);
+  });
+});
+
+describe('GET /api/mesocycles/today', () => {
+  it('returns state:workout for today within the active run window', async () => {
+    // Today_local in America/New_York is 2026-05-04 (Mon). full-body-3-day has
+    // day 1 on Mon → workout state with sets array.
+    const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<any>();
+    expect(body.state).toBe('workout');
+    expect(body.run_id).toBe(runId);
+    expect(Array.isArray(body.sets)).toBe(true);
+    expect(body.day).toBeDefined();
+    expect(body.day.scheduled_date).toBe('2026-05-04');
+  });
+
+  it('returns state:rest on an off-day inside the run window', async () => {
+    // Move time forward to Tuesday, which is a rest day for Mon/Wed/Fri.
+    vi.setSystemTime(new Date('2026-05-05T15:00:00.000Z'));
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
+      expect(r.statusCode).toBe(200);
+      const body = r.json<any>();
+      expect(body.state).toBe('rest');
+      expect(body.run_id).toBe(runId);
+    } finally {
+      vi.setSystemTime(new Date('2026-05-04T15:00:00.000Z'));
+    }
+  });
+
+  it('returns state:no_active_run when no active run exists', async () => {
+    await db.query(`UPDATE mesocycle_runs SET status='completed' WHERE id=$1`, [runId]);
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
+      expect(r.statusCode).toBe(200);
+      expect(r.json<any>().state).toBe('no_active_run');
+    } finally {
+      await db.query(`UPDATE mesocycle_runs SET status='active' WHERE id=$1`, [runId]);
+    }
+  });
+
+  it('401 without auth', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today' });
     expect(r.statusCode).toBe(401);
   });
 });

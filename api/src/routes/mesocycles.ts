@@ -1,8 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { getTodayWorkout } from '../services/getTodayWorkout.js';
 
 export async function mesocycleRoutes(app: FastifyInstance) {
+  // /today must be registered before /:id so the literal path wins over the param.
+  app.get(
+    '/mesocycles/today',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, _reply) => {
+      const userId = (req as any).userId as string;
+      return getTodayWorkout(userId);
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/mesocycles/:id',
     { preHandler: requireBearerOrCfAccess },
