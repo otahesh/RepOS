@@ -691,3 +691,39 @@ describe('mesocycle_run_events (migration 023)', () => {
     }
   });
 });
+
+describe('device_tokens scopes (migration 025)', () => {
+  it('device_tokens.scopes is TEXT[]', async () => {
+    const { rows: [c] } = await db.query(
+      `SELECT data_type, udt_name FROM information_schema.columns
+        WHERE table_name='device_tokens' AND column_name='scopes'`
+    );
+    expect(c?.data_type).toBe('ARRAY');
+    expect(c?.udt_name).toBe('_text');
+  });
+
+  it('singular scope column is gone', async () => {
+    const { rows } = await db.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name='device_tokens' AND column_name='scope'`
+    );
+    expect(rows.length).toBe(0);
+  });
+
+  it('default scopes is health:weight:write singleton', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.dts.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      const { rows: [t] } = await db.query(
+        `INSERT INTO device_tokens (user_id, token_hash, label)
+         VALUES ($1, $2, $3) RETURNING scopes`,
+        [u.id, `tok-${Date.now()}-${Math.random().toString(36).slice(2,8)}:hash`, 'test']
+      );
+      expect(t.scopes).toEqual(['health:weight:write']);
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+});
