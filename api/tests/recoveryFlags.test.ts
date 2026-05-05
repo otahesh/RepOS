@@ -5,6 +5,9 @@ import {
   bodyweightCrashEvaluator, _resetRegistryForTest,
   type RecoveryFlagEvaluator,
 } from '../src/services/recoveryFlags.js';
+import {
+  recordDismissal, isDismissed, isFlagSuppressed,
+} from '../src/services/recoveryFlagDismissals.js';
 import 'dotenv/config';
 import { db } from '../src/db/client.js';
 
@@ -104,5 +107,35 @@ describe('bodyweight-crash evaluator (spec §7.2)', () => {
     const keys = getRegisteredFlagKeys();
     expect(keys).toContain('bodyweight_crash');
     expect(keys).toContain('overreaching');
+  });
+});
+
+describe('recovery_flag_dismissals (spec §7.2)', () => {
+  // Canonical schema: (user_id, flag, week_start DATE) — no run_id/week_idx.
+  // week_start is the Monday of the ISO week the flag fired.
+  const weekStart1 = '2026-04-28'; // Monday of week containing 2026-05-04
+  const weekStart2 = '2026-05-05'; // next week
+  const weekStart3 = '2026-05-12'; // week after that
+
+  it('records a dismissal and reads it back', async () => {
+    await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
+    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 })).toBe(true);
+    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart2 })).toBe(false);
+  });
+
+  it('isFlagSuppressed prevents re-fire for the same (user, flag, week)', async () => {
+    expect(await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 })).toBe(true);
+    expect(await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart3 })).toBe(false);
+  });
+
+  it('idempotent: recording twice does not raise', async () => {
+    await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
+    await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
+    const { rows: [{ n }] } = await db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM recovery_flag_dismissals
+       WHERE user_id=$1 AND flag='bodyweight_crash' AND week_start=$2`,
+      [userId, weekStart1],
+    );
+    expect(n).toBe(1);
   });
 });
