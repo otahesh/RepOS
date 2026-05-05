@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { db } from '../src/db/client.js';
 
@@ -197,5 +197,95 @@ describe('PATCH /api/user-programs/:id', () => {
     } finally {
       await db.query(`UPDATE user_programs SET status='draft' WHERE id=$1`, [upId]);
     }
+  });
+});
+
+describe('POST /api/user-programs/:id/start', () => {
+  let upId: string;
+  beforeEach(async () => {
+    // Clean active run + user_programs for this test user
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM user_programs WHERE user_id=$1`, [userId]);
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    upId = r.json<any>().id;
+  });
+
+  it('201 materializes a mesocycle_run + returns its id + run details', async () => {
+    const r = await app.inject({
+      method: 'POST', url: `/api/user-programs/${upId}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json<any>();
+    expect(body.mesocycle_run_id).toBeDefined();
+    expect(body.start_date).toBe('2026-05-04');
+    expect(body.start_tz).toBe('America/New_York');
+    const { rows } = await db.query(
+      `SELECT status FROM mesocycle_runs WHERE id=$1`, [body.mesocycle_run_id],
+    );
+    expect(rows[0].status).toBe('active');
+  });
+
+  it('409 when an active run already exists for this user', async () => {
+    await app.inject({
+      method: 'POST', url: `/api/user-programs/${upId}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    const r2 = await app.inject({
+      method: 'POST', url: '/api/program-templates/upper-lower-4-day/fork', headers: auth(),
+    });
+    const upId2 = r2.json<any>().id;
+    const startR = await app.inject({
+      method: 'POST', url: `/api/user-programs/${upId2}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    expect(startR.statusCode).toBe(409);
+    expect(startR.json<any>().error).toBe('active_run_exists');
+  });
+
+  it('409 with must_refork:true when template_version is stale', async () => {
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    await db.query(`UPDATE program_templates SET version=version+1 WHERE id=$1`, [tmpl.id]);
+    try {
+      const r = await app.inject({
+        method: 'POST', url: `/api/user-programs/${upId}/start`, headers: auth(),
+        body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+      });
+      expect(r.statusCode).toBe(409);
+      const body = r.json<any>();
+      expect(body.error).toBe('template_outdated');
+      expect(body.must_refork).toBe(true);
+      expect(body.latest_version).toBe(tmpl.version + 1);
+    } finally {
+      await db.query(`UPDATE program_templates SET version=$1 WHERE id=$2`, [tmpl.version, tmpl.id]);
+    }
+  });
+
+  it("404 on someone else's user_program", async () => {
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    const { rows: [other] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const r = await app.inject({
+      method: 'POST', url: `/api/user-programs/${other.id}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('400 on invalid body (bad date format)', async () => {
+    const r = await app.inject({
+      method: 'POST', url: `/api/user-programs/${upId}/start`, headers: auth(),
+      body: { start_date: 'not-a-date', start_tz: 'America/New_York' },
+    });
+    expect(r.statusCode).toBe(400);
   });
 });

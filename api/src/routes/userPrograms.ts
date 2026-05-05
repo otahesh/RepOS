@@ -1,8 +1,19 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { resolveUserProgramStructure } from '../services/resolveUserProgramStructure.js';
 import { UserProgramPatchSchema } from '../schemas/userProgramPatch.js';
+import {
+  materializeMesocycle,
+  TemplateOutdatedError,
+  ActiveRunExistsError,
+} from '../services/materializeMesocycle.js';
+
+const StartBodySchema = z.object({
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+  start_tz: z.string().min(1).max(64),
+});
 
 export async function userProgramRoutes(app: FastifyInstance) {
   app.get('/user-programs', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
@@ -137,6 +148,60 @@ export async function userProgramRoutes(app: FastifyInstance) {
         [JSON.stringify(cust), req.params.id, userId],
       );
       return updated;
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    '/user-programs/:id/start',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+      const parsed = StartBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        reply.code(400);
+        return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+      }
+      // Ownership check
+      const { rows } = await db.query(
+        `SELECT id FROM user_programs WHERE id=$1 AND user_id=$2`,
+        [req.params.id, userId],
+      );
+      if (rows.length === 0) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      try {
+        const { run_id } = await materializeMesocycle({
+          userProgramId: req.params.id,
+          startDate: parsed.data.start_date,
+          startTz: parsed.data.start_tz,
+        });
+        // Enrich response with mesocycle_runs row
+        const { rows: [run] } = await db.query(
+          `SELECT id, start_date, start_tz, weeks, status, current_week
+           FROM mesocycle_runs WHERE id=$1`,
+          [run_id],
+        );
+        reply.code(201);
+        // Normalize date column to YYYY-MM-DD string
+        const startDateStr = (run.start_date instanceof Date)
+          ? run.start_date.toISOString().slice(0, 10)
+          : String(run.start_date).slice(0, 10);
+        return {
+          mesocycle_run_id: run.id,
+          start_date: startDateStr,
+          start_tz: run.start_tz,
+          weeks: run.weeks,
+          status: run.status,
+          current_week: run.current_week,
+        };
+      } catch (err) {
+        if (err instanceof TemplateOutdatedError || err instanceof ActiveRunExistsError) {
+          reply.code(err.status);
+          return err.toJSON();
+        }
+        throw err;
+      }
     },
   );
 }
