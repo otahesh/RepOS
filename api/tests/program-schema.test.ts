@@ -94,3 +94,54 @@ describe('program_templates (migration 015)', () => {
     await db.query(`DELETE FROM program_templates WHERE slug='test-valid-template'`);
   });
 });
+
+describe('user_programs (migration 016)', () => {
+  it('cascades on user delete', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.up.${Date.now()}@repos.test`]
+    );
+    const { rows: [t] } = await db.query(
+      `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
+       VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb) RETURNING id`,
+      [`tpl-up-${Date.now()}`]
+    );
+    const { rows: [up] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1,$2,1,'mine') RETURNING id, customizations, status`,
+      [u.id, t.id]
+    );
+    expect(up.customizations).toEqual({});
+    expect(up.status).toBe('draft');
+
+    await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    const { rows } = await db.query(
+      `SELECT 1 FROM user_programs WHERE id=$1`, [up.id]
+    );
+    expect(rows.length).toBe(0);
+    await db.query(`DELETE FROM program_templates WHERE id=$1`, [t.id]);
+  });
+
+  it('rejects status outside enum', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.up2.${Date.now()}@repos.test`]
+    );
+    await expect(
+      db.query(
+        `INSERT INTO user_programs (user_id, name, status)
+         VALUES ($1,'x','running'::program_status)`,
+        [u.id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+  });
+
+  it('partial index excludes archived rows', async () => {
+    const { rows } = await db.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE tablename='user_programs' AND indexname='idx_user_programs_user'`
+    );
+    expect(rows[0]?.indexdef).toMatch(/WHERE \(status <> 'archived'/i);
+  });
+});
