@@ -1,5 +1,6 @@
 import { db } from '../db/client.js';
 import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
+import { addDaysISO } from './_dateUtil.js';
 
 // Per-muscle landmarks (spec §5.1). Read-only constant in v1.
 export const MUSCLE_LANDMARKS: Record<string, { mev: number; mav: number; mrv: number }> = {
@@ -47,14 +48,6 @@ export class ActiveRunExistsError extends Error {
   status = 409;
   constructor() { super('active run already exists'); }
   toJSON() { return { error: 'active_run_exists' }; }
-}
-
-function addDaysISO(iso: string, days: number): string {
-  // Use UTC math on a Z-anchored midnight. Caller has already mapped
-  // tz-local "start of day" → this ISO date string, so simple UTC add is safe.
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 export async function materializeMesocycle(input: MaterializeInput): Promise<MaterializeResult> {

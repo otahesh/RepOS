@@ -152,16 +152,18 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
   });
 
   it('equipment-fit failure attaches suggested_substitution', async () => {
-    // userId profile has no barbell — bench-press require predicate should fail.
-    // (If your seed's bench-press lacks barbell predicate, this assertion
-    // softens to: substitution suggestion is *attempted* — i.e., no throw.)
+    // userId profile has dumbbells + adjustable_bench but NO barbell + NO flat_bench.
+    // barbell-bench-press requires both → predicate fails → substitution should attach.
     const r = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z'));
+    expect(r.state).toBe('workout');
     if (r.state === 'workout') {
-      const setsByExercise = r.sets;
-      // either every set has a predicate-OK exercise, or at least one has
-      // suggested_substitution attached. Both are valid no-throw states.
-      const anySub = setsByExercise.some(s => s.suggested_substitution !== undefined);
-      expect(typeof anySub).toBe('boolean');
+      expect(r.sets.length).toBeGreaterThan(0);
+      // Every set in this day uses barbell-bench-press (the verbatim template
+      // structure has only that exercise). Each should carry a substitution.
+      for (const s of r.sets) {
+        expect(s.suggested_substitution).toBeDefined();
+        expect(s.suggested_substitution!.slug).not.toBe('barbell-bench-press');
+      }
     }
   });
 });

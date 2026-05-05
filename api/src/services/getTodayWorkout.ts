@@ -2,6 +2,9 @@
 import { db } from '../db/client.js';
 import { computeUserLocalDate } from './userLocalDate.js';
 import { findSubstitutions } from './substitutions.js';
+import { allPredicatesSatisfied } from './_equipmentPredicate.js';
+import { addDaysISO } from './_dateUtil.js';
+import type { PredicateT } from '../schemas/predicate.js';
 
 export type TodayWorkout =
   | { state: 'no_active_run' }
@@ -30,12 +33,6 @@ export type TodayWorkout =
         target_zone: number | null;
       }>;
     };
-
-function addDaysISO(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 export async function getTodayWorkout(userId: string, now: Date = new Date()): Promise<TodayWorkout> {
   const { rows: [run] } = await db.query<{
@@ -97,7 +94,7 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
   // For any block whose required_equipment predicates fail under the user's
   // current profile, attach a suggested_substitution from Library v1's ranker.
   const sets = await Promise.all(setRows.map(async (s) => {
-    const predicates = (s.ex_required?.requires ?? []) as Array<{ type: string }>;
+    const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
     const fits = allPredicatesSatisfied(predicates, profile);
     let suggested: { slug: string; name: string } | undefined;
     if (!fits) {
@@ -132,15 +129,3 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
   };
 }
 
-// Lightweight local copy of the predicate-eval shape used by Library v1.
-// Substitutions service has the canonical implementation; we only need a
-// boolean here. Keep in sync (or factor into a shared util in a future
-// refactor).
-function allPredicatesSatisfied(preds: Array<{ type: string }>, profile: Record<string, unknown>): boolean {
-  for (const p of preds) {
-    const v = (profile as any)[p.type];
-    const ok = v === true || (typeof v === 'object' && v !== null);
-    if (!ok) return false;
-  }
-  return true;
-}
