@@ -221,4 +221,42 @@ describe('resolveUserProgramStructure', () => {
       await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
     }
   });
+
+  it('12. rir_overrides stamps target_rir_override on the matching block (week_idx=1 only)', async () => {
+    await db.query(
+      `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
+      [JSON.stringify({
+        rir_overrides: [
+          { week_idx: 1, day_idx: 0, block_idx: 0, target_rir: 1 },
+          { week_idx: 2, day_idx: 0, block_idx: 0, target_rir: 5 },  // ignored: week 2
+        ],
+      }), userProgramId],
+    );
+    try {
+      const r = await resolveUserProgramStructure(userProgramId, userId);
+      expect(r).not.toBeNull();
+      expect(r!.effective_structure.days[0].blocks[0].target_rir_override).toBe(1);
+      // Other blocks: undefined (no override)
+      expect(r!.effective_structure.days[1].blocks[0].target_rir_override).toBeUndefined();
+    } finally {
+      await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
+    }
+  });
+
+  it('13. trim_last_n persisted but does not modify the single-week blueprint (no-op for preview)', async () => {
+    await db.query(
+      `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
+      [JSON.stringify({ trim_last_n: 2 }), userProgramId],
+    );
+    try {
+      const r = await resolveUserProgramStructure(userProgramId, userId);
+      expect(r).not.toBeNull();
+      // Trim affects mesocycle weeks, not the single-week blueprint — days length unchanged
+      expect(r!.effective_structure.days.length).toBe(3);  // full-body-3-day has 3 days
+      // Customization round-trip: trim_last_n is exposed back in customizations for the FE
+      expect(r!.customizations.trim_last_n).toBe(2);
+    } finally {
+      await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
+    }
+  });
 });

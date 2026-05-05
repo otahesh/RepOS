@@ -12,6 +12,7 @@ import { db } from '../db/client.js';
 type Block = {
   exercise_slug: string;
   set_count_delta?: number;
+  target_rir_override?: number;
   [key: string]: unknown;
 };
 
@@ -34,6 +35,8 @@ type Customizations = {
   set_count_overrides?: Array<{ week_idx: number; day_idx: number; block_idx: number; delta: number }>;
   day_offset_overrides?: Array<{ week_idx: number; day_idx: number; new_day_offset: number }>;
   skipped_days?: Array<{ week_idx: number; day_idx: number }>;
+  rir_overrides?: Array<{ week_idx: number; day_idx: number; block_idx: number; target_rir: number }>;
+  trim_last_n?: number;
 };
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -151,7 +154,21 @@ export async function resolveUserProgramStructure(
     }
   }
 
-  // 4. skipped_days (week_idx === 1): filter out matching days
+  // 4. rir_overrides — week-1 entries stamp target_rir_override on the matching block.
+  //    Other-week entries are ignored at preview time (they apply at materialization).
+  for (const ov of cust.rir_overrides ?? []) {
+    if (ov.week_idx !== 1) continue;
+    const day = structure.days[ov.day_idx];
+    if (!day) continue;
+    const block = day.blocks[ov.block_idx];
+    if (!block) continue;
+    (block as any).target_rir_override = ov.target_rir;
+  }
+
+  // 5. skipped_days (week_idx === 1): filter out matching days
+  //    trim_last_n is a mesocycle-materialization concern (truncates run weeks); it is
+  //    passed through unchanged in the customizations field but does NOT modify the
+  //    single-week effective_structure blueprint.
   const skippedIdxs = new Set(
     (cust.skipped_days ?? [])
       .filter(sd => sd.week_idx === 1)
