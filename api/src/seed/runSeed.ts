@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { db } from '../db/client.js';
 
 export type SeedAdapter<T> = {
-  validate: (entries: T[]) => z.SafeParseReturnType<T[], T[]>;
+  validate: (entries: T[]) => z.ZodSafeParseResult<T[]>;
   upsertOne: (tx: PoolClient, entry: T, generation: number) => Promise<void>;
   archiveMissing: (tx: PoolClient, key: string, generation: number) => Promise<number>;
 };

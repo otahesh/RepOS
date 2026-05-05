@@ -88,8 +88,9 @@ export function makeExerciseSeedAdapter(key: string): SeedAdapter<ExerciseSeed> 
       }
     },
     archiveMissing: async (tx, seedKey, generation) => {
-      // Stateless equivalent of "slug NOT IN (...)" — archive rows whose
-      // seed_generation is older than the just-bumped one.
+      // Equivalent to "slug NOT IN (current entries)": runSeed is the sole writer
+      // per seed_key and serializes on the transaction, so any row whose
+      // seed_generation is older than the just-bumped generation was not re-upserted.
       const { rowCount } = await tx.query(
         `UPDATE exercises SET archived_at=now()
          WHERE created_by='system' AND archived_at IS NULL AND seed_key=$1

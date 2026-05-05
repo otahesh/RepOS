@@ -3,23 +3,12 @@ import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 import { runSeed, type SeedAdapter } from '../../src/seed/runSeed.js';
 import type { ExerciseSeed } from '../../src/schemas/exerciseSeed.js';
-import type { PoolClient } from 'pg';
 import { makeExerciseSeedAdapter } from '../../src/seed/adapters/exercises.js';
-
-type StubEntry = { slug: string; payload: number };
-
-const stubAdapter: SeedAdapter<StubEntry> = {
-  validate: (entries) => ({
-    success: true as const,
-    data: entries,
-  }) as any,
-  upsertOne: async (_tx: PoolClient, _e, _g) => { /* no-op */ },
-  archiveMissing: async (_tx, _key, _g) => 0,
-};
 
 describe('runSeed (generic adapter contract)', () => {
   it('exposes SeedAdapter<T> + opts shape', () => {
     expect(typeof runSeed).toBe('function');
+    type StubEntry = { slug: string; payload: number };
     const fn: (opts: { key: string; entries: StubEntry[]; adapter: SeedAdapter<StubEntry> })
       => Promise<{ applied: boolean; archived: number }> = runSeed;
     expect(fn).toBeDefined();
