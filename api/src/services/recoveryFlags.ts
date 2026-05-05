@@ -2,6 +2,8 @@
 // Registry-shaped evaluator surface so #3 can plug in overreaching +
 // stalled-PR evaluators without schema or surface changes.
 
+import { db } from '../db/client.js';
+
 export type RecoveryFlagContext = {
   userId: string;
   runId: string | null;
@@ -35,9 +37,15 @@ export type EvaluatedFlag =
 export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFlag[]> {
   const out: EvaluatedFlag[] = [];
   for (const ev of REGISTRY.values()) {
-    const r = await ev.evaluate(ctx);
-    if (r.triggered) out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
-    else             out.push({ key: ev.key, triggered: false });
+    try {
+      const r = await ev.evaluate(ctx);
+      if (r.triggered) out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
+      else             out.push({ key: ev.key, triggered: false });
+    } catch (err) {
+      // Fail-closed so one evaluator failure doesn't drop the others.
+      console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
+      out.push({ key: ev.key, triggered: false });
+    }
   }
   return out;
 }
@@ -45,13 +53,20 @@ export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFl
 // For tests: clear registry between scenarios.
 export function _resetRegistryForTest(): void { REGISTRY.clear(); }
 
-import { db } from '../db/client.js';
-
 /**
- * Trigger when the 7-day rolling trend is ≤ -2.0 lb AND the active program's
- * goal is not 'cut'. Goal lookup: user_programs.customizations.goal of the
- * user's active mesocycle_run, falling back to 'unspecified' (which is
- * treated as ≠ cut, so the flag may fire).
+ * Trigger when the 7-day weight trend is ≤ -2.0 lb AND the active program's
+ * goal is not 'cut'.
+ *
+ * Trend is computed as (recent-half mean − older-half mean) inside an 8-day
+ * window. With inclusive date boundaries on each half, the partition is:
+ *   recent: sample_date >= CURRENT_DATE - INTERVAL '3 days'  (today + 3 prior = 4 dates)
+ *   older:  sample_date <  CURRENT_DATE - INTERVAL '3 days'
+ *           AND sample_date >= CURRENT_DATE - INTERVAL '8 days'  (4 dates)
+ * Negative trend means losing weight. ≤ -2.0 fires the flag.
+ *
+ * If no active mesocycle_run/user_program is found, the goal check defaults
+ * to "≠ cut" (flag may fire). If the program's goal is explicitly 'cut',
+ * the flag is suppressed.
  */
 export const bodyweightCrashEvaluator: RecoveryFlagEvaluator = {
   key: 'bodyweight_crash',

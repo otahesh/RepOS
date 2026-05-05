@@ -1,5 +1,5 @@
 // api/tests/recoveryFlags.test.ts
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
   registerEvaluator, getRegisteredFlagKeys, evaluateAll,
   bodyweightCrashEvaluator, _resetRegistryForTest,
@@ -35,6 +35,10 @@ describe('recoveryFlags registry (spec §7.2)', () => {
     expect(fired.find(f => f.key === 'unit_always_fires')).toBeDefined();
     expect(fired.find(f => f.key === 'unit_never_fires')).toBeUndefined();
   });
+});
+
+beforeEach(() => {
+  _resetRegistryForTest();
 });
 
 let userId: string;
@@ -92,7 +96,6 @@ describe('bodyweight-crash evaluator (spec §7.2)', () => {
   });
 
   it('registry interface accepts the bodyweight-crash evaluator alongside a stub overreaching evaluator (#3-ready)', () => {
-    _resetRegistryForTest();
     registerEvaluator(bodyweightCrashEvaluator);
     registerEvaluator({
       key: 'overreaching', version: 1,
