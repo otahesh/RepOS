@@ -208,3 +208,123 @@ describe('PATCH /api/planned-sets/:id', () => {
     }
   });
 });
+
+describe('POST /api/planned-sets/:id/substitute', () => {
+  it('persists exercise_id change AND substituted_from_exercise_id', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    const { rows: [orig] } = await db.query(
+      `SELECT exercise_id FROM planned_sets WHERE id=$1`, [setRow.id],
+    );
+    const { rows: [target] } = await db.query(
+      `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
+    );
+    expect(target).toBeDefined();
+    const r = await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: { to_exercise_id: target.id },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows: [after] } = await db.query(
+      `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`,
+      [setRow.id],
+    );
+    expect(after.exercise_id).toBe(target.id);
+    expect(after.substituted_from_exercise_id).toBe(orig.exercise_id);
+  });
+
+  it('appends a mesocycle_run_events row with substitute payload', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    const { rows: [target] } = await db.query(
+      `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
+    );
+    await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: { to_exercise_id: target.id },
+    });
+    const { rows } = await db.query(
+      `SELECT payload FROM mesocycle_run_events
+       WHERE run_id=$1 AND event_type='set_overridden'
+       ORDER BY occurred_at DESC LIMIT 1`,
+      [runId],
+    );
+    expect(rows[0].payload.kind).toBe('substitute');
+    expect(rows[0].payload.to_exercise_id).toBe(target.id);
+  });
+
+  it('past day → 409', async () => {
+    await db.query(
+      `UPDATE day_workouts SET scheduled_date='2026-05-01'
+       WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`, [runId],
+    );
+    try {
+      const { rows: [past] } = await db.query(
+        `SELECT ps.id FROM planned_sets ps JOIN day_workouts dw ON dw.id=ps.day_workout_id
+         WHERE dw.mesocycle_run_id=$1 AND dw.scheduled_date='2026-05-01' LIMIT 1`,
+        [runId],
+      );
+      const { rows: [target] } = await db.query(
+        `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
+      );
+      const r = await app.inject({
+        method: 'POST', url: `/api/planned-sets/${past.id}/substitute`, headers: auth(),
+        body: { to_exercise_id: target.id },
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json<any>().error).toBe('past_day_readonly');
+    } finally {
+      // Restore the date so other tests aren't affected
+      await db.query(
+        `UPDATE day_workouts SET scheduled_date='2026-05-08'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`, [runId],
+      );
+    }
+  });
+
+  it('400 when to_exercise_id is missing or unknown', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    const r1 = await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: {},
+    });
+    expect(r1.statusCode).toBe(400);
+    const r2 = await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: { to_exercise_id: '00000000-0000-0000-0000-000000000000' },
+    });
+    expect(r2.statusCode).toBe(400);
+  });
+
+  it('idempotent substituted_from_exercise_id — second substitute preserves the first from', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    // Capture the true "original from" — may already be set from earlier tests in this suite
+    const { rows: [before] } = await db.query(
+      `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`, [setRow.id],
+    );
+    // The first-ever original is substituted_from_exercise_id if already substituted, else current exercise_id
+    const trueOrigId = before.substituted_from_exercise_id ?? before.exercise_id;
+    const { rows: targets } = await db.query(
+      `SELECT id, slug FROM exercises WHERE slug IN ('dumbbell-goblet-squat','barbell-back-squat') AND archived_at IS NULL`,
+    );
+    const goblet = targets.find(e => e.slug === 'dumbbell-goblet-squat');
+    const barbell = targets.find(e => e.slug === 'barbell-back-squat');
+    expect(goblet).toBeDefined();
+    expect(barbell).toBeDefined();
+    // First sub (may re-apply goblet — idempotency will keep trueOrigId)
+    await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: { to_exercise_id: goblet.id },
+    });
+    // Second sub
+    await app.inject({
+      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      body: { to_exercise_id: barbell.id },
+    });
+    const { rows: [after] } = await db.query(
+      `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`,
+      [setRow.id],
+    );
+    expect(after.exercise_id).toBe(barbell.id);
+    // First "from" preserved via COALESCE
+    expect(after.substituted_from_exercise_id).toBe(trueOrigId);
+  });
+});
