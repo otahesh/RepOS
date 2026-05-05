@@ -102,3 +102,100 @@ describe('GET /api/user-programs/:id', () => {
     expect(r.statusCode).toBe(404);
   });
 });
+
+describe('PATCH /api/user-programs/:id', () => {
+  let upId: string;
+  beforeAll(async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    upId = r.json<any>().id;
+  });
+
+  it('rename op updates customizations.name_override', async () => {
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
+      body: { op: 'rename', name: 'My Custom Plan' },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query(
+      `SELECT customizations FROM user_programs WHERE id=$1`, [upId],
+    );
+    expect(rows[0].customizations.name_override).toBe('My Custom Plan');
+  });
+
+  it('swap_exercise op records {week_idx:1, day_idx, block_idx, from_slug captured, to_slug}', async () => {
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
+      body: {
+        op: 'swap_exercise', day_idx: 0, block_idx: 0,
+        to_exercise_slug: 'goblet-squat',
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query(
+      `SELECT customizations, template_id FROM user_programs WHERE id=$1`, [upId],
+    );
+    const swaps = rows[0].customizations.swaps;
+    expect(Array.isArray(swaps)).toBe(true);
+    expect(swaps).toContainEqual(
+      expect.objectContaining({
+        week_idx: 1, day_idx: 0, block_idx: 0, to_slug: 'goblet-squat',
+      })
+    );
+    // from_slug must be captured from the template's current structure
+    const swap = swaps.find((s: any) => s.day_idx === 0 && s.block_idx === 0);
+    expect(typeof swap.from_slug).toBe('string');
+    expect(swap.from_slug.length).toBeGreaterThan(0);
+  });
+
+  it('skip_day op records {week_idx, day_idx}', async () => {
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
+      body: { op: 'skip_day', week_idx: 2, day_idx: 1 },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query(
+      `SELECT customizations FROM user_programs WHERE id=$1`, [upId],
+    );
+    expect(rows[0].customizations.skipped_days).toContainEqual({ week_idx: 2, day_idx: 1 });
+  });
+
+  it('400 on invalid op (not in schema)', async () => {
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
+      body: { op: 'destroy_program' },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("404 on someone else's user_program", async () => {
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+    );
+    const { rows: [other] } = await db.query(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${other.id}`, headers: auth(),
+      body: { op: 'rename', name: 'Hijacked' },
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('409 on archived program', async () => {
+    // Mark this program as archived, attempt rename → 409
+    await db.query(`UPDATE user_programs SET status='archived' WHERE id=$1`, [upId]);
+    try {
+      const r = await app.inject({
+        method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
+        body: { op: 'rename', name: 'Should Reject' },
+      });
+      expect(r.statusCode).toBe(409);
+    } finally {
+      await db.query(`UPDATE user_programs SET status='draft' WHERE id=$1`, [upId]);
+    }
+  });
+});
