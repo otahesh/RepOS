@@ -6,7 +6,17 @@ import { db } from '../src/db/client.js';
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 
+// Phase D's seed-runner e2e tests archive 'strength-cardio-3-2' when proving
+// the "missing from input → archive" path (D.19). Restore the curated 3 here
+// so this catalog suite is order-independent vs. seed-runner suites.
+const CURATED_SLUGS = ['full-body-3-day', 'strength-cardio-3-2', 'upper-lower-4-day'];
+
 beforeAll(async () => {
+  await db.query(
+    `UPDATE program_templates SET archived_at = NULL
+     WHERE slug = ANY($1::text[]) AND archived_at IS NOT NULL`,
+    [CURATED_SLUGS],
+  );
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS n FROM program_templates WHERE archived_at IS NULL`
   );
