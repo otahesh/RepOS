@@ -287,3 +287,101 @@ describe('day_workouts (migration 018)', () => {
     await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
   });
 });
+
+describe('planned_sets (migration 019)', () => {
+  async function mkDay(): Promise<{ user_id: string; day_id: string; ex_id: string }> {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.ps.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    const { rows: [up] } = await db.query(
+      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'p') RETURNING id`,
+      [u.id]
+    );
+    const { rows: [r] } = await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
+       VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
+      [up.id, u.id]
+    );
+    const { rows: [d] } = await db.query(
+      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
+       VALUES ($1,1,0,'2026-01-05','strength','Mon') RETURNING id`,
+      [r.id]
+    );
+    const { rows: [ex] } = await db.query(
+      `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
+                              skill_complexity,loading_demand,systemic_fatigue)
+       VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
+               'push_horizontal','mid',3,3,3) RETURNING id`,
+      [`ps-test-ex-${Date.now()}-${Math.random().toString(36).slice(2,8)}`]
+    );
+    return { user_id: u.id, day_id: d.id, ex_id: ex.id };
+  }
+
+  it('rejects target_rir = 0 (RIR 0 globally banned per Q4)', async () => {
+    const { user_id, day_id, ex_id } = await mkDay();
+    await expect(
+      db.query(
+        `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                    target_reps_low, target_reps_high, target_rir, rest_sec)
+         VALUES ($1,0,0,$2,8,12,0,120)`,
+        [day_id, ex_id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+  });
+
+  it('rejects target_reps_low > target_reps_high', async () => {
+    const { user_id, day_id, ex_id } = await mkDay();
+    await expect(
+      db.query(
+        `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                    target_reps_low, target_reps_high, target_rir, rest_sec)
+         VALUES ($1,0,0,$2,12,8,2,120)`,
+        [day_id, ex_id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+  });
+
+  it('FK exercise_id ON DELETE RESTRICT raises 23503 if exercise still referenced', async () => {
+    const { user_id, day_id, ex_id } = await mkDay();
+    await db.query(
+      `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                  target_reps_low, target_reps_high, target_rir, rest_sec)
+       VALUES ($1,0,0,$2,8,12,2,120)`,
+      [day_id, ex_id]
+    );
+    let code: string | undefined;
+    try {
+      await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+    } catch (e: any) { code = e.code; }
+    expect(code).toBe('23503');
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);  // cascades to planned_sets
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+  });
+
+  it('rejects duplicate (day_workout_id, block_idx, set_idx)', async () => {
+    const { user_id, day_id, ex_id } = await mkDay();
+    await db.query(
+      `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                  target_reps_low, target_reps_high, target_rir, rest_sec)
+       VALUES ($1,0,0,$2,8,12,2,120)`,
+      [day_id, ex_id]
+    );
+    let code: string | undefined;
+    try {
+      await db.query(
+        `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
+                                    target_reps_low, target_reps_high, target_rir, rest_sec)
+         VALUES ($1,0,0,$2,8,12,2,120)`,
+        [day_id, ex_id]
+      );
+    } catch (e: any) { code = e.code; }
+    expect(code).toBe('23505');
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+    await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
+  });
+});
