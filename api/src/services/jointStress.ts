@@ -1,9 +1,14 @@
 // api/src/services/jointStress.ts
 import { db } from '../db/client.js';
 
-const SOFT_CAPS: Record<string, number> = {
-  lumbar: 16, knee: 20, shoulder: 14,
-};
+// Caps measure COUNT of high-level sets per joint per week. The score
+// (Σ sets × stress) is a separate intensity-weighted axis surfaced via
+// week.joints[joint].score, not gated by these caps.
+const SOFT_CAPS = {
+  lumbar:   { cap: 16, kind: 'soft_cap_lumbar' },
+  knee:     { cap: 20, kind: 'soft_cap_knee' },
+  shoulder: { cap: 14, kind: 'soft_cap_shoulder' },
+} as const;
 const HIGH_LEVEL = 'high';
 
 export type JointStressWarning =
@@ -25,17 +30,17 @@ export type JointStressReport = {
 
 export async function computeWeeklyJointStress(runId: string): Promise<JointStressReport> {
   const { rows } = await db.query<{
-    week_idx: number; day_workout_id: string; exercise_id: string; ex_name: string;
+    week_idx: number; day_workout_id: string; ex_name: string;
     sets: number; profile: any;
   }>(
-    `SELECT dw.week_idx, dw.id AS day_workout_id, e.id AS exercise_id, e.name AS ex_name,
+    `SELECT dw.week_idx, dw.id AS day_workout_id, e.name AS ex_name,
             COUNT(*)::int AS sets,
             e.joint_stress_profile AS profile
      FROM planned_sets ps
      JOIN day_workouts dw ON dw.id=ps.day_workout_id
      JOIN exercises e ON e.id=ps.exercise_id
      WHERE dw.mesocycle_run_id=$1
-     GROUP BY dw.week_idx, dw.id, e.id, e.name, e.joint_stress_profile`,
+     GROUP BY dw.week_idx, dw.id, e.name, e.joint_stress_profile`,
     [runId],
   );
 
@@ -88,13 +93,11 @@ export async function computeWeeklyJointStress(runId: string): Promise<JointStre
   }
   for (const [k, sets] of highByWeekJoint) {
     const [wStr, joint] = k.split('|');
-    const cap = SOFT_CAPS[joint];
-    if (cap && sets > cap) {
+    const entry = SOFT_CAPS[joint as keyof typeof SOFT_CAPS];
+    // > cap, not >=: hitting the cap exactly is acceptable; only exceeding warns.
+    if (entry && sets > entry.cap) {
       const wk = byWeek.get(Number(wStr));
-      const kind = `soft_cap_${joint}` as 'soft_cap_lumbar'|'soft_cap_knee'|'soft_cap_shoulder';
-      if (kind === 'soft_cap_lumbar' || kind === 'soft_cap_knee' || kind === 'soft_cap_shoulder') {
-        wk?.warnings.push({ kind, sets });
-      }
+      wk?.warnings.push({ kind: entry.kind, sets });
     }
   }
 
