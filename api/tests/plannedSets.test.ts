@@ -144,6 +144,7 @@ describe('PATCH /api/planned-sets/:id', () => {
       [runId],
     );
     expect(rows[0].event_type).toBe('set_overridden');
+    expect(rows[0].payload.kind).toBe('patch');
     expect(rows[0].payload.planned_set_id).toBe(setRow.id);
   });
 

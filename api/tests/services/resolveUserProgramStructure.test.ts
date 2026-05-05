@@ -90,7 +90,7 @@ describe('resolveUserProgramStructure', () => {
       `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
       [
         JSON.stringify({
-          swaps: [{ week_idx: 1, day_idx: 0, block_idx: 0, from_slug: origFirstSlug, to_slug: 'goblet-squat' }],
+          swaps: [{ week_idx: 1, day_idx: 0, block_idx: 0, from_slug: origFirstSlug, to_slug: 'barbell-back-squat' }],
         }),
         userProgramId,
       ],
@@ -98,7 +98,7 @@ describe('resolveUserProgramStructure', () => {
     try {
       const result = await resolveUserProgramStructure(userProgramId, userId);
       expect(result).not.toBeNull();
-      expect(result!.effective_structure.days[0].blocks[0].exercise_slug).toBe('goblet-squat');
+      expect(result!.effective_structure.days[0].blocks[0].exercise_slug).toBe('barbell-back-squat');
       // set_count_delta defaults to 0 on all blocks
       expect(result!.effective_structure.days[0].blocks[0].set_count_delta).toBe(0);
     } finally {
@@ -147,7 +147,7 @@ describe('resolveUserProgramStructure', () => {
       `UPDATE user_programs SET customizations=$1::jsonb WHERE id=$2`,
       [
         JSON.stringify({
-          swaps: [{ week_idx: 2, day_idx: 0, block_idx: 0, from_slug: 'x', to_slug: 'goblet-squat' }],
+          swaps: [{ week_idx: 2, day_idx: 0, block_idx: 0, from_slug: 'x', to_slug: 'dumbbell-goblet-squat' }],
         }),
         userProgramId,
       ],
@@ -207,7 +207,7 @@ describe('resolveUserProgramStructure', () => {
       [JSON.stringify({
         swaps: [
           { week_idx: 1, day_idx: 0, block_idx: 0,
-            from_slug: 'never-existed-this-name', to_slug: 'goblet-squat' }
+            from_slug: 'never-existed-this-name', to_slug: 'barbell-back-squat' }
         ],
       }), userProgramId],
     );
@@ -216,7 +216,7 @@ describe('resolveUserProgramStructure', () => {
       expect(r).not.toBeNull();
       // Swap was stale → block keeps its original exercise_slug
       expect(r!.effective_structure.days[0].blocks[0].exercise_slug).toBe(origFirstSlug);
-      expect(r!.effective_structure.days[0].blocks[0].exercise_slug).not.toBe('goblet-squat');
+      expect(r!.effective_structure.days[0].blocks[0].exercise_slug).not.toBe('barbell-back-squat');
     } finally {
       await db.query(`UPDATE user_programs SET customizations='{}'::jsonb WHERE id=$1`, [userProgramId]);
     }

@@ -115,6 +115,7 @@ export async function plannedSetRoutes(app: FastifyInstance) {
           `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
            VALUES ($1, 'set_overridden', $2::jsonb)`,
           [setRow.mesocycle_run_id, JSON.stringify({
+            kind: 'patch',
             planned_set_id: req.params.id,
             changes: b,
             scheduled_date: setRow.scheduled_date,

@@ -129,7 +129,7 @@ describe('PATCH /api/user-programs/:id', () => {
       method: 'PATCH', url: `/api/user-programs/${upId}`, headers: auth(),
       body: {
         op: 'swap_exercise', day_idx: 0, block_idx: 0,
-        to_exercise_slug: 'goblet-squat',
+        to_exercise_slug: 'dumbbell-goblet-squat',
       },
     });
     expect(r.statusCode).toBe(200);
@@ -140,7 +140,7 @@ describe('PATCH /api/user-programs/:id', () => {
     expect(Array.isArray(swaps)).toBe(true);
     expect(swaps).toContainEqual(
       expect.objectContaining({
-        week_idx: 1, day_idx: 0, block_idx: 0, to_slug: 'goblet-squat',
+        week_idx: 1, day_idx: 0, block_idx: 0, to_slug: 'dumbbell-goblet-squat',
       })
     );
     // from_slug must be captured from the template's current structure
