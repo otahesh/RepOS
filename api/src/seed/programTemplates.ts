@@ -1,5 +1,5 @@
 // File: api/src/seed/programTemplates.ts
-// Curated v1 program lineup. Three templates: full-body-3-day, upper-lower-4-day, strength-cardio-3+2.
+// Curated v1 program lineup. Three templates: full-body-3-day, upper-lower-4-day, strength-cardio-3-2.
 // Auto-ramp materializer expands these template-week structures across N weeks at run-start.
 // MEV/MAV per block are inputs the materializer reads; do not pre-expand here.
 
