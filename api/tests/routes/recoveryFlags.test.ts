@@ -162,3 +162,106 @@ describe('GET /api/recovery-flags', () => {
     expect(r.statusCode).toBe(401);
   });
 });
+
+describe('POST /api/recovery-flags/dismiss', () => {
+  beforeEach(async () => {
+    // Ensure dismissals don't bleed across tests regardless of execution order.
+    await db.query(`DELETE FROM recovery_flag_dismissals WHERE user_id = $1`, [userId]);
+    await db.query(`DELETE FROM recovery_flag_dismissals WHERE user_id = $1`, [cutUserId]);
+  });
+
+  it('returns 400 for unknown flag', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
+      headers: auth(token),
+      body: { flag: 'not_a_real_flag' },
+    });
+    expect(r.statusCode).toBe(400);
+    const body = r.json<{ error: string; field: string }>();
+    expect(typeof body.error).toBe('string');
+    expect(typeof body.field).toBe('string');
+  });
+
+  it('records dismissal and suppresses flag for current week', async () => {
+    // Ensure flag fires before dismissal
+    await seedCrashingWeights(userId);
+
+    const before = await app.inject({
+      method: 'GET',
+      url: '/api/recovery-flags',
+      headers: auth(token),
+    });
+    expect(before.statusCode).toBe(200);
+    const beforeBody = before.json<{ flags: Array<{ flag: string }> }>();
+    expect(beforeBody.flags.find(f => f.flag === 'bodyweight_crash')).toBeDefined();
+
+    // Dismiss the flag
+    const dismiss = await app.inject({
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
+      headers: auth(token),
+      body: { flag: 'bodyweight_crash' },
+    });
+    expect(dismiss.statusCode).toBe(204);
+
+    // Now GET should not return the flag
+    const after = await app.inject({
+      method: 'GET',
+      url: '/api/recovery-flags',
+      headers: auth(token),
+    });
+    expect(after.statusCode).toBe(200);
+    const afterBody = after.json<{ flags: Array<{ flag: string }> }>();
+    expect(afterBody.flags.find(f => f.flag === 'bodyweight_crash')).toBeUndefined();
+  });
+
+  it('re-fires after moving dismissal back 14 days (new ISO week)', async () => {
+    await seedCrashingWeights(userId);
+
+    // Dismiss for current week
+    const dismiss = await app.inject({
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
+      headers: auth(token),
+      body: { flag: 'bodyweight_crash' },
+    });
+    expect(dismiss.statusCode).toBe(204);
+
+    // Shift the dismissal back 2 weeks so it belongs to a past week
+    await db.query(
+      `UPDATE recovery_flag_dismissals
+       SET week_start = (current_date - interval '14 days')::date
+       WHERE user_id=$1 AND flag='bodyweight_crash'`,
+      [userId],
+    );
+
+    // Flag should re-fire since dismissal is no longer for this week
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/recovery-flags',
+      headers: auth(token),
+    });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ flags: Array<{ flag: string }> }>();
+    expect(body.flags.find(f => f.flag === 'bodyweight_crash')).toBeDefined();
+  });
+
+  it('is idempotent — repeat dismiss in same week returns 204', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
+      headers: auth(token),
+      body: { flag: 'bodyweight_crash' },
+    });
+    expect(first.statusCode).toBe(204);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
+      headers: auth(token),
+      body: { flag: 'bodyweight_crash' },
+    });
+    expect(second.statusCode).toBe(204);
+  });
+});

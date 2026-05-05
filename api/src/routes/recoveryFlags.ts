@@ -2,8 +2,12 @@
 // GET /api/recovery-flags
 // Evaluates recovery flags for the authenticated user and returns triggered,
 // non-dismissed flags for the current ISO week.
+//
+// POST /api/recovery-flags/dismiss
+// Records a dismissal for (user, flag, week_start). Re-fires next week.
 
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import {
@@ -12,7 +16,10 @@ import {
   registerEvaluator,
   type EvaluatedFlag,
 } from '../services/recoveryFlags.js';
-import { isDismissed } from '../services/recoveryFlagDismissals.js';
+import { isDismissed, recordDismissal } from '../services/recoveryFlagDismissals.js';
+
+const KNOWN_FLAGS = ['bodyweight_crash', 'overreaching', 'stalled_pr'] as const;
+const DismissBody = z.object({ flag: z.enum(KNOWN_FLAGS) });
 
 export async function recoveryFlagRoutes(app: FastifyInstance) {
   // Register evaluators inside the setup function (not at module scope) so that
@@ -53,4 +60,31 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
 
     return { flags };
   });
+
+  app.post<{ Body: unknown }>(
+    '/recovery-flags/dismiss',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+
+      const parsed = DismissBody.safeParse(req.body);
+      if (!parsed.success) {
+        reply.code(400);
+        return {
+          error: parsed.error.message,
+          field: parsed.error.issues[0]?.path?.join('.') ?? '',
+        };
+      }
+
+      // Compute current ISO-week Monday (TZ-stable via Postgres, same formula as GET)
+      const { rows: [{ week_start }] } = await db.query<{ week_start: string }>(
+        `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
+      );
+
+      await recordDismissal({ userId, flag: parsed.data.flag, weekStart: week_start });
+
+      reply.code(204);
+      return null;
+    },
+  );
 }
