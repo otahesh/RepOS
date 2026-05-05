@@ -105,12 +105,11 @@ describe('POST /api/program-templates/:slug/fork', () => {
   });
   const auth = () => ({ authorization: `Bearer ${token}` });
 
-  it('401/503 without auth (CF Access disabled in tests)', async () => {
+  it('401 without auth', async () => {
     const r = await app.inject({
       method: 'POST', url: '/api/program-templates/full-body-3-day/fork',
     });
-    // No Bearer token + CF Access disabled = 503; valid pattern tested via other endpoints
-    expect([401, 503]).toContain(r.statusCode);
+    expect(r.statusCode).toBe(401);
   });
 
   it('201 creates user_program with template_id + template_version, status=draft, structure NOT copied', async () => {

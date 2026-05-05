@@ -134,6 +134,12 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
     return requireAuth(req, reply);
   }
+  // No Bearer header: only fall through to CF Access when it's actually configured.
+  // Otherwise the request is simply unauthenticated → 401, not "service unavailable".
+  if (!isCfAccessEnabled()) {
+    reply.header('WWW-Authenticate', 'Bearer realm="api"');
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
   return requireCfAccess(req, reply);
 }
 
