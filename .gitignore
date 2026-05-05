@@ -22,3 +22,6 @@ npm-debug.log*
 
 # Superpowers brainstorm session artifacts (visual companion)
 .superpowers/
+
+# Local git worktrees (subagent-driven-development isolation)
+.worktrees/
