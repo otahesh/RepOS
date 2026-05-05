@@ -145,3 +145,78 @@ describe('user_programs (migration 016)', () => {
     expect(rows[0]?.indexdef).toMatch(/WHERE \(status <> 'archived'/i);
   });
 });
+
+describe('mesocycle_runs (migration 017)', () => {
+  async function mkUserProgram(): Promise<{ user_id: string; up_id: string }> {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.mr.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    const { rows: [up] } = await db.query(
+      `INSERT INTO user_programs (user_id, name) VALUES ($1, 'mine') RETURNING id`,
+      [u.id]
+    );
+    return { user_id: u.id, up_id: up.id };
+  }
+
+  it('partial unique index allows multiple non-active rows', async () => {
+    const { user_id, up_id } = await mkUserProgram();
+    await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1,$2,'2026-01-01','America/New_York',5,'completed')`,
+      [up_id, user_id]
+    );
+    await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1,$2,'2026-02-01','America/New_York',5,'completed')`,
+      [up_id, user_id]
+    );
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+
+  it('partial unique index allows one active and one paused per user', async () => {
+    const { user_id, up_id } = await mkUserProgram();
+    await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
+      [up_id, user_id]
+    );
+    await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1,$2,'2026-02-01','UTC',5,'paused')`,
+      [up_id, user_id]
+    );
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+
+  it('rejects a SECOND active row for same user with 23505', async () => {
+    const { user_id, up_id } = await mkUserProgram();
+    await db.query(
+      `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+       VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
+      [up_id, user_id]
+    );
+    let code: string | undefined;
+    try {
+      await db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
+         VALUES ($1,$2,'2026-02-01','UTC',5,'active')`,
+        [up_id, user_id]
+      );
+    } catch (e: any) { code = e.code; }
+    expect(code).toBe('23505');
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+
+  it('start_tz is NOT NULL', async () => {
+    const { user_id, up_id } = await mkUserProgram();
+    await expect(
+      db.query(
+        `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, weeks)
+         VALUES ($1,$2,'2026-01-01',5)`,
+        [up_id, user_id]
+      )
+    ).rejects.toThrow();
+    await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
+  });
+});
