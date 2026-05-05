@@ -10,6 +10,7 @@ import { equipmentRoutes } from './routes/equipment.js';
 import { programRoutes } from './routes/programs.js';
 import { userProgramRoutes } from './routes/userPrograms.js';
 import { mesocycleRoutes } from './routes/mesocycles.js';
+import { plannedSetRoutes } from './routes/plannedSets.js';
 import { requireCfAccess } from './middleware/cfAccess.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -37,6 +38,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(programRoutes, { prefix: '/api' });
   await app.register(userProgramRoutes, { prefix: '/api' });
   await app.register(mesocycleRoutes, { prefix: '/api' });
+  await app.register(plannedSetRoutes, { prefix: '/api' });
   await app.register(weightRoutes, { prefix: '/api/health' });
   await app.register(syncRoutes, { prefix: '/api/health' });
 
