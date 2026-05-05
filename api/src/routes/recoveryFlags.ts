@@ -72,7 +72,7 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
         reply.code(400);
         return {
           error: parsed.error.message,
-          field: parsed.error.issues[0]?.path?.join('.') ?? '',
+          field: parsed.error.issues[0]?.path?.join('.'),
         };
       }
 
