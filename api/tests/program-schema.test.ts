@@ -559,6 +559,53 @@ describe('set_logs (migration 022)', () => {
   });
 });
 
+describe('recovery_flag_dismissals (migration 024)', () => {
+  it('rejects duplicate (user, flag, week_start)', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.rfd.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      await db.query(
+        `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
+         VALUES ($1, 'bodyweight_crash', '2026-05-04')`,
+        [u.id]
+      );
+      let code: string | undefined;
+      try {
+        await db.query(
+          `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
+           VALUES ($1, 'bodyweight_crash', '2026-05-04')`,
+          [u.id]
+        );
+      } catch (e: any) { code = e.code; }
+      expect(code).toBe('23505');
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+
+  it('rejects unknown flag value via CHECK', async () => {
+    const { rows: [u] } = await db.query(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.rfd2.${Date.now()}.${Math.random()}@repos.test`]
+    );
+    try {
+      let code: string | undefined;
+      try {
+        await db.query(
+          `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
+           VALUES ($1, 'made_up_flag', '2026-05-04')`,
+          [u.id]
+        );
+      } catch (e: any) { code = e.code; }
+      expect(code).toBe('23514');
+    } finally {
+      await db.query(`DELETE FROM users WHERE id=$1`, [u.id]);
+    }
+  });
+});
+
 describe('mesocycle_run_events (migration 023)', () => {
   it('cascades on mesocycle_run delete', async () => {
     const { rows: [u] } = await db.query(
