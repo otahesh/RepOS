@@ -19,6 +19,7 @@ function canonicalize(value: unknown): string {
 
 export function makeProgramTemplateAdapter(
   knownExerciseSlugs: Set<string>,
+  cardioExerciseSlugs: Set<string> = new Set(),
 ): SeedAdapter<ProgramTemplateSeed> {
   const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema)
     .superRefine((arr, ctx) => {
@@ -29,11 +30,22 @@ export function makeProgramTemplateAdapter(
         }
         seen.add(tpl.slug);
         tpl.structure.days.forEach((day, dayIdx) => {
+          const dayIsCardio = day.kind === 'cardio' || day.kind === 'hybrid';
           day.blocks.forEach((block, blockIdx) => {
             if (!knownExerciseSlugs.has(block.exercise_slug)) {
               ctx.addIssue({
                 code: 'custom',
                 message: `unknown exercise_slug: ${block.exercise_slug}`,
+                path: [tplIdx, 'structure', 'days', dayIdx, 'blocks', blockIdx, 'exercise_slug'],
+              });
+            }
+            // Cardio blocks (carry a `cardio` field) on cardio/hybrid days must
+            // reference cardio-modality exercises (movement_pattern='gait' in v1).
+            const isCardioBlock = 'cardio' in block && block.cardio != null;
+            if (dayIsCardio && isCardioBlock && !cardioExerciseSlugs.has(block.exercise_slug)) {
+              ctx.addIssue({
+                code: 'custom',
+                message: `cardio block references non-cardio exercise: ${block.exercise_slug}`,
                 path: [tplIdx, 'structure', 'days', dayIdx, 'blocks', blockIdx, 'exercise_slug'],
               });
             }

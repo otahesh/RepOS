@@ -100,4 +100,22 @@ describe('programTemplate validator', () => {
     expect(r.success).toBe(false);
     if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/mev.*mav|mav.*mev/i);
   });
+
+  it('rejects cardio block referencing non-cardio exercise', () => {
+    const adapter = makeProgramTemplateAdapter(
+      new Set(['dumbbell-bench-press', 'outdoor-walking-z2']),
+      new Set(['outdoor-walking-z2']),
+    );
+    const bad: ProgramTemplateSeed = {
+      ...baseTpl,
+      structure: { _v: 1, days: [{ ...minimalDay, kind: 'cardio',
+        blocks: [{
+          exercise_slug: 'dumbbell-bench-press',
+          cardio: { target_duration_sec: 1800, target_zone: 2 },
+        }] }] },
+    };
+    const r = adapter.validate([bad]);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/cardio.*non.?cardio|not a cardio/i);
+  });
 });
