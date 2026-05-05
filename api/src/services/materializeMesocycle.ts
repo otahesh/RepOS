@@ -1,5 +1,4 @@
 import { db } from '../db/client.js';
-import type { PoolClient } from 'pg';
 import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
 
 // Per-muscle landmarks (spec §5.1). Read-only constant in v1.
@@ -59,6 +58,9 @@ function addDaysISO(iso: string, days: number): string {
 }
 
 export async function materializeMesocycle(input: MaterializeInput): Promise<MaterializeResult> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) {
+    throw new Error('startDate must be YYYY-MM-DD');
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -186,7 +188,7 @@ export async function materializeMesocycle(input: MaterializeInput): Promise<Mat
       // For each muscle, compute week target from landmarks then distribute.
       for (const [muscleSlug, blocks] of muscleGroups) {
         const lm = MUSCLE_LANDMARKS[muscleSlug];
-        if (!lm) continue;
+        if (!lm) throw new Error(`muscle '${muscleSlug}' has no MEV/MAV/MRV landmarks`);
         const weekTarget = computeRamp({ mev: lm.mev, mav: lm.mav, mrv: lm.mrv, week: w, totalWeeks: weeks });
         const dist = distributeWeekTargetAcrossBlocks(
           blocks.map(b => ({ blockKey: `${b.dayIdx}|${b.blockIdx}`, mev: b.mev })),
