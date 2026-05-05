@@ -20,6 +20,3 @@ CREATE TABLE IF NOT EXISTS planned_sets (
   UNIQUE (day_workout_id, block_idx, set_idx),
   CHECK (target_reps_low <= target_reps_high)
 );
-
-CREATE INDEX IF NOT EXISTS idx_planned_sets_day
-  ON planned_sets(day_workout_id, block_idx, set_idx);
