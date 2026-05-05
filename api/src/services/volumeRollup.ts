@@ -1,6 +1,6 @@
 // api/src/services/volumeRollup.ts
 import { db } from '../db/client.js';
-import { MUSCLE_LANDMARKS } from './materializeMesocycle.js';
+import { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
 
 export type MuscleVolume = {
   muscle: string;
@@ -63,7 +63,11 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
     const muscles: MuscleVolume[] = setRows
       .filter(r => r.week_idx === w)
       .map(r => {
-        const lm = MUSCLE_LANDMARKS[r.muscle_slug] ?? { mev: 0, mav: 0, mrv: 0 };
+        let lm = MUSCLE_LANDMARKS[r.muscle_slug];
+        if (!lm) {
+          console.warn(`[volumeRollup] muscle '${r.muscle_slug}' has no landmarks; emitting zeros`);
+          lm = { mev: 0, mav: 0, mrv: 0 };
+        }
         return { muscle: r.muscle_slug, sets: Number(r.sets), mev: lm.mev, mav: lm.mav, mrv: lm.mrv };
       });
     const minutes_by_modality: Record<string, number> = {};
