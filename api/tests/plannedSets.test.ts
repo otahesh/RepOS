@@ -147,6 +147,47 @@ describe('PATCH /api/planned-sets/:id', () => {
     expect(rows[0].payload.planned_set_id).toBe(setRow.id);
   });
 
+  it('rejects empty PATCH body with 400', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      body: {},
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json<any>().error).toContain('patch body cannot be empty');
+  });
+
+  it('explicit override_reason: null clears the existing reason', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    // First set a reason
+    await app.inject({
+      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      body: { override_reason: 'temp' },
+    });
+    // Then explicitly clear
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      body: { override_reason: null },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query(`SELECT override_reason FROM planned_sets WHERE id=$1`, [setRow.id]);
+    expect(rows[0].override_reason).toBeNull();
+  });
+
+  it('cross-row rep range: PATCH target_reps_low > current high → 400 (no CHECK violation)', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    const { rows: [orig] } = await db.query(
+      `SELECT target_reps_low, target_reps_high FROM planned_sets WHERE id=$1`, [setRow.id]
+    );
+    // Set new low above current high
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      body: { target_reps_low: orig.target_reps_high + 5 },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json<any>().field).toBe('target_reps_low');
+  });
+
   it('bearer revoked mid-mesocycle → 401, no partial write', async () => {
     const setRow = await getSetOnDate('2026-05-06');
     const before = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [setRow.id]);
