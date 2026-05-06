@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs"
+    "check-pages": "node scripts/check-page-reachability.mjs",
+    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
