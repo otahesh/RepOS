@@ -49,7 +49,10 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 
 export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
   const res = await fetch('/api/program-templates', { credentials: 'same-origin' });
-  return jsonOrThrow<ProgramTemplate[]>(res);
+  // API wraps the list in { templates: [...] } — the detail and fork
+  // endpoints return bare bodies, but list endpoints leave room for pagination.
+  const body = await jsonOrThrow<{ templates: ProgramTemplate[] }>(res);
+  return body.templates;
 }
 
 export async function getProgramTemplate(slug: string): Promise<ProgramTemplate> {

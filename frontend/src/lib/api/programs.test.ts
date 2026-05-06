@@ -5,9 +5,12 @@ describe('programs API client', () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn();
   });
-  it('GET /api/program-templates returns rows', async () => {
+  it('GET /api/program-templates unwraps { templates } envelope and returns rows', async () => {
     (fetch as any).mockResolvedValueOnce({
-      ok: true, json: async () => ([{ slug: 'full-body-3-day', name: 'Full Body 3-Day', weeks: 5 }]),
+      ok: true,
+      json: async () => ({
+        templates: [{ slug: 'full-body-3-day', name: 'Full Body 3-Day', weeks: 5 }],
+      }),
     });
     const rows = await listProgramTemplates();
     expect(rows[0].slug).toBe('full-body-3-day');
