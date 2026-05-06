@@ -15,9 +15,24 @@ function monogram(displayName: string | null | undefined, email: string): string
   return 'U'
 }
 
-const NAV_ITEMS = [
-  { name: 'Today', icon: 'flame' as const, to: '/', exact: true },
-  { name: 'Settings', icon: 'settings' as const, to: '/settings/integrations' },
+type NavItem = {
+  name: string
+  icon: 'flame' | 'dumbbell' | 'settings'
+  to: string
+  exact?: boolean
+  matchPrefixes?: string[]
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { name: 'Today', icon: 'flame', to: '/', exact: true },
+  { name: 'Programs', icon: 'dumbbell', to: '/programs', matchPrefixes: ['/programs', '/my-programs'] },
+  { name: 'Settings', icon: 'settings', to: '/settings/integrations', matchPrefixes: ['/settings'] },
+]
+
+const SETTINGS_SUB = [
+  { label: 'Integrations', to: '/settings/integrations' },
+  { label: 'Units & equipment', to: '/settings/equipment' },
+  { label: 'Account', to: '/settings/account' },
 ]
 
 export default function Sidebar() {
@@ -86,7 +101,7 @@ export default function Sidebar() {
         {NAV_ITEMS.map(item => {
           const active = item.exact
             ? location.pathname === item.to
-            : location.pathname.startsWith(item.to)
+            : (item.matchPrefixes ?? [item.to]).some(p => location.pathname.startsWith(p))
           return (
             <div key={item.name}>
               <NavLink
@@ -137,19 +152,22 @@ export default function Sidebar() {
                   marginBottom: 4,
                   marginTop: 2,
                 }}>
-                  {['Integrations', 'Units & equipment', 'Account'].map((sub, i) => (
-                    <NavLink key={sub} to={i === 0 ? '/settings/integrations' : '#'} style={{ textDecoration: 'none' }}>
-                      <div style={{
-                        fontSize: 12,
-                        padding: '5px 10px',
-                        borderRadius: 6,
-                        color: i === 0 ? TOKENS.accent : TOKENS.textMute,
-                        fontWeight: i === 0 ? 600 : 500,
-                        background: i === 0 ? TOKENS.accentGlow : 'transparent',
-                        cursor: 'pointer',
-                      }}>{sub}</div>
-                    </NavLink>
-                  ))}
+                  {SETTINGS_SUB.map(sub => {
+                    const subActive = location.pathname === sub.to
+                    return (
+                      <NavLink key={sub.label} to={sub.to} style={{ textDecoration: 'none' }}>
+                        <div style={{
+                          fontSize: 12,
+                          padding: '5px 10px',
+                          borderRadius: 6,
+                          color: subActive ? TOKENS.accent : TOKENS.textMute,
+                          fontWeight: subActive ? 600 : 500,
+                          background: subActive ? TOKENS.accentGlow : 'transparent',
+                          cursor: 'pointer',
+                        }}>{sub.label}</div>
+                      </NavLink>
+                    )
+                  })}
                 </div>
               )}
             </div>
