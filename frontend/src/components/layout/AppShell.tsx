@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
+import { RouteErrorBoundary } from './RouteErrorBoundary'
 import { useIsMobile } from '../../lib/useIsMobile'
 
 export default function AppShell() {
@@ -70,7 +71,10 @@ export default function AppShell() {
           overflow: 'auto',
           minHeight: 0,
         }}>
-          <Outlet />
+          {/* keyed by pathname so the boundary resets on navigation */}
+          <RouteErrorBoundary key={location.pathname}>
+            <Outlet />
+          </RouteErrorBoundary>
         </main>
 
         {/* Backdrop */}
@@ -115,7 +119,9 @@ export default function AppShell() {
           overflow: 'auto',
           minHeight: 0,
         }}>
-          <Outlet />
+          <RouteErrorBoundary key={location.pathname}>
+            <Outlet />
+          </RouteErrorBoundary>
         </main>
       </div>
     </div>

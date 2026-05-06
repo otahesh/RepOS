@@ -7,10 +7,19 @@ describe('userPrograms API client', () => {
     (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'up-1', status: 'draft' }] });
     expect((await listMyPrograms()).length).toBe(1);
   });
-  it('GET detail merges customizations into structure', async () => {
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'up-1', structure: { _v: 1, days: [] }, customizations: {} }) });
+  it('GET detail returns effective_structure with customizations resolved', async () => {
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: 'up-1',
+        name: 'My Program',
+        effective_name: 'My Program',
+        effective_structure: { _v: 1, days: [] },
+        customizations: {},
+      }),
+    });
     const r = await getUserProgram('up-1');
-    expect(r.structure._v).toBe(1);
+    expect(r.effective_structure._v).toBe(1);
   });
   it('PATCH applies customizations', async () => {
     (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'up-1', customizations: { renamed: true } }) });

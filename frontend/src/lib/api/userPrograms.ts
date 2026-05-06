@@ -1,7 +1,15 @@
 import type { ProgramTemplateStructure, UserProgramRecord } from './programs';
 import type { ScheduleWarning } from '../../components/programs/ScheduleWarnings';
 
-export type UserProgramDetail = UserProgramRecord & { structure: ProgramTemplateStructure };
+// Mirror of api/src/services/resolveUserProgramStructure.ts ResolvedUserProgram.
+// API returns `effective_structure` (resolved with customizations applied) — not
+// `structure`. Frontend was reading `structure` and rendering blank pages on
+// every user-program detail load.
+export type UserProgramDetail = UserProgramRecord & {
+  effective_name: string;
+  effective_structure: ProgramTemplateStructure;
+  latest_run_id?: string;
+};
 
 export type UserProgramPatch = Partial<{
   name: string;
