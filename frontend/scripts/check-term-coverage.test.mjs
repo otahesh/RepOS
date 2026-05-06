@@ -18,4 +18,8 @@ describe('check-term-coverage', () => {
     const out = await findOffenders([fix('identifier-substring.tsx')]);
     expect(out).toEqual([]);
   });
+  it('flags term in JSX string-attribute value', async () => {
+    const out = await findOffenders([fix('attribute.tsx')]);
+    expect(out.map(o => o.token)).toEqual(['MEV']);
+  });
 });

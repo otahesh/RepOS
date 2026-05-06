@@ -17,6 +17,13 @@ async function loadTerms() {
   const keys = [...src.matchAll(/^\s{2}([A-Za-z_]\w*):\s*\{/gm)].map(m => m[1]);
   const shorts = [...src.matchAll(/short:\s*['"]([^'"]+)['"]/g)].map(m => m[1]);
   const fulls = [...src.matchAll(/full:\s*['"]([^'"]+)['"]/g)].map(m => m[1]);
+  if (keys.length < 5 || shorts.length !== keys.length || fulls.length !== keys.length) {
+    throw new Error(
+      `term-coverage: regex parse of terms.ts produced inconsistent results ` +
+      `(${keys.length} keys / ${shorts.length} shorts / ${fulls.length} fulls). ` +
+      `terms.ts may have been refactored — update loadTerms() in scripts/check-term-coverage.mjs.`
+    );
+  }
   return { keys, shorts, fulls };
 }
 
@@ -59,7 +66,10 @@ export async function findOffenders(files) {
         plugins: ['typescript', 'jsx'],
       });
     } catch (err) {
+      // Soft-fail-then-fail-loudly: record the parse error as an offender so the CI
+      // gate exits non-zero. Without this, a syntax error masks all term offenders.
       console.error(`parse error: ${file}: ${err.message}`);
+      offenders.push({ file, line: 0, token: '<parse error>' });
       continue;
     }
 
@@ -105,6 +115,6 @@ async function main() {
   process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
