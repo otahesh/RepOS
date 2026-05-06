@@ -6,19 +6,33 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
-    "recharts": "^2.14.1"
+    "recharts": "^2.14.1",
+    "@radix-ui/react-popover": "^1.1.2"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "@vitest/ui": "^2.1.4",
+    "jsdom": "^25.0.1",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^2.1.4",
+    "@babel/parser": "^7.26.2",
+    "@babel/traverse": "^7.25.9",
+    "@types/babel__traverse": "^7.20.6",
+    "glob": "^11.0.0"
   }
 }
