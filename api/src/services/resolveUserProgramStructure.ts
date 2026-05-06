@@ -6,27 +6,27 @@
 // canonical week schedule; this service covers the planning/preview phase.
 
 import { db } from '../db/client.js';
+import type { TemplateBlock, TemplateDayDef } from '../types/program.js';
 
 // ── Internal structure types ──────────────────────────────────────────────────
+//
+// The resolver stamps two override fields onto the canonical TemplateBlock
+// shape: `set_count_delta` (always initialized) and `target_rir_override`
+// (only when a week-1 rir_override applies). Both are part of the public
+// effective_structure contract — frontend reads them directly.
 
-type Block = {
-  exercise_slug: string;
+type ResolvedTemplateBlock = TemplateBlock & {
   set_count_delta?: number;
   target_rir_override?: number;
-  [key: string]: unknown;
 };
 
-type DayDef = {
-  idx: number;
-  day_offset: number;
-  kind: 'strength' | 'cardio' | 'hybrid';
-  name: string;
-  blocks: Block[];
+type ResolvedTemplateDay = Omit<TemplateDayDef, 'blocks'> & {
+  blocks: ResolvedTemplateBlock[];
 };
 
 type TemplateStructure = {
   _v: 1;
-  days: DayDef[];
+  days: ResolvedTemplateDay[];
 };
 
 type Customizations = {
@@ -49,16 +49,7 @@ export type ResolvedUserProgram = {
   effective_name: string;
   customizations: Record<string, unknown>;
   status: 'draft' | 'active' | 'completed' | 'archived';
-  effective_structure: {
-    _v: 1;
-    days: Array<{
-      idx: number;
-      day_offset: number;
-      kind: 'strength' | 'cardio' | 'hybrid';
-      name: string;
-      blocks: unknown[];
-    }>;
-  };
+  effective_structure: TemplateStructure;
   latest_run_id?: string;
 };
 
