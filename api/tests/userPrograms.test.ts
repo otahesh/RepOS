@@ -200,6 +200,90 @@ describe('PATCH /api/user-programs/:id', () => {
       await db.query(`UPDATE user_programs SET status='draft' WHERE id=$1`, [upId]);
     }
   });
+
+  it('draft program PATCH emits no mesocycle_run_events row', async () => {
+    const fork = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    const draftUpId = fork.json<{ id: string }>().id;
+    const r = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${draftUpId}`, headers: auth(),
+      body: { op: 'rename', name: 'Quiet Patch' },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM mesocycle_run_events ev
+       JOIN mesocycle_runs mr ON mr.id = ev.run_id
+       WHERE mr.user_program_id = $1`,
+      [draftUpId],
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('active program PATCH emits a customized mesocycle_run_events row', async () => {
+    // Ensure no active run for this user before /start
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    const fork = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    const activeUpId = fork.json<{ id: string }>().id;
+    const start = await app.inject({
+      method: 'POST', url: `/api/user-programs/${activeUpId}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    expect(start.statusCode).toBe(201);
+    const runId = start.json<{ mesocycle_run_id: string }>().mesocycle_run_id;
+
+    const patch = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${activeUpId}`, headers: auth(),
+      body: { op: 'rename', name: 'During Run' },
+    });
+    expect(patch.statusCode).toBe(200);
+
+    const { rows } = await db.query<{ event_type: string; payload: any }>(
+      `SELECT event_type, payload FROM mesocycle_run_events
+       WHERE run_id = $1 AND event_type = 'customized'`,
+      [runId],
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].payload.op).toBe('rename');
+    expect(rows[0].payload.name).toBe('During Run');
+
+    // Cleanup so the START describe's beforeEach starts from a clean slate
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
+
+  it('active program swap_exercise audit payload captures from_slug', async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    const fork = await app.inject({
+      method: 'POST', url: '/api/program-templates/full-body-3-day/fork', headers: auth(),
+    });
+    const swapUpId = fork.json<{ id: string }>().id;
+    const start = await app.inject({
+      method: 'POST', url: `/api/user-programs/${swapUpId}/start`, headers: auth(),
+      body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
+    });
+    const runId = start.json<{ mesocycle_run_id: string }>().mesocycle_run_id;
+
+    const patch = await app.inject({
+      method: 'PATCH', url: `/api/user-programs/${swapUpId}`, headers: auth(),
+      body: { op: 'swap_exercise', day_idx: 0, block_idx: 0, to_exercise_slug: 'dumbbell-goblet-squat' },
+    });
+    expect(patch.statusCode).toBe(200);
+
+    const { rows } = await db.query<{ payload: any }>(
+      `SELECT payload FROM mesocycle_run_events
+       WHERE run_id = $1 AND event_type = 'customized'`,
+      [runId],
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].payload.op).toBe('swap_exercise');
+    expect(rows[0].payload.to_exercise_slug).toBe('dumbbell-goblet-squat');
+    expect(typeof rows[0].payload.from_slug).toBe('string');
+    expect(rows[0].payload.from_slug.length).toBeGreaterThan(0);
+
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
 });
 
 describe('POST /api/user-programs/:id/start', () => {

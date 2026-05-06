@@ -53,100 +53,159 @@ export async function userProgramRoutes(app: FastifyInstance) {
         return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
       }
 
-      // Ownership check + load current state (status + customizations + template_id)
-      const { rows } = await db.query(
-        `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2`,
-        [req.params.id, userId],
-      );
-      if (rows.length === 0) {
+      // Wrap ownership-load + UPDATE + audit-INSERT in a single transaction so a
+      // mid-flight failure can't leave customizations changed without a matching
+      // 'customized' audit row when an active/paused run exists. Audit row is
+      // skipped for draft programs (no run_id to attach to per FK).
+      const client = await db.connect();
+      let updated: Record<string, unknown> | null = null;
+      let badBlock = false;
+      let notFound = false;
+      let archived = false;
+      let auditFromSlug: string | undefined;
+
+      try {
+        await client.query('BEGIN');
+
+        const { rows } = await client.query(
+          `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2`,
+          [req.params.id, userId],
+        );
+        if (rows.length === 0) {
+          notFound = true;
+          await client.query('ROLLBACK');
+        } else if (rows[0].status === 'archived') {
+          archived = true;
+          await client.query('ROLLBACK');
+        } else {
+          const cust: any = rows[0].customizations ?? {};
+          const op = parsed.data;
+
+          // Reducer — translate schema body to persisted shape
+          switch (op.op) {
+            case 'rename':
+              cust.name_override = op.name;
+              break;
+            case 'swap_exercise': {
+              // Look up template's current block exercise_slug for from_slug capture
+              const tmplRow = await client.query(
+                `SELECT structure FROM program_templates WHERE id=$1`,
+                [rows[0].template_id],
+              );
+              const days = tmplRow.rows[0]?.structure?.days;
+              const block = days?.[op.day_idx]?.blocks?.[op.block_idx];
+              if (!block || !block.exercise_slug) {
+                badBlock = true;
+                await client.query('ROLLBACK');
+                break;
+              }
+              auditFromSlug = block.exercise_slug;
+              cust.swaps = (cust.swaps ?? []).filter((s: any) =>
+                !(s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
+              );
+              cust.swaps.push({
+                week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx,
+                from_slug: auditFromSlug, to_slug: op.to_exercise_slug,
+              });
+              break;
+            }
+            case 'add_set':
+            case 'remove_set': {
+              const delta = op.op === 'add_set' ? +1 : -1;
+              // Aggregate existing override at the same coords (sum deltas)
+              const existing = (cust.set_count_overrides ?? []).find((s: any) =>
+                s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx
+              );
+              if (existing) {
+                existing.delta += delta;
+              } else {
+                cust.set_count_overrides = [...(cust.set_count_overrides ?? []), {
+                  week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx, delta,
+                }];
+              }
+              break;
+            }
+            case 'shift_weekday':
+              cust.day_offset_overrides = (cust.day_offset_overrides ?? []).filter((s: any) =>
+                !(s.week_idx === 1 && s.day_idx === op.day_idx)
+              );
+              cust.day_offset_overrides.push({
+                week_idx: 1, day_idx: op.day_idx, new_day_offset: op.to_day_offset,
+              });
+              break;
+            case 'skip_day':
+              cust.skipped_days = (cust.skipped_days ?? []).filter((s: any) =>
+                !(s.week_idx === op.week_idx && s.day_idx === op.day_idx)
+              );
+              cust.skipped_days.push({ week_idx: op.week_idx, day_idx: op.day_idx });
+              break;
+            case 'change_rir':
+              cust.rir_overrides = (cust.rir_overrides ?? []).filter((s: any) =>
+                !(s.week_idx === op.week_idx && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
+              );
+              cust.rir_overrides.push({
+                week_idx: op.week_idx, day_idx: op.day_idx, block_idx: op.block_idx,
+                target_rir: op.target_rir,
+              });
+              break;
+            case 'trim_week':
+              cust.trim_last_n = op.drop_last_n;
+              break;
+          }
+
+          if (!badBlock) {
+            const upd = await client.query(
+              `UPDATE user_programs SET customizations=$1::jsonb, updated_at=now()
+               WHERE id=$2 AND user_id=$3
+               RETURNING id, template_id, template_version, name, customizations, status, updated_at`,
+              [JSON.stringify(cust), req.params.id, userId],
+            );
+            updated = upd.rows[0];
+
+            // Forensic audit (Q20): record post-/start customizations against the
+            // run they affect. Skipped for draft programs (run_id FK is NOT NULL).
+            // Most-recent active or paused run for this user_program; completed
+            // and abandoned runs are intentionally excluded.
+            const { rows: runRows } = await client.query<{ id: string }>(
+              `SELECT id FROM mesocycle_runs
+               WHERE user_program_id = $1 AND status IN ('active','paused')
+               ORDER BY created_at DESC LIMIT 1`,
+              [req.params.id],
+            );
+            if (runRows.length > 0) {
+              const auditPayload: Record<string, unknown> = { ...parsed.data };
+              if (op.op === 'swap_exercise' && auditFromSlug) {
+                auditPayload.from_slug = auditFromSlug;
+              }
+              await client.query(
+                `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
+                 VALUES ($1, 'customized', $2::jsonb)`,
+                [runRows[0].id, JSON.stringify(auditPayload)],
+              );
+            }
+
+            await client.query('COMMIT');
+          }
+        }
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      if (notFound) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      if (rows[0].status === 'archived') {
+      if (archived) {
         reply.code(409);
         return { error: 'cannot patch archived program' };
       }
-
-      const cust: any = rows[0].customizations ?? {};
-      const op = parsed.data;
-
-      // Reducer — translate schema body to persisted shape
-      switch (op.op) {
-        case 'rename':
-          cust.name_override = op.name;
-          break;
-        case 'swap_exercise': {
-          // Look up template's current block exercise_slug for from_slug capture
-          const tmplRow = await db.query(
-            `SELECT structure FROM program_templates WHERE id=$1`,
-            [rows[0].template_id],
-          );
-          const days = tmplRow.rows[0]?.structure?.days;
-          const block = days?.[op.day_idx]?.blocks?.[op.block_idx];
-          if (!block || !block.exercise_slug) {
-            reply.code(400);
-            return { error: 'invalid block coordinates', field: 'block_idx' };
-          }
-          const fromSlug = block.exercise_slug;
-          cust.swaps = (cust.swaps ?? []).filter((s: any) =>
-            !(s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
-          );
-          cust.swaps.push({
-            week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx,
-            from_slug: fromSlug, to_slug: op.to_exercise_slug,
-          });
-          break;
-        }
-        case 'add_set':
-        case 'remove_set': {
-          const delta = op.op === 'add_set' ? +1 : -1;
-          // Aggregate existing override at the same coords (sum deltas)
-          const existing = (cust.set_count_overrides ?? []).find((s: any) =>
-            s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx
-          );
-          if (existing) {
-            existing.delta += delta;
-          } else {
-            cust.set_count_overrides = [...(cust.set_count_overrides ?? []), {
-              week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx, delta,
-            }];
-          }
-          break;
-        }
-        case 'shift_weekday':
-          cust.day_offset_overrides = (cust.day_offset_overrides ?? []).filter((s: any) =>
-            !(s.week_idx === 1 && s.day_idx === op.day_idx)
-          );
-          cust.day_offset_overrides.push({
-            week_idx: 1, day_idx: op.day_idx, new_day_offset: op.to_day_offset,
-          });
-          break;
-        case 'skip_day':
-          cust.skipped_days = (cust.skipped_days ?? []).filter((s: any) =>
-            !(s.week_idx === op.week_idx && s.day_idx === op.day_idx)
-          );
-          cust.skipped_days.push({ week_idx: op.week_idx, day_idx: op.day_idx });
-          break;
-        case 'change_rir':
-          cust.rir_overrides = (cust.rir_overrides ?? []).filter((s: any) =>
-            !(s.week_idx === op.week_idx && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
-          );
-          cust.rir_overrides.push({
-            week_idx: op.week_idx, day_idx: op.day_idx, block_idx: op.block_idx,
-            target_rir: op.target_rir,
-          });
-          break;
-        case 'trim_week':
-          cust.trim_last_n = op.drop_last_n;
-          break;
+      if (badBlock) {
+        reply.code(400);
+        return { error: 'invalid block coordinates', field: 'block_idx' };
       }
-
-      const { rows: [updated] } = await db.query(
-        `UPDATE user_programs SET customizations=$1::jsonb, updated_at=now()
-         WHERE id=$2 AND user_id=$3
-         RETURNING id, template_id, template_version, name, customizations, status, updated_at`,
-        [JSON.stringify(cust), req.params.id, userId],
-      );
       return updated;
     },
   );
