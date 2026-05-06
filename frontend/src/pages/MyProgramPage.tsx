@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { ProgramPage } from '../components/programs/ProgramPage'
 import { DayCard } from '../components/programs/DayCard'
 import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings'
+import { Term } from '../components/Term'
 import { getMesocycle, type MesocycleRunDetail } from '../lib/api/mesocycles'
 import {
   getUserProgram,
@@ -81,9 +82,11 @@ export default function MyProgramPage() {
   if (run.status === 'completed') {
     return (
       <div style={{ padding: 24, color: TOKENS.text }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, marginBottom: 8 }}>Mesocycle complete</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, marginBottom: 8 }}>
+          <Term k="mesocycle">Mesocycle</Term> complete
+        </h2>
         <p style={{ color: TOKENS.textDim, fontSize: 14, lineHeight: 1.5, maxWidth: 520 }}>
-          You wrapped this mesocycle ({run.weeks} weeks). The full recap — total working sets, PRs, deload recommendation — lands in a follow-up PR alongside the recap-stats endpoint.
+          You wrapped this <Term k="mesocycle" /> ({run.weeks} weeks). The full recap — total working sets, PRs, <Term k="deload" /> recommendation — lands in a follow-up PR alongside the recap-stats endpoint.
         </p>
       </div>
     )
