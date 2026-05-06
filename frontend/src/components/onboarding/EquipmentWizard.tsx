@@ -34,7 +34,7 @@ export function EquipmentWizard({ onComplete }: { onComplete: (p: EquipmentProfi
         <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', margin: '0 0 24px' }}>
           Pick a starting profile. You can edit it any time in Settings → Equipment.
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
           {PRESETS.map(p => (
             <button
               key={p.id}

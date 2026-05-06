@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { TOKENS, FONTS } from '../../tokens'
 import { apiFetch, useCurrentUser } from '../../auth'
+import { useIsMobile } from '../../lib/useIsMobile'
 import Icon from '../Icon'
 import TokenTable, { TokenRow } from './TokenTable'
 import GenerateTokenModal from './GenerateTokenModal'
@@ -28,6 +29,7 @@ function formatDateTime(isoString: string | null): string {
 }
 
 export default function SettingsIntegrations() {
+  const isMobile = useIsMobile()
   const { user } = useCurrentUser()
   // Transition mode: when CF Access feature flag is off, the API is in admin-key
   // mode and requires `?user_id=` / body `user_id`. We detect by the placeholder
@@ -136,10 +138,10 @@ export default function SettingsIntegrations() {
 
   return (
     <div style={{
-      padding: '24px 32px',
+      padding: isMobile ? '16px' : '24px 32px',
       display: 'grid',
-      gridTemplateColumns: '320px minmax(0, 1fr)',
-      gap: 24,
+      gridTemplateColumns: isMobile ? '1fr' : '320px minmax(0, 1fr)',
+      gap: isMobile ? 16 : 24,
       minHeight: '100%',
     }}>
       {/* Generated token modal */}
@@ -270,6 +272,8 @@ export default function SettingsIntegrations() {
             justifyContent: 'space-between',
             alignItems: 'flex-start',
             marginBottom: 14,
+            flexWrap: 'wrap',
+            gap: 12,
           }}>
             <div>
               <div style={{
@@ -314,7 +318,7 @@ export default function SettingsIntegrations() {
           {/* Status grid */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             borderTop: `1px solid ${TOKENS.line}`,
           }}>
             {[
@@ -325,7 +329,8 @@ export default function SettingsIntegrations() {
             ].map((s, i) => (
               <div key={s.k} style={{
                 padding: '14px 16px',
-                borderRight: i < 3 ? `1px solid ${TOKENS.line}` : 'none',
+                borderRight: !isMobile && i < 3 ? `1px solid ${TOKENS.line}` : 'none',
+                borderBottom: isMobile && i < 3 ? `1px solid ${TOKENS.line}` : 'none',
               }}>
                 <div style={{
                   fontFamily: FONTS.mono,

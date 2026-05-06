@@ -81,7 +81,7 @@ export default function TrendStats({ stats, current }: Props) {
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(4, 1fr)',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
       gap: 14,
     }}>
       {/* Current weight */}

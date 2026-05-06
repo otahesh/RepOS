@@ -15,8 +15,6 @@ export function useIsMobile(): boolean {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
     const mql = window.matchMedia(QUERY)
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    // Sync once in case viewport changed between initial state and effect.
-    setIsMobile(mql.matches)
     mql.addEventListener('change', handler)
     return () => mql.removeEventListener('change', handler)
   }, [])

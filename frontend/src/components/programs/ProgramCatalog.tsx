@@ -19,7 +19,7 @@ export function ProgramCatalog({ onPick }: ProgramCatalogProps) {
   if (!rows) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, padding: 16, fontFamily: 'Inter Tight' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, padding: 16, fontFamily: 'Inter Tight' }}>
       {rows.map(t => (
         <article
           key={t.slug}
