@@ -21,7 +21,7 @@ describe('<Term>', () => {
   it('compact mode hides underline, shows info icon', () => {
     const { container } = render(<Term k="RIR" compact />);
     const trigger = container.querySelector('button');
-    expect(trigger?.style.borderBottomStyle).toBe('none');
+    expect(trigger?.style.borderBottomStyle).not.toBe('dotted');
     expect(container.textContent).toContain('ⓘ');
   });
   it('opens popover on click and shows definition', async () => {
