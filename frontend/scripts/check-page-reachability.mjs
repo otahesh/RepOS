@@ -106,17 +106,28 @@ const ORPHAN_IGNORE_GLOBS = [
 ];
 
 /**
- * Returns the list of component files (relative paths) that exist under
+ * Returns the list of component files (absolute paths) that exist under
  * `componentsDir` but are not in the `reachable` set.
+ *
+ * `allow` is a Set of paths (relative to componentsDir) that are
+ * intentionally not yet wired and should not fail the gate. Use sparingly:
+ * each entry should have a documented unblock condition at the call site.
  */
-export async function findOrphans({ entry, componentsDir }) {
+export async function findOrphans({ entry, componentsDir, allow = new Set() }) {
   const reachable = collectReachable(entry);
   const allFiles = await glob('**/*.{ts,tsx}', {
     cwd: componentsDir,
     absolute: true,
     ignore: ORPHAN_IGNORE_GLOBS,
   });
-  return allFiles.filter((f) => !reachable.has(f)).sort();
+  return allFiles
+    .filter((f) => {
+      if (reachable.has(f)) return false;
+      const rel = path.relative(componentsDir, f);
+      if (allow.has(rel)) return false;
+      return true;
+    })
+    .sort();
 }
 
 /**
@@ -255,8 +266,23 @@ async function main() {
 
   let failed = false;
 
+  // Components with no current routed path. Each entry has a documented
+  // unblock condition; remove from this set when its prerequisite lands.
+  // Keep small, audited, and time-bounded — this is the gate's release valve,
+  // not a graveyard.
+  const KNOWN_PENDING = new Set([
+    // Mid-session exercise swap UI. Needs the exercise-picker flow to
+    // populate { plannedSetId, fromName, toSlug, toName } before the sheet
+    // can mount. Remove when the picker lands.
+    'programs/MidSessionSwapSheet.tsx',
+    // End-of-mesocycle recap. Needs a /mesocycles/:id/recap-stats endpoint
+    // returning { weeks, total_sets, prs }; placeholder zeros would falsely
+    // tell the user "0 sets · 0 PRs". Remove when the endpoint lands.
+    'programs/MesocycleRecap.tsx',
+  ]);
+
   // 1. Orphan components.
-  const orphans = await findOrphans({ entry, componentsDir });
+  const orphans = await findOrphans({ entry, componentsDir, allow: KNOWN_PENDING });
   if (orphans.length > 0) {
     failed = true;
     console.error(

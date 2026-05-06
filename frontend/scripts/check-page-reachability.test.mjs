@@ -28,6 +28,15 @@ describe('check-page-reachability', () => {
       });
       expect(out).toEqual([]);
     });
+
+    it('omits files in the `allow` set even when they would otherwise be orphans', async () => {
+      const out = await findOrphans({
+        entry: fix('with-orphan', 'main.tsx'),
+        componentsDir: fix('with-orphan', 'components'),
+        allow: new Set(['Orphan.tsx']),
+      });
+      expect(out).toEqual([]);
+    });
   });
 
   describe('findPlaceholderLinks', () => {
