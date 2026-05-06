@@ -12,6 +12,9 @@ describe('TERMS dictionary', () => {
   it('has every required key', () => {
     for (const k of ALL_KEYS) expect(TERMS[k]).toBeDefined();
   });
+  it('has exactly the required keys (no silent additions)', () => {
+    expect(Object.keys(TERMS).length).toBe(ALL_KEYS.length);
+  });
   it('every entry has non-empty short/full/plain/whyMatters', () => {
     for (const [k, v] of Object.entries(TERMS)) {
       expect(v.short, `${k}.short`).toMatch(/\S/);
