@@ -44,7 +44,7 @@ export default function TokenTable({ tokens, onRevoke, revoking }: Props) {
       background: TOKENS.bg,
       borderRadius: 8,
       border: `1px solid ${TOKENS.line}`,
-      overflow: 'hidden',
+      overflowX: 'auto',
     }}>
       {/* Table header */}
       <div style={{
@@ -52,6 +52,7 @@ export default function TokenTable({ tokens, onRevoke, revoking }: Props) {
         gridTemplateColumns: '1fr 140px 140px 80px',
         padding: '8px 16px',
         borderBottom: `1px solid ${TOKENS.line}`,
+        minWidth: 480,
       }}>
         {['LABEL', 'CREATED', 'LAST USED', ''].map(col => (
           <div key={col} style={{
@@ -74,6 +75,7 @@ export default function TokenTable({ tokens, onRevoke, revoking }: Props) {
             alignItems: 'center',
             borderTop: i > 0 ? `1px solid ${TOKENS.line}` : 'none',
             background: 'transparent',
+            minWidth: 480,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

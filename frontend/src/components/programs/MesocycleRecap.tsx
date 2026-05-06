@@ -21,7 +21,7 @@ export function MesocycleRecap({
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
         <Choice
           accent="#6BE28B"
           recommended

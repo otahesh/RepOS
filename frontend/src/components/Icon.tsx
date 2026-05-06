@@ -10,7 +10,7 @@ interface IconProps {
 export type IconName =
   | 'barbell' | 'plus' | 'check' | 'chevron' | 'chevronDown'
   | 'arrowUp' | 'arrowRight' | 'flame' | 'timer' | 'dots'
-  | 'bars' | 'swap' | 'minus' | 'heart' | 'walk' | 'trend'
+  | 'bars' | 'menu' | 'close' | 'swap' | 'minus' | 'heart' | 'walk' | 'trend'
   | 'calendar' | 'dumbbell' | 'sparkline' | 'info' | 'clock'
   | 'pause' | 'play' | 'settings' | 'key' | 'trash' | 'copy' | 'eye' | 'eyeOff'
 
@@ -35,6 +35,8 @@ export default function Icon({ name, size = 16, color = 'currentColor', strokeWi
     timer: <g {...p}><circle cx="12" cy="13" r="8"/><line x1="12" y1="13" x2="12" y2="9"/><line x1="9" y1="2" x2="15" y2="2"/></g>,
     dots: <g {...p}><circle cx="5" cy="12" r="0.5"/><circle cx="12" cy="12" r="0.5"/><circle cx="19" cy="12" r="0.5"/></g>,
     bars: <g {...p}><line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="22" y1="20" x2="22" y2="7"/></g>,
+    menu: <g {...p}><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></g>,
+    close: <g {...p}><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></g>,
     swap: <g {...p}><polyline points="17 3 21 7 17 11"/><line x1="21" y1="7" x2="8" y2="7"/><polyline points="7 13 3 17 7 21"/><line x1="3" y1="17" x2="16" y2="17"/></g>,
     minus: <g {...p}><line x1="5" y1="12" x2="19" y2="12"/></g>,
     heart: <g {...p}><path d="M20.5 8.5a5 5 0 00-8.5-3 5 5 0 00-8.5 3c0 6 8.5 11 8.5 11s8.5-5 8.5-11z"/></g>,

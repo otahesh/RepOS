@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
+import { useIsMobile } from '../../lib/useIsMobile'
 import Icon from '../Icon'
 
 function monogram(displayName: string | null | undefined, email: string): string {
@@ -35,8 +36,15 @@ const SETTINGS_SUB = [
   { label: 'Account', to: '/settings/account' },
 ]
 
-export default function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean
+  onClose?: () => void
+  drawerRef?: React.Ref<HTMLElement>
+}
+
+export default function Sidebar({ mobileOpen = false, onClose, drawerRef }: SidebarProps) {
   const location = useLocation()
+  const isMobile = useIsMobile()
   const isSettings = location.pathname.startsWith('/settings')
   const { user, status } = useCurrentUser()
 
@@ -51,16 +59,42 @@ export default function Sidebar() {
   const secondary = isPlaceholder ? 'placeholder mode' : (user?.email ?? '')
   const initials = isPlaceholder ? 'G' : monogram(user?.display_name, user?.email ?? '')
 
+  // Close drawer on any nav click (mobile only). No-op on desktop.
+  const handleNavClick = () => {
+    if (isMobile && onClose) onClose()
+  }
+
+  const mobileStyles: React.CSSProperties = isMobile
+    ? {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 280,
+        zIndex: 50,
+        transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+        boxShadow: mobileOpen ? '8px 0 32px rgba(0,0,0,0.42)' : 'none',
+        // On mobile, the drawer is hidden when closed — don't trap focus inside it.
+        visibility: mobileOpen ? 'visible' : 'hidden',
+      }
+    : {
+        width: 232,
+        flexShrink: 0,
+      }
+
   return (
-    <aside style={{
-      background: TOKENS.surface,
-      borderRight: `1px solid ${TOKENS.line}`,
-      padding: '20px 14px',
-      display: 'flex',
-      flexDirection: 'column',
-      width: 232,
-      flexShrink: 0,
-    }}>
+    <aside
+      ref={drawerRef}
+      aria-hidden={isMobile && !mobileOpen}
+      style={{
+        background: TOKENS.surface,
+        borderRight: `1px solid ${TOKENS.line}`,
+        padding: '20px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        ...mobileStyles,
+      }}>
       {/* Logo */}
       <div style={{
         display: 'flex',
@@ -106,6 +140,7 @@ export default function Sidebar() {
             <div key={item.name}>
               <NavLink
                 to={item.to}
+                onClick={handleNavClick}
                 style={{ textDecoration: 'none' }}
               >
                 <div style={{
@@ -155,7 +190,12 @@ export default function Sidebar() {
                   {SETTINGS_SUB.map(sub => {
                     const subActive = location.pathname === sub.to
                     return (
-                      <NavLink key={sub.label} to={sub.to} style={{ textDecoration: 'none' }}>
+                      <NavLink
+                        key={sub.label}
+                        to={sub.to}
+                        onClick={handleNavClick}
+                        style={{ textDecoration: 'none' }}
+                      >
                         <div style={{
                           fontSize: 12,
                           padding: '5px 10px',
