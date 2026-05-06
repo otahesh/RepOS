@@ -3,7 +3,7 @@ import { listProgramTemplates, getProgramTemplate, forkProgramTemplate } from '.
 
 describe('programs API client', () => {
   beforeEach(() => {
-    global.fetch = vi.fn();
+    globalThis.fetch = vi.fn();
   });
   it('GET /api/program-templates returns rows', async () => {
     (fetch as any).mockResolvedValueOnce({
@@ -18,7 +18,7 @@ describe('programs API client', () => {
       ok: true, json: async () => ({ slug: 'full-body-3-day', structure: { _v: 1, days: [] } }),
     });
     const t = await getProgramTemplate('full-body-3-day');
-    expect(t.structure._v).toBe(1);
+    expect(t.structure?._v).toBe(1);
   });
   it('POST /api/program-templates/:slug/fork returns user_program', async () => {
     (fetch as any).mockResolvedValueOnce({
