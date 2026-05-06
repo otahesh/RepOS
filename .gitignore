@@ -25,3 +25,6 @@ npm-debug.log*
 
 # Local git worktrees (subagent-driven-development isolation)
 .worktrees/
+
+# Claude Code session-local state (scheduled tasks, etc.)
+.claude/

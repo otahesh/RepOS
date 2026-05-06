@@ -146,6 +146,7 @@ All 13 tests must pass before merging to `main`. They use a fresh isolated test 
 | Edge auth | Cloudflare Access app `RepOS Admin Tokens` gates `/api/tokens` to a single email (defense in depth on top of `ADMIN_API_KEY`). Will be folded into a new whole-host CF Access app when auth lands; retire the old app once the whole-host app is verified to avoid serving two AUDs to the browser. |
 | Build context | `/mnt/user/appdata/repos/build/` (rsynced from dev Mac); rebuild with `docker build -t repos:latest -f docker/Dockerfile .` |
 | Docker restart | `unless-stopped` |
+| Container init chain | s6 oneshots in order: `init-postgres-data` → `init-postgres-bootstrap` → `init-migrations` → `init-seed` → `api` + `nginx`. `init-seed` runs `node dist/seed/seed-cli.js` which is idempotent (skips when `_seed_meta` hash matches). |
 
 **Build + redeploy cycle (CI-driven, preferred):**
 ```bash
