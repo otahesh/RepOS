@@ -1,17 +1,20 @@
 // frontend/src/components/programs/ForkWizard.tsx
 import { useEffect, useState } from 'react';
-import { getUserProgram, patchUserProgram, startUserProgram, type UserProgramDetail } from '../../lib/api/userPrograms';
+import { getUserProgram, getUserProgramWarnings, patchUserProgram, startUserProgram, type UserProgramDetail } from '../../lib/api/userPrograms';
 import { Term } from '../Term';
 import { DayCard } from './DayCard';
+import { ScheduleWarnings, type ScheduleWarning } from './ScheduleWarnings';
 
 export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string; onStarted: (mesocycleRunId: string) => void }) {
   const [up, setUp] = useState<UserProgramDetail | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<ScheduleWarning[]>([]);
 
   useEffect(() => {
     getUserProgram(userProgramId).then(p => { setUp(p); setName(p.name); }).catch(e => setErr(String(e)));
+    getUserProgramWarnings(userProgramId).then(setWarnings).catch(() => setWarnings([]));
   }, [userProgramId]);
 
   if (err) return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load: {err}</div>;
@@ -20,7 +23,10 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
   async function saveName() {
     if (!up) return;
     setSaving(true);
-    try { await patchUserProgram(up.id, { name }); }
+    try {
+      await patchUserProgram(up.id, { name });
+      getUserProgramWarnings(up.id).then(setWarnings).catch(() => setWarnings([]));
+    }
     catch (e) { setErr(String(e)); }
     finally { setSaving(false); }
   }
@@ -79,13 +85,20 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
         </div>
       </section>
 
-      <button
-        onClick={start}
-        disabled={saving}
-        style={{ padding: '14px 22px', background: '#4D8DFF', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', cursor: 'pointer', alignSelf: 'flex-start' }}
-      >
-        {'Start Mesocycle'}
-      </button>
+      <ScheduleWarnings warnings={warnings} />
+
+      {(() => {
+        const hasBlock = warnings.some(w => w.severity === 'block');
+        return (
+          <button
+            onClick={start}
+            disabled={saving || hasBlock}
+            style={{ padding: '14px 22px', background: '#4D8DFF', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', cursor: 'pointer', alignSelf: 'flex-start' }}
+          >
+            {'Start Mesocycle'}
+          </button>
+        );
+      })()}
       {err ? <div style={{ color: '#FF6A6A', fontSize: 13 }}>{err}</div> : null}
     </div>
   );

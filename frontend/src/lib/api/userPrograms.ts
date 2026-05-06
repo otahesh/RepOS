@@ -1,4 +1,5 @@
 import type { ProgramTemplateStructure, UserProgramRecord } from './programs';
+import type { ScheduleWarning } from '../../components/programs/ScheduleWarnings';
 
 export type UserProgramDetail = UserProgramRecord & { structure: ProgramTemplateStructure };
 
@@ -50,4 +51,10 @@ export async function startUserProgram(
     body: JSON.stringify(body),
   });
   return jsonOrThrow(res);
+}
+
+export async function getUserProgramWarnings(id: string): Promise<ScheduleWarning[]> {
+  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}/warnings`, { credentials: 'same-origin' });
+  const data = await jsonOrThrow<{ warnings: ScheduleWarning[] }>(res);
+  return data.warnings;
 }

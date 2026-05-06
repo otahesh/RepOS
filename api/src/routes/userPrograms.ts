@@ -9,6 +9,10 @@ import {
   TemplateOutdatedError,
   ActiveRunExistsError,
 } from '../services/materializeMesocycle.js';
+import {
+  validateFrequencyLimits,
+  validateCardioScheduling,
+} from '../services/scheduleRules.js';
 
 const StartBodySchema = z.object({
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
@@ -207,6 +211,25 @@ export async function userProgramRoutes(app: FastifyInstance) {
         return { error: 'invalid block coordinates', field: 'block_idx' };
       }
       return updated;
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/user-programs/:id/warnings',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+      const resolved = await resolveUserProgramStructure(req.params.id, userId);
+      if (!resolved) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const structure = resolved.effective_structure;
+      const warnings = [
+        ...validateFrequencyLimits(structure),
+        ...validateCardioScheduling(structure),
+      ];
+      return { warnings };
     },
   );
 
