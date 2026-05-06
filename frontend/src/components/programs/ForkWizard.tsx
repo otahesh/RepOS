@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react';
 import { getUserProgram, patchUserProgram, startUserProgram, type UserProgramDetail } from '../../lib/api/userPrograms';
 import { Term } from '../Term';
-
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+import { DayCard } from './DayCard';
 
 export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string; onStarted: (mesocycleRunId: string) => void }) {
   const [up, setUp] = useState<UserProgramDetail | null>(null);
@@ -69,19 +68,13 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
         <h3 style={{ marginTop: 0, fontSize: 16 }}>Days</h3>
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${up.structure.days.length}, 1fr)`, gap: 12 }}>
           {up.structure.days.map(d => (
-            <div key={d.idx} style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
-                {WEEKDAYS[d.day_offset] ?? `+${d.day_offset}d`} · {d.kind}
-              </div>
-              <div style={{ fontWeight: 600, marginTop: 4 }}>{d.name}</div>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {d.blocks.map((b, i) => (
-                  <li key={i} style={{ fontSize: 12 }}>
-                    {b.exercise_slug.replace(/-/g, ' ')} <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>({b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir})</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <DayCard
+              key={d.idx}
+              day={d}
+              onAddSet={(dayIdx, blockIdx) => patchUserProgram(up.id, { add_set: { day_idx: dayIdx, block_idx: blockIdx } })}
+              onRemoveSet={(dayIdx, blockIdx, setIdx) => patchUserProgram(up.id, { remove_set: { day_idx: dayIdx, block_idx: blockIdx, set_idx: setIdx } })}
+              onSwap={(_dayIdx, _blockIdx) => { /* TODO: open exercise picker */ }}
+            />
           ))}
         </div>
       </section>
