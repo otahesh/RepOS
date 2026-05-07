@@ -1,0 +1,12 @@
+-- 027_program_status_abandoned.sql
+-- Add 'abandoned' to program_status so mesocycle_runs.status can record a
+-- user-initiated quit (distinct from 'completed' which means all weeks done,
+-- and 'archived' which means out-of-view). The 'abandoned' mesocycle_run_events
+-- type already exists in code as the audit kind for this transition; this
+-- migration aligns the row-level status with that audit kind.
+--
+-- ALTER TYPE ... ADD VALUE is allowed inside a transaction in PG 12+, but the
+-- new value cannot be referenced in the SAME transaction. The migration runner
+-- runs each .sql file in its own transaction, so subsequent files / runtime
+-- queries can use 'abandoned' freely.
+ALTER TYPE program_status ADD VALUE IF NOT EXISTS 'abandoned';

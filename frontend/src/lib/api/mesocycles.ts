@@ -1,3 +1,6 @@
+import { jsonOrThrow } from './_http';
+export { ApiError } from './_http';
+
 export type TodayWorkoutResponse =
   | { state: 'no_active_run' }
   | { state: 'rest'; run_id: string; scheduled_date: string }
@@ -51,6 +54,9 @@ export type VolumeRollup = {
   weeks: WeekVolume[];
 };
 
+export type MesocycleRunStatus =
+  | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
+
 export type MesocycleRunDetail = {
   id: string;
   user_program_id: string;
@@ -58,16 +64,14 @@ export type MesocycleRunDetail = {
   start_tz: string;
   weeks: number;
   current_week: number;
-  status: 'draft' | 'active' | 'paused' | 'completed' | 'archived';
+  status: MesocycleRunStatus;
 };
 
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
+export type AbandonMesocycleResponse = {
+  mesocycle_run_id: string;
+  status: MesocycleRunStatus;
+  finished_at: string;
+};
 
 export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {
   const res = await fetch('/api/mesocycles/today', { credentials: 'same-origin' });
@@ -81,5 +85,13 @@ export async function getMesocycle(id: string): Promise<MesocycleRunDetail> {
 
 export async function getVolumeRollup(id: string): Promise<VolumeRollup> {
   const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, { credentials: 'same-origin' });
+  return jsonOrThrow(res);
+}
+
+export async function abandonMesocycle(id: string): Promise<AbandonMesocycleResponse> {
+  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
   return jsonOrThrow(res);
 }

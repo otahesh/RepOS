@@ -60,4 +60,56 @@ export async function mesocycleRoutes(app: FastifyInstance) {
       return computeVolumeRollup(req.params.id);
     },
   );
+
+  app.post<{ Params: { id: string } }>(
+    '/mesocycles/:id/abandon',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = (req as any).userId as string;
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows: [run] } = await client.query<{ id: string; status: string }>(
+          `SELECT id, status FROM mesocycle_runs
+           WHERE id=$1 AND user_id=$2 FOR UPDATE`,
+          [req.params.id, userId],
+        );
+        if (!run) {
+          await client.query('ROLLBACK');
+          reply.code(404);
+          return { error: 'mesocycle_run not found', field: 'id' };
+        }
+        if (run.status !== 'active') {
+          await client.query('ROLLBACK');
+          reply.code(409);
+          return { error: 'not_active', current_status: run.status };
+        }
+        const { rows: [updated] } = await client.query<{
+          id: string; status: string; finished_at: string;
+        }>(
+          `UPDATE mesocycle_runs
+              SET status='abandoned', finished_at=now(), updated_at=now()
+            WHERE id=$1
+            RETURNING id, status, finished_at`,
+          [run.id],
+        );
+        await client.query(
+          `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
+           VALUES ($1, 'abandoned', '{}'::jsonb)`,
+          [run.id],
+        );
+        await client.query('COMMIT');
+        return {
+          mesocycle_run_id: updated.id,
+          status: updated.status,
+          finished_at: updated.finished_at,
+        };
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+  );
 }
