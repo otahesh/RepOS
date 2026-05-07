@@ -194,10 +194,15 @@ describe('POST /api/mesocycles/:id/abandon', () => {
   // This block leaves the user with no active runs at the end. The afterAll
   // cleanup at file scope cascades through ON DELETE CASCADE.
 
-  it('200 marks active run abandoned, frees the partial unique index, and emits an event', async () => {
+  it('200 marks active run abandoned, flips user_program status, frees the partial unique index, and emits an event', async () => {
     // Make sure the file-scope runId is in 'active' (the today-state-no_active_run
     // test above restores it, but be defensive).
     await db.query(`UPDATE mesocycle_runs SET status='active' WHERE id=$1`, [runId]);
+    // Ensure the owning user_program is in a startable state before abandon.
+    const { rows: [runRow] } = await db.query<{ user_program_id: string }>(
+      `SELECT user_program_id FROM mesocycle_runs WHERE id=$1`, [runId],
+    );
+    await db.query(`UPDATE user_programs SET status='active' WHERE id=$1`, [runRow.user_program_id]);
 
     const r = await app.inject({
       method: 'POST', url: `/api/mesocycles/${runId}/abandon`, headers: auth(),
@@ -212,6 +217,12 @@ describe('POST /api/mesocycles/:id/abandon', () => {
     );
     expect(row.status).toBe('abandoned');
     expect(row.finished_at).not.toBeNull();
+
+    // user_programs row must also flip to 'abandoned'
+    const { rows: [up] } = await db.query<{ status: string }>(
+      `SELECT status FROM user_programs WHERE id=$1`, [runRow.user_program_id],
+    );
+    expect(up.status).toBe('abandoned');
 
     const { rows: events } = await db.query<{ event_type: string }>(
       `SELECT event_type FROM mesocycle_run_events WHERE run_id=$1 ORDER BY occurred_at DESC LIMIT 1`,

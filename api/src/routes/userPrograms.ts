@@ -20,17 +20,29 @@ const StartBodySchema = z.object({
 });
 
 export async function userProgramRoutes(app: FastifyInstance) {
-  app.get('/user-programs', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
-    const userId = (req as any).userId as string;
-    const { rows } = await db.query(
-      `SELECT id, template_id, template_version, name, customizations, status, created_at, updated_at
-       FROM user_programs
-       WHERE user_id=$1 AND status <> 'archived'
-       ORDER BY created_at DESC`,
-      [userId],
-    );
-    return { programs: rows };
-  });
+  // ?include=past  → returns active + abandoned + completed (excludes only 'archived')
+  // default        → returns active programs only (status IN ('draft','active','paused'))
+  app.get<{ Querystring: { include?: string } }>(
+    '/user-programs',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, _reply) => {
+      const userId = (req as any).userId as string;
+      const includePast = req.query.include === 'past';
+      const { rows } = await db.query(
+        includePast
+          ? `SELECT id, template_id, template_version, name, customizations, status, created_at, updated_at
+             FROM user_programs
+             WHERE user_id=$1 AND status <> 'archived'
+             ORDER BY created_at DESC`
+          : `SELECT id, template_id, template_version, name, customizations, status, created_at, updated_at
+             FROM user_programs
+             WHERE user_id=$1 AND status IN ('draft','active','paused')
+             ORDER BY created_at DESC`,
+        [userId],
+      );
+      return { programs: rows };
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     '/user-programs/:id',

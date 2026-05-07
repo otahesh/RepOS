@@ -27,9 +27,13 @@ export type UserProgramPatch =
   | { op: 'skip_day'; week_idx: number; day_idx: number }
   | { op: 'trim_week'; drop_last_n: number };
 
-export async function listMyPrograms(): Promise<UserProgramRecord[]> {
-  const res = await fetch('/api/user-programs', { credentials: 'same-origin' });
-  return jsonOrThrow(res);
+// include='past' returns abandoned + completed programs in addition to active ones.
+// Default (omitted) returns only active programs (draft/active/paused).
+export async function listMyPrograms(opts?: { includePast?: boolean }): Promise<UserProgramRecord[]> {
+  const url = opts?.includePast ? '/api/user-programs?include=past' : '/api/user-programs';
+  const res = await fetch(url, { credentials: 'same-origin' });
+  const data = await jsonOrThrow<{ programs: UserProgramRecord[] }>(res);
+  return data.programs;
 }
 
 export async function getUserProgram(id: string): Promise<UserProgramDetail> {

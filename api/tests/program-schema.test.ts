@@ -16,14 +16,14 @@ describe('program enum types (migration 014)', () => {
     expect(rows.map(r => r.enumlabel)).toEqual(['strength','cardio','hybrid']);
   });
 
-  it('program_status enum carries draft|active|paused|completed|archived', async () => {
+  it('program_status enum carries draft|active|paused|completed|archived|abandoned', async () => {
     const { rows } = await db.query(
       `SELECT enumlabel FROM pg_enum
         WHERE enumtypid = 'program_status'::regtype
         ORDER BY enumsortorder`
     );
     expect(rows.map(r => r.enumlabel)).toEqual(
-      ['draft','active','paused','completed','archived']
+      ['draft','active','paused','completed','archived','abandoned']
     );
   });
 

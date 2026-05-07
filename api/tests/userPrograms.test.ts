@@ -61,6 +61,71 @@ describe('GET /api/user-programs', () => {
     expect(ids).not.toContain(otherUp.id);
   });
 
+  it('default filter excludes abandoned and completed programs', async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM user_programs WHERE user_id=$1`, [userId]);
+
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    // draft — should appear
+    const { rows: [draftUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'draft') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    // abandoned — should NOT appear in default view
+    const { rows: [abandonedUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'abandoned') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    // completed — should NOT appear in default view
+    const { rows: [completedUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'completed') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+
+    const r = await app.inject({ method: 'GET', url: '/api/user-programs', headers: auth() });
+    expect(r.statusCode).toBe(200);
+    const ids = r.json<{ programs: { id: string }[] }>().programs.map(p => p.id);
+    expect(ids).toContain(draftUp.id);
+    expect(ids).not.toContain(abandonedUp.id);
+    expect(ids).not.toContain(completedUp.id);
+  });
+
+  it('?include=past returns abandoned and completed but excludes archived', async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM user_programs WHERE user_id=$1`, [userId]);
+
+    const { rows: [tmpl] } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    const { rows: [abandonedUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'abandoned') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const { rows: [completedUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'completed') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+    const { rows: [archivedUp] } = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+       VALUES ($1, $2, $3, $4, 'archived') RETURNING id`,
+      [userId, tmpl.id, tmpl.version, tmpl.name],
+    );
+
+    const r = await app.inject({ method: 'GET', url: '/api/user-programs?include=past', headers: auth() });
+    expect(r.statusCode).toBe(200);
+    const ids = r.json<{ programs: { id: string }[] }>().programs.map(p => p.id);
+    expect(ids).toContain(abandonedUp.id);
+    expect(ids).toContain(completedUp.id);
+    expect(ids).not.toContain(archivedUp.id);
+  });
+
   it('401 without auth', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/user-programs' });
     expect(r.statusCode).toBe(401);

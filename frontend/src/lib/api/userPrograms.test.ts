@@ -3,9 +3,21 @@ import { listMyPrograms, getUserProgram, patchUserProgram, startUserProgram } fr
 
 describe('userPrograms API client', () => {
   beforeEach(() => { globalThis.fetch = vi.fn(); });
-  it('lists mine', async () => {
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'up-1', status: 'draft' }] });
-    expect((await listMyPrograms()).length).toBe(1);
+
+  it('lists mine — unwraps { programs: [...] } envelope', async () => {
+    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ programs: [{ id: 'up-1', status: 'draft' }] }) });
+    const rows = await listMyPrograms();
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toBe('up-1');
+  });
+
+  it('listMyPrograms with includePast=true appends ?include=past', async () => {
+    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ programs: [{ id: 'up-2', status: 'abandoned' }] }) });
+    const rows = await listMyPrograms({ includePast: true });
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe('abandoned');
+    const calledUrl = (fetch as any).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('include=past');
   });
   it('GET detail returns effective_structure with customizations resolved', async () => {
     (fetch as any).mockResolvedValueOnce({

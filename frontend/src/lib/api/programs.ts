@@ -36,7 +36,9 @@ export type UserProgramRecord = {
   template_version: number | null;
   name: string;
   customizations: Record<string, unknown>;
-  status: 'draft' | 'active' | 'paused' | 'completed' | 'archived';
+  status: 'draft' | 'active' | 'paused' | 'completed' | 'abandoned' | 'archived';
+  created_at: string;
+  updated_at: string;
 };
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {

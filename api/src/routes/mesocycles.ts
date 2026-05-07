@@ -85,13 +85,21 @@ export async function mesocycleRoutes(app: FastifyInstance) {
           return { error: 'not_active', current_status: run.status };
         }
         const { rows: [updated] } = await client.query<{
-          id: string; status: string; finished_at: string;
+          id: string; status: string; finished_at: string; user_program_id: string;
         }>(
           `UPDATE mesocycle_runs
               SET status='abandoned', finished_at=now(), updated_at=now()
             WHERE id=$1
-            RETURNING id, status, finished_at`,
+            RETURNING id, status, finished_at, user_program_id`,
           [run.id],
+        );
+        // Flip the owning user_program to 'abandoned' so the library can
+        // filter it out of the default active view. The row is preserved so
+        // the user can find it in the Past tab and restart.
+        await client.query(
+          `UPDATE user_programs SET status='abandoned', updated_at=now()
+           WHERE id=$1`,
+          [updated.user_program_id],
         );
         await client.query(
           `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
