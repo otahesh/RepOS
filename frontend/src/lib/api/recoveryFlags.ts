@@ -1,3 +1,7 @@
+import { jsonOrThrow } from './_http';
+
+export { ApiError } from './_http';
+
 export type RecoveryFlag = {
   flag: 'bodyweight_crash' | 'overreaching' | 'stalled_pr';
   message: string;
@@ -5,11 +9,6 @@ export type RecoveryFlag = {
   week_idx?: number;
   dismissable: boolean;
 };
-
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) { const body = await res.text(); throw new Error(`HTTP ${res.status}: ${body || res.statusText}`); }
-  return res.json();
-}
 
 export async function listRecoveryFlags(): Promise<RecoveryFlag[]> {
   const res = await fetch('/api/recovery-flags', { credentials: 'same-origin' });

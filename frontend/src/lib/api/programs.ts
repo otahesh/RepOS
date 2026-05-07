@@ -29,6 +29,10 @@ export type ProgramTemplateStructure = {
   }>;
 };
 
+import { jsonOrThrow } from './_http';
+
+export { ApiError } from './_http';
+
 export type UserProgramRecord = {
   id: string;
   user_id: string;
@@ -40,14 +44,6 @@ export type UserProgramRecord = {
   created_at: string;
   updated_at: string;
 };
-
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
 
 export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
   const res = await fetch('/api/program-templates', { credentials: 'same-origin' });

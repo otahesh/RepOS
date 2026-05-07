@@ -1,3 +1,7 @@
+import { jsonOrThrow } from './_http';
+
+export { ApiError } from './_http';
+
 export type PlannedSetPatch = Partial<{
   target_reps_low: number;
   target_reps_high: number;
@@ -5,11 +9,6 @@ export type PlannedSetPatch = Partial<{
   rest_sec: number;
   override_reason: string;
 }>;
-
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) { const body = await res.text(); throw new Error(`HTTP ${res.status}: ${body || res.statusText}`); }
-  return res.json();
-}
 
 export async function patchPlannedSet(id: string, patch: PlannedSetPatch) {
   const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
