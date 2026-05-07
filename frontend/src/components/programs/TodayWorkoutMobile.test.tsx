@@ -9,8 +9,8 @@ describe('<TodayWorkoutMobile>', () => {
       state: 'workout', run_id: 'mr-1',
       day: { id: 'dw-1', kind: 'strength', name: 'Upper Heavy', week_idx: 1, day_idx: 0 } as any,
       sets: [
-        { id: 'ps-1', exercise_id: 'e-1', exercise_name: 'Barbell Bench Press', block_idx: 0, set_idx: 0, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
-        { id: 'ps-2', exercise_id: 'e-1', exercise_name: 'Barbell Bench Press', block_idx: 0, set_idx: 1, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
+        { id: 'ps-1', exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' }, block_idx: 0, set_idx: 0, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
+        { id: 'ps-2', exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' }, block_idx: 0, set_idx: 1, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
       ],
       cardio: [],
     });

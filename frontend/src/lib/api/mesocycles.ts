@@ -10,19 +10,15 @@ export { ApiError } from './_http';
 export type MesocycleRunStatus =
   | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
 
-// NOTE (inconsistency): The real API response shape (api/src/schemas/mesocycles.ts)
-// uses nested exercise objects: exercise: { id, slug, name }.
-// TodayWorkoutMobile.tsx was written against the old flat shape below and has
-// pre-existing drift from the real API. These flat types are preserved to keep
-// the frontend TSC clean. Fix the component and these types together in a
-// follow-up pass.
 export type TodaySet = {
   id: string;
-  exercise_id: string;
-  exercise_slug?: string;
-  exercise_name?: string;
   block_idx: number;
   set_idx: number;
+  exercise: {
+    id: string;
+    slug: string;
+    name: string;
+  };
   target_reps_low: number;
   target_reps_high: number;
   target_rir: number;
@@ -33,11 +29,15 @@ export type TodaySet = {
 
 export type TodayCardio = {
   id: string;
-  exercise_id: string;
-  exercise_name?: string;
-  target_duration_sec?: number;
-  target_distance_m?: number;
-  target_zone?: number;
+  block_idx: number;
+  exercise: {
+    id: string;
+    slug: string;
+    name: string;
+  };
+  target_duration_sec?: number | null;
+  target_distance_m?: number | null;
+  target_zone?: number | null;
 };
 
 export type TodayDay = {

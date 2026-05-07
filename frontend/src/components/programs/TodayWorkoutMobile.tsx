@@ -28,7 +28,7 @@ export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId
           const first = blockSets[0];
           return (
             <li key={blockIdx} style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{first.exercise_name ?? first.exercise_slug ?? `Exercise ${first.exercise_id}`}</div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{first.exercise.name}</div>
               <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
                 {blockSets.length} <Term k="working_set" compact />{'s · '}{first.target_reps_low}{'–'}{first.target_reps_high}{' reps · '}<Term k="RIR" compact />{' '}{first.target_rir}{' · '}{first.rest_sec}{'s rest'}
               </div>
@@ -42,7 +42,7 @@ export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId
         })}
         {cardio.map(c => (
           <li key={c.id} style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{c.exercise_name ?? `Cardio ${c.exercise_id}`}</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>{c.exercise.name}</div>
             <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
               {c.target_duration_sec ? `${Math.round(c.target_duration_sec / 60)} min` : null}
               {c.target_distance_m ? ` · ${(c.target_distance_m / 1000).toFixed(1)} km` : null}
