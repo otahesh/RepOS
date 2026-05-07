@@ -45,4 +45,15 @@ describe('computeUserLocalDate (spec §3.3)', () => {
   it('throws on invalid IANA tz', () => {
     expect(() => computeUserLocalDate('Mars/Olympus', new Date())).toThrow();
   });
+
+  it('always returns YYYY-MM-DD shape regardless of ICU build (small-icu safety)', () => {
+    // Production runs on Alpine's small-icu Node, where Intl.DateTimeFormat
+    // ignores most locale tags and falls back to 'MM/DD/YYYY'. Any drift here
+    // breaks getTodayWorkout's date comparison silently — every active
+    // mesocycle would read as no_active_run. Lock the format down.
+    for (const tz of ['UTC', 'America/Los_Angeles', 'America/Indianapolis', 'Europe/Berlin', 'Asia/Tokyo']) {
+      const out = computeUserLocalDate(tz, new Date('2026-05-07T16:00:00Z'));
+      expect(out).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
 });
