@@ -4,12 +4,20 @@ import { MemoryRouter } from 'react-router-dom';
 import { MyLibrary } from './MyLibrary';
 import * as api from '../../lib/api/userPrograms';
 
+// Capture navigate calls from inside the component.
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 const ACTIVE_PROGRAM = {
   id: 'up-active',
   name: 'My Full Body',
   status: 'active' as const,
   user_id: 'u1',
   template_id: 't1',
+  template_slug: 'full-body-3x',
   template_version: 1,
   customizations: {},
   created_at: '2026-04-01T10:00:00Z',
@@ -22,6 +30,7 @@ const ABANDONED_PROGRAM = {
   status: 'abandoned' as const,
   user_id: 'u1',
   template_id: 't1',
+  template_slug: 'full-body-3x',
   template_version: 1,
   customizations: {},
   created_at: '2026-03-01T10:00:00Z',
@@ -38,6 +47,7 @@ function renderLibrary(onRestartProgram = vi.fn()) {
 
 describe('<MyLibrary>', () => {
   beforeEach(() => {
+    mockNavigate.mockReset();
     vi.spyOn(api, 'listMyPrograms').mockResolvedValue([ACTIVE_PROGRAM]);
   });
 
@@ -56,6 +66,14 @@ describe('<MyLibrary>', () => {
     renderLibrary();
     await screen.findByText('My Full Body');
     expect(screen.queryByText('Old Program')).not.toBeInTheDocument();
+  });
+
+  it('View button on an active program navigates to /today', async () => {
+    renderLibrary();
+    await screen.findByText('My Full Body');
+
+    fireEvent.click(screen.getByRole('button', { name: /View/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/today');
   });
 
   it('Past tab triggers a new fetch with includePast=true and shows abandoned programs', async () => {
@@ -88,7 +106,7 @@ describe('<MyLibrary>', () => {
     expect(screen.queryByRole('button', { name: /View/i })).not.toBeInTheDocument();
   });
 
-  it('Restart button calls onRestartProgram with the program id', async () => {
+  it('Restart button calls onRestartProgram with the template slug', async () => {
     const onRestart = vi.fn();
     vi.spyOn(api, 'listMyPrograms')
       .mockResolvedValueOnce([ACTIVE_PROGRAM])
@@ -100,7 +118,38 @@ describe('<MyLibrary>', () => {
     await screen.findByText('Old Program');
 
     fireEvent.click(screen.getByRole('button', { name: /Restart/i }));
-    expect(onRestart).toHaveBeenCalledWith('up-abandoned');
+    expect(onRestart).toHaveBeenCalledWith('full-body-3x');
+  });
+
+  it('Restart on a past program routes to the fork wizard at /programs/:slug', async () => {
+    // Simulate what ProgramsPage does: navigate to /programs/:slug on restart.
+    const onRestart = vi.fn((slug: string) => mockNavigate(`/programs/${slug}`));
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([ABANDONED_PROGRAM]);
+
+    renderLibrary(onRestart);
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /Past/i }));
+    await screen.findByText('Old Program');
+
+    fireEvent.click(screen.getByRole('button', { name: /Restart/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/programs/full-body-3x');
+  });
+
+  it('Restart button is hidden when template_slug is null (archived template)', async () => {
+    const noSlugProgram = { ...ABANDONED_PROGRAM, template_slug: null };
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([noSlugProgram]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /Past/i }));
+    await screen.findByText('Old Program');
+
+    // No Restart button when template is gone
+    expect(screen.queryByRole('button', { name: /Restart/i })).not.toBeInTheDocument();
   });
 
   it('empty Past tab shows a helpful empty state', async () => {

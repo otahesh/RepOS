@@ -125,7 +125,7 @@ function ProgramCard({
   );
 }
 
-export function MyLibrary({ onRestartProgram }: { onRestartProgram: (userProgramId: string) => void }) {
+export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlug: string) => void }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState<ViewTab>('active');
   const [programs, setPrograms] = useState<UserProgramRecord[] | null>(null);
@@ -148,11 +148,9 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (userProgram
       : p.status !== 'abandoned' && p.status !== 'completed' && p.status !== 'archived',
   ) ?? null;
 
-  function handleOpen(id: string) {
-    // My Programs detail pages are keyed by mesocycle_run_id; for now route to
-    // the fork-wizard customization flow via the program id path.
-    navigate(`/programs`);
-    void id; // TODO: route to /my-programs/:id when active run lookup is available
+  function handleOpen(_id: string) {
+    // Active program → live workout page.
+    navigate('/today');
   }
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -210,7 +208,9 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (userProgram
               program={p}
               faded={tab === 'past'}
               onOpen={tab === 'active' ? handleOpen : undefined}
-              onResume={tab === 'past' ? () => onRestartProgram(p.id) : undefined}
+              onResume={tab === 'past' && p.template_slug
+                ? () => onRestartProgram(p.template_slug!)
+                : undefined}
             />
           ))}
         </div>

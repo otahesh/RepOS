@@ -28,16 +28,23 @@ export async function userProgramRoutes(app: FastifyInstance) {
     async (req, _reply) => {
       const userId = (req as any).userId as string;
       const includePast = req.query.include === 'past';
+      // LEFT JOIN program_templates to carry template_slug through to the client
+      // so the fork-wizard "Restart" action can navigate to /programs/:slug
+      // without a second round-trip.
       const { rows } = await db.query(
         includePast
-          ? `SELECT id, template_id, template_version, name, customizations, status, created_at, updated_at
-             FROM user_programs
-             WHERE user_id=$1 AND status <> 'archived'
-             ORDER BY created_at DESC`
-          : `SELECT id, template_id, template_version, name, customizations, status, created_at, updated_at
-             FROM user_programs
-             WHERE user_id=$1 AND status IN ('draft','active','paused')
-             ORDER BY created_at DESC`,
+          ? `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
+                    up.name, up.customizations, up.status, up.created_at, up.updated_at
+             FROM user_programs up
+             LEFT JOIN program_templates pt ON pt.id = up.template_id
+             WHERE up.user_id=$1 AND up.status <> 'archived'
+             ORDER BY up.created_at DESC`
+          : `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
+                    up.name, up.customizations, up.status, up.created_at, up.updated_at
+             FROM user_programs up
+             LEFT JOIN program_templates pt ON pt.id = up.template_id
+             WHERE up.user_id=$1 AND up.status IN ('draft','active','paused')
+             ORDER BY up.created_at DESC`,
         [userId],
       );
       return { programs: rows };
