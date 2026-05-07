@@ -24,8 +24,10 @@ const TodayRestSchema = z.object({
 });
 
 const SuggestedSubstitutionSchema = z.object({
+  id: z.string().uuid(),
   slug: z.string(),
   name: z.string(),
+  reason: z.string(),
 });
 
 const TodaySetSchema = z.object({

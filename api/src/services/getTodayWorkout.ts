@@ -22,7 +22,7 @@ export type TodayWorkout =
         target_reps_high: number;
         target_rir: number;
         rest_sec: number;
-        suggested_substitution?: { slug: string; name: string };
+        suggested_substitution?: { id: string; slug: string; name: string; reason: string };
       }>;
       cardio: Array<{
         id: string;
@@ -96,11 +96,11 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
   const sets = await Promise.all(setRows.map(async (s) => {
     const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
     const fits = allPredicatesSatisfied(predicates, profile);
-    let suggested: { slug: string; name: string } | undefined;
+    let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
     if (!fits) {
       const sub = await findSubstitutions(s.ex_slug, profile);
       const top = sub?.subs?.[0];
-      if (top) suggested = { slug: top.slug, name: top.name };
+      if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
     }
     return {
       id: s.id, block_idx: s.block_idx, set_idx: s.set_idx,
