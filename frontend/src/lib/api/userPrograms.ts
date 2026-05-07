@@ -1,5 +1,7 @@
 import type { ProgramTemplateStructure, UserProgramRecord } from './programs';
 import type { ScheduleWarning } from '../../components/programs/ScheduleWarnings';
+import { jsonOrThrow } from './_http';
+export { ApiError } from './_http';
 
 // Mirror of api/src/services/resolveUserProgramStructure.ts ResolvedUserProgram.
 // API returns `effective_structure` (resolved with customizations applied) — not
@@ -24,14 +26,6 @@ export type UserProgramPatch =
   | { op: 'shift_weekday'; day_idx: number; to_day_offset: number }
   | { op: 'skip_day'; week_idx: number; day_idx: number }
   | { op: 'trim_week'; drop_last_n: number };
-
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
 
 export async function listMyPrograms(): Promise<UserProgramRecord[]> {
   const res = await fetch('/api/user-programs', { credentials: 'same-origin' });
