@@ -50,9 +50,7 @@ export const WeightSampleSchema = z.object({
   date: WeightDate,
   time: WeightTime,
   source: z.enum(VALID_SOURCES, {
-    errorMap: () => ({
-      message: `source must be one of: ${VALID_SOURCES.join(', ')}`,
-    }),
+    error: () => `source must be one of: ${VALID_SOURCES.join(', ')}`,
   }),
 });
 
