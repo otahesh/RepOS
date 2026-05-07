@@ -26,15 +26,21 @@ describe('mesocycles API client', () => {
     expect(r.state).toBe('workout');
     if (r.state === 'workout') expect(r.sets.length).toBe(1);
   });
-  it('volume-rollup returns sets-by-week-by-muscle + cardio minutes', async () => {
+  it('volume-rollup returns weeks[].muscles[] per the API contract', async () => {
     (fetch as any).mockResolvedValueOnce({
       ok: true, json: async () => ({
-        sets_by_week_by_muscle: { chest: [10, 12, 14, 16, 5] },
-        landmarks: { chest: { mev: 10, mav: 14, mrv: 22 } },
-        cardio_minutes_by_modality: { outdoor_walking: [60, 60, 60, 60, 30] },
+        run_id: 'mr-1',
+        weeks: [
+          {
+            week_idx: 1,
+            muscles: [{ muscle: 'chest', sets: 10, mev: 10, mav: 14, mrv: 22 }],
+            minutes_by_modality: { outdoor_walking: 60 },
+          },
+        ],
       }),
     });
     const r = await getVolumeRollup('mr-1');
-    expect(r.sets_by_week_by_muscle.chest[0]).toBe(10);
+    expect(r.weeks[0].muscles[0].muscle).toBe('chest');
+    expect(r.weeks[0].muscles[0].sets).toBe(10);
   });
 });

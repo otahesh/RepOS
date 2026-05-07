@@ -23,7 +23,7 @@ describe('userPrograms API client', () => {
   });
   it('PATCH applies customizations', async () => {
     (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'up-1', customizations: { renamed: true } }) });
-    const out = await patchUserProgram('up-1', { name: 'New Name' });
+    const out = await patchUserProgram('up-1', { op: 'rename', name: 'New Name' });
     expect(out.customizations).toEqual({ renamed: true });
   });
   it('start materializes', async () => {

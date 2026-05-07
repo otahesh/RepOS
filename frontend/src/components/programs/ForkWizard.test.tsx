@@ -33,7 +33,7 @@ describe('<ForkWizard>', () => {
     await user.clear(input);
     await user.type(input, 'My FB Run');
     await user.click(screen.getByText(/save name/i));
-    expect(api.patchUserProgram).toHaveBeenCalledWith('up-1', { name: 'My FB Run' });
+    expect(api.patchUserProgram).toHaveBeenCalledWith('up-1', { op: 'rename', name: 'My FB Run' });
   });
   it('start materializes and calls onStarted with mesocycle id', async () => {
     const onStarted = vi.fn();

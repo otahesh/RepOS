@@ -11,14 +11,19 @@ export type UserProgramDetail = UserProgramRecord & {
   latest_run_id?: string;
 };
 
-export type UserProgramPatch = Partial<{
-  name: string;
-  swap: { day_idx: number; block_idx: number; to_exercise_slug: string };
-  add_set: { day_idx: number; block_idx: number };
-  remove_set: { day_idx: number; block_idx: number; set_idx: number };
-  shift_day: { from_day_idx: number; to_day_offset: number };
-  skip_day: { day_idx: number };
-}>;
+// Mirror of api/src/schemas/userProgramPatch.ts UserProgramPatchSchema —
+// a discriminated union on `op`. Each op is a flat object, NOT nested.
+// Keep these in lockstep with the API; drift is the most common failure
+// mode in this codebase.
+export type UserProgramPatch =
+  | { op: 'rename'; name: string }
+  | { op: 'swap_exercise'; day_idx: number; block_idx: number; to_exercise_slug: string }
+  | { op: 'add_set'; day_idx: number; block_idx: number }
+  | { op: 'remove_set'; day_idx: number; block_idx: number }
+  | { op: 'change_rir'; week_idx: number; day_idx: number; block_idx: number; target_rir: number }
+  | { op: 'shift_weekday'; day_idx: number; to_day_offset: number }
+  | { op: 'skip_day'; week_idx: number; day_idx: number }
+  | { op: 'trim_week'; drop_last_n: number };
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {

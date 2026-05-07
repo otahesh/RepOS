@@ -56,17 +56,17 @@ export default function MyProgramPage() {
   async function handleAddSet(dayIdx: number, blockIdx: number) {
     if (!up) return
     try {
-      await patchUserProgram(up.id, { add_set: { day_idx: dayIdx, block_idx: blockIdx } })
+      await patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx })
       await refreshUserProgram()
     } catch (e) {
       setErr(`Add set failed: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
-  async function handleRemoveSet(dayIdx: number, blockIdx: number, setIdx: number) {
+  async function handleRemoveSet(dayIdx: number, blockIdx: number, _setIdx: number) {
     if (!up) return
     try {
-      await patchUserProgram(up.id, { remove_set: { day_idx: dayIdx, block_idx: blockIdx, set_idx: setIdx } })
+      await patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx })
       await refreshUserProgram()
     } catch (e) {
       setErr(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`)
