@@ -151,11 +151,14 @@ describe('PATCH /api/planned-sets/:id contract', () => {
 
 describe('POST /api/planned-sets/:id/substitute contract', () => {
   it('404 on unknown id', async () => {
+    // Path UUID can be the nil UUID (allowed by zod's UUID regex). Body UUID
+    // must pass z.string().uuid() — zod v4 requires version nibble 1-8, so use
+    // a synthetic v4 here.
     const res = await app.inject({
       method: 'POST',
       url: '/api/planned-sets/00000000-0000-0000-0000-000000000000/substitute',
       headers: auth(),
-      body: { to_exercise_id: '00000000-0000-0000-0000-000000000001' },
+      body: { to_exercise_id: '00000000-0000-4000-8000-000000000001' },
     });
     expect(res.statusCode).toBe(404);
   });
