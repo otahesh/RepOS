@@ -24,7 +24,7 @@ export type TodaySet = {
   target_rir: number;
   rest_sec: number;
   target_load_hint?: string;
-  suggested_substitution?: { slug: string; name: string; reason: string } | null;
+  suggested_substitution?: { id: string; slug: string; name: string; reason: string } | null;
 };
 
 export type TodayCardio = {

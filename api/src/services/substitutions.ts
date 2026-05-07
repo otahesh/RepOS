@@ -4,7 +4,7 @@ import { allPredicatesSatisfied } from './_equipmentPredicate.js';
 
 export type SubResult = {
   from: { slug: string; name: string };
-  subs: Array<{ slug: string; name: string; score: number; reason: string }>;
+  subs: Array<{ id: string; slug: string; name: string; score: number; reason: string }>;
   truncated: boolean;
   total_matches?: number;
   reason?: 'no_equipment_profile' | 'no_equipment_match';
@@ -91,7 +91,7 @@ export async function findSubstitutions(
   const sliced = passing.slice(0, TRUNCATION);
   return {
     from: { slug: targetSlug, name: target.name },
-    subs: sliced.map(s => ({ slug: s.slug, name: s.name, score: s.score, reason: s.reason })),
+    subs: sliced.map(s => ({ id: s.id, slug: s.slug, name: s.name, score: s.score, reason: s.reason })),
     truncated: passing.length > TRUNCATION,
     ...(passing.length > TRUNCATION ? { total_matches: passing.length } : {}),
   };

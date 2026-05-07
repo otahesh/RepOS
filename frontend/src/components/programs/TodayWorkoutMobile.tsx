@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
+import { MidSessionSwapSheet } from './MidSessionSwapSheet';
+
+type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
 export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId: string) => void }) {
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
-  useEffect(() => { getTodayWorkout().then(setData).catch(() => setData(null)); }, []);
+  const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
+
+  const fetchToday = useCallback(() => {
+    getTodayWorkout().then(setData).catch(() => setData(null));
+  }, []);
+
+  useEffect(() => { fetchToday(); }, [fetchToday]);
   if (!data) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
   if (data.state === 'no_active_run') return <div style={{ padding: 16, color: 'rgba(255,255,255,0.7)' }}>{'No active '}<Term k="mesocycle" />{'. Pick a program on desktop.'}</div>;
   if (data.state === 'rest') return <div style={{ padding: 16, color: '#6BE28B', fontFamily: 'Inter Tight' }}><strong>Rest day.</strong></div>;
@@ -33,8 +42,21 @@ export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId
                 {blockSets.length} <Term k="working_set" compact />{'s · '}{first.target_reps_low}{'–'}{first.target_reps_high}{' reps · '}<Term k="RIR" compact />{' '}{first.target_rir}{' · '}{first.rest_sec}{'s rest'}
               </div>
               {first.suggested_substitution ? (
-                <div style={{ marginTop: 6, fontSize: 11, color: '#F5B544' }}>
-                  {'Suggested sub: '}{first.suggested_substitution.name}{' ('}{first.suggested_substitution.reason}{')'}
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: '#F5B544' }}>
+                    {'Suggested sub: '}{first.suggested_substitution.name}{' ('}{first.suggested_substitution.reason}{')'}
+                  </span>
+                  <button
+                    onClick={() => setSwapTarget({
+                      plannedSetId: first.id,
+                      fromName: first.exercise.name,
+                      toId: first.suggested_substitution!.id,
+                      toName: first.suggested_substitution!.name,
+                    })}
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: '#F5B544', textDecoration: 'underline', fontFamily: 'Inter Tight' }}
+                  >
+                    {'Swap'}
+                  </button>
                 </div>
               ) : null}
             </li>
@@ -57,6 +79,18 @@ export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId
       >
         {'Start Workout'}
       </button>
+      {swapTarget ? (
+        <MidSessionSwapSheet
+          plannedSetId={swapTarget.plannedSetId}
+          fromName={swapTarget.fromName}
+          toId={swapTarget.toId}
+          toName={swapTarget.toName}
+          onClose={(changed) => {
+            setSwapTarget(null);
+            if (changed) fetchToday();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
