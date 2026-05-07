@@ -3,6 +3,10 @@ import { randomBytes } from 'crypto';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
+import type {
+  TokenMintResponse,
+  TokenListResponse,
+} from '../schemas/tokens.js';
 
 // Token mint / list / revoke. Two auth modes:
 //   - admin   : body/query supplies user_id (CLI, tests, ops scripts).
@@ -35,7 +39,8 @@ export async function tokenRoutes(app: FastifyInstance) {
         [userId, storedHash, req.body.label ?? null],
       );
 
-      return reply.code(201).send({ id: rows[0].id, token: plaintext, created_at: rows[0].created_at });
+      const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
+      return reply.code(201).send(mintResp);
     },
   );
 
@@ -53,7 +58,13 @@ export async function tokenRoutes(app: FastifyInstance) {
          ORDER BY created_at DESC`,
         [userId],
       );
-      return reply.send(rows);
+      const listResp: TokenListResponse = rows.map(r => ({
+        id: String(r.id),
+        label: r.label,
+        created_at: r.created_at,
+        last_used_at: r.last_used_at,
+      }));
+      return reply.send(listResp);
     },
   );
 

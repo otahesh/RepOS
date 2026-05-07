@@ -4,13 +4,13 @@ import { substitutePlannedSet } from '../../lib/api/plannedSets';
 export function MidSessionSwapSheet({
   plannedSetId,
   fromName,
-  toSlug,
+  toId,
   toName,
   onClose,
 }: {
   plannedSetId: string;
   fromName: string;
-  toSlug: string;
+  toId: string;
   toName: string;
   onClose: (changed: boolean) => void;
 }) {
@@ -20,7 +20,7 @@ export function MidSessionSwapSheet({
   async function confirm() {
     setBusy(true);
     try {
-      await substitutePlannedSet(plannedSetId, { to_exercise_slug: toSlug });
+      await substitutePlannedSet(plannedSetId, { to_exercise_id: toId });
       onClose(true);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));

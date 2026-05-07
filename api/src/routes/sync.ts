@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
+import type { SyncStatusResponse } from '../schemas/healthWeight.js';
 
 export async function syncRoutes(app: FastifyInstance) {
   app.get('/sync/status', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
@@ -18,6 +19,7 @@ export async function syncRoutes(app: FastifyInstance) {
     );
 
     reply.header('Cache-Control', 'private, max-age=60');
-    return row ?? { source: null, last_success_at: null, state: 'broken' };
+    const resp: SyncStatusResponse = row ?? { source: null, last_success_at: null, state: 'broken' };
+    return resp;
   });
 }

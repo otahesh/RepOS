@@ -3,13 +3,14 @@ import { listRecoveryFlags, dismissRecoveryFlag } from './recoveryFlags';
 describe('recoveryFlags API client', () => {
   beforeEach(() => { globalThis.fetch = vi.fn(); });
   it('lists active', async () => {
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ([{ flag: 'bodyweight_crash', message: 'Weight dropping fast' }]) });
+    // API returns { flags: [...] }, not a bare array
+    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ flags: [{ flag: 'bodyweight_crash', message: 'Weight dropping fast' }] }) });
     const r = await listRecoveryFlags();
-    expect(r[0].flag).toBe('bodyweight_crash');
+    expect(r.flags[0].flag).toBe('bodyweight_crash');
   });
-  it('dismisses', async () => {
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
-    const r = await dismissRecoveryFlag('bodyweight_crash');
-    expect(r.ok).toBe(true);
+  it('dismisses with 204', async () => {
+    // Dismiss returns 204 no body
+    (fetch as any).mockResolvedValueOnce({ ok: true, status: 204 });
+    await expect(dismissRecoveryFlag('bodyweight_crash')).resolves.toBeUndefined();
   });
 });
