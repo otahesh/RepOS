@@ -71,7 +71,7 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
                 {cells.map((sets, w) => (
                   <div
                     key={`${m}-${w}`}
-                    title={`${m} · W${w + 1}: ${sets} sets (MEV ${lm.mev} / MAV ${lm.mav} / MRV ${lm.mrv})`}
+                    title={`${m} · W${w + 1}: ${sets} sets (Min Effective ${lm.mev} / Max Adaptive ${lm.mav} / Max Recoverable ${lm.mrv})`}
                     style={{
                       background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
                       borderRadius: 3,
@@ -91,7 +91,7 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           })}
         </div>
         <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-          {'Tiers: '}<Term k="MEV" />{' → '}<Term k="MAV" />{' → '}<Term k="MRV" />{' with deload final week.'}
+          {'Tiers: '}<Term k="MEV" />{' → '}<Term k="MAV" />{' → '}<Term k="MRV" />{' with '}<Term k="deload" variant="abbr" />{' final week.'}
         </div>
       </section>
     </div>

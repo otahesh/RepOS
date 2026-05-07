@@ -26,7 +26,7 @@ export function MesocycleRecap({
           accent="#6BE28B"
           recommended
           label={'Take a deload'}
-          desc={<>{'One light week to clear fatigue, then a fresh ramp. Recommended after a hard '}{'mesocycle'}{'.'}</>}
+          desc={<>{'One light week to clear fatigue, then a fresh ramp. Recommended after a hard '}<Term k="mesocycle" variant="abbr" />{'.'}</>}
           onClick={() => onChoice('deload')}
         />
         <Choice
