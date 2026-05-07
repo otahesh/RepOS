@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { getMesocycle, getVolumeRollup, type MesocycleRunDetail, type VolumeRollup } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 
@@ -9,6 +9,27 @@ function tierColor(sets: number, mev: number, mav: number, mrv: number): string 
   return '#FF6A6A';
 }
 
+// API returns weeks: [{ week_idx, muscles: [{ muscle, sets, mev, mav, mrv }] }].
+// The heatmap renders by-muscle rows × by-week columns, so we pivot once.
+function pivotByMuscle(vol: VolumeRollup): {
+  muscles: string[];
+  setsByMuscleByWeek: Record<string, number[]>;
+  landmarks: Record<string, { mev: number; mav: number; mrv: number }>;
+} {
+  const setsByMuscleByWeek: Record<string, number[]> = {};
+  const landmarks: Record<string, { mev: number; mav: number; mrv: number }> = {};
+  const totalWeeks = vol.weeks.length;
+  for (const wk of vol.weeks) {
+    for (const m of wk.muscles) {
+      if (!setsByMuscleByWeek[m.muscle]) setsByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
+      // week_idx is 1-indexed; align to 0-indexed array.
+      setsByMuscleByWeek[m.muscle][wk.week_idx - 1] = m.sets;
+      if (!landmarks[m.muscle]) landmarks[m.muscle] = { mev: m.mev, mav: m.mav, mrv: m.mrv };
+    }
+  }
+  return { muscles: Object.keys(setsByMuscleByWeek).sort(), setsByMuscleByWeek, landmarks };
+}
+
 export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
   const [run, setRun] = useState<MesocycleRunDetail | null>(null);
   const [vol, setVol] = useState<VolumeRollup | null>(null);
@@ -16,9 +37,10 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
     getMesocycle(mesocycleRunId).then(setRun).catch(() => setRun(null));
     getVolumeRollup(mesocycleRunId).then(setVol).catch(() => setVol(null));
   }, [mesocycleRunId]);
-  if (!run || !vol) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+  const pivot = useMemo(() => (vol ? pivotByMuscle(vol) : null), [vol]);
+  if (!run || !vol || !pivot) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
 
-  const muscles = Object.keys(vol.sets_by_week_by_muscle).sort();
+  const muscles = pivot.muscles;
 
   return (
     <div style={{ padding: 24, fontFamily: 'Inter Tight', color: '#fff', display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -41,8 +63,8 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
             </div>
           ))}
           {muscles.map(m => {
-            const lm = vol.landmarks[m];
-            const cells = vol.sets_by_week_by_muscle[m] ?? [];
+            const lm = pivot.landmarks[m];
+            const cells = pivot.setsByMuscleByWeek[m] ?? [];
             return (
               <Fragment key={m}>
                 <div style={{ color: 'rgba(255,255,255,0.7)' }}>{m}</div>

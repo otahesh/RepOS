@@ -10,9 +10,14 @@ describe('<ProgramPage>', () => {
       weeks: 5, current_week: 2, status: 'active',
     });
     vi.spyOn(mesoApi, 'getVolumeRollup').mockResolvedValue({
-      sets_by_week_by_muscle: { chest: [10, 12, 14, 16, 5] },
-      landmarks: { chest: { mev: 10, mav: 14, mrv: 22 } },
-      cardio_minutes_by_modality: {},
+      run_id: 'mr-1',
+      weeks: [
+        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+      ],
     });
   });
   it('renders 5×N heatmap with current week marker', async () => {

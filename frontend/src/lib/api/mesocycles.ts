@@ -29,10 +29,26 @@ export type TodayWorkoutResponse =
       }>;
     };
 
+// Mirror of api/src/services/volumeRollup.ts VolumeRollup. The API returns
+// per-week nested muscles, NOT per-muscle indexed by week. Components that
+// want a by-muscle view derive it locally — see ProgramPage.
+export type MuscleVolume = {
+  muscle: string;
+  sets: number;
+  mev: number;
+  mav: number;
+  mrv: number;
+};
+
+export type WeekVolume = {
+  week_idx: number;
+  muscles: MuscleVolume[];
+  minutes_by_modality: Record<string, number>;
+};
+
 export type VolumeRollup = {
-  sets_by_week_by_muscle: Record<string, number[]>;
-  landmarks: Record<string, { mev: number; mav: number; mrv: number }>;
-  cardio_minutes_by_modality: Record<string, number[]>;
+  run_id: string;
+  weeks: WeekVolume[];
 };
 
 export type MesocycleRunDetail = {

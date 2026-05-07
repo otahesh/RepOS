@@ -24,7 +24,7 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
     if (!up) return;
     setSaving(true);
     try {
-      await patchUserProgram(up.id, { name });
+      await patchUserProgram(up.id, { op: 'rename', name });
       getUserProgramWarnings(up.id).then(setWarnings).catch(() => setWarnings([]));
     }
     catch (e) { setErr(String(e)); }
@@ -77,8 +77,8 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
             <DayCard
               key={d.idx}
               day={d}
-              onAddSet={(dayIdx, blockIdx) => patchUserProgram(up.id, { add_set: { day_idx: dayIdx, block_idx: blockIdx } })}
-              onRemoveSet={(dayIdx, blockIdx, setIdx) => patchUserProgram(up.id, { remove_set: { day_idx: dayIdx, block_idx: blockIdx, set_idx: setIdx } })}
+              onAddSet={(dayIdx, blockIdx) => patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx })}
+              onRemoveSet={(dayIdx, blockIdx, _setIdx) => patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx })}
               onSwap={(_dayIdx, _blockIdx) => { /* TODO: open exercise picker */ }}
             />
           ))}
