@@ -12,8 +12,9 @@ describe('plannedSets API client', () => {
     await expect(patchPlannedSet('ps-1', { target_rir: 1 })).rejects.toThrow(/409/);
   });
   it('substitute persists exercise change', async () => {
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'ps-1', exercise_id: 'e-2', substituted_from_exercise_id: 'e-1' }) });
-    const r = await substitutePlannedSet('ps-1', { to_exercise_slug: 'incline-dumbbell-bench-press' });
+    // API accepts to_exercise_id (UUID), not to_exercise_slug
+    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'ps-1', exercise_id: 'e-2', substituted_from_exercise_id: 'e-1', overridden_at: '2026-05-05T00:00:00Z' }) });
+    const r = await substitutePlannedSet('ps-1', { to_exercise_id: '00000000-0000-0000-0000-000000000002' });
     expect(r.substituted_from_exercise_id).toBe('e-1');
   });
 });

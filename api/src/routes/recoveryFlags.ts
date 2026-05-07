@@ -7,7 +7,6 @@
 // Records a dismissal for (user, flag, week_start). Re-fires next week.
 
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import {
@@ -17,9 +16,12 @@ import {
   type EvaluatedFlag,
 } from '../services/recoveryFlags.js';
 import { isDismissed, recordDismissal } from '../services/recoveryFlagDismissals.js';
-
-const KNOWN_FLAGS = ['bodyweight_crash', 'overreaching', 'stalled_pr'] as const;
-const DismissBody = z.object({ flag: z.enum(KNOWN_FLAGS) });
+import { zodToFieldError } from '../utils/zodToFieldError.js';
+import {
+  KNOWN_FLAGS,
+  RecoveryFlagDismissRequestSchema,
+  type RecoveryFlagListResponse,
+} from '../schemas/recoveryFlags.js';
 
 export async function recoveryFlagRoutes(app: FastifyInstance) {
   // Register evaluators inside the setup function (not at module scope) so that
@@ -45,12 +47,12 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
     const triggered = (await evaluateAll(ctx))
       .filter((f): f is Extract<EvaluatedFlag, { triggered: true }> => f.triggered);
 
-    const flags: Array<{ flag: string; message: string; trend_7d_lbs?: number }> = [];
+    const flags: RecoveryFlagListResponse['flags'] = [];
     for (const f of triggered) {
       const dismissed = await isDismissed({ userId, flag: f.key, weekStart: week_start });
       if (dismissed) continue;
       flags.push({
-        flag: f.key,
+        flag: f.key as RecoveryFlagListResponse['flags'][number]['flag'],
         message: f.message,
         ...(typeof f.payload?.trend_7d_lbs === 'number'
           ? { trend_7d_lbs: f.payload.trend_7d_lbs }
@@ -58,7 +60,8 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
       });
     }
 
-    return { flags };
+    const flagsResp: RecoveryFlagListResponse = { flags };
+    return flagsResp;
   });
 
   app.post<{ Body: unknown }>(
@@ -67,13 +70,10 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = (req as any).userId as string;
 
-      const parsed = DismissBody.safeParse(req.body);
+      const parsed = RecoveryFlagDismissRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return {
-          error: parsed.error.message,
-          field: parsed.error.issues[0]?.path?.join('.'),
-        };
+        return zodToFieldError(parsed.error);
       }
 
       // Compute current ISO-week Monday (TZ-stable via Postgres, same formula as GET)

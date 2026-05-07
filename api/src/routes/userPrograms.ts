@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { resolveUserProgramStructure } from '../services/resolveUserProgramStructure.js';
@@ -13,11 +12,15 @@ import {
   validateFrequencyLimits,
   validateCardioScheduling,
 } from '../services/scheduleRules.js';
-
-const StartBodySchema = z.object({
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
-  start_tz: z.string().min(1).max(64),
-});
+import { zodToFieldError } from '../utils/zodToFieldError.js';
+import {
+  UserProgramStartRequestSchema,
+  type UserProgramListResponse,
+  type UserProgramDetailResponse,
+  type UserProgramPatchResponse,
+  type UserProgramWarningsResponse,
+  type UserProgramStartResponse,
+} from '../schemas/userPrograms.js';
 
 export async function userProgramRoutes(app: FastifyInstance) {
   // ?include=past  → returns active + abandoned + completed (excludes only 'archived')
@@ -40,7 +43,8 @@ export async function userProgramRoutes(app: FastifyInstance) {
              ORDER BY created_at DESC`,
         [userId],
       );
-      return { programs: rows };
+      const listResp: UserProgramListResponse = { programs: rows };
+      return listResp;
     },
   );
 
@@ -54,7 +58,8 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      return resolved;
+      const detail: UserProgramDetailResponse = resolved as unknown as UserProgramDetailResponse;
+      return detail;
     },
   );
 
@@ -66,7 +71,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
       const parsed = UserProgramPatchSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+        return zodToFieldError(parsed.error);
       }
 
       // Wrap ownership-load + UPDATE + audit-INSERT in a single transaction so a
@@ -222,7 +227,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(400);
         return { error: 'invalid block coordinates', field: 'block_idx' };
       }
-      return updated;
+      return updated as UserProgramPatchResponse;
     },
   );
 
@@ -241,7 +246,8 @@ export async function userProgramRoutes(app: FastifyInstance) {
         ...validateFrequencyLimits(structure),
         ...validateCardioScheduling(structure),
       ];
-      return { warnings };
+      const warningsResp: UserProgramWarningsResponse = { warnings };
+      return warningsResp;
     },
   );
 
@@ -250,10 +256,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const parsed = StartBodySchema.safeParse(req.body);
+      const parsed = UserProgramStartRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+        return zodToFieldError(parsed.error);
       }
       // Ownership check
       const { rows } = await db.query(
@@ -276,8 +282,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
            FROM mesocycle_runs WHERE id=$1`,
           [run_id],
         );
-        reply.code(201);
-        return {
+        const startResp: UserProgramStartResponse = {
           mesocycle_run_id: run.id,
           start_date: run.start_date,
           start_tz: run.start_tz,
@@ -285,6 +290,8 @@ export async function userProgramRoutes(app: FastifyInstance) {
           status: run.status,
           current_week: run.current_week,
         };
+        reply.code(201);
+        return startResp;
       } catch (err) {
         if (err instanceof TemplateOutdatedError || err instanceof ActiveRunExistsError) {
           reply.code(err.status);

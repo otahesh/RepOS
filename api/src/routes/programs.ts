@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import type {
+  ProgramTemplateListResponse,
+  ProgramTemplateDetailResponse,
+  ProgramForkResponse,
+} from '../schemas/programs.js';
 
 export async function programRoutes(app: FastifyInstance) {
   app.get('/program-templates', async (_req, reply) => {
@@ -11,7 +16,8 @@ export async function programRoutes(app: FastifyInstance) {
       ORDER BY slug ASC
     `);
     reply.header('cache-control', 'public, max-age=300');
-    return { templates: rows };
+    const listResp: ProgramTemplateListResponse = { templates: rows };
+    return listResp;
   });
 
   app.get<{ Params: { slug: string } }>('/program-templates/:slug', async (req, reply) => {
@@ -27,7 +33,8 @@ export async function programRoutes(app: FastifyInstance) {
       return { error: 'template not found', field: 'slug' };
     }
     reply.header('cache-control', 'public, max-age=300');
-    return rows[0];
+    const detail: ProgramTemplateDetailResponse = rows[0] as unknown as ProgramTemplateDetailResponse;
+    return detail;
   });
 
   app.post<{ Params: { slug: string } }>(
@@ -51,8 +58,9 @@ export async function programRoutes(app: FastifyInstance) {
          RETURNING id, template_id, template_version, name, customizations, status, created_at`,
         [userId, tmpl.id, tmpl.version, tmpl.name],
       );
+      const forkResp: ProgramForkResponse = up as unknown as ProgramForkResponse;
       reply.code(201);
-      return up;
+      return forkResp;
     },
   );
 }

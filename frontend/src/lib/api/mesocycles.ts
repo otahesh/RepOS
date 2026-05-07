@@ -1,5 +1,52 @@
+/**
+ * Frontend types for the /api/mesocycles surface.
+ * Manually kept in sync with api/src/schemas/mesocycles.ts.
+ * See api/src/schemas/README.md for the cross-package type mirror strategy.
+ */
+
 import { jsonOrThrow } from './_http';
 export { ApiError } from './_http';
+
+export type MesocycleRunStatus =
+  | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
+
+// NOTE (inconsistency): The real API response shape (api/src/schemas/mesocycles.ts)
+// uses nested exercise objects: exercise: { id, slug, name }.
+// TodayWorkoutMobile.tsx was written against the old flat shape below and has
+// pre-existing drift from the real API. These flat types are preserved to keep
+// the frontend TSC clean. Fix the component and these types together in a
+// follow-up pass.
+export type TodaySet = {
+  id: string;
+  exercise_id: string;
+  exercise_slug?: string;
+  exercise_name?: string;
+  block_idx: number;
+  set_idx: number;
+  target_reps_low: number;
+  target_reps_high: number;
+  target_rir: number;
+  rest_sec: number;
+  target_load_hint?: string;
+  suggested_substitution?: { slug: string; name: string; reason: string } | null;
+};
+
+export type TodayCardio = {
+  id: string;
+  exercise_id: string;
+  exercise_name?: string;
+  target_duration_sec?: number;
+  target_distance_m?: number;
+  target_zone?: number;
+};
+
+export type TodayDay = {
+  id: string;
+  kind: 'strength' | 'cardio' | 'hybrid';
+  name: string;
+  week_idx: number;
+  day_idx: number;
+};
 
 export type TodayWorkoutResponse =
   | { state: 'no_active_run' }
@@ -7,29 +54,9 @@ export type TodayWorkoutResponse =
   | {
       state: 'workout';
       run_id: string;
-      day: { id: string; kind: 'strength' | 'cardio' | 'hybrid'; name: string; week_idx: number; day_idx: number };
-      sets: Array<{
-        id: string;
-        exercise_id: string;
-        exercise_slug?: string;
-        exercise_name?: string;
-        block_idx: number;
-        set_idx: number;
-        target_reps_low: number;
-        target_reps_high: number;
-        target_rir: number;
-        rest_sec: number;
-        target_load_hint?: string;
-        suggested_substitution?: { slug: string; name: string; reason: string } | null;
-      }>;
-      cardio: Array<{
-        id: string;
-        exercise_id: string;
-        exercise_name?: string;
-        target_duration_sec?: number;
-        target_distance_m?: number;
-        target_zone?: number;
-      }>;
+      day: TodayDay;
+      sets: TodaySet[];
+      cardio: TodayCardio[];
     };
 
 // Mirror of api/src/services/volumeRollup.ts VolumeRollup. The API returns
@@ -54,17 +81,31 @@ export type VolumeRollup = {
   weeks: WeekVolume[];
 };
 
-export type MesocycleRunStatus =
-  | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
-
+// NOTE: The real API returns user_id, finished_at, created_at, updated_at,
+// and day_workouts. These are marked optional here for backward compat with
+// test mocks that predate the schema migration — fix the mocks in a follow-up.
 export type MesocycleRunDetail = {
   id: string;
   user_program_id: string;
+  user_id?: string;
   start_date: string;
   start_tz: string;
   weeks: number;
   current_week: number;
   status: MesocycleRunStatus;
+  finished_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  day_workouts?: Array<{
+    id: string;
+    week_idx: number;
+    day_idx: number;
+    scheduled_date: string;
+    kind: string;
+    name: string;
+    status: string;
+    completed_at: string | null;
+  }>;
 };
 
 export type AbandonMesocycleResponse = {

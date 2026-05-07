@@ -1,27 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { computeUserLocalDate } from '../services/userLocalDate.js';
-
-const SubstituteSchema = z.object({
-  to_exercise_id: z.string().uuid(),
-});
-
-const PatchSchema = z.object({
-  target_reps_low: z.number().int().min(1).max(50).optional(),
-  target_reps_high: z.number().int().min(1).max(50).optional(),
-  target_rir: z.number().int().min(1).max(10).optional(),
-  target_load_hint: z.string().max(200).optional().nullable(),
-  rest_sec: z.number().int().min(0).max(900).optional(),
-  override_reason: z.string().max(200).nullable().optional(),
-}).refine(
-  (b) => b.target_reps_low == null || b.target_reps_high == null || b.target_reps_low <= b.target_reps_high,
-  { message: 'target_reps_low must be <= target_reps_high' },
-).refine(
-  (b) => Object.keys(b).length > 0,
-  { message: 'patch body cannot be empty' },
-);
+import { zodToFieldError } from '../utils/zodToFieldError.js';
+import {
+  PlannedSetPatchRequestSchema,
+  PlannedSetSubstituteRequestSchema,
+  type PlannedSetPatchResponse,
+  type PlannedSetSubstituteResponse,
+} from '../schemas/plannedSets.js';
 
 export async function plannedSetRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string }; Body: unknown }>(
@@ -29,10 +16,10 @@ export async function plannedSetRoutes(app: FastifyInstance) {
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const parsed = PatchSchema.safeParse(req.body);
+      const parsed = PlannedSetPatchRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+        return zodToFieldError(parsed.error);
       }
 
       // Fix #2 error message extraction: ZodError for refinement has no path
@@ -130,7 +117,7 @@ export async function plannedSetRoutes(app: FastifyInstance) {
         client.release();
       }
 
-      return updated;
+      return updated as PlannedSetPatchResponse;
     },
   );
 
@@ -139,10 +126,10 @@ export async function plannedSetRoutes(app: FastifyInstance) {
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const parsed = SubstituteSchema.safeParse(req.body);
+      const parsed = PlannedSetSubstituteRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
-        return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+        return zodToFieldError(parsed.error);
       }
 
       // Prefetch + ownership + scheduled_date + start_tz + current exercise_id
@@ -202,7 +189,7 @@ export async function plannedSetRoutes(app: FastifyInstance) {
           })],
         );
         await client.query('COMMIT');
-        return updated;
+        return updated as PlannedSetSubstituteResponse;
       } catch (err) {
         await client.query('ROLLBACK');
         throw err;

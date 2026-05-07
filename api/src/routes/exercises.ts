@@ -2,6 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { findSubstitutions } from '../services/substitutions.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import type {
+  ExerciseListResponse,
+  SubstitutionResponse,
+} from '../schemas/exercises.js';
 
 export async function exerciseRoutes(app: FastifyInstance) {
   app.get('/exercises', async (_req, reply) => {
@@ -25,7 +29,8 @@ export async function exerciseRoutes(app: FastifyInstance) {
       ORDER BY e.slug ASC
     `);
     reply.header('cache-control', 'public, max-age=300, stale-while-revalidate=86400');
-    return { exercises: rows };
+    const listResp: ExerciseListResponse = { exercises: rows as ExerciseListResponse['exercises'] };
+    return listResp;
   });
 
   app.get<{ Params: { slug: string } }>('/exercises/:slug', async (req, reply) => {
@@ -66,7 +71,8 @@ export async function exerciseRoutes(app: FastifyInstance) {
       if (!result) { reply.code(404); return { error: 'exercise not found', field: 'slug' }; }
       reply.header('cache-control', 'private, max-age=60');
       reply.header('vary', 'Authorization');
-      return result;
+      const subResp: SubstitutionResponse = result as SubstitutionResponse;
+      return subResp;
     },
   );
 }

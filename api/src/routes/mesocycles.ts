@@ -3,6 +3,11 @@ import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { getTodayWorkout } from '../services/getTodayWorkout.js';
 import { computeVolumeRollup } from '../services/volumeRollup.js';
+import type {
+  MesocycleDetailResponse,
+  MesocycleAbandonResponse,
+  VolumeRollupResponse,
+} from '../schemas/mesocycles.js';
 
 export async function mesocycleRoutes(app: FastifyInstance) {
   // /today must be registered before /:id so the literal path wins over the param.
@@ -40,7 +45,8 @@ export async function mesocycleRoutes(app: FastifyInstance) {
          ORDER BY week_idx, day_idx`,
         [run.id],
       );
-      return { ...run, day_workouts: days };
+      const detail: MesocycleDetailResponse = { ...run, day_workouts: days };
+      return detail;
     },
   );
 
@@ -57,7 +63,8 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
       }
-      return computeVolumeRollup(req.params.id);
+      const rollup: VolumeRollupResponse = await computeVolumeRollup(req.params.id);
+      return rollup;
     },
   );
 
@@ -107,11 +114,12 @@ export async function mesocycleRoutes(app: FastifyInstance) {
           [run.id],
         );
         await client.query('COMMIT');
-        return {
+        const abandonResp: MesocycleAbandonResponse = {
           mesocycle_run_id: updated.id,
-          status: updated.status,
+          status: updated.status as MesocycleAbandonResponse['status'],
           finished_at: updated.finished_at,
         };
+        return abandonResp;
       } catch (e) {
         try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
         throw e;

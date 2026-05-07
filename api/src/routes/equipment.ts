@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { EquipmentProfileSchema } from '../schemas/equipmentProfile.js';
+import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { PRESETS, isPreset } from '../services/equipmentProfile.js';
+import type { EquipmentProfileResponse } from '../schemas/equipment.js';
 
 export async function equipmentRoutes(app: FastifyInstance) {
   app.get('/equipment/profile', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
@@ -19,13 +21,13 @@ export async function equipmentRoutes(app: FastifyInstance) {
     const parsed = EquipmentProfileSchema.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
-      return { error: parsed.error.message, field: parsed.error.issues[0]?.path?.join('.') };
+      return zodToFieldError(parsed.error);
     }
     await db.query(
       `UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`,
       [JSON.stringify(parsed.data), userId],
     );
-    return parsed.data;
+    return parsed.data as EquipmentProfileResponse;
   });
 
   app.post<{ Params: { name: string } }>(
@@ -42,7 +44,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
         `UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`,
         [JSON.stringify(profile), userId],
       );
-      return profile;
+      return profile as unknown as EquipmentProfileResponse;
     },
   );
 }
