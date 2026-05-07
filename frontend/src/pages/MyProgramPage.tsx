@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { ProgramPage } from '../components/programs/ProgramPage'
 import { DayCard } from '../components/programs/DayCard'
 import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings'
-import { Term } from '../components/Term'
-import { getMesocycle, type MesocycleRunDetail } from '../lib/api/mesocycles'
+import { MesocycleRecap, type RecapChoice } from '../components/programs/MesocycleRecap'
+import { getMesocycle, getMesocycleRecapStats, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
 import {
   getUserProgram,
   getUserProgramWarnings,
@@ -17,10 +17,14 @@ import { TOKENS } from '../tokens'
 // volume rollup keys off. The user_program_id is derived from the run.
 export default function MyProgramPage() {
   const { id = '' } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [run, setRun] = useState<MesocycleRunDetail | null>(null)
   const [up, setUp] = useState<UserProgramDetail | null>(null)
   const [warnings, setWarnings] = useState<ScheduleWarning[]>([])
   const [err, setErr] = useState<string | null>(null)
+  const [recapStats, setRecapStats] = useState<MesocycleRecapStats | null>(null)
+  const [recapErr, setRecapErr] = useState<string | null>(null)
+  const [recapLoading, setRecapLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -42,6 +46,55 @@ export default function MyProgramPage() {
       .catch(() => { if (!ignore) setWarnings([]) })
     return () => { ignore = true }
   }, [run])
+
+  // Fetch recap stats when the run is completed.
+  useEffect(() => {
+    if (!run || run.status !== 'completed') return
+    let ignore = false
+    setRecapLoading(true)
+    getMesocycleRecapStats(run.id)
+      .then((s) => {
+        if (!ignore) {
+          setRecapStats(s)
+          setRecapLoading(false)
+        }
+      })
+      .catch((e) => {
+        if (!ignore) {
+          setRecapErr(e instanceof Error ? e.message : String(e))
+          setRecapLoading(false)
+        }
+      })
+    return () => { ignore = true }
+  }, [run])
+
+  function handleChoice(choice: RecapChoice) {
+    // up may not yet be loaded if the user_program fetch raced. Fall back to
+    // the catalog so the user always ends up somewhere useful.
+    const slug = up?.template_slug ?? null
+
+    if (choice === 'deload') {
+      // V2 will generate a dedicated deload mesocycle. For now, navigate to the
+      // fork wizard for the same template with an intent hint so the user can
+      // manually select a lighter week. If the template was archived (no slug),
+      // fall through to catalog.
+      if (slug) {
+        navigate(`/programs/${encodeURIComponent(slug)}?intent=deload`)
+      } else {
+        navigate('/programs')
+      }
+    } else if (choice === 'run_it_back') {
+      // Fork wizard for the same template — no special flag.
+      if (slug) {
+        navigate(`/programs/${encodeURIComponent(slug)}`)
+      } else {
+        navigate('/programs')
+      }
+    } else {
+      // 'new_program' — browse catalog.
+      navigate('/programs')
+    }
+  }
 
   async function refreshUserProgram() {
     if (!up) return
@@ -76,20 +129,23 @@ export default function MyProgramPage() {
   if (err) return <div style={{ padding: 16, color: TOKENS.danger }}>Couldn't load program: {err}</div>
   if (!run) return <div style={{ padding: 16, color: TOKENS.textDim }}>Loading…</div>
 
-  // Completed-mesocycle placeholder. Real recap UI lands when the
-  // /mesocycles/:id/recap-stats endpoint exists; rendering MesocycleRecap
-  // with zeros here would show a misleading "0 sets · 0 PRs".
   if (run.status === 'completed') {
-    return (
-      <div style={{ padding: 24, color: TOKENS.text }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, marginBottom: 8 }}>
-          <Term k="mesocycle">Mesocycle</Term> complete
-        </h2>
-        <p style={{ color: TOKENS.textDim, fontSize: 14, lineHeight: 1.5, maxWidth: 520 }}>
-          You wrapped this <Term k="mesocycle" /> ({run.weeks} weeks). The full recap — total working sets, PRs, <Term k="deload" /> recommendation — lands in a follow-up PR alongside the recap-stats endpoint.
-        </p>
-      </div>
-    )
+    if (recapLoading) {
+      return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>
+    }
+    if (recapErr) {
+      return (
+        <div style={{ padding: 24, color: TOKENS.danger }}>
+          Couldn't load recap stats: {recapErr}
+        </div>
+      )
+    }
+    if (recapStats) {
+      return <MesocycleRecap stats={recapStats} onChoice={handleChoice} />
+    }
+    // recapStats not yet populated (first render before effect fires) — show
+    // a brief spinner to avoid a flash of empty content.
+    return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>
   }
 
   return (

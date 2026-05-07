@@ -154,3 +154,21 @@ export const MesocycleAbandonResponseSchema = z.object({
 });
 
 export type MesocycleAbandonResponse = z.infer<typeof MesocycleAbandonResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// GET /api/mesocycles/:id/recap-stats — response body
+// ---------------------------------------------------------------------------
+
+export const MesocycleRecapStatsResponseSchema = z.object({
+  weeks: z.number().int().min(0),
+  total_sets: z.number().int().min(0),
+  // PR interpretation: count of distinct exercises in this run where the
+  // user logged a performed_load_lbs that exceeds ALL prior performed_load_lbs
+  // for that same exercise across the user's earlier completed/abandoned runs.
+  // "Earlier" means runs whose finished_at precedes this run's finished_at
+  // (or now() if the run is still active). Uses set_logs → planned_sets →
+  // day_workouts chain; planned_cardio_blocks are excluded (no load).
+  prs: z.number().int().min(0),
+});
+
+export type MesocycleRecapStatsResponse = z.infer<typeof MesocycleRecapStatsResponseSchema>;

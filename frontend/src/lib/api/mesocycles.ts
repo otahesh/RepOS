@@ -114,6 +114,13 @@ export type AbandonMesocycleResponse = {
   finished_at: string;
 };
 
+// Mirror of api/src/schemas/mesocycles.ts MesocycleRecapStatsResponseSchema.
+export type MesocycleRecapStats = {
+  weeks: number;
+  total_sets: number;
+  prs: number;
+};
+
 export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {
   const res = await fetch('/api/mesocycles/today', { credentials: 'same-origin' });
   return jsonOrThrow(res);
@@ -132,6 +139,13 @@ export async function getVolumeRollup(id: string): Promise<VolumeRollup> {
 export async function abandonMesocycle(id: string): Promise<AbandonMesocycleResponse> {
   const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
     method: 'POST',
+    credentials: 'same-origin',
+  });
+  return jsonOrThrow(res);
+}
+
+export async function getMesocycleRecapStats(id: string): Promise<MesocycleRecapStats> {
+  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/recap-stats`, {
     credentials: 'same-origin',
   });
   return jsonOrThrow(res);
