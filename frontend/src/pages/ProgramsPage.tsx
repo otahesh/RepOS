@@ -11,7 +11,7 @@ export default function ProgramsPage() {
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 32 }}>
       <div style={{ padding: '24px 24px 0' }}>
-        <MyLibrary onRestartProgram={(id) => navigate(`/programs`, { state: { restartId: id } })} />
+        <MyLibrary onRestartProgram={(slug) => navigate(`/programs/${slug}`)} />
       </div>
 
       <section>

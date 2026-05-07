@@ -37,6 +37,10 @@ export type UserProgramRecord = {
   id: string;
   user_id: string;
   template_id: string | null;
+  /** Slug of the originating template — included so the fork-wizard "Restart"
+   *  action can navigate to /programs/:slug without a second round-trip.
+   *  Null for programs forked from a template that has since been archived. */
+  template_slug: string | null;
   template_version: number | null;
   name: string;
   customizations: Record<string, unknown>;
