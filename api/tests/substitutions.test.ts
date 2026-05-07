@@ -17,6 +17,19 @@ beforeAll(async () => {
   // Ensure seed has been applied; tests assume curated catalog is present.
   const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM exercises WHERE created_by='system' AND archived_at IS NULL`);
   if (rows[0].n < 30) throw new Error('seed not applied — run npm run seed first');
+
+  // Purge any test-scoped exercise rows leaked by prior test runs (e.g. from
+  // program-schema.test.ts planned_sets / planned_cardio_blocks / set_logs
+  // helpers that didn't clean up due to a crash). These rows have
+  // required_equipment=NULL so allPredicatesSatisfied always returns true,
+  // causing them to appear in substitution results and break the
+  // "zero viable subs" assertion.
+  await db.query(`
+    DELETE FROM exercises
+    WHERE slug LIKE 'ps-test-ex-%'
+       OR slug LIKE 'pcb-test-ex-%'
+       OR slug LIKE 'sl-test-ex-%'
+  `);
 });
 afterAll(async () => { await db.end(); });
 
