@@ -8,8 +8,9 @@ describe('<ForkWizard>', () => {
   beforeEach(() => {
     vi.spyOn(api, 'getUserProgram').mockResolvedValue({
       id: 'up-1', user_id: 'u-1', template_id: 't-1', template_version: 1, name: 'Full Body 3-Day Foundation',
+      effective_name: 'Full Body 3-Day Foundation',
       customizations: {}, status: 'draft',
-      structure: { _v: 1, days: [
+      effective_structure: { _v: 1, days: [
         { idx: 0, day_offset: 0, kind: 'strength', name: 'Full Body A', blocks: [{ exercise_slug: 'dumbbell-goblet-squat', mev: 8, mav: 14, target_reps_low: 8, target_reps_high: 10, target_rir: 2, rest_sec: 120 }] },
         { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [] },
         { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [] },

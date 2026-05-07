@@ -72,8 +72,8 @@ export function ForkWizard({ userProgramId, onStarted }: { userProgramId: string
 
       <section>
         <h3 style={{ marginTop: 0, fontSize: 16 }}>Days</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${up.structure.days.length}, 1fr)`, gap: 12 }}>
-          {up.structure.days.map(d => (
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(240px, 1fr))`, gap: 12 }}>
+          {up.effective_structure.days.map(d => (
             <DayCard
               key={d.idx}
               day={d}
