@@ -2,23 +2,11 @@ import { useEffect, useState, useCallback } from 'react'
 import { TOKENS, FONTS } from '../tokens'
 import { apiFetch } from '../auth'
 import Icon from './Icon'
+import type { SyncStatusResponse, WeightRangeResponse } from '../lib/api/health'
 
-interface SyncStatus {
-  source: string
-  last_success_at: string | null
-  state: 'fresh' | 'stale' | 'broken'
-}
-
-interface WeightData {
-  current: {
-    weight_lbs: number
-    date: string
-    time: string
-  } | null
-  stats: {
-    trend_7d_lbs: number | null
-  } | null
-}
+// Local aliases for readability
+type SyncStatus = SyncStatusResponse
+type WeightData = Pick<WeightRangeResponse, 'current' | 'stats'>
 
 export default function MobileWeightChip() {
   const [sync, setSync] = useState<SyncStatus | null>(null)

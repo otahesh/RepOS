@@ -9,23 +9,16 @@ import {
   AreaChart,
 } from 'recharts'
 import { TOKENS, FONTS } from '../../tokens'
+import type { WeightSampleRow, WeightStats, CurrentWeight } from '../../lib/api/health'
 
-export interface WeightSample {
-  date: string
-  weight_lbs: number
-  source: string
-}
+// Re-export for consumers that imported WeightSample from this module.
+// Prefer importing WeightSampleRow from lib/api/health directly.
+export type WeightSample = WeightSampleRow
 
 interface Props {
-  samples: WeightSample[]
-  current: { weight_lbs: number; date: string; time: string } | null
-  stats: {
-    trend_7d_lbs: number | null
-    trend_30d_lbs: number | null
-    trend_90d_lbs: number | null
-    adherence_pct: number | null
-    missed_days: string[]
-  } | null
+  samples: WeightSampleRow[]
+  current: CurrentWeight | null
+  stats: WeightStats | null
 }
 
 // 7-day moving average

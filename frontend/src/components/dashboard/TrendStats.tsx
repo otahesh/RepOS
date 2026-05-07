@@ -1,15 +1,10 @@
 import { TOKENS, FONTS } from '../../tokens'
 import Icon from '../Icon'
+import type { WeightStats, CurrentWeight } from '../../lib/api/health'
 
 interface Props {
-  stats: {
-    trend_7d_lbs: number | null
-    trend_30d_lbs: number | null
-    trend_90d_lbs: number | null
-    adherence_pct: number | null
-    missed_days: string[]
-  }
-  current: { weight_lbs: number; date: string; time: string } | null
+  stats: WeightStats
+  current: CurrentWeight | null
 }
 
 interface StatCardProps {

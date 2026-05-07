@@ -1,29 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { TOKENS, FONTS } from '../../tokens'
 import { apiFetch } from '../../auth'
-import BodyweightChart, { WeightSample } from './BodyweightChart'
+import BodyweightChart from './BodyweightChart'
 import TrendStats from './TrendStats'
+import type { WeightRangeResponse } from '../../lib/api/health'
 
-interface WeightData {
-  current: {
-    weight_lbs: number
-    date: string
-    time: string
-  } | null
-  samples: WeightSample[]
-  stats: {
-    trend_7d_lbs: number | null
-    trend_30d_lbs: number | null
-    trend_90d_lbs: number | null
-    adherence_pct: number | null
-    missed_days: string[]
-  } | null
-  sync: {
-    source: string
-    last_success_at: string | null
-    state: 'fresh' | 'stale' | 'broken'
-  } | null
-}
+type WeightData = WeightRangeResponse
 
 export default function DesktopDashboard() {
   const [data, setData] = useState<WeightData | null>(null)

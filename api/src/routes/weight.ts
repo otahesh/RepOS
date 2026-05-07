@@ -3,43 +3,40 @@ import type { PoolClient } from 'pg';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
 import { computeStats } from '../services/stats.js';
+import {
+  WeightSampleSchema,
+  WeightBackfillSchema,
+  WeightRangeQuerySchema,
+  type WeightSampleResponse,
+  type WeightBackfillResponse,
+  type WeightRangeResponse,
+} from '../schemas/healthWeight.js';
 
 const MAX_BACKFILL_SAMPLES = 500;
 
-const VALID_SOURCES = ['Apple Health', 'Manual', 'Withings', 'Renpho'] as const;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_RE = /^\d{2}:\d{2}:\d{2}$/;
+// ---------------------------------------------------------------------------
+// Validation helpers — translate Zod errors into the { error, field } shape
+// the existing tests and API spec require.
+// ---------------------------------------------------------------------------
 
-function isValidCalendarDate(s: string): boolean {
-  if (!DATE_RE.test(s)) return false;
-  const [y, m, d] = s.split('-').map(Number);
-  // Date constructor accepts overflow (e.g. month 13 → Jan next year), so
-  // reverse-check that the parsed Date round-trips to the same Y-M-D.
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
-}
+function validate(body: unknown): { error: string; field: string } | null {
+  const result = WeightSampleSchema.safeParse(body);
+  if (result.success) return null;
 
-function isValidTime(s: string): boolean {
-  if (!TIME_RE.test(s)) return false;
-  const [h, m, sec] = s.split(':').map(Number);
-  return h < 24 && m < 60 && sec < 60;
-}
-
-function validate(body: any): { error: string; field: string } | null {
-  const { weight_lbs, date, time, source } = body;
-  if (weight_lbs == null || typeof weight_lbs !== 'number' || !isFinite(weight_lbs) || weight_lbs < 50.0 || weight_lbs > 600.0)
-    return { error: 'weight_lbs must be between 50.0 and 600.0', field: 'weight_lbs' };
-  if (!date || !isValidCalendarDate(date))
-    return { error: 'date must be a valid YYYY-MM-DD calendar date', field: 'date' };
-  if (!time || !isValidTime(time))
-    return { error: 'time must be HH:MM:SS', field: 'time' };
-  if (!VALID_SOURCES.includes(source))
-    return { error: `source must be one of: ${VALID_SOURCES.join(', ')}`, field: 'source' };
-  return null;
+  // Map the first Zod issue back to { error, field } so the API contract
+  // is unchanged and existing tests continue to pass without modification.
+  const issue = result.error.issues[0];
+  const field = issue.path[0]?.toString() ?? 'unknown';
+  return { error: issue.message, field };
 }
 
 // client param allows backfill to share its transaction so rate-limit increments roll back on error
-async function upsertSample(userId: string, body: any, ip: string, client?: PoolClient) {
+async function upsertSample(
+  userId: string,
+  body: { weight_lbs: number; date: string; time: string; source: string },
+  _ip: string,
+  client?: PoolClient,
+): Promise<{ status: number; body: WeightSampleResponse | { error: string } }> {
   const qr = client ?? db;
   const { weight_lbs, date, time, source } = body;
   const rounded = Math.round(weight_lbs * 10) / 10;
@@ -102,35 +99,52 @@ async function upsertSample(userId: string, body: any, ip: string, client?: Pool
 
 export async function weightRoutes(app: FastifyInstance) {
   app.post('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const body = req.body as any;
-    const err = validate(body);
+    const err = validate(req.body);
     if (err) return reply.code(400).send(err);
 
-    const { status, body: resBody } = await upsertSample((req as any).userId, body, req.ip);
+    const parsed = WeightSampleSchema.parse(req.body);
+    const { status, body: resBody } = await upsertSample((req as any).userId, parsed, req.ip);
     return reply.code(status).send(resBody);
   });
 
   app.post('/weight/backfill', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const { samples } = req.body as { samples: any[] };
-    if (!Array.isArray(samples)) return reply.code(400).send({ error: 'samples must be an array' });
-    if (samples.length > MAX_BACKFILL_SAMPLES)
-      return reply.code(400).send({ error: `samples array exceeds maximum of ${MAX_BACKFILL_SAMPLES} items` });
+    const rawBody = req.body as unknown;
+    if (
+      typeof rawBody !== 'object' ||
+      rawBody === null ||
+      !Array.isArray((rawBody as Record<string, unknown>).samples)
+    ) {
+      return reply.code(400).send({ error: 'samples must be an array' });
+    }
 
-    // Validate all items before touching the DB
+    const samples = (rawBody as { samples: unknown[] }).samples;
+
+    if (samples.length > MAX_BACKFILL_SAMPLES) {
+      return reply.code(400).send({
+        error: `samples array exceeds maximum of ${MAX_BACKFILL_SAMPLES} items`,
+      });
+    }
+
+    // Validate all items before touching the DB; keep existing { error, field } shape
     for (const sample of samples) {
       const err = validate(sample);
       if (err) return reply.code(400).send(err);
     }
 
+    // Re-parse as typed after validation
+    const backfill = WeightBackfillSchema.parse(rawBody);
+
     // Use an explicit client so the transaction covers rate-limit increments too —
     // a mid-batch error rolls back everything including write_count increments.
     const client = await db.connect();
-    let created = 0, deduped = 0;
+    let created = 0;
+    let deduped = 0;
     try {
       await client.query('BEGIN');
-      for (const sample of samples) {
+      for (const sample of backfill.samples) {
         const result = await upsertSample((req as any).userId, sample, req.ip, client);
-        if (result.status === 201) created++; else deduped++;
+        if (result.status === 201) created++;
+        else deduped++;
       }
       await client.query('COMMIT');
     } catch (e) {
@@ -140,11 +154,14 @@ export async function weightRoutes(app: FastifyInstance) {
       client.release();
     }
 
-    return reply.send({ created, deduped });
+    const response: WeightBackfillResponse = { created, deduped };
+    return reply.send(response);
   });
 
   app.get('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const { range = '90d' } = req.query as { range?: string };
+    const queryResult = WeightRangeQuerySchema.safeParse(req.query);
+    const { range } = queryResult.success ? queryResult.data : { range: '90d' as const };
+
     const rangeMap: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '1y': 365, 'all': 36500 };
     const days = rangeMap[range] ?? 90;
     const since = new Date();
@@ -166,8 +183,9 @@ export async function weightRoutes(app: FastifyInstance) {
     );
 
     reply.header('Cache-Control', 'no-store');
-    return {
-      current,
+
+    const response: WeightRangeResponse = {
+      current: current ?? null,
       samples,
       stats: {
         trend_7d_lbs: trend7d,
@@ -178,5 +196,7 @@ export async function weightRoutes(app: FastifyInstance) {
       },
       sync: sync ?? null,
     };
+
+    return response;
   });
 }
