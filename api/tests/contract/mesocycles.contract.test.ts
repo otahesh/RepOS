@@ -18,6 +18,7 @@ import {
   MesocycleDetailResponseSchema,
   VolumeRollupResponseSchema,
   MesocycleAbandonResponseSchema,
+  MesocycleRecapStatsResponseSchema,
 } from '../../src/schemas/mesocycles.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
@@ -142,6 +143,46 @@ describe('GET /api/mesocycles/:id/volume-rollup contract', () => {
       headers: auth(),
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/mesocycles/:id/recap-stats
+// ---------------------------------------------------------------------------
+
+describe('GET /api/mesocycles/:id/recap-stats contract', () => {
+  it('404 on unknown id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/mesocycles/00000000-0000-0000-0000-000000000000/recap-stats',
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('recap-stats response parses through MesocycleRecapStatsResponseSchema when run exists', async () => {
+    // Reuse any run that belongs to our test user (active or completed).
+    const { rows: [run] } = await db.query(
+      `SELECT id FROM mesocycle_runs WHERE user_id=$1 LIMIT 1`,
+      [userId],
+    );
+    if (!run) {
+      console.warn('No run for test user — skipping recap-stats contract test');
+      return;
+    }
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/mesocycles/${run.id}/recap-stats`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+    const parsed = MesocycleRecapStatsResponseSchema.safeParse(res.json());
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.weeks).toBeGreaterThanOrEqual(0);
+      expect(parsed.data.total_sets).toBeGreaterThanOrEqual(0);
+      expect(parsed.data.prs).toBeGreaterThanOrEqual(0);
+    }
   });
 });
 
