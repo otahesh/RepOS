@@ -1,3 +1,4 @@
+import FocusTrap from 'focus-trap-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
@@ -39,10 +40,9 @@ const SETTINGS_SUB = [
 interface SidebarProps {
   mobileOpen?: boolean
   onClose?: () => void
-  drawerRef?: React.Ref<HTMLElement>
 }
 
-export default function Sidebar({ mobileOpen = false, onClose, drawerRef }: SidebarProps) {
+export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const location = useLocation()
   const isMobile = useIsMobile()
   const isSettings = location.pathname.startsWith('/settings')
@@ -83,10 +83,14 @@ export default function Sidebar({ mobileOpen = false, onClose, drawerRef }: Side
         flexShrink: 0,
       }
 
-  return (
+  const aside = (
     <aside
-      ref={drawerRef}
-      aria-hidden={isMobile && !mobileOpen}
+      {...(isMobile && {
+        role: 'dialog' as const,
+        'aria-modal': true,
+        'aria-label': 'Main navigation',
+        'aria-hidden': !mobileOpen,
+      })}
       style={{
         background: TOKENS.surface,
         borderRight: `1px solid ${TOKENS.line}`,
@@ -261,4 +265,26 @@ export default function Sidebar({ mobileOpen = false, onClose, drawerRef }: Side
       </div>
     </aside>
   )
+
+  if (isMobile) {
+    return (
+      <FocusTrap
+        active={mobileOpen}
+        focusTrapOptions={{
+          returnFocusOnDeactivate: true,
+          escapeDeactivates: true,
+          clickOutsideDeactivates: true,
+          allowOutsideClick: true,
+          onDeactivate: onClose,
+          // When the drawer is closed (visibility:hidden) there are no tabbable
+          // elements visible. Fall back gracefully rather than throwing.
+          fallbackFocus: () => document.body,
+        }}
+      >
+        {aside}
+      </FocusTrap>
+    )
+  }
+
+  return aside
 }

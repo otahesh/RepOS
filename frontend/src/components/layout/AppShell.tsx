@@ -10,8 +10,6 @@ export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const drawerRef = useRef<HTMLElement | null>(null)
-  const wasOpenRef = useRef(false)
 
   const closeDrawer = useCallback(() => setMobileOpen(false), [])
   const toggleDrawer = useCallback(() => setMobileOpen(o => !o), [])
@@ -21,39 +19,10 @@ export default function AppShell() {
     setMobileOpen(false)
   }, [location.pathname])
 
-  // ESC closes the drawer while open.
-  useEffect(() => {
-    if (!mobileOpen) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileOpen(false)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [mobileOpen])
-
   // If we cross the breakpoint into desktop while drawer is open, drop the open state.
   useEffect(() => {
     if (!isMobile && mobileOpen) setMobileOpen(false)
   }, [isMobile, mobileOpen])
-
-  // Focus management: on open, move focus into the drawer (first focusable);
-  // on close, return focus to the hamburger trigger so keyboard users land
-  // back where they started instead of on <body>.
-  useEffect(() => {
-    if (mobileOpen) {
-      const root = drawerRef.current
-      if (root) {
-        const first = root.querySelector<HTMLElement>(
-          'a, button, [tabindex]:not([tabindex="-1"])',
-        )
-        first?.focus()
-      }
-      wasOpenRef.current = true
-    } else if (wasOpenRef.current) {
-      triggerRef.current?.focus()
-      wasOpenRef.current = false
-    }
-  }, [mobileOpen])
 
   if (isMobile) {
     return (
@@ -94,7 +63,7 @@ export default function AppShell() {
           }}
         />
 
-        <Sidebar mobileOpen={mobileOpen} onClose={closeDrawer} drawerRef={drawerRef} />
+        <Sidebar mobileOpen={mobileOpen} onClose={closeDrawer} />
       </div>
     )
   }
