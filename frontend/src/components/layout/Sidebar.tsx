@@ -1,5 +1,6 @@
 import FocusTrap from 'focus-trap-react'
 import { NavLink, useLocation } from 'react-router-dom'
+import * as Popover from '@radix-ui/react-popover'
 import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
 import { useIsMobile } from '../../lib/useIsMobile'
@@ -216,50 +217,122 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         })}
       </nav>
 
-      {/* User avatar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px',
-        borderRadius: 8,
-        border: `1px solid ${TOKENS.line}`,
-        marginTop: 16,
-      }}>
-        <div style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
-          background: `linear-gradient(135deg, ${TOKENS.heat3} 0%, ${TOKENS.accent} 100%)`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: FONTS.mono,
-          fontSize: 12,
-          fontWeight: 700,
-          color: '#fff',
-          flexShrink: 0,
-        }}>{initials}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: TOKENS.text,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>{primary}</div>
-          <div style={{
-            fontSize: 10,
-            color: TOKENS.textMute,
-            fontFamily: FONTS.mono,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>{secondary}</div>
-        </div>
-        <Icon name="settings" size={14} color={TOKENS.textMute} />
-      </div>
+      {/* Account menu — Beta W0.4 */}
+      <Popover.Root>
+        <Popover.Trigger asChild>
+          <button
+            aria-label="Account menu"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '10px',
+              borderRadius: 8,
+              border: `1px solid ${TOKENS.line}`,
+              marginTop: 16,
+              background: 'transparent',
+              cursor: 'pointer',
+              width: '100%',
+              textAlign: 'left',
+              fontFamily: 'inherit',
+              color: 'inherit',
+            }}
+          >
+            <div style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: `linear-gradient(135deg, ${TOKENS.heat3} 0%, ${TOKENS.accent} 100%)`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontFamily: FONTS.mono,
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#fff',
+              flexShrink: 0,
+            }}>{initials}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: TOKENS.text,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>{primary}</div>
+              <div style={{
+                fontSize: 10,
+                color: TOKENS.textMute,
+                fontFamily: FONTS.mono,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>{secondary}</div>
+            </div>
+            <Icon name="settings" size={14} color={TOKENS.textMute} />
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            align="start"
+            side="top"
+            sideOffset={8}
+            style={{
+              minWidth: 220,
+              background: TOKENS.surface,
+              border: `1px solid ${TOKENS.line}`,
+              borderRadius: 10,
+              padding: 8,
+              boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+              zIndex: 60,
+            }}
+          >
+            <div style={{ padding: '8px 10px', borderBottom: `1px solid ${TOKENS.line}` }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: TOKENS.text }}>
+                {user?.display_name?.trim() || user?.email || 'User'}
+              </div>
+              <div style={{
+                fontSize: 11,
+                color: TOKENS.textMute,
+                fontFamily: FONTS.mono,
+                marginTop: 2,
+              }}>{user?.email}</div>
+            </div>
+            <NavLink
+              to="/settings/account"
+              role="menuitem"
+              style={{
+                display: 'block',
+                padding: '8px 10px',
+                fontSize: 12,
+                color: TOKENS.text,
+                textDecoration: 'none',
+                borderRadius: 6,
+                marginTop: 4,
+              }}
+            >Account settings</NavLink>
+            <button
+              role="menuitem"
+              onClick={() => { window.location.assign('/cdn-cgi/access/logout') }}
+              style={{
+                display: 'block',
+                padding: '8px 10px',
+                fontSize: 12,
+                color: TOKENS.danger,
+                background: 'transparent',
+                border: 'none',
+                borderRadius: 6,
+                width: '100%',
+                textAlign: 'left',
+                cursor: 'pointer',
+                marginTop: 2,
+                fontFamily: 'inherit',
+              }}
+            >Sign out</button>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     </aside>
   )
 
