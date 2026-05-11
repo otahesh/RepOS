@@ -85,6 +85,8 @@ Stats (`trend_7d_lbs`, `trend_30d_lbs`, `trend_90d_lbs`, `adherence_pct`, `misse
 
 ## Scope
 
-**v1 (shipped):** Apple Health bodyweight sync, web chart, mobile read-only chip, sync status pill, manual backfill API, single-container deploy on Unraid behind Cloudflare Tunnel + Access.
+**Alpha (shipped):** Apple Health bodyweight sync, web chart, mobile read-only chip, sync status pill, manual backfill API, single-container deploy on Unraid behind Cloudflare Tunnel + Access, GHCR + CI builds, nightly Postgres backups (14-day retention), per-service s6-log rotation, CF Access whole-host auth (built; flag-bypassed in alpha, default-on in Beta).
 
-**v2 (out of scope):** User login/auth (frontend currently uses `PLACEHOLDER_USER_ID`), multi-metric, Withings/Renpho direct integration, automated backfill, source-priority UI, GHCR + CI builds, log rotation, Postgres backups.
+**Beta (in-flight):** see `docs/superpowers/plans/2026-05-11-repos-beta.md`. 9 waves, 15 binary acceptance gates. W0 (auth flip + cleanup + JWKS test) covered by `docs/superpowers/plans/2026-05-11-beta-W0-auth-flip.md`.
+
+**Post-Beta / GA (out of scope for Beta):** multi-metric body composition, Withings/Renpho direct integration, automated backfill, source-priority UI, image signing (cosign), WAL archiving / PITR, multi-region / HA Postgres, light theme, notification settings panel.
