@@ -46,18 +46,15 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const location = useLocation()
   const isMobile = useIsMobile()
   const isSettings = location.pathname.startsWith('/settings')
-  const { user, status } = useCurrentUser()
+  const { user } = useCurrentUser()
 
-  // AuthGate blocks render until status leaves 'loading', so user is non-null
-  // here in both 'authenticated' and 'disabled' (placeholder) modes.
-  const isPlaceholder = status === 'disabled'
+  // AuthGate blocks render until status === 'authenticated', so user is
+  // non-null here.
   const trimmedName = user?.display_name?.trim() ?? ''
   const emailLocal = user?.email.split('@')[0]?.trim() ?? ''
-  const primary = isPlaceholder
-    ? 'GUEST'
-    : (trimmedName || emailLocal || 'USER').toUpperCase()
-  const secondary = isPlaceholder ? 'placeholder mode' : (user?.email ?? '')
-  const initials = isPlaceholder ? 'G' : monogram(user?.display_name, user?.email ?? '')
+  const primary = (trimmedName || emailLocal || 'USER').toUpperCase()
+  const secondary = user?.email ?? ''
+  const initials = monogram(user?.display_name, user?.email ?? '')
 
   // Close drawer on any nav click (mobile only). No-op on desktop.
   const handleNavClick = () => {

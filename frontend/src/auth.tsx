@@ -7,11 +7,6 @@
 //   - AuthProvider: bootstraps `/api/me` once, exposes the resolved user / status.
 //   - useCurrentUser(): hook accessor for the same.
 //   - AuthGate: render-blocker until status leaves 'loading' (or shows error).
-//
-// The transitional `'disabled'` status is returned by the API as 503
-// `{ error: 'cf_access_disabled' }` while the feature flag is off — the frontend
-// falls back to the placeholder user so legacy admin-key paths keep working
-// during deploy.
 
 import {
   createContext,
@@ -22,11 +17,6 @@ import {
 } from 'react'
 import { TOKENS, FONTS, API_BASE } from './tokens'
 
-// Hardcoded placeholder used only during the cf_access_disabled transition.
-// Once CF Access is fully enabled this constant is dead weight; remove with
-// the feature flag.
-export const PLACEHOLDER_USER_ID = '00000000-0000-0000-0000-000000000001'
-
 export interface User {
   id: string
   email: string
@@ -34,19 +24,12 @@ export interface User {
   timezone: string
 }
 
-export type AuthStatus = 'loading' | 'authenticated' | 'disabled' | 'error'
+export type AuthStatus = 'loading' | 'authenticated' | 'error'
 
 export interface AuthState {
   status: AuthStatus
   user: User | null
   error: string | null
-}
-
-const PLACEHOLDER_USER: User = {
-  id: PLACEHOLDER_USER_ID,
-  email: 'placeholder@local',
-  display_name: null,
-  timezone: 'UTC',
 }
 
 /**
@@ -113,15 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        if (res.status === 503) {
-          // cf_access_disabled transition — fall back to placeholder so the
-          // admin-key path keeps working while the flag flips.
-          setState({ status: 'disabled', user: PLACEHOLDER_USER, error: null })
-          return
-        }
-
-        // 401 was already handled by apiFetch (redirect). Anything else is an
-        // unexpected error.
+        // 401 was already handled by apiFetch (redirect). Anything else
+        // (including 503 — post-flag-flip, a 503 means something is genuinely
+        // broken, not a transitional state) is an unexpected error.
         setState({
           status: 'error',
           user: null,
