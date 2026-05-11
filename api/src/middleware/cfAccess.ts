@@ -14,14 +14,41 @@ import { requireAuth } from './auth.js';
 // matches the deploy ordering: code lands first, the user creates the CF
 // Access apps in the dashboard, then the env flag flips on.
 
+// JWKS cache strategy: refresh the public-key set at most every 30s under
+// normal traffic (cacheMaxAge), and on a cache miss for a kid, refresh
+// immediately without rate-limiting (cooldownDuration=0). With Cloudflare
+// Access's occasional JWKS rotation cadence, this yields a ~60s p99 budget
+// for a rotated-in key to start verifying. Beta W0.6's integration test
+// in api/tests/integration/jwks-rotation.test.ts proves the budget holds.
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
 function jwks() {
   if (cachedJwks) return cachedJwks;
   const teamDomain = process.env.CF_ACCESS_TEAM_DOMAIN;
   if (!teamDomain) throw new Error('CF_ACCESS_TEAM_DOMAIN must be set');
-  cachedJwks = createRemoteJWKSet(new URL(`https://${teamDomain}/cdn-cgi/access/certs`));
+  // Test-only escape hatch: allow http:// when teamDomain is a localhost
+  // ephemeral-port form like "127.0.0.1:54321" AND NODE_ENV=test. Prod always
+  // resolves to https:// because real team domains start with team names.
+  const proto =
+    process.env.NODE_ENV === 'test' && teamDomain.startsWith('127.0.0.1')
+      ? 'http'
+      : 'https';
+  cachedJwks = createRemoteJWKSet(
+    new URL(`${proto}://${teamDomain}/cdn-cgi/access/certs`),
+    {
+      cacheMaxAge: 30_000, // 30s soft refresh
+      cooldownDuration: 0, // immediate refresh on a kid miss
+    },
+  );
   return cachedJwks;
+}
+
+/**
+ * Test-only: clear the module-level JWKS cache so a rotation in test N
+ * doesn't leak into test N+1. Do not call from production code.
+ */
+export function resetJwksCacheForTesting(): void {
+  cachedJwks = null;
 }
 
 export function isCfAccessEnabled(): boolean {
