@@ -105,7 +105,8 @@ export async function setLogsRoutes(app: FastifyInstance) {
       `SELECT ${SELECT_COLUMNS}
        FROM set_logs
        WHERE (user_id = $1 AND client_request_id = $2)
-          OR (planned_set_id = $3
+          OR (user_id = $1
+              AND planned_set_id = $3
               AND date_trunc('minute', performed_at, 'UTC')
                 = date_trunc('minute', $4::timestamptz, 'UTC'))
        LIMIT 1`,

@@ -165,6 +165,15 @@ describe('POST /api/set-logs — idempotency', () => {
         },
       });
       expect(resp.statusCode).toBe(404);
+
+      // Guard against a future refactor that moves the ownership check
+      // below the INSERT: the 404 would still surface but a row would
+      // leak. Asserting zero rows tied to userA's planned_set catches it.
+      const { rows: leaked } = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM set_logs WHERE planned_set_id = $1`,
+        [userA.plannedSetId],
+      );
+      expect(leaked[0].n).toBe(0);
     } finally {
       await app.close();
     }
