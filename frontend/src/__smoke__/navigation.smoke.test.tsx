@@ -20,12 +20,11 @@ vi.mock('../auth', () => {
   return {
     AuthProvider: passthrough,
     AuthGate: passthrough,
-    PLACEHOLDER_USER_ID: '00000000-0000-0000-0000-000000000001',
     apiFetch: vi.fn(),
     useCurrentUser: () => ({
       status: 'authenticated' as const,
       user: {
-        id: '00000000-0000-0000-0000-000000000001',
+        id: 'test-user-id',
         email: 'test@example.com',
         display_name: 'Test User',
         timezone: 'UTC',

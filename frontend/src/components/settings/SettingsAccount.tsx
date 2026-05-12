@@ -2,8 +2,7 @@ import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
 
 export default function SettingsAccount() {
-  const { user, status } = useCurrentUser()
-  const isPlaceholder = status === 'disabled'
+  const { user } = useCurrentUser()
 
   return (
     <div style={{
@@ -41,7 +40,7 @@ export default function SettingsAccount() {
         {[
           { k: 'EMAIL', v: user?.email ?? '—' },
           { k: 'DISPLAY NAME', v: user?.display_name?.trim() || '—' },
-          { k: 'AUTH MODE', v: isPlaceholder ? 'Placeholder (pre-auth)' : 'Cloudflare Access' },
+          { k: 'AUTH MODE', v: 'Cloudflare Access' },
         ].map((row, i) => (
           <div key={row.k} style={{
             display: 'flex',
@@ -70,7 +69,7 @@ export default function SettingsAccount() {
         color: TOKENS.textDim,
         lineHeight: 1.5,
       }}>
-        Profile editing, password changes, and session management land in v2 alongside the user-auth migration. Account state is currently sourced from Cloudflare Access in production and a placeholder user in dev.
+        Profile editing and session management land in upcoming Beta waves. Account state is sourced from Cloudflare Access.
       </div>
     </div>
   )
