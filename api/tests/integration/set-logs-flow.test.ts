@@ -1,15 +1,20 @@
 /**
- * Beta W1.2 — POST /api/set-logs integration tests.
+ * Beta W1.2 — POST + PATCH /api/set-logs integration tests.
  *
  * Covers:
- *   - Happy path: 201, derived user_id + exercise_id, aliased weight_lbs/reps/rir
- *   - Idempotency: identical client_request_id → 200 deduped:true
- *   - Double-tap minute-bucket dedupe: same planned_set + same UTC minute → 200
- *   - IDOR contract: planned_set owned by another user → 404 (no oracle)
+ *   - POST happy path: 201, derived user_id + exercise_id, aliased weight_lbs/reps/rir
+ *   - POST idempotency: identical client_request_id → 200 deduped:true
+ *   - POST double-tap minute-bucket dedupe: same planned_set + same UTC minute → 200
+ *   - POST IDOR contract: planned_set owned by another user → 404 (no oracle)
+ *   - PATCH 24h audit window: within window → 200; past window → 409;
+ *     IDOR (set_log owned by another user) → 404 (no oracle)
  *
  * The atomic INSERT ... ON CONFLICT DO NOTHING in the handler covers both
  * idempotency probes from W1.1's unique indices (set_logs_user_id_client_request_id_key
  * and set_logs_minute_dedupe_key). No probe-then-insert TOCTOU window.
+ *
+ * PATCH uses a single SQL pass for load + ownership + audit-window check.
+ * SQL is the source of truth for time so API/DB clock-skew can't pop the gate.
  */
 
 import 'dotenv/config';
@@ -17,6 +22,7 @@ import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
 import {
   seedUserWithMesocycle,
+  seedUserWithLoggedSet,
   cleanupSeeded,
   type SeedHandle,
 } from '../helpers/seed-fixtures.js';
@@ -174,6 +180,75 @@ describe('POST /api/set-logs — idempotency', () => {
         [userA.plannedSetId],
       );
       expect(leaked[0].n).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('PATCH /api/set-logs/:id — 24h audit window', () => {
+  it('200 when performed_at is within 24h', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 60 });
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'PATCH',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: { weight_lbs: 230 },
+      });
+      expect(resp.statusCode).toBe(200);
+      expect(resp.json().set_log.weight_lbs).toBe(230);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('409 audit_window_expired when performed_at > 24h ago', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 25 * 60 });
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'PATCH',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: { weight_lbs: 230 },
+      });
+      expect(resp.statusCode).toBe(409);
+      expect(resp.json().error).toBe('audit_window_expired');
+      expect(resp.json()).toHaveProperty('performed_at');
+      expect(resp.json()).toHaveProperty('max_edit_at');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('404 when set_log belongs to another user (IDOR — collapsed with not-found)', async () => {
+    const app = await build();
+    try {
+      const userA = await seedUserWithLoggedSet({ minutesAgo: 10 });
+      handles.push(userA);
+      const userB = await seedUserWithMesocycle();
+      handles.push(userB);
+      const resp = await app.inject({
+        method: 'PATCH',
+        url: `/api/set-logs/${userA.setLogId}`,
+        headers: { authorization: `Bearer ${userB.bearer}` },
+        payload: { weight_lbs: 9 },
+      });
+      expect(resp.statusCode).toBe(404);
+
+      // Guard against a future refactor that moves the ownership check
+      // below the UPDATE: the 404 would still surface but the row would
+      // be silently mutated. Assert userA's row weight is unchanged.
+      const { rows } = await db.query<{ weight_lbs: number }>(
+        `SELECT performed_load_lbs::float AS weight_lbs
+         FROM set_logs WHERE id = $1`,
+        [userA.setLogId],
+      );
+      expect(rows[0].weight_lbs).toBe(200.0);
     } finally {
       await app.close();
     }
