@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 RepOS is a fitness tracking app — Apple Health weight-sync is v1. **Status: alpha, deployed.** The full backend (Fastify + Postgres) and frontend (Vite + React) ship from this repo, run as a single Docker container on Unraid, and are publicly reachable as `https://repos.jpmtech.com` via Cloudflare Tunnel.
 
 For current operational state see:
-- `PASSDOWN.md` — engineering handoff: build/redeploy cycle, schema, security checklist, what's open
-- `docs/superpowers/plans/2026-05-03-repos-monolithic-container.md` — the implementation plan that drove the deploy
+- `docs/superpowers/plans/2026-05-11-repos-beta.md` — the master Beta plan (9 waves, 15 acceptance gates); W0 is operationally complete
+- `docs/superpowers/plans/2026-05-03-repos-monolithic-container.md` — the implementation plan that drove the alpha deploy
 - `Engineering Handoff.md` — authoritative product spec; **do not modify** without checking in first
 
 ## Repo Layout
