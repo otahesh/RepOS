@@ -45,6 +45,9 @@ COPY --from=api-builder      /build/api/node_modules  /app/api/node_modules
 COPY --from=api-builder      /build/api/package.json  /app/api/package.json
 COPY --from=frontend-builder /build/frontend/dist     /app/frontend
 
+# Operational scripts (pre-restore snapshot, cutover SQL) invoked via docker exec.
+COPY scripts /scripts
+
 # nginx config + s6 service tree
 COPY docker/nginx/repos.conf  /etc/nginx/http.d/default.conf
 COPY docker/root/             /
