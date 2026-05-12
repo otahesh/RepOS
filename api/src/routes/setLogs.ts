@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import {
   SetLogPostSchema,
   SetLogPatchSchema,
+  IdParamSchema,
   type SetLogRow,
 } from '../schemas/setLogs.js';
 
@@ -139,7 +140,12 @@ export async function setLogsRoutes(app: FastifyInstance) {
     const userId = (req as any).userId as string | undefined;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
-    const { id } = req.params as { id: string };
+    const idParse = IdParamSchema.safeParse(req.params);
+    if (!idParse.success) {
+      const issue = idParse.error.issues[0];
+      return reply.code(400).send({ error: issue.message, field: issue.path[0]?.toString() ?? 'unknown' });
+    }
+    const { id } = idParse.data;
     const parse = SetLogPatchSchema.safeParse(req.body);
     if (!parse.success) {
       const issue = parse.error.issues[0];
@@ -151,16 +157,19 @@ export async function setLogsRoutes(app: FastifyInstance) {
     // `audit_window_ok` boolean is computed from Postgres's clock; if the
     // row's performed_at is more than 24h in Postgres-time the gate trips
     // regardless of whatever the Node process thinks the time is.
+    // audit_window_ok uses strict `>`, so max_edit_at is the boundary
+    // *at which* editing becomes forbidden — when this 409 fires,
+    // max_edit_at is <= now() by definition.
     const { rows: existing } = await db.query<{
       id: string;
       user_id: string;
-      performed_at: string;
+      performed_at: Date;
       audit_window_ok: boolean;
-      max_edit_at: string;
+      max_edit_at: Date;
     }>(
       `SELECT id, user_id, performed_at,
               performed_at > now() - INTERVAL '24 hours' AS audit_window_ok,
-              (performed_at + INTERVAL '24 hours')::text AS max_edit_at
+              performed_at + INTERVAL '24 hours'         AS max_edit_at
        FROM set_logs WHERE id = $1`,
       [id],
     );
@@ -193,6 +202,9 @@ export async function setLogsRoutes(app: FastifyInstance) {
     const setParts: string[] = [];
     const params: unknown[] = [];
     let p = 1;
+    // SQL-injection safety: keys in `fields` are post-Zod, so they are
+    // necessarily in the `map` literal — `map[k]` resolves to a hardcoded
+    // column name. Values flow through $-params.
     for (const [k, v] of Object.entries(fields)) {
       if (v === undefined) continue;
       setParts.push(`${map[k as keyof typeof map]} = $${p++}`);

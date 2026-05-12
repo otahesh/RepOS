@@ -220,6 +220,29 @@ describe('PATCH /api/set-logs/:id — 24h audit window', () => {
       expect(resp.json().error).toBe('audit_window_expired');
       expect(resp.json()).toHaveProperty('performed_at');
       expect(resp.json()).toHaveProperty('max_edit_at');
+      // Lock the contract: both timestamps serialize as ISO-8601-Z, not
+      // Postgres DateStyle (`2026-05-12 19:30:00+00`). Drift between the
+      // two is the regression this regex catches.
+      expect(resp.json().performed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+      expect(resp.json().max_edit_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400 when :id is not a UUID', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'PATCH',
+        url: '/api/set-logs/not-a-uuid',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: { weight_lbs: 230 },
+      });
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json().field).toBe('id');
     } finally {
       await app.close();
     }

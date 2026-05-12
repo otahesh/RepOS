@@ -39,6 +39,12 @@ export const SetLogListQuerySchema = z.object({
 });
 export type SetLogListQuery = z.infer<typeof SetLogListQuerySchema>;
 
+// shared by PATCH; DELETE/GET will use it in W1.2.14+
+export const IdParamSchema = z.object({
+  id: z.string().uuid(),
+});
+export type IdParam = z.infer<typeof IdParamSchema>;
+
 // ---------------------------------------------------------------------------
 // Shape returned to clients. The numeric(5,1) `performed_load_lbs` column is
 // SELECTed as `performed_load_lbs::float AS weight_lbs` — pg's default text
