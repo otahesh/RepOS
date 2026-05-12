@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
-import { SetLogPostSchema, type SetLogRow } from '../schemas/setLogs.js';
+import {
+  SetLogPostSchema,
+  SetLogPatchSchema,
+  type SetLogRow,
+} from '../schemas/setLogs.js';
 
 // ---------------------------------------------------------------------------
 // Beta W1.2 — set_logs routes.
@@ -113,5 +117,97 @@ export async function setLogsRoutes(app: FastifyInstance) {
       [userId, body.client_request_id, body.planned_set_id, body.performed_at],
     );
     return reply.code(200).send({ deduped: true, set_log: existing.rows[0] });
+  });
+
+  // -------------------------------------------------------------------------
+  // PATCH /api/set-logs/:id — mutate a logged set inside the 24h audit window.
+  //
+  // The audit window is the only post-write mutation gate. After 24 hours a
+  // set_log is immutable so historical analytics (PR trends, MAV/MRV state)
+  // can't be silently rewritten. The window is computed in SQL via
+  // `now() - INTERVAL '24 hours'` rather than at the API layer so any
+  // clock-skew between Node and Postgres can't reopen the gate.
+  //
+  // Ownership + window check happen in the same SELECT as the row load so
+  // there's no TOCTOU between checking ownership and running the UPDATE.
+  //
+  // IDOR: a set_log belonging to another user returns 404 — same shape as
+  // "no such id" — so the response can't be used to enumerate other users'
+  // set_log IDs.
+  // -------------------------------------------------------------------------
+  app.patch('/set-logs/:id', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = (req as any).userId as string | undefined;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
+    const { id } = req.params as { id: string };
+    const parse = SetLogPatchSchema.safeParse(req.body);
+    if (!parse.success) {
+      const issue = parse.error.issues[0];
+      const field = issue.path[0]?.toString() ?? 'unknown';
+      return reply.code(400).send({ error: issue.message, field });
+    }
+
+    // Atomic load: ownership + audit window in one SQL pass. The
+    // `audit_window_ok` boolean is computed from Postgres's clock; if the
+    // row's performed_at is more than 24h in Postgres-time the gate trips
+    // regardless of whatever the Node process thinks the time is.
+    const { rows: existing } = await db.query<{
+      id: string;
+      user_id: string;
+      performed_at: string;
+      audit_window_ok: boolean;
+      max_edit_at: string;
+    }>(
+      `SELECT id, user_id, performed_at,
+              performed_at > now() - INTERVAL '24 hours' AS audit_window_ok,
+              (performed_at + INTERVAL '24 hours')::text AS max_edit_at
+       FROM set_logs WHERE id = $1`,
+      [id],
+    );
+
+    // IDOR: "not found" and "not yours" collapse to the same 404 — anything
+    // else lets an attacker probe which IDs exist on other accounts.
+    if (existing.length === 0 || existing[0].user_id !== userId) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+    if (!existing[0].audit_window_ok) {
+      return reply.code(409).send({
+        error: 'audit_window_expired',
+        performed_at: existing[0].performed_at,
+        max_edit_at: existing[0].max_edit_at,
+      });
+    }
+
+    // Build SET clause dynamically. API field names map to DB column names
+    // (the historical performed_load_lbs/performed_reps/performed_rir
+    // mismatch from POST applies here too). The schema's .refine guarantees
+    // at least one field is set, so setParts is never empty.
+    const fields = parse.data;
+    const map = {
+      weight_lbs: 'performed_load_lbs',
+      reps: 'performed_reps',
+      rir: 'performed_rir',
+      rpe: 'rpe',
+      notes: 'notes',
+    } as const;
+    const setParts: string[] = [];
+    const params: unknown[] = [];
+    let p = 1;
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue;
+      setParts.push(`${map[k as keyof typeof map]} = $${p++}`);
+      params.push(v);
+    }
+    params.push(id);
+
+    // Migration 029's BEFORE UPDATE trigger bumps updated_at — no need to
+    // touch it here. RETURNING uses SELECT_COLUMNS so weight_lbs comes back
+    // as a JS number (the ::float cast) instead of NUMERIC-as-string.
+    const { rows } = await db.query<SetLogRow>(
+      `UPDATE set_logs SET ${setParts.join(', ')} WHERE id = $${p}
+       RETURNING ${SELECT_COLUMNS}`,
+      params,
+    );
+    return reply.code(200).send({ set_log: rows[0] });
   });
 }
