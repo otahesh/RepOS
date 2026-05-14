@@ -47,9 +47,9 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     `UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`,
     [req.ip, row.id],
   );
-  (req as any).userId = row.user_id as string;
+  req.userId = row.user_id as string;
   // Empty array (rather than undefined) on the bearer path so requireScope
   // can distinguish "bearer with zero scopes" (403) from "no bearer used,
   // CF Access took over" (pass-through).
-  (req as any).tokenScopes = (row.scopes as string[] | null) ?? [];
+  req.tokenScopes = (row.scopes as string[] | null) ?? [];
 }

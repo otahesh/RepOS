@@ -105,6 +105,24 @@ describe('scope enforcement (W1.4.0 backport)', () => {
     }
   });
 
+  it('403 when bearer has empty scopes array (fail-closed)', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({ scopes: [] });
+      handles.push(handle);
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/health/weight',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: validWeightPayload('2025-02-04'),
+      });
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:weight:write/);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('CF Access JWT bypasses scope check (whole-host auth covers it)', async () => {
     const app = await build();
     try {

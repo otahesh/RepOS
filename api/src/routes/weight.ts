@@ -103,11 +103,14 @@ export async function weightRoutes(app: FastifyInstance) {
     '/weight',
     { preHandler: [requireBearerOrCfAccess, requireScope('health:weight:write')] },
     async (req, reply) => {
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
       const err = validate(req.body);
       if (err) return reply.code(400).send(err);
 
       const parsed = WeightSampleSchema.parse(req.body);
-      const { status, body: resBody } = await upsertSample((req as any).userId, parsed, req.ip);
+      const { status, body: resBody } = await upsertSample(userId, parsed, req.ip);
       return reply.code(status).send(resBody);
     },
   );
@@ -116,6 +119,9 @@ export async function weightRoutes(app: FastifyInstance) {
     '/weight/backfill',
     { preHandler: [requireBearerOrCfAccess, requireScope('health:weight:write')] },
     async (req, reply) => {
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
       const rawBody = req.body as unknown;
       if (
         typeof rawBody !== 'object' ||
@@ -150,7 +156,7 @@ export async function weightRoutes(app: FastifyInstance) {
       try {
         await client.query('BEGIN');
         for (const sample of backfill.samples) {
-          const result = await upsertSample((req as any).userId, sample, req.ip, client);
+          const result = await upsertSample(userId, sample, req.ip, client);
           if (result.status === 201) created++;
           else deduped++;
         }
@@ -168,6 +174,9 @@ export async function weightRoutes(app: FastifyInstance) {
   );
 
   app.get('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = req.userId;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
     const queryResult = WeightRangeQuerySchema.safeParse(req.query);
     const { range } = queryResult.success ? queryResult.data : { range: '90d' as const };
 
@@ -177,7 +186,7 @@ export async function weightRoutes(app: FastifyInstance) {
     since.setDate(since.getDate() - days);
 
     const { samples, current, trend7d, trend30d, trend90d, adherencePct, missedDays } =
-      await computeStats((req as any).userId, since);
+      await computeStats(userId, since);
 
     // Sync block
     const { rows: [sync] } = await db.query(
@@ -188,7 +197,7 @@ export async function weightRoutes(app: FastifyInstance) {
            ELSE 'broken'
          END AS state
        FROM health_sync_status WHERE user_id = $1`,
-      [(req as any).userId],
+      [userId],
     );
 
     reply.header('Cache-Control', 'no-store');
