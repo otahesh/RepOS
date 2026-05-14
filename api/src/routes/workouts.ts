@@ -46,11 +46,14 @@ export async function workoutsRoutes(app: FastifyInstance) {
 
       const parsed = WorkoutIngestSchema.parse(req.body);
 
-      // Derive the rate-limit day key from the workout's started_at, in UTC.
-      // The plan's 409 test pins started_at with Date.UTC(...).toISOString(),
-      // so 'YYYY-MM-DD' from the ISO string matches the test's expectation
-      // ('2026-05-12'). Using wall-clock here would race DST.
-      const logDate = new Date(parsed.started_at).toISOString().slice(0, 10);
+      // Day-key for rate-limit accounting is the wall-clock date of
+      // started_at (CLAUDE.md: "store wall-clock time as display label only.
+      // Do not derive UTC."). Zod's datetime({ offset: true }) already
+      // validated that started_at is an ISO-8601 string whose first 10
+      // characters are the local YYYY-MM-DD, so slice(0, 10) is exact.
+      // A PST workout starting 23:30 local on May 11 stays a May 11 write —
+      // no off-by-one 409 surprise near a user's wall-clock midnight.
+      const logDate = parsed.started_at.slice(0, 10);
 
       // Rate-limit FIRST so dedupes also count toward the cap (mirrors
       // weight.ts). 11th write/day per user returns 409.

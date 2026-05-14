@@ -172,6 +172,25 @@ describe('POST /api/health/workouts', () => {
       }
       expect(responses.slice(0, 10).every((s) => s === 201)).toBe(true);
       expect(responses[10]).toBe(409);
+
+      // Defence-in-depth: a 12th call on the same day must also reject.
+      // Guards against a future refactor that increments-then-resets
+      // write_count on the boundary, which would still pass the 11-only check.
+      const twelfthStartedAt = new Date(Date.UTC(2026, 4, 12, 10, 11)).toISOString();
+      const twelfthEndedAt = new Date(
+        Date.parse(twelfthStartedAt) + 30 * 60_000,
+      ).toISOString();
+      const twelfth = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: {
+          ...validWorkoutPayload(),
+          started_at: twelfthStartedAt,
+          ended_at: twelfthEndedAt,
+        },
+      });
+      expect(twelfth.statusCode).toBe(409);
     } finally {
       await app.close();
     }
@@ -194,6 +213,70 @@ describe('POST /api/health/workouts', () => {
 
       expect(resp.statusCode).toBe(400);
       expect(resp.json()).toMatchObject({ field: 'started_at' });
+      expect(typeof resp.json().error).toBe('string');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('uses wall-clock date for rate-limit accounting, not UTC date', async () => {
+    // Regression guard for the W1.4-C review fix: a PST workout starting at
+    // 23:30 local on May 11 is still a May 11 workout, even though its UTC
+    // instant is May 12. Day-key derivation must preserve the wall-clock date
+    // from started_at (CLAUDE.md: "store wall-clock time as display label
+    // only. Do not derive UTC.") so users near a wall-clock midnight don't
+    // see a 409 rate-limit on a "tomorrow" they don't recognize.
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:workouts:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: {
+          ...validWorkoutPayload(),
+          started_at: '2026-05-11T23:30:00-08:00', // PST: wall-clock May 11
+          ended_at: '2026-05-11T23:55:00-08:00',
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+
+      const { rows } = await db.query<{ log_date: string }>(
+        `SELECT to_char(log_date, 'YYYY-MM-DD') AS log_date
+         FROM workout_write_log WHERE user_id = $1`,
+        [handle.userId],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].log_date).toBe('2026-05-11');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400 {error, field: source} when source is Withings (workouts enum is Apple Health|Manual only)', async () => {
+    // Workouts source enum is intentionally narrower than weight's. A future
+    // contributor who assumes "all health endpoints accept the same sources"
+    // would silently break this divergence — this test locks the contract.
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:workouts:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { ...validWorkoutPayload(), source: 'Withings' },
+      });
+
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json()).toMatchObject({ field: 'source' });
       expect(typeof resp.json().error).toBe('string');
     } finally {
       await app.close();
