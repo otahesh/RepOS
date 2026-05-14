@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import {
   SetLogPostSchema,
   SetLogPatchSchema,
+  SetLogListQuerySchema,
   IdParamSchema,
   type SetLogRow,
 } from '../schemas/setLogs.js';
@@ -271,5 +272,50 @@ export async function setLogsRoutes(app: FastifyInstance) {
 
     await db.query(`DELETE FROM set_logs WHERE id = $1`, [id]);
     return reply.code(200).send({ deleted: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/set-logs?planned_set_id=<uuid> — list this user's set_logs for a
+  // planned_set, most-recent performed_at first.
+  //
+  // IDOR: ownership is enforced inside the WHERE clause via JOIN to
+  // mesocycle_runs.user_id. A planned_set owned by another user produces an
+  // empty result set, NOT a 404 — different shape from PATCH/DELETE because
+  // a list query's empty result is semantically valid and doesn't function
+  // as an existence oracle for other users' planned_set IDs.
+  //
+  // No audit-window gate (read-only), no pagination (out of scope for W1.2).
+  // The SELECT is inline rather than reusing SELECT_COLUMNS because the JOIN
+  // needs `sl.`-prefixed column references; the ::float cast still applies so
+  // weight_lbs comes back as a JS number rather than NUMERIC-as-string.
+  // -------------------------------------------------------------------------
+  app.get('/set-logs', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = (req as any).userId as string | undefined;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
+    const parse = SetLogListQuerySchema.safeParse(req.query);
+    if (!parse.success) {
+      const issue = parse.error.issues[0];
+      const field = issue.path[0]?.toString() ?? 'unknown';
+      return reply.code(400).send({ error: issue.message, field });
+    }
+
+    const { rows } = await db.query<SetLogRow>(
+      `SELECT
+         sl.id, sl.user_id, sl.exercise_id, sl.planned_set_id, sl.client_request_id,
+         sl.performed_load_lbs::float AS weight_lbs,
+         sl.performed_reps             AS reps,
+         sl.performed_rir              AS rir,
+         sl.rpe, sl.performed_at, sl.notes, sl.created_at, sl.updated_at
+       FROM set_logs sl
+       JOIN planned_sets    ps ON ps.id = sl.planned_set_id
+       JOIN day_workouts    dw ON dw.id = ps.day_workout_id
+       JOIN mesocycle_runs  mr ON mr.id = dw.mesocycle_run_id
+       WHERE sl.planned_set_id = $1
+         AND mr.user_id = $2
+       ORDER BY sl.performed_at DESC`,
+      [parse.data.planned_set_id, userId],
+    );
+    return reply.code(200).send({ set_logs: rows });
   });
 }

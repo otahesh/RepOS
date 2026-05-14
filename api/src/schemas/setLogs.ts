@@ -39,7 +39,8 @@ export const SetLogListQuerySchema = z.object({
 });
 export type SetLogListQuery = z.infer<typeof SetLogListQuerySchema>;
 
-// shared by PATCH; DELETE/GET will use it in W1.2.14+
+// :id param schema — shared by PATCH and DELETE. GET uses
+// SetLogListQuerySchema for the planned_set_id query param.
 export const IdParamSchema = z.object({
   id: z.string().uuid(),
 });
