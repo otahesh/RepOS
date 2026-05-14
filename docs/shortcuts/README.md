@@ -1,12 +1,13 @@
 # RepOS iOS Shortcuts
 
-Build instructions and operational runbooks for the iOS Shortcuts that interact with the RepOS API. v1 ships one shortcut.
+Build instructions and operational runbooks for the iOS Shortcuts that interact with the RepOS API. v1 ships two shortcuts.
 
 ## Index
 
 | Shortcut | Purpose | Trigger | Doc |
 |---|---|---|---|
 | RepOS Daily Weight Sync | Reads the most-recent Apple Health Body Mass sample and POSTs it to `/api/health/weight` | Personal Automation — Time of Day (default 07:30 daily). Apple does not currently expose a Health-event trigger in Personal Automations. | [`health-weight-sync.md`](./health-weight-sync.md) |
+| RepOS Workout Sync | Reads the most-recent Apple Watch workout and POSTs it to `/api/health/workouts` | Personal Automation — Apple Watch Workout, When: Ends. Fires once per completed workout. | [`health-workouts-sync.md`](./health-workouts-sync.md) |
 
 ## Why text instructions instead of a `.shortcut` bundle
 
