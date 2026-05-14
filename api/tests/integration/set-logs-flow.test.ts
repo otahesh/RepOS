@@ -1,5 +1,5 @@
 /**
- * Beta W1.2 — POST + PATCH /api/set-logs integration tests.
+ * Beta W1.2 — POST + PATCH + DELETE + GET /api/set-logs integration tests.
  *
  * Covers:
  *   - POST happy path: 201, derived user_id + exercise_id, aliased weight_lbs/reps/rir
@@ -10,6 +10,10 @@
  *     IDOR (set_log owned by another user) → 404 (no oracle)
  *   - DELETE 24h audit window: within window → 200 deleted:true; past window → 409;
  *     IDOR (set_log owned by another user) → 404 (no oracle)
+ *   - GET list: performed_at DESC ordering, IDOR returns empty array (NOT 404 —
+ *     a list query's empty result is semantically valid and avoids leaking
+ *     existence of other users' planned_set IDs), 400 {error,field} envelope
+ *     when planned_set_id query param is missing or not a UUID
  *
  * The atomic INSERT ... ON CONFLICT DO NOTHING in the handler covers both
  * idempotency probes from W1.1's unique indices (set_logs_user_id_client_request_id_key
@@ -26,6 +30,7 @@ import { build } from '../helpers/build-test-app.js';
 import {
   seedUserWithMesocycle,
   seedUserWithLoggedSet,
+  seedThreeLogsOnSamePlannedSet,
   cleanupSeeded,
   type SeedHandle,
 } from '../helpers/seed-fixtures.js';
@@ -344,6 +349,87 @@ describe('DELETE /api/set-logs/:id — 24h audit window', () => {
         [userA.setLogId],
       );
       expect(rows[0].n).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('GET /api/set-logs?planned_set_id= — list', () => {
+  it('returns this user’s set_logs for the given planned_set in performed_at DESC order', async () => {
+    const app = await build();
+    try {
+      const seed = await seedThreeLogsOnSamePlannedSet();
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'GET',
+        url: `/api/set-logs?planned_set_id=${seed.plannedSetId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(resp.statusCode).toBe(200);
+      const body = resp.json();
+      expect(body.set_logs).toHaveLength(3);
+      // Lock the response shape: weight_lbs must be a JS number (not a
+      // NUMERIC-as-string), proving the ::float cast landed. The seed
+      // helper inserts 101/102/103 for minutesAgo=1/2/3 respectively.
+      for (const row of body.set_logs) {
+        expect(typeof row.weight_lbs).toBe('number');
+      }
+      // DESC ordering: most-recent performed_at first. Seed creates logs at
+      // 1/2/3 minutes ago, so reversing the sorted list yields the expected
+      // server order.
+      const ts = body.set_logs.map((s: { performed_at: string }) => s.performed_at);
+      expect(ts).toEqual([...ts].sort().reverse());
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 200 + empty array when another user owns the planned_set (IDOR-safe list)', async () => {
+    const app = await build();
+    try {
+      const userA = await seedThreeLogsOnSamePlannedSet();
+      handles.push(userA);
+      const userB = await seedUserWithMesocycle();
+      handles.push(userB);
+      // IDOR contract distinction: PATCH/DELETE 404 because they target a
+      // single resource. GET is a list query — an empty list is a valid
+      // result and avoids leaking existence of userA's planned_set_id.
+      const resp = await app.inject({
+        method: 'GET',
+        url: `/api/set-logs?planned_set_id=${userA.plannedSetId}`,
+        headers: { authorization: `Bearer ${userB.bearer}` },
+      });
+      expect(resp.statusCode).toBe(200);
+      expect(resp.json().set_logs).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400 {error,field} envelope when planned_set_id query param is missing or not a UUID', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      // Missing param — Zod's default for a required field surfaces as
+      // `{ error: 'Required', field: 'planned_set_id' }` via the standard
+      // route validation envelope shared with POST/PATCH/DELETE.
+      const resp1 = await app.inject({
+        method: 'GET',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(resp1.statusCode).toBe(400);
+      expect(resp1.json().field).toBe('planned_set_id');
+      // Bad UUID — same envelope shape, different message.
+      const resp2 = await app.inject({
+        method: 'GET',
+        url: '/api/set-logs?planned_set_id=not-a-uuid',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(resp2.statusCode).toBe(400);
+      expect(resp2.json().field).toBe('planned_set_id');
     } finally {
       await app.close();
     }
