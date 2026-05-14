@@ -3,6 +3,7 @@
 // hasScope(token.scopes, 'program:write') before allowing writes.
 export const VALID_SCOPES = [
   'health:weight:write',
+  'health:workouts:write',
   'program:write',
 ] as const;
 

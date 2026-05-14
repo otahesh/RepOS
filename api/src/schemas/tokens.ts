@@ -7,6 +7,13 @@ import { z } from 'zod';
 export const TokenMintRequestSchema = z.object({
   user_id: z.string().uuid().optional(),
   label: z.string().max(100).nullable().optional(),
+  // Optional list of bearer-token scopes to grant. Each element is validated
+  // against VALID_SCOPES at the route layer (isValidScope). When omitted, the
+  // device_tokens.scopes column DEFAULT applies (['health:weight:write']),
+  // preserving alpha behaviour. The wire-side validator is not Zod today —
+  // the route does an ad-hoc element check — but this schema stays honest so
+  // the request shape is self-documenting.
+  scopes: z.array(z.string()).optional(),
 });
 
 export type TokenMintRequest = z.infer<typeof TokenMintRequestSchema>;

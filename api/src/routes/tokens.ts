@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
+import { isValidScope } from '../auth/scopes.js';
 import type {
   TokenMintResponse,
   TokenListResponse,
@@ -20,12 +21,28 @@ function userIdFromReq(req: any, fallback: string | undefined): string | undefin
 }
 
 export async function tokenRoutes(app: FastifyInstance) {
-  app.post<{ Body: { user_id?: string; label?: string } }>(
+  app.post<{ Body: { user_id?: string; label?: string; scopes?: string[] } }>(
     '/tokens',
     { preHandler: requireAdminKeyOrCfAccess },
     async (req, reply) => {
       const userId = userIdFromReq(req, req.body.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
+
+      // Optional scopes: validate each element against VALID_SCOPES so an
+      // unknown scope is a loud 400 rather than a silently-accepted column
+      // value. When omitted, the device_tokens.scopes DEFAULT applies
+      // (['health:weight:write']) — alpha-compatible.
+      const scopes = req.body.scopes;
+      if (scopes !== undefined) {
+        if (!Array.isArray(scopes)) {
+          return reply.code(400).send({ error: 'invalid_scope' });
+        }
+        for (const s of scopes) {
+          if (!isValidScope(s)) {
+            return reply.code(400).send({ error: 'invalid_scope', scope: s });
+          }
+        }
+      }
 
       const prefix = randomBytes(8).toString('hex');
       const secret = randomBytes(32).toString('hex');
@@ -33,11 +50,17 @@ export async function tokenRoutes(app: FastifyInstance) {
       const hash = await argon2.hash(secret);
       const storedHash = `${prefix}:${hash}`;
 
-      const { rows } = await db.query(
-        `INSERT INTO device_tokens (user_id, token_hash, label)
-         VALUES ($1, $2, $3) RETURNING id, created_at`,
-        [userId, storedHash, req.body.label ?? null],
-      );
+      const { rows } = scopes === undefined
+        ? await db.query(
+            `INSERT INTO device_tokens (user_id, token_hash, label)
+             VALUES ($1, $2, $3) RETURNING id, created_at`,
+            [userId, storedHash, req.body.label ?? null],
+          )
+        : await db.query(
+            `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
+             VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+            [userId, storedHash, req.body.label ?? null, scopes],
+          );
 
       const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
       return reply.code(201).send(mintResp);

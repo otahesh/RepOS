@@ -66,6 +66,42 @@ describe('POST /api/tokens contract', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('201 on scopes: ["health:workouts:write"] and persists to device_tokens.scopes', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      body: {
+        user_id: userId,
+        label: 'contract-test-workouts-scope',
+        scopes: ['health:workouts:write'],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const parsed = TokenMintResponseSchema.safeParse(res.json());
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    if (parsed.success) {
+      const { rows } = await db.query(
+        `SELECT scopes FROM device_tokens WHERE id = $1`,
+        [parsed.data.id],
+      );
+      expect(rows[0].scopes).toEqual(['health:workouts:write']);
+    }
+  });
+
+  it('400 on unknown scope', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      body: {
+        user_id: userId,
+        label: 'contract-test-bad-scope',
+        scopes: ['admin:everything'],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_scope' });
+  });
 });
 
 // ---------------------------------------------------------------------------
