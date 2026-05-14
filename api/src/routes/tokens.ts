@@ -37,6 +37,9 @@ export async function tokenRoutes(app: FastifyInstance) {
         if (!Array.isArray(scopes)) {
           return reply.code(400).send({ error: 'invalid_scope' });
         }
+        if (scopes.length === 0) {
+          return reply.code(400).send({ error: 'invalid_scope', scope: '' });
+        }
         for (const s of scopes) {
           if (!isValidScope(s)) {
             return reply.code(400).send({ error: 'invalid_scope', scope: s });

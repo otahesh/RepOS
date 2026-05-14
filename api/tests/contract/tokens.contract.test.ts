@@ -102,6 +102,16 @@ describe('POST /api/tokens contract', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'invalid_scope' });
   });
+
+  it('400 on empty scopes array', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      body: { user_id: userId, scopes: [] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_scope' });
+  });
 });
 
 // ---------------------------------------------------------------------------
