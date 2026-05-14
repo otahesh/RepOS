@@ -222,4 +222,54 @@ export async function setLogsRoutes(app: FastifyInstance) {
     );
     return reply.code(200).send({ set_log: rows[0] });
   });
+
+  // -------------------------------------------------------------------------
+  // DELETE /api/set-logs/:id — same 24h window + 404-IDOR semantics as PATCH.
+  // Deletes are subject to the audit gate so historical analytics (PR trends,
+  // MAV/MRV state) can't be silently retroactively wiped. Hard delete — no
+  // soft-delete column in this iteration.
+  // -------------------------------------------------------------------------
+  app.delete('/set-logs/:id', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = (req as any).userId as string | undefined;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
+    const idParse = IdParamSchema.safeParse(req.params);
+    if (!idParse.success) {
+      const issue = idParse.error.issues[0];
+      return reply.code(400).send({ error: issue.message, field: issue.path[0]?.toString() ?? 'unknown' });
+    }
+    const { id } = idParse.data;
+
+    // Atomic load: ownership + audit window in one SQL pass. Same boundary
+    // semantics as PATCH (strict `>`; max_edit_at is the boundary at which
+    // editing/deleting becomes forbidden). See PATCH handler above for the
+    // full rationale on why the window is SQL-computed.
+    const { rows: existing } = await db.query<{
+      id: string;
+      user_id: string;
+      performed_at: Date;
+      audit_window_ok: boolean;
+      max_edit_at: Date;
+    }>(
+      `SELECT id, user_id, performed_at,
+              performed_at > now() - INTERVAL '24 hours' AS audit_window_ok,
+              performed_at + INTERVAL '24 hours'         AS max_edit_at
+       FROM set_logs WHERE id = $1`,
+      [id],
+    );
+
+    if (existing.length === 0 || existing[0].user_id !== userId) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+    if (!existing[0].audit_window_ok) {
+      return reply.code(409).send({
+        error: 'audit_window_expired',
+        performed_at: existing[0].performed_at,
+        max_edit_at: existing[0].max_edit_at,
+      });
+    }
+
+    await db.query(`DELETE FROM set_logs WHERE id = $1`, [id]);
+    return reply.code(200).send({ deleted: true });
+  });
 }
