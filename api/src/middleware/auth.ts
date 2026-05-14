@@ -21,9 +21,11 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const prefix = token.slice(0, dotIdx);
   const secret = token.slice(dotIdx + 1);
 
-  // Look up by prefix — at most one row; no table scan
+  // Look up by prefix — at most one row; no table scan. `scopes` is pulled
+  // alongside id/user_id so requireScope (api/src/middleware/scope.ts) can
+  // gate writes without a second DB round-trip.
   const { rows } = await db.query(
-    `SELECT id, user_id, token_hash
+    `SELECT id, user_id, token_hash, scopes
      FROM device_tokens
      WHERE token_hash LIKE $1 AND revoked_at IS NULL`,
     [`${prefix}:%`],
@@ -46,4 +48,8 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     [req.ip, row.id],
   );
   (req as any).userId = row.user_id as string;
+  // Empty array (rather than undefined) on the bearer path so requireScope
+  // can distinguish "bearer with zero scopes" (403) from "no bearer used,
+  // CF Access took over" (pass-through).
+  (req as any).tokenScopes = (row.scopes as string[] | null) ?? [];
 }

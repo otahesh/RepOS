@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PoolClient } from 'pg';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { requireScope } from '../middleware/scope.js';
 import { db } from '../db/client.js';
 import { computeStats } from '../services/stats.js';
 import {
@@ -98,65 +99,73 @@ async function upsertSample(
 }
 
 export async function weightRoutes(app: FastifyInstance) {
-  app.post('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const err = validate(req.body);
-    if (err) return reply.code(400).send(err);
-
-    const parsed = WeightSampleSchema.parse(req.body);
-    const { status, body: resBody } = await upsertSample((req as any).userId, parsed, req.ip);
-    return reply.code(status).send(resBody);
-  });
-
-  app.post('/weight/backfill', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const rawBody = req.body as unknown;
-    if (
-      typeof rawBody !== 'object' ||
-      rawBody === null ||
-      !Array.isArray((rawBody as Record<string, unknown>).samples)
-    ) {
-      return reply.code(400).send({ error: 'samples must be an array' });
-    }
-
-    const samples = (rawBody as { samples: unknown[] }).samples;
-
-    if (samples.length > MAX_BACKFILL_SAMPLES) {
-      return reply.code(400).send({
-        error: `samples array exceeds maximum of ${MAX_BACKFILL_SAMPLES} items`,
-      });
-    }
-
-    // Validate all items before touching the DB; keep existing { error, field } shape
-    for (const sample of samples) {
-      const err = validate(sample);
+  app.post(
+    '/weight',
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:weight:write')] },
+    async (req, reply) => {
+      const err = validate(req.body);
       if (err) return reply.code(400).send(err);
-    }
 
-    // Re-parse as typed after validation
-    const backfill = WeightBackfillSchema.parse(rawBody);
+      const parsed = WeightSampleSchema.parse(req.body);
+      const { status, body: resBody } = await upsertSample((req as any).userId, parsed, req.ip);
+      return reply.code(status).send(resBody);
+    },
+  );
 
-    // Use an explicit client so the transaction covers rate-limit increments too —
-    // a mid-batch error rolls back everything including write_count increments.
-    const client = await db.connect();
-    let created = 0;
-    let deduped = 0;
-    try {
-      await client.query('BEGIN');
-      for (const sample of backfill.samples) {
-        const result = await upsertSample((req as any).userId, sample, req.ip, client);
-        if (result.status === 201) created++;
-        else deduped++;
+  app.post(
+    '/weight/backfill',
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:weight:write')] },
+    async (req, reply) => {
+      const rawBody = req.body as unknown;
+      if (
+        typeof rawBody !== 'object' ||
+        rawBody === null ||
+        !Array.isArray((rawBody as Record<string, unknown>).samples)
+      ) {
+        return reply.code(400).send({ error: 'samples must be an array' });
       }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
 
-    const response: WeightBackfillResponse = { created, deduped };
-    return reply.send(response);
-  });
+      const samples = (rawBody as { samples: unknown[] }).samples;
+
+      if (samples.length > MAX_BACKFILL_SAMPLES) {
+        return reply.code(400).send({
+          error: `samples array exceeds maximum of ${MAX_BACKFILL_SAMPLES} items`,
+        });
+      }
+
+      // Validate all items before touching the DB; keep existing { error, field } shape
+      for (const sample of samples) {
+        const err = validate(sample);
+        if (err) return reply.code(400).send(err);
+      }
+
+      // Re-parse as typed after validation
+      const backfill = WeightBackfillSchema.parse(rawBody);
+
+      // Use an explicit client so the transaction covers rate-limit increments too —
+      // a mid-batch error rolls back everything including write_count increments.
+      const client = await db.connect();
+      let created = 0;
+      let deduped = 0;
+      try {
+        await client.query('BEGIN');
+        for (const sample of backfill.samples) {
+          const result = await upsertSample((req as any).userId, sample, req.ip, client);
+          if (result.status === 201) created++;
+          else deduped++;
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+
+      const response: WeightBackfillResponse = { created, deduped };
+      return reply.send(response);
+    },
+  );
 
   app.get('/weight', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const queryResult = WeightRangeQuerySchema.safeParse(req.query);
