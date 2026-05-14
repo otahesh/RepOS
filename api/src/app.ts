@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
 import helmet from '@fastify/helmet';
 import { weightRoutes } from './routes/weight.js';
+import { workoutsRoutes } from './routes/workouts.js';
 import { syncRoutes } from './routes/sync.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { muscleRoutes } from './routes/muscles.js';
@@ -43,6 +44,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(plannedSetRoutes, { prefix: '/api' });
   await app.register(recoveryFlagRoutes, { prefix: '/api' });
   await app.register(weightRoutes, { prefix: '/api/health' });
+  await app.register(workoutsRoutes, { prefix: '/api/health' });
   await app.register(syncRoutes, { prefix: '/api/health' });
   await app.register(setLogsRoutes, { prefix: '/api' });
 
