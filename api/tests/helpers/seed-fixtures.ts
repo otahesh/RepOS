@@ -59,6 +59,43 @@ export async function mintBearer(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// seedUserAndMintBearer — minimal "user + bearer" seed for tests that don't
+// need a mesocycle/program chain (e.g. scope-enforcement W1.4.0). Returns a
+// SeedHandle-compatible shape (with empty program/meso/etc. ids) so the
+// shared cleanupSeeded() can wipe it via the cascading DELETE on users.
+// ---------------------------------------------------------------------------
+export async function seedUserAndMintBearer(opts: {
+  scopes: string[];
+  label?: string;
+}): Promise<{ bearer: string; userId: string; handle: SeedHandle }> {
+  const userTag = randomUUID();
+  const email = `scope-fixture.${userTag}@repos.test`;
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [email],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: opts.scopes,
+    label: opts.label ?? 'scope-fixture',
+  });
+  // cleanupSeeded only needs userId; everything else cascades or is unused.
+  // The empty-string placeholders keep the SeedHandle shape without forcing
+  // callers to invent UUIDs for fields they don't touch.
+  const handle: SeedHandle = {
+    userId,
+    bearer,
+    userProgramId: '',
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+  return { bearer, userId, handle };
+}
+
+// ---------------------------------------------------------------------------
 // seedUserWithMesocycle — builds the full chain a set_log needs:
 //   users → user_programs → mesocycle_runs → day_workouts → planned_sets
 // The planned_set references a real seeded exercise (picked via
