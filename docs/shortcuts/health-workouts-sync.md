@@ -30,6 +30,7 @@ This doc assumes you have already built the weight Shortcut from [`health-weight
 - **Paste the secret into the Shortcut's `Authorization` header field ONCE, then delete it from any clipboard manager** (1Password, Clipy, Paste, etc.). The plaintext appears once at mint-time and is never recoverable from the server — RepOS stores only the argon2id hash with the 16-hex prefix prepended for indexed lookup.
 - **NEVER paste tokens into a Shortcut import URL** (`https://www.icloud.com/shortcuts/...`). That URL is fetched through Apple's iCloud CDN and the body is cached at the edge — anything pasted into it can persist outside your control.
 - **If you suspect leak, revoke immediately** via `DELETE /api/tokens/:id` (see §5 below) and mint a fresh one. Revocation is effectively instant — there is no auth cache.
+- **Never share screenshots of the Shortcut editor that include the `Authorization` header** — the bearer secret is visible in plaintext. If you need to ask for help, paste only the part of the Shortcut that's failing, or redact the header value before sharing.
 
 ### 1.2 Mint a workouts-scoped token
 
@@ -130,7 +131,7 @@ Add a sixth **"Get Details of Workouts"**.
 
 - `Input: Workouts`
 - `Get: Type` *(iOS 26 spot-check: the picker may label this "Workout Type" or "Activity Type")*
-- **Why:** Returns Apple's HKWorkoutActivityType name as text (`Running`, `Walking`, `Cycling`, `Swimming`, `Rowing`, `Elliptical`, `Traditional Strength Training`, `Functional Strength Training`, etc.). We map this to the API's lowercase modality enum in Step 7.
+- **Why:** Returns Apple's display label for the workout's `HKWorkoutActivityType` (e.g. `Running`, `Traditional Strength Training`). The values you see in the Shortcut are the localized labels, not the underlying enum constants (`HKWorkoutActivityTypeRunning`, etc.) — keep that in mind when debugging against Apple's HealthKit docs. We map this to the API's lowercase modality enum in Step 7.
 
 Long-press → rename to **"Workout Type"**.
 
@@ -176,6 +177,8 @@ Mapping table (case-sensitive on both sides):
 | `Functional Strength Training` | `strength` |
 | `Core Training` | `strength` |
 | (anything else — Hiking, HIIT, Yoga, Dance, etc.) | `other` |
+
+**What lands in `other` in practice.** Common Apple Watch workout types that fall through to `other` include Hiking, HIIT, Yoga, Pilates, Dance, Tennis, Basketball, Soccer, Core Training, and Functional Strength Training. This is a deliberate W1.4 scoping decision — the 8-entry modality allowlist is fixed by the Zod schema (`api/src/schemas/healthWorkouts.ts`) and the data plan; the Shortcut cannot work around it by sending something else. If you run a varied training week and see `60% other` when you query `health_workouts` in psql, that is expected, not a bug or a missing migration.
 
 Recommended pattern: add a **Text** action with the placeholder `other`, rename it to **"API Modality"**, then add an **If** action per matching row:
 
@@ -319,7 +322,7 @@ You should see the new row with `source = 'Apple Health'`, the mapped `modality`
 
 Run the Shortcut a second time within a few minutes — same workout, no changes in Health.
 
-**Expected:** Still no notification. In the DB: the same row exists (same `id`); `updated_at` may bump even though nothing changed because the route's upsert always overwrites `updated_at = now()` on conflict. The HTTP response was `200 { ..., deduped: true }`.
+**Expected:** Still no notification. In the DB: the same row exists (same `id`); `updated_at` **will** bump because the route's upsert always sets `updated_at = now()` on conflict and the table trigger backs that up. The data columns (`ended_at`, `modality`, `distance_m`, `duration_sec`) are unchanged. The HTTP response was `200 { ..., deduped: true }`.
 
 **Important semantic — `deduped: true` is NOT a no-op.** The dedupe key is `(user_id, started_at, source)`. If you edit the workout in Health (or re-run with a different `Workout End`) between two Shortcut runs, the second POST **overwrites** the row's `ended_at`, `modality`, `distance_m`, and `duration_sec` with the new values, AND still returns `deduped: true`. The flag means "I have seen this `started_at` before"; it does NOT mean "I rejected your payload". Freshest payload wins. If an Apple Watch glitch causes the workout to be re-logged with a corrupted end time, the second POST will silently overwrite the good first one. There is no undo path in v1 short of editing the row in psql.
 
@@ -350,9 +353,9 @@ curl -sS -i -X POST https://repos.jpmtech.com/api/health/workouts \
 
 **Expected:** `HTTP/1.1 403` with body `{"error":"scope_required:health:workouts:write"}`. Revoke the scope-test token afterward (§5).
 
-### 4.6 Verify the sync pill
+### 4.6 Sync pill (does NOT refresh on workout sync — W1.4 limit)
 
-`https://repos.jpmtech.com` → topbar pill should reflect the most recent successful sync within 60s. As of W1.4 the pill aggregates across scopes (one `health_sync_status` row per user, not per scope), so a fresh workout sync will refresh the pill regardless of when the last weight sync was.
+The topbar sync pill in W1.4 reflects weight syncs only — the workouts ingest route does not currently update `health_sync_status` (only `api/src/routes/weight.ts` writes that table). A fresh workout sync will NOT bump the pill; you'll still see your last weight sync's state (or `broken` if you have no weight syncs yet). Per-modality sync-state surfacing is a post-W1 concern.
 
 ---
 
