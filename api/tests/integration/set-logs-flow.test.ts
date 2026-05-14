@@ -8,13 +8,16 @@
  *   - POST IDOR contract: planned_set owned by another user → 404 (no oracle)
  *   - PATCH 24h audit window: within window → 200; past window → 409;
  *     IDOR (set_log owned by another user) → 404 (no oracle)
+ *   - DELETE 24h audit window: within window → 200 deleted:true; past window → 409;
+ *     IDOR (set_log owned by another user) → 404 (no oracle)
  *
  * The atomic INSERT ... ON CONFLICT DO NOTHING in the handler covers both
  * idempotency probes from W1.1's unique indices (set_logs_user_id_client_request_id_key
  * and set_logs_minute_dedupe_key). No probe-then-insert TOCTOU window.
  *
- * PATCH uses a single SQL pass for load + ownership + audit-window check.
- * SQL is the source of truth for time so API/DB clock-skew can't pop the gate.
+ * PATCH + DELETE use a single SQL pass for load + ownership + audit-window
+ * check. SQL is the source of truth for time so API/DB clock-skew can't pop
+ * the gate.
  */
 
 import 'dotenv/config';
@@ -272,6 +275,75 @@ describe('PATCH /api/set-logs/:id — 24h audit window', () => {
         [userA.setLogId],
       );
       expect(rows[0].weight_lbs).toBe(200.0);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('DELETE /api/set-logs/:id — 24h audit window', () => {
+  it('200 deleted:true when performed_at is within 24h', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 30 });
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'DELETE',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(resp.statusCode).toBe(200);
+      expect(resp.json()).toEqual({ deleted: true });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('409 audit_window_expired when performed_at > 24h ago', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 25 * 60 });
+      handles.push(seed);
+      const resp = await app.inject({
+        method: 'DELETE',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(resp.statusCode).toBe(409);
+      expect(resp.json().error).toBe('audit_window_expired');
+      expect(resp.json()).toHaveProperty('performed_at');
+      expect(resp.json()).toHaveProperty('max_edit_at');
+      // Same ISO-Z contract lock as PATCH — drift between handlers is the
+      // regression this regex catches.
+      expect(resp.json().performed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+      expect(resp.json().max_edit_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('404 when set_log belongs to another user (IDOR — collapsed with not-found)', async () => {
+    const app = await build();
+    try {
+      const userA = await seedUserWithLoggedSet({ minutesAgo: 10 });
+      handles.push(userA);
+      const userB = await seedUserWithMesocycle();
+      handles.push(userB);
+      const resp = await app.inject({
+        method: 'DELETE',
+        url: `/api/set-logs/${userA.setLogId}`,
+        headers: { authorization: `Bearer ${userB.bearer}` },
+      });
+      expect(resp.statusCode).toBe(404);
+
+      // Anti-refactor leak-guard: a future change that moves the ownership
+      // check below the DELETE would still surface a 404 but would silently
+      // remove userA's row. Assert userA's set_log still exists.
+      const { rows } = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM set_logs WHERE id = $1`,
+        [userA.setLogId],
+      );
+      expect(rows[0].n).toBe(1);
     } finally {
       await app.close();
     }
