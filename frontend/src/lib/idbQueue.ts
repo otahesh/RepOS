@@ -139,11 +139,6 @@ class IdbQueue {
     await this.db.pendingSetLogs.clear();
   }
 
-  async clear(): Promise<void> {
-    await this.ensureOpen();
-    await this.db.pendingSetLogs.clear();
-  }
-
   async close(): Promise<void> {
     if (this.db.isOpen()) this.db.close();
     this.reconciled = false;

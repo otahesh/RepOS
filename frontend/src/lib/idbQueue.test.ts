@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
 
 describe('idbQueue', () => {
-  beforeEach(async () => { await idbQueue.clear(); });
+  beforeEach(async () => { await idbQueue.purgeAll(); });
 
   it('enqueue + peek round-trips a single item', async () => {
     const item = mkItem({ client_request_id: 'aaa' });
@@ -46,19 +46,24 @@ describe('idbQueue', () => {
   it('survives across DB reopens', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'p' }));
     await idbQueue.close();
-    const fresh = await import('./idbQueue').then(m => m.idbQueue);
-    expect(await fresh.peekPending()).toHaveLength(1);
+    // Same singleton; ensureOpen() must allocate a fresh RepOSLogQueueDB
+    // instance and reconcileSyncing() must re-run. The row must still be
+    // readable because fake-indexeddb persists the named DB across Dexie
+    // instances.
+    expect(await idbQueue.peekPending()).toHaveLength(1);
   });
 
   it('reconciles stuck-in-syncing rows back to pending at init', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'stuck' }));
     await idbQueue.markSyncing('stuck');
+    // Row is now status=syncing in the underlying IDB store. Close so the
+    // next ensureOpen() reopens with reconciled=false and re-runs
+    // reconcileSyncing(), which must flip the stuck row back to pending.
     await idbQueue.close();
 
-    const fresh = await import('./idbQueue').then(m => m.idbQueue);
-    await fresh.init();
+    await idbQueue.init();
 
-    const pending = await fresh.peekPending();
+    const pending = await idbQueue.peekPending();
     expect(pending).toHaveLength(1);
     expect(pending[0].client_request_id).toBe('stuck');
     expect(pending[0].attempt_count).toBeGreaterThanOrEqual(1);
