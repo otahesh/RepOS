@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import Topbar from './Topbar'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
 import { useIsMobile } from '../../lib/useIsMobile'
+import { LogBufferRecovery } from '../programs/LogBufferRecovery'
 
 export default function AppShell() {
   const isMobile = useIsMobile()
@@ -36,6 +37,7 @@ export default function AppShell() {
         minHeight: 0,
       }}>
         <Topbar onToggleSidebar={toggleDrawer} mobileOpen={mobileOpen} triggerRef={triggerRef} />
+        <LogBufferRecovery />
         <main style={{
           overflow: 'auto',
           minHeight: 0,
@@ -84,6 +86,7 @@ export default function AppShell() {
         overflow: 'hidden',
       }}>
         <Topbar />
+        <LogBufferRecovery />
         <main style={{
           overflow: 'auto',
           minHeight: 0,

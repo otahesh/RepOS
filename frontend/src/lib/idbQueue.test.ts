@@ -25,6 +25,19 @@ describe('idbQueue', () => {
     expect((await idbQueue.peekRejected())[0].rejection_reason).toBe('audit_window_expired');
   });
 
+  it('peekSyncing returns rows whose status is "syncing", FIFO ordered', async () => {
+    await idbQueue.enqueue(mkItem({ client_request_id: 's-b', created_at: 2 }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 's-a', created_at: 1 }));
+    // Nothing in 'syncing' yet.
+    expect(await idbQueue.peekSyncing()).toHaveLength(0);
+
+    await idbQueue.markSyncing('s-b');
+    await idbQueue.markSyncing('s-a');
+    const out = await idbQueue.peekSyncing();
+    expect(out.map(i => i.client_request_id)).toEqual(['s-a', 's-b']);
+    expect(out.every(r => r.status === 'syncing')).toBe(true);
+  });
+
   it('peekPending returns FIFO order', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'b', created_at: 2 }));
     await idbQueue.enqueue(mkItem({ client_request_id: 'a', created_at: 1 }));

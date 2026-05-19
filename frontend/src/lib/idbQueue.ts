@@ -108,6 +108,13 @@ class IdbQueue {
     return rows;
   }
 
+  async peekSyncing(): Promise<PendingSetLog[]> {
+    await this.ensureOpen();
+    const rows = await this.db.pendingSetLogs.where('status').equals('syncing').toArray();
+    rows.sort((a, b) => a.created_at - b.created_at);
+    return rows;
+  }
+
   async markSyncing(client_request_id: string): Promise<void> {
     await this.ensureOpen();
     await this.db.pendingSetLogs.update(client_request_id, {
