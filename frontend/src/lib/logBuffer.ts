@@ -17,6 +17,10 @@
  * online-event listener firing twice (or enqueue+online racing) collapses to a
  * single tick. Retries do NOT happen inside flush() — the next external invoker
  * (online event, periodic poll, next enqueue) drives the retry.
+ *
+ * Status `'syncing'` from `PendingSetLog['status']` is intentionally unused here —
+ * logBuffer keeps rows at `'pending'` end-to-end. Reserved for future at-most-once
+ * enforcement.
  */
 
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
@@ -68,6 +72,10 @@ async function postSetLog(row: PendingSetLog): Promise<Response> {
   });
 }
 
+// NOTE: production CF Access may issue a 302 redirect rather than 401 with this
+// header on XHR. Verify against the live tunnel before W1.3.7 banner consumes
+// the cf-access-expired event — if 302 is what we actually see, the detection
+// logic needs to move to a `fetch.redirected` check or a global 401 interceptor.
 function isCFAccess401(res: Response): boolean {
   if (res.status !== 401) return false;
   const wwwAuth = res.headers?.get?.('WWW-Authenticate') ?? '';

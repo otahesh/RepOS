@@ -1,7 +1,16 @@
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
 import { logBuffer, computeBackoffMs } from './logBuffer';
+
+// Cross-file isolation: Vitest's restoreMocks only undoes vi.spyOn/vi.fn spies,
+// not direct binding replacements or Object.defineProperty mutations. Save the
+// originals here and restore them in afterAll so test files that run after this
+// one inherit the real fetch and jsdom's original onLine accessor.
+const originalFetch = globalThis.fetch;
+const originalOnLineDescriptor =
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(navigator), 'onLine') ??
+  Object.getOwnPropertyDescriptor(navigator, 'onLine');
 
 // Helper: directly seed a queue row with overrides (bypasses logBuffer.enqueue
 // so we can control attempt_count / next_attempt_at exactly).
@@ -44,6 +53,15 @@ describe('logBuffer', () => {
 
   afterEach(() => {
     setOnline(true);
+  });
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+    if (originalOnLineDescriptor) {
+      Object.defineProperty(navigator, 'onLine', originalOnLineDescriptor);
+    } else {
+      delete (navigator as unknown as { onLine?: boolean }).onLine;
+    }
   });
 
   // ─────────────────────────────────────────────────────────────────────
