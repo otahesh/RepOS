@@ -5,9 +5,11 @@ import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile'
 import MobileWeightChip from '../components/MobileWeightChip'
 import DesktopDashboard from '../components/dashboard/DesktopDashboard'
 
-// Placeholder until workout-run UI is built in a follow-up PR.
-function handleStart(_runId: string, _dayId: string) {
-  alert('Workout execution flow not yet wired — coming in next PR.')
+// Desktop TodayCard's onStart still routes through this placeholder until the
+// desktop logger ships (W2.x); mobile path now navigates via TodayWorkoutMobile's
+// internal useNavigate to /today/:runId/log.
+function handleDesktopStart(_runId: string, _dayId: string) {
+  alert('Desktop workout execution flow not yet wired — coming in a follow-up PR.')
 }
 
 export default function TodayPage() {
@@ -16,7 +18,7 @@ export default function TodayPage() {
   if (isMobile) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, color: TOKENS.text }}>
-        <TodayWorkoutMobile onStart={handleStart} />
+        <TodayWorkoutMobile />
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-start' }}>
           <MobileWeightChip />
         </div>
@@ -26,7 +28,7 @@ export default function TodayPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, color: TOKENS.text }}>
-      <TodayCard onStart={handleStart} />
+      <TodayCard onStart={handleDesktopStart} />
       <DesktopDashboard />
     </div>
   )

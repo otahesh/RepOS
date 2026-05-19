@@ -69,6 +69,26 @@ describe('idbQueue', () => {
     expect(pending[0].attempt_count).toBeGreaterThanOrEqual(1);
   });
 
+  it('getStatus returns the row status for pending/rejected and "synced" when row is absent', async () => {
+    await idbQueue.enqueue(mkItem({ client_request_id: 'gs-pending' }));
+    expect(await idbQueue.getStatus('gs-pending')).toBe('pending');
+
+    await idbQueue.markSyncing('gs-pending');
+    expect(await idbQueue.getStatus('gs-pending')).toBe('syncing');
+
+    await idbQueue.enqueue(mkItem({ client_request_id: 'gs-rejected' }));
+    await idbQueue.markRejected('gs-rejected', 'audit_window_expired');
+    expect(await idbQueue.getStatus('gs-rejected')).toBe('rejected');
+
+    // markSynced deletes the row; getStatus collapses "absent" to "synced".
+    await idbQueue.enqueue(mkItem({ client_request_id: 'gs-synced' }));
+    await idbQueue.markSynced('gs-synced');
+    expect(await idbQueue.getStatus('gs-synced')).toBe('synced');
+
+    // Never-enqueued id also reads as 'synced' — see method JSDoc.
+    expect(await idbQueue.getStatus('gs-never-was')).toBe('synced');
+  });
+
   it('purgeAll wipes everything (auth-state-change support)', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'a' }));
     await idbQueue.enqueue(mkItem({ client_request_id: 'b' }));

@@ -12,6 +12,7 @@ import TodayPage from './pages/TodayPage'
 import ProgramsPage from './pages/ProgramsPage'
 import ProgramDetailPage from './pages/ProgramDetailPage'
 import MyProgramPage from './pages/MyProgramPage'
+import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
 
 function AppInner() {
   const [profile, setProfile] = useState<EquipmentProfile | null>(null)
@@ -28,6 +29,7 @@ function AppInner() {
             <Route path="programs" element={<ProgramsPage />} />
             <Route path="programs/:slug" element={<ProgramDetailPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
+            <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobile />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />

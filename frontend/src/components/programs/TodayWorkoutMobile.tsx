@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
-export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId: string) => void }) {
+// onStart is retained for backwards compatibility with existing test fixtures
+// and TodayPage's wiring; the actual navigation now uses react-router-dom's
+// navigate() to push /today/:runId/log. The onStart callback (if provided) is
+// still invoked so callers can attach analytics or other side effects.
+export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayId: string) => void } = {}) {
+  const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
 
@@ -74,7 +80,10 @@ export function TodayWorkoutMobile({ onStart }: { onStart: (runId: string, dayId
         ))}
       </ul>
       <button
-        onClick={() => onStart(data.run_id, day.id)}
+        onClick={() => {
+          onStart?.(data.run_id, day.id);
+          navigate(`/today/${data.run_id}/log`);
+        }}
         style={{ marginTop: 24, padding: '14px', width: '100%', background: '#4D8DFF', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', fontSize: 14, cursor: 'pointer' }}
       >
         {'Start Workout'}

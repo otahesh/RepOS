@@ -116,6 +116,27 @@ class IdbQueue {
     });
   }
 
+  /**
+   * Lookup the live status of a queued row by primary key.
+   *
+   * Contract:
+   *   • row present → returns its `status` ('pending' | 'syncing' | 'rejected'
+   *     — note `'synced'` rows are deleted by `markSynced`, so this branch
+   *     never returns 'synced' literally).
+   *   • row absent → returns 'synced' (deletion-on-success is the contract;
+   *     `useIdbQueueStatus` polling treats "gone" as "successfully synced").
+   *
+   * Callers that need to disambiguate "never enqueued" from "synced" must track
+   * the client_request_id externally — this method intentionally collapses
+   * both into 'synced' so the UI affordance is single-source.
+   */
+  async getStatus(client_request_id: string): Promise<PendingSetLog['status']> {
+    await this.ensureOpen();
+    const row = await this.db.pendingSetLogs.get(client_request_id);
+    if (row) return row.status;
+    return 'synced';
+  }
+
   async markSynced(client_request_id: string): Promise<void> {
     await this.ensureOpen();
     // Delete on synced — row has no further purpose and we keep IDB small.
