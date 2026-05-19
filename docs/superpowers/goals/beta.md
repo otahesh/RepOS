@@ -2,7 +2,7 @@
 
 > Operating dashboard for the alpha→Beta transition. Source-of-truth for *what's true right now*; the master plan is `docs/superpowers/plans/2026-05-11-repos-beta.md`. When this file conflicts with the master plan, the master plan wins — correct this file.
 
-**Last updated:** 2026-05-18 (mid-W1, branch `beta/w1-live-data-foundation`).
+**Last updated:** 2026-05-18 (mid-W1.3, branch `beta/w1-live-data-foundation`, 34 commits ahead of main).
 
 ---
 
@@ -29,12 +29,21 @@ Until Milestone 2 lands the system is "Beta-launched" but not "Beta-validated." 
 
 ```
 [x] W0 — Auth flip + cutover (merged PR #11)
-[~] W1 — Live data foundation (branch: beta/w1-live-data-foundation, 24 commits, no PR open)
+[~] W1 — Live data foundation (branch: beta/w1-live-data-foundation, 34 commits, no PR open)
     [x] W1.1 — set_logs schema + migration 029
     [x] W1.2 — set-logs CRUD (POST/PATCH/DELETE/GET) with 24h audit window + IDOR tests
     [x] W1.4 — health_workouts table + ingest + iOS Shortcuts runbook
         [x] W1.4.0 scope-enforcement middleware (backported)
-    [ ] W1.3 — TodayLoggerMobile + O1–O8 offline matrix         ← NEXT (longest pole)
+    [~] W1.3 — TodayLoggerMobile + offline foundation (frontend suite at 205/205 green)
+        [x] W1.3.1 idbQueue (Dexie wrapper)
+        [x] W1.3.2 logBuffer (flush + exponential backoff)
+        [x] W1.3.3 useNetworkState + useRestTimer hooks
+        [x] W1.3.4 TodayLoggerMobile component + /today/:runId/log route + useIdbQueueStatus
+        [x] W1.3.5 LogBufferRecovery banner + useIdbQueueCounts hook
+        [ ] W1.3.6 O1–O8 Playwright matrix                       ← NEXT (longest remaining task in W1)
+        [ ] W1.3.7 CF Access expiry handling (SessionExpiredBanner + Safari private-mode + auth-state purge)
+        [ ] W1.3.8 Settings storage UI ("Clear offline sessions")
+        [ ] W1.3.9 typecheck + tests final sweep
     [ ] W1.5 — e2e Playwright (overreaching toast / W1→W3 proof)
 [ ] W2 — Onboarding + clinical safety (PAR-Q, deload, core)     parallel-eligible from now
 [ ] W3 — Clinical signals + injury swap                          gated on W1 fully merged
@@ -102,11 +111,11 @@ W0 ✓ ───► W1 (W1.3, W1.5) ───► W3 ───► (W8 continuous 
 
 ## Next dispatch
 
-**Immediate next action: W1.3 — TodayLoggerMobile + O1–O8 offline matrix.**
+**Immediate next action: W1.3.6 — O1–O8 offline Playwright matrix.**
 
-The W1 per-wave plan at `docs/superpowers/plans/2026-05-12-beta-W1-live-data-foundation.md` enumerates W1.3 as five sub-tasks (W1.3.1–W1.3.5: idbQueue, logBuffer, hooks, component, status banner) plus the O1–O8 Playwright scenarios. Backend is green so the frontend can integrate against real endpoints. Pre.4 (install `dexie`) and Pre.5 (scaffold Playwright) need to land first if they haven't.
+W1.3.1–W1.3.5 (idbQueue + logBuffer + hooks + TodayLoggerMobile + LogBufferRecovery) all merged this session. Frontend suite green at 205/205. Next is the 8-scenario offline-resilience matrix (`frontend/src/components/programs/__offline__/O{N}-*.spec.ts`) with shared `_helpers.ts`. This needs Playwright running against the dev server with API mocking via `page.route()` for most scenarios; O2 + parts of O3 + O4 want a real backend. The W1 per-wave plan W1.3.6 section (lines 1279–1372) has the per-scenario specs.
 
-**After W1.3 merges to branch:** dispatch W1.5 (single Playwright case asserting set-log POSTs surface the overreaching evaluator via `/api/recovery-flags` poll — this case folds into G3's suite and proves the W1→W3 data flow).
+**After W1.3.6:** W1.3.7 (CF Access expiry — SessionExpiredBanner + Safari private-mode + auth-state purge), W1.3.8 (Settings storage UI), W1.3.9 (final sweep), then PR + merge.
 
 **Parallel-dispatchable from now:** W2 (onboarding + PAR-Q + deload) and W5 (backups + restore UI) have no W1 dependency. Each gets its own per-wave plan written via `superpowers:writing-plans` before dispatch.
 
