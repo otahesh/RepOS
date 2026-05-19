@@ -354,4 +354,107 @@ describe('logBuffer', () => {
       expect(ms).toBeLessThanOrEqual(37_500);
     }
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // W1.3.6 companion tests
+  //
+  // Three behaviors the offline matrix's Playwright specs assert at the UI
+  // boundary, restated as unit-level guarantees at the logBuffer boundary:
+  //   • O3 idempotency contract — same client_request_id (e.g. device A's
+  //     queue restored on device B) yields 200 deduped, client markSyncs.
+  //   • O4 exact backoff sequence (cap at 30s).
+  //   • O5 minute-bucket dedupe — fresh CRID + same minute bucket also
+  //     yields 200 deduped from the server's perspective; client treats it
+  //     identically to a 201 from a markSynced standpoint.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('W1.3.6 / O3: same client_request_id replayed → server 200 deduped → client markSyncs', async () => {
+    // Simulate the device-A-restored-on-device-B path: row carries a CRID
+    // the server already recorded; server responds 200 deduped:true.
+    const sharedCrid = 'shared-crid-device-a-and-b';
+    await seedRow({ client_request_id: sharedCrid });
+
+    const synced = vi.spyOn(idbQueue, 'markSynced');
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'srv-existing', deduped: true }),
+    });
+
+    await logBuffer.flush();
+
+    // The POST carried the shared CRID — verifies the idempotency key flows
+    // through unchanged from device-A's queue into the wire request.
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.client_request_id).toBe(sharedCrid);
+
+    // Deduped 200 marks the row synced (deletes it), not pending.
+    expect(synced).toHaveBeenCalledWith(sharedCrid);
+    expect(await idbQueue.peekPending()).toHaveLength(0);
+  });
+
+  it('W1.3.6 / O4: exact backoff sequence [1s, 2s, 4s, 8s, 16s, 30s] with cap-at-30s', async () => {
+    // Master plan W1.3.6.5 lists [1,2,4,8,16,30] with ±10% tolerance; the
+    // shipped jitter is ±25% (logBuffer.ts comment + W1.3.2 session sign-off),
+    // so this test uses the wider tolerance to match impl. The sequence
+    // (1,2,4,8,16,30) and the 30s cap are still asserted exactly.
+    const SEQUENCE_SECONDS = [1, 2, 4, 8, 16, 30];
+
+    for (const expectedBase of SEQUENCE_SECONDS) {
+      // Sample 40 times — jitter is uniform over [-25%, +25%].
+      for (let i = 0; i < 40; i++) {
+        const attemptForBase = expectedBase === 30 ? 5 : Math.log2(expectedBase);
+        const ms = computeBackoffMs(attemptForBase);
+        const min = expectedBase * 1000 * 0.75;
+        const max = expectedBase * 1000 * 1.25;
+        expect(ms).toBeGreaterThanOrEqual(min);
+        expect(ms).toBeLessThanOrEqual(max);
+      }
+    }
+
+    // Cap: attempt 6+ stays at 30s base (no exponential beyond cap).
+    for (const attempt of [6, 7, 8, 12, 30]) {
+      const ms = computeBackoffMs(attempt);
+      expect(ms).toBeGreaterThanOrEqual(30_000 * 0.75);
+      expect(ms).toBeLessThanOrEqual(30_000 * 1.25);
+    }
+  });
+
+  it('W1.3.6 / O5: fresh CRID + server minute-bucket dedupe → 200 deduped → client markSyncs', async () => {
+    // Two rows queued for the SAME planned_set within the SAME minute bucket
+    // but with DIFFERENT CRIDs (the regenerated-CRID case after a release-
+    // and-retap at ~600ms). Server's minute-bucket dedupe layer returns 200
+    // deduped:true for the second; the client must markSync it (NOT bump
+    // attempts, NOT mark rejected).
+    const t = '2026-05-18T12:34:00-04:00';
+    await seedRow({
+      client_request_id: 'crid-a',
+      planned_set_id: 'ps-1',
+      performed_at: t,
+      created_at: 1,
+    });
+    await seedRow({
+      client_request_id: 'crid-b',
+      planned_set_id: 'ps-1',
+      performed_at: t,
+      created_at: 2,
+    });
+
+    const synced = vi.spyOn(idbQueue, 'markSynced');
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any)
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 's-a', deduped: false }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 's-a', deduped: true }) });
+
+    await logBuffer.flush();
+
+    // Both rows are gone from the queue.
+    expect(await idbQueue.peekPending()).toHaveLength(0);
+    expect(await idbQueue.peekRejected()).toHaveLength(0);
+
+    // Both got marked synced; neither was rejected; no attempt-count bump.
+    expect(synced).toHaveBeenCalledWith('crid-a');
+    expect(synced).toHaveBeenCalledWith('crid-b');
+    expect(rejected).not.toHaveBeenCalled();
+  });
 });

@@ -7,7 +7,12 @@ import AppShell from '../layout/AppShell';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockCounts = { pending: 0, syncing: 0, rejected: 0 };
+const mockCounts: { pending: number; syncing: number; rejected: number; oldestPendingCreatedAt: number | null } = {
+  pending: 0,
+  syncing: 0,
+  rejected: 0,
+  oldestPendingCreatedAt: null,
+};
 const mockNetwork = { online: true, transitionedAt: 0 };
 
 vi.mock('../../hooks/useIdbQueueCounts', () => ({
@@ -70,6 +75,8 @@ function setCounts(c: Partial<typeof mockCounts>) {
   mockCounts.pending = c.pending ?? 0;
   mockCounts.syncing = c.syncing ?? 0;
   mockCounts.rejected = c.rejected ?? 0;
+  mockCounts.oldestPendingCreatedAt =
+    c.oldestPendingCreatedAt !== undefined ? c.oldestPendingCreatedAt : null;
 }
 
 function setOnline(v: boolean) {

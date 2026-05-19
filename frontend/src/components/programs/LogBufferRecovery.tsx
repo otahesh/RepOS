@@ -28,12 +28,31 @@ interface BannerVariant {
   clickable: boolean;
 }
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 function pickVariant(
   online: boolean,
   pending: number,
   syncing: number,
   rejected: number,
+  oldestPendingCreatedAt: number | null,
 ): BannerVariant | null {
+  // Staleness banner (W1.3.6 O7): any pending row ≥7 days old takes precedence
+  // over the normal pending banner because it implies user attention is needed
+  // — the row has been stuck long enough that auto-recovery is suspect.
+  if (pending > 0 && oldestPendingCreatedAt !== null) {
+    const ageMs = Date.now() - oldestPendingCreatedAt;
+    if (ageMs >= SEVEN_DAYS_MS) {
+      const days = Math.floor(ageMs / ONE_DAY_MS);
+      const setWord = pending === 1 ? 'set' : 'sets';
+      return {
+        copy: `${pending} ${setWord} queued · ${days} days old · flush or clear?`,
+        background: TOKENS.warn,
+        clickable: true,
+      };
+    }
+  }
   // Precedence: offline-pending > syncing > rejected > online-pending.
   if (pending > 0 && !online) {
     return {
@@ -68,14 +87,14 @@ function pickVariant(
 
 export function LogBufferRecovery(): JSX.Element | null {
   const { online } = useNetworkState();
-  const { pending, syncing, rejected } = useIdbQueueCounts();
+  const { pending, syncing, rejected, oldestPendingCreatedAt } = useIdbQueueCounts();
   const location = useLocation();
   const navigate = useNavigate();
 
   if (!isAllowedRoute(location.pathname)) return null;
   if (pending === 0 && syncing === 0 && rejected === 0) return null;
 
-  const variant = pickVariant(online, pending, syncing, rejected);
+  const variant = pickVariant(online, pending, syncing, rejected, oldestPendingCreatedAt);
   if (variant === null) return null;
 
   const onClickRejected = (): void => {

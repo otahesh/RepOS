@@ -37,19 +37,26 @@ describe('useIdbQueueCounts', () => {
     const { result } = renderHook(() => useIdbQueueCounts());
     // Initial state is zero; first tick reads an empty queue and stays zero.
     await waitFor(() => {
-      expect(result.current).toEqual({ pending: 0, syncing: 0, rejected: 0 });
+      expect(result.current).toEqual({
+        pending: 0,
+        syncing: 0,
+        rejected: 0,
+        oldestPendingCreatedAt: null,
+      });
     });
   });
 
-  it('returns pending=N after enqueuing N rows', async () => {
-    await idbQueue.enqueue(mkItem({ client_request_id: 'p-1' }));
-    await idbQueue.enqueue(mkItem({ client_request_id: 'p-2' }));
-    await idbQueue.enqueue(mkItem({ client_request_id: 'p-3' }));
+  it('returns pending=N after enqueuing N rows; tracks oldest created_at', async () => {
+    const oldest = Date.now() - 5000;
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p-1', created_at: oldest }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p-2', created_at: oldest + 100 }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p-3', created_at: oldest + 200 }));
 
     const { result } = renderHook(() => useIdbQueueCounts());
     await waitFor(() => expect(result.current.pending).toBe(3));
     expect(result.current.syncing).toBe(0);
     expect(result.current.rejected).toBe(0);
+    expect(result.current.oldestPendingCreatedAt).toBe(oldest);
   });
 
   it('returns syncing=1 after markSyncing on a row', async () => {
