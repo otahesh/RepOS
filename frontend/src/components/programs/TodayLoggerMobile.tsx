@@ -18,6 +18,13 @@ import { useRestTimer } from '../../hooks/useRestTimer';
 // Persists set logs through logBuffer → idbQueue (offline-tolerant).
 // =============================================================================
 
+// W1.3.4 code-review follow-ups deferred to W1.3.x cleanup:
+//   - weight upper/lower bound validation (currently server-side only)
+//   - Skip button currently no-op; awaits W1.3.5 design
+//   - quota-error banner needs dismiss/recover affordance (awaits W1.3.8 Settings storage UI)
+//   - inline styles could hoist to module-scope const for GC
+//   - extract RirSlider + NumInput into their own files when reused (W2.x desktop logger)
+
 export interface TodayLoggerMobileProps {
   /**
    * Test-only hatch: bypasses getTodayWorkout() so tests don't have to mock
@@ -401,15 +408,6 @@ function SetRow({
     state.phase === 'logged' || state.phase === 'rejected' ? state.clientRequestId : null;
   const status = useIdbQueueStatus(clientRequestId);
 
-  // If the IDB row flips to 'rejected' while we're in 'logged', drop into rejected.
-  useEffect(() => {
-    if (state.phase === 'logged' && status === 'rejected') {
-      // Per-row state machine transition is purely informational here — the
-      // affordance already reads the rejected status, but updating the phase
-      // is useful for future "re-log" buttons.
-    }
-  }, [state, status]);
-
   const isLogged = state.phase === 'logged';
   const isLogging = state.phase === 'logging';
 
@@ -474,7 +472,6 @@ function SetRow({
         <button
           onClick={handleLogClick}
           disabled={!canLog}
-          aria-busy={status === 'syncing'}
           style={{
             flex: 2,
             padding: 10,

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import TodayLoggerMobile from './TodayLoggerMobile';
 import { logBuffer } from '../../lib/logBuffer';
+import type { QueueRowStatus } from '../../hooks/useIdbQueueStatus';
 import type { TodayDay, TodaySet } from '../../lib/api/mesocycles';
 
 // ---- Mocks ------------------------------------------------------------------
@@ -22,10 +23,12 @@ vi.mock('../../auth', () => ({
 }));
 
 // Force the queue-status hook to return a deterministic value per test so we
-// don't couple to its internal 500ms interval.
-let __mockedQueueStatus: 'unknown' | 'pending' | 'syncing' | 'synced' | 'rejected' = 'pending';
+// don't couple to its internal 500ms interval. Per-row keyed by clientRequestId
+// so W1.3.5 (LogBufferRecovery banner) can assert mixed-status rendering.
+const __mockedQueueStatuses = new Map<string, QueueRowStatus>();
 vi.mock('../../hooks/useIdbQueueStatus', () => ({
-  useIdbQueueStatus: () => __mockedQueueStatus,
+  useIdbQueueStatus: (crid: string | null) =>
+    crid == null ? 'unknown' : (__mockedQueueStatuses.get(crid) ?? 'pending'),
 }));
 
 const navigateMock = vi.fn();
@@ -78,7 +81,7 @@ function renderLogger() {
 
 describe('<TodayLoggerMobile>', () => {
   beforeEach(() => {
-    __mockedQueueStatus = 'pending';
+    __mockedQueueStatuses.clear();
     vi.spyOn(logBuffer, 'enqueue').mockResolvedValue('crid-stub');
     navigateMock.mockReset();
   });
@@ -134,7 +137,7 @@ describe('<TodayLoggerMobile>', () => {
   });
 
   it('shows "Set logged" when the queue status mock returns "synced"', async () => {
-    __mockedQueueStatus = 'synced';
+    __mockedQueueStatuses.set('crid-stub', 'synced');
     const user = userEvent.setup();
     renderLogger();
     const row = within(screen.getByTestId('set-row-0'));
