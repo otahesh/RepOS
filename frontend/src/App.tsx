@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import SettingsIntegrations from './components/settings/SettingsIntegrations'
 import SettingsAccount from './components/settings/SettingsAccount'
+import SettingsStorage from './components/settings/SettingsStorage'
 import { AuthProvider, AuthGate } from './auth'
 import { EquipmentWizard } from './components/onboarding/EquipmentWizard'
 import { EquipmentEditor } from './components/settings/EquipmentEditor'
@@ -33,6 +34,7 @@ function AppInner() {
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />
+            <Route path="settings/storage" element={<SettingsStorage />} />
             {import.meta.env.DEV && <Route path="dev/picker" element={<ExercisePickerDemo />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

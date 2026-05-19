@@ -186,6 +186,11 @@ class IdbQueue {
     await this.db.pendingSetLogs.clear();
   }
 
+  async clearRejected(): Promise<void> {
+    await this.ensureOpen();
+    await this.db.pendingSetLogs.where('status').equals('rejected').delete();
+  }
+
   async getQueueOwnerUserId(): Promise<string | null> {
     await this.ensureOpen();
     const row = await this.db.metadata.get(QUEUE_OWNER_KEY);

@@ -36,6 +36,7 @@ const SETTINGS_SUB = [
   { label: 'Integrations', to: '/settings/integrations' },
   { label: 'Units & equipment', to: '/settings/equipment' },
   { label: 'Account', to: '/settings/account' },
+  { label: 'Storage', to: '/settings/storage' },
 ]
 
 interface SidebarProps {

@@ -136,6 +136,23 @@ describe('idbQueue', () => {
     expect(await idbQueue.peekPending()).toHaveLength(0);
     expect(await idbQueue.getQueueOwnerUserId()).toBe('user-A');
   });
+
+  it('clearRejected drops rejected rows but leaves pending/syncing untouched', async () => {
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p1' }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p2' }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 'r1' }));
+    await idbQueue.enqueue(mkItem({ client_request_id: 'r2' }));
+    await idbQueue.markRejected('r1', 'audit_window_expired');
+    await idbQueue.markRejected('r2', 'planned_set_deleted');
+    await idbQueue.markSyncing('p2');
+
+    await idbQueue.clearRejected();
+
+    expect(await idbQueue.peekRejected()).toHaveLength(0);
+    expect(await idbQueue.peekPending()).toHaveLength(1);
+    expect((await idbQueue.peekPending())[0].client_request_id).toBe('p1');
+    expect(await idbQueue.peekSyncing()).toHaveLength(1);
+  });
 });
 
 function mkItem(over: Partial<PendingSetLog> = {}): PendingSetLog {
