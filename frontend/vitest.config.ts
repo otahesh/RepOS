@@ -5,6 +5,13 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // jsdom defaults to an opaque origin (`about:blank`) where Web Storage is
+    // disabled and throws SecurityError. The W1.3.7 SessionExpiredBanner uses
+    // localStorage as its synchronous "we have unflushed work" signal — give
+    // jsdom a non-opaque URL so Storage works under test.
+    environmentOptions: {
+      jsdom: { url: 'https://repos.jpmtech.com/' },
+    },
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,

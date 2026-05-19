@@ -109,6 +109,33 @@ describe('idbQueue', () => {
     expect(await idbQueue.peekPending()).toHaveLength(0);
     expect(await idbQueue.peekRejected()).toHaveLength(0);
   });
+
+  it('getQueueOwnerUserId returns null before any owner is set', async () => {
+    expect(await idbQueue.getQueueOwnerUserId()).toBeNull();
+  });
+
+  it('setQueueOwnerUserId persists and round-trips', async () => {
+    await idbQueue.setQueueOwnerUserId('user-A');
+    expect(await idbQueue.getQueueOwnerUserId()).toBe('user-A');
+
+    // Overwrites prior owner.
+    await idbQueue.setQueueOwnerUserId('user-B');
+    expect(await idbQueue.getQueueOwnerUserId()).toBe('user-B');
+  });
+
+  it('queue owner survives a DB close/reopen', async () => {
+    await idbQueue.setQueueOwnerUserId('user-A');
+    await idbQueue.close();
+    expect(await idbQueue.getQueueOwnerUserId()).toBe('user-A');
+  });
+
+  it('purgeAll does NOT clear the queue owner metadata (lets bootstrap distinguish "first run" from "same user, drained queue")', async () => {
+    await idbQueue.setQueueOwnerUserId('user-A');
+    await idbQueue.enqueue(mkItem({ client_request_id: 'x' }));
+    await idbQueue.purgeAll();
+    expect(await idbQueue.peekPending()).toHaveLength(0);
+    expect(await idbQueue.getQueueOwnerUserId()).toBe('user-A');
+  });
 });
 
 function mkItem(over: Partial<PendingSetLog> = {}): PendingSetLog {

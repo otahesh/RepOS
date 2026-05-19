@@ -25,13 +25,29 @@ export class QueueFullError extends Error {
   }
 }
 
+interface MetadataRow {
+  key: string;
+  value: string;
+}
+
+const QUEUE_OWNER_KEY = 'queueOwnerUserId';
+
 class RepOSLogQueueDB extends Dexie {
   pendingSetLogs!: Table<PendingSetLog, string>;
+  metadata!: Table<MetadataRow, string>;
 
   constructor() {
     super('RepOSLogQueue');
     this.version(1).stores({
       pendingSetLogs: 'client_request_id, status, created_at',
+    });
+    // W1.3.7.2.5 — metadata table stores the queue owner (currently-signed-in
+    // user id) so the AuthProvider bootstrap can purge the queue when a
+    // different user signs in. Single-row, keyed by `key`. Schema v2 is
+    // additive — existing v1 rows in pendingSetLogs survive the upgrade.
+    this.version(2).stores({
+      pendingSetLogs: 'client_request_id, status, created_at',
+      metadata: 'key',
     });
   }
 }
@@ -164,7 +180,21 @@ class IdbQueue {
 
   async purgeAll(): Promise<void> {
     await this.ensureOpen();
+    // Only the pending-set rows are wiped. The queue-owner metadata is left
+    // intact so the bootstrap purge (W1.3.7.2.5) can still tell a "drained
+    // same-user queue" apart from a "never-initialised" queue on next launch.
     await this.db.pendingSetLogs.clear();
+  }
+
+  async getQueueOwnerUserId(): Promise<string | null> {
+    await this.ensureOpen();
+    const row = await this.db.metadata.get(QUEUE_OWNER_KEY);
+    return row?.value ?? null;
+  }
+
+  async setQueueOwnerUserId(userId: string): Promise<void> {
+    await this.ensureOpen();
+    await this.db.metadata.put({ key: QUEUE_OWNER_KEY, value: userId });
   }
 
   async close(): Promise<void> {

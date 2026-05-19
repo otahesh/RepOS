@@ -5,6 +5,7 @@ import Topbar from './Topbar'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
 import { useIsMobile } from '../../lib/useIsMobile'
 import { LogBufferRecovery } from '../programs/LogBufferRecovery'
+import { SessionExpiredBanner } from '../auth/SessionExpiredBanner'
 import { logBuffer } from '../../lib/logBuffer'
 
 export default function AppShell() {
@@ -65,6 +66,7 @@ export default function AppShell() {
       }}>
         <Topbar onToggleSidebar={toggleDrawer} mobileOpen={mobileOpen} triggerRef={triggerRef} />
         <LogBufferRecovery />
+        <SessionExpiredBanner />
         <main style={{
           overflow: 'auto',
           minHeight: 0,
@@ -114,6 +116,7 @@ export default function AppShell() {
       }}>
         <Topbar />
         <LogBufferRecovery />
+        <SessionExpiredBanner />
         <main style={{
           overflow: 'auto',
           minHeight: 0,
