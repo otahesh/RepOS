@@ -9,25 +9,47 @@ function tierColor(sets: number, mev: number, mav: number, mrv: number): string 
   return '#FF6A6A';
 }
 
-// API returns weeks: [{ week_idx, muscles: [{ muscle, sets, mev, mav, mrv }] }].
-// The heatmap renders by-muscle rows × by-week columns, so we pivot once.
+// API returns weeks: [{ week_idx, muscles: [{ muscle, sets, performed_sets,
+// mev, mav, mrv }] }]. The heatmap renders by-muscle rows × by-week columns,
+// so we pivot once.
 function pivotByMuscle(vol: VolumeRollup): {
   muscles: string[];
   setsByMuscleByWeek: Record<string, number[]>;
+  performedByMuscleByWeek: Record<string, number[]>;
   landmarks: Record<string, { mev: number; mav: number; mrv: number }>;
 } {
   const setsByMuscleByWeek: Record<string, number[]> = {};
+  const performedByMuscleByWeek: Record<string, number[]> = {};
   const landmarks: Record<string, { mev: number; mav: number; mrv: number }> = {};
   const totalWeeks = vol.weeks.length;
   for (const wk of vol.weeks) {
     for (const m of wk.muscles) {
       if (!setsByMuscleByWeek[m.muscle]) setsByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
+      if (!performedByMuscleByWeek[m.muscle]) performedByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
       // week_idx is 1-indexed; align to 0-indexed array.
       setsByMuscleByWeek[m.muscle][wk.week_idx - 1] = m.sets;
+      performedByMuscleByWeek[m.muscle][wk.week_idx - 1] = m.performed_sets;
       if (!landmarks[m.muscle]) landmarks[m.muscle] = { mev: m.mev, mav: m.mav, mrv: m.mrv };
     }
   }
-  return { muscles: Object.keys(setsByMuscleByWeek).sort(), setsByMuscleByWeek, landmarks };
+  return {
+    muscles: Object.keys(setsByMuscleByWeek).sort(),
+    setsByMuscleByWeek,
+    performedByMuscleByWeek,
+    landmarks,
+  };
+}
+
+/**
+ * Render a heatmap cell's text. Planned-only weeks show just the planned
+ * count; weeks with logged sets show "performed / planned" so the user can
+ * eyeball progress at a glance. We round to whole sets for display because
+ * fractional contributions read as noise in a dense grid.
+ */
+function cellText(planned: number, performed: number): string {
+  const p = Math.round(planned);
+  if (performed <= 0) return String(p);
+  return `${Math.round(performed)}/${p}`;
 }
 
 export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
@@ -53,7 +75,7 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
 
       <section>
         <h3 style={{ marginTop: 0, fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
-          {'Planned '}<Term k="working_set" />{' heatmap (sets/week per muscle)'}
+          <Term k="working_set" />{' heatmap (logged / planned per week)'}
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: `auto repeat(${run.weeks}, 1fr)`, gap: 4, fontFamily: 'JetBrains Mono', fontSize: 11 }}>
           <div></div>
@@ -65,33 +87,38 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           {muscles.map(m => {
             const lm = pivot.landmarks[m];
             const cells = pivot.setsByMuscleByWeek[m] ?? [];
+            const performed = pivot.performedByMuscleByWeek[m] ?? [];
             return (
               <Fragment key={m}>
                 <div style={{ color: 'rgba(255,255,255,0.7)' }}>{m}</div>
-                {cells.map((sets, w) => (
-                  <div
-                    key={`${m}-${w}`}
-                    title={`${m} · W${w + 1}: ${sets} sets (Min Effective ${lm.mev} / Max Adaptive ${lm.mav} / Max Recoverable ${lm.mrv})`}
-                    style={{
-                      background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
-                      borderRadius: 3,
-                      minHeight: 24,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#0A0D12',
-                      fontWeight: 600,
-                    }}
-                  >
-                    {sets}
-                  </div>
-                ))}
+                {cells.map((sets, w) => {
+                  const done = performed[w] ?? 0;
+                  return (
+                    <div
+                      key={`${m}-${w}`}
+                      data-testid={`heatmap-cell-${m}-w${w + 1}`}
+                      title={`${m} · W${w + 1}: ${Math.round(done)} logged / ${Math.round(sets)} planned (Min Effective ${lm.mev} / Max Adaptive ${lm.mav} / Max Recoverable ${lm.mrv})`}
+                      style={{
+                        background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
+                        borderRadius: 3,
+                        minHeight: 24,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#0A0D12',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {cellText(sets, done)}
+                    </div>
+                  );
+                })}
               </Fragment>
             );
           })}
         </div>
         <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-          {'Tiers: '}<Term k="MEV" />{' → '}<Term k="MAV" />{' → '}<Term k="MRV" />{' with '}<Term k="deload" variant="abbr" />{' final week.'}
+          {'Tile color: planned tier ('}<Term k="MEV" />{' → '}<Term k="MAV" />{' → '}<Term k="MRV" />{'). Cell text: logged sets / planned sets — logged number appears once you start logging.'}
         </div>
       </section>
     </div>

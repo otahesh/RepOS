@@ -169,11 +169,13 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   );
   const mesocycleRunId = mr.id;
 
-  // 7. day_workout.
+  // 7. day_workout. week_idx is 1-indexed per the mesocycles schema (min 1) —
+  // the volume rollup service iterates 1..nWeeks and would otherwise drop
+  // this fixture's day_workouts when filtering by week_idx.
   const { rows: [dw] } = await db.query<{ id: string }>(
     `INSERT INTO day_workouts
        (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-     VALUES ($1, 0, 0, CURRENT_DATE, 'strength', 'Seed Day')
+     VALUES ($1, 1, 0, CURRENT_DATE, 'strength', 'Seed Day')
      RETURNING id`,
     [mesocycleRunId],
   );

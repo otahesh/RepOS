@@ -1,24 +1,20 @@
 /**
- * Beta W1.5.2 — Volume-rollup invariant under POST /api/set-logs.
+ * Beta W1.5.2 — Volume-rollup reflects POSTed set_logs.
  *
- * The W1 acceptance bullet calls for "desktop MyProgramPage shows volume
- * rollup updated" after a set is logged. The current rollup
- * (api/src/services/volumeRollup.ts) is PLAN-based — it sums
- * `planned_sets × exercise_muscle_contributions` per week — so it does NOT
- * change when a set_log is inserted. This test pins that invariant down so
- * any future regression (or intentional cut-over to a logged-volume rollup)
- * surfaces here.
+ * Closes the W1 acceptance bullet "desktop MyProgramPage shows volume rollup
+ * updated" by asserting that POST /api/set-logs grows the rollup's per-muscle
+ * `performed_sets` field for the week the parent day_workout belongs to. The
+ * planned `sets` field is unchanged — that captures the program design.
  *
- * If a future wave ships a "performed-volume rollup" that DOES grow with
- * set_logs, this test fails and the assertion direction flips. The fixme'd
- * subtest below sketches the eventual contract.
+ * The rollup query attributes a logged set to the planned-week of its parent
+ * day_workout (not the calendar week of performed_at). See
+ * api/src/services/volumeRollup.ts for the SQL and the rationale.
  *
- * DEVIATION FROM THE PLAN (§W1.5.2): the plan's draft uses
- * `before.json().rollup.find(r => r.exercise_id === exerciseId)?.set_count`
- * — but the real `VolumeRollupResponse` shape is `{run_id, weeks[{muscles[{
- * muscle, sets, mev, mav, mrv}]}]}` (no exercise_id, no set_count). The
- * draft was written against an imagined per-exercise shape; the assertion
- * here matches the actual shape and the actual (plan-based) semantics.
+ * DEVIATION FROM THE PLAN (§W1.5.2): the plan's draft asserted
+ * `rollup.find(r => r.exercise_id === exerciseId)?.set_count` — but the real
+ * VolumeRollupResponse is week-and-muscle-shaped, not per-exercise. The fix
+ * (both to the plan and to the rollup service) was to add `performed_sets`
+ * to MuscleVolume so the per-muscle running total grows after each set_log.
  */
 
 import 'dotenv/config';
@@ -42,8 +38,23 @@ afterAll(async () => {
   await db.end();
 });
 
+interface MuscleEntry {
+  muscle: string;
+  sets: number;
+  performed_sets: number;
+  mev: number;
+  mav: number;
+  mrv: number;
+}
+
+interface WeekEntry {
+  week_idx: number;
+  muscles: MuscleEntry[];
+  minutes_by_modality: Record<string, number>;
+}
+
 describe('W1.5.2 — set_logs → volume rollup', () => {
-  it('GET /api/mesocycles/:id/volume-rollup returns the plan-based shape with the seeded mesocycle', async () => {
+  it('GET /api/mesocycles/:id/volume-rollup returns the per-week per-muscle shape with both sets and performed_sets', async () => {
     const app = await build();
     const seed = await seedUserWithMesocycle();
     handles.push(seed);
@@ -55,30 +66,56 @@ describe('W1.5.2 — set_logs → volume rollup', () => {
     });
 
     expect(resp.statusCode).toBe(200);
-    const body = resp.json();
-    expect(body).toMatchObject({
-      run_id: seed.mesocycleRunId,
-      weeks: expect.any(Array),
-    });
-    // The seed fixture provisions a single-week run with one planned_set, so
-    // the rollup should always have exactly one week entry.
+    const body = resp.json() as { run_id: string; weeks: WeekEntry[] };
+    expect(body.run_id).toBe(seed.mesocycleRunId);
     expect(body.weeks).toHaveLength(1);
     expect(body.weeks[0].week_idx).toBe(1);
+
+    // Every muscle row must carry both planned (`sets`) and performed
+    // (`performed_sets`). The seed fixture logs zero sets, so performed_sets
+    // is 0 across the board before the POST below.
+    for (const m of body.weeks[0].muscles) {
+      expect(m).toHaveProperty('sets');
+      expect(m).toHaveProperty('performed_sets');
+      expect(m.performed_sets).toBe(0);
+    }
 
     await app.close();
   });
 
-  it('POST /api/set-logs leaves the (plan-based) rollup unchanged — invariant for W1', async () => {
+  it('POST /api/set-logs increments performed_sets for the muscles credited by the planned_set exercise; planned sets are unchanged', async () => {
     const app = await build();
     const seed = await seedUserWithMesocycle();
     handles.push(seed);
 
-    const before = await app.inject({
+    const before = (await app.inject({
       method: 'GET',
       url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
       headers: { authorization: `Bearer ${seed.bearer}` },
-    });
-    expect(before.statusCode).toBe(200);
+    })).json() as { weeks: WeekEntry[] };
+
+    const beforeWeek = before.weeks.find((w) => w.week_idx === 1);
+    expect(beforeWeek).toBeDefined();
+    const beforePerformed = beforeWeek!.muscles.reduce(
+      (acc, m) => acc + m.performed_sets,
+      0,
+    );
+    const beforePlanned = beforeWeek!.muscles.reduce(
+      (acc, m) => acc + m.sets,
+      0,
+    );
+
+    // Sanity: which muscles does the seeded exercise credit? We grab them up
+    // front so we can target the ones that should grow.
+    const { rows: crediting } = await db.query<{ slug: string; contribution: number }>(
+      `SELECT m.slug, emc.contribution
+       FROM exercise_muscle_contributions emc
+       JOIN muscles m ON m.id = emc.muscle_id
+       WHERE emc.exercise_id = $1`,
+      [seed.exerciseId],
+    );
+    expect(crediting.length).toBeGreaterThan(0);
+    const expectedDelta = crediting.reduce((acc, r) => acc + Number(r.contribution), 0);
 
     const post = await app.inject({
       method: 'POST',
@@ -95,26 +132,27 @@ describe('W1.5.2 — set_logs → volume rollup', () => {
     });
     expect(post.statusCode).toBe(201);
 
-    const after = await app.inject({
+    const after = (await app.inject({
       method: 'GET',
       url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
       headers: { authorization: `Bearer ${seed.bearer}` },
-    });
-    expect(after.statusCode).toBe(200);
+    })).json() as { weeks: WeekEntry[] };
 
-    // Plan-based rollup: identical body before and after the POST. Stringify
-    // for an order-tolerant deep-equal across the nested weeks[].muscles[]
-    // arrays which the service already sorts by week_idx, muscle slug.
-    expect(after.json()).toEqual(before.json());
+    const afterWeek = after.weeks.find((w) => w.week_idx === 1)!;
+    const afterPerformed = afterWeek.muscles.reduce(
+      (acc, m) => acc + m.performed_sets,
+      0,
+    );
+    const afterPlanned = afterWeek.muscles.reduce((acc, m) => acc + m.sets, 0);
+
+    // Planned volume must not move — that's the program design, not user
+    // activity.
+    expect(afterPlanned).toBe(beforePlanned);
+    // Performed volume must grow by exactly the seeded exercise's total
+    // muscle contribution. Tolerance covers float drift from the SUM cast.
+    expect(afterPerformed - beforePerformed).toBeGreaterThan(expectedDelta - 0.0001);
+    expect(afterPerformed - beforePerformed).toBeLessThan(expectedDelta + 0.0001);
 
     await app.close();
-  });
-
-  // When a future wave ships performed-volume (counting set_logs into the
-  // rollup), flip this `it.skip` to `it` and update the W1 invariant test
-  // above to either delete or invert. Document the rollover in a follow-up
-  // plan so the change isn't lost.
-  it.skip('POST /api/set-logs grows the performed-volume rollup (post-W1 contract)', async () => {
-    expect(false).toBe(true);
   });
 });

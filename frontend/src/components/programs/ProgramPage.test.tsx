@@ -12,11 +12,11 @@ describe('<ProgramPage>', () => {
     vi.spyOn(mesoApi, 'getVolumeRollup').mockResolvedValue({
       run_id: 'mr-1',
       weeks: [
-        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
       ],
     });
   });
@@ -24,5 +24,24 @@ describe('<ProgramPage>', () => {
     render(<ProgramPage mesocycleRunId="mr-1" />);
     expect(await screen.findByText(/chest/i)).toBeInTheDocument();
     expect(screen.getByText(/Week 2/)).toBeInTheDocument();
+  });
+
+  it('shows logged/planned in heatmap cell once performed_sets > 0', async () => {
+    vi.spyOn(mesoApi, 'getVolumeRollup').mockResolvedValue({
+      run_id: 'mr-1',
+      weeks: [
+        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, performed_sets: 4, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+      ],
+    });
+    render(<ProgramPage mesocycleRunId="mr-1" />);
+    // Wait for chest row first to ensure the heatmap rendered.
+    await screen.findByText(/chest/i);
+    expect(screen.getByTestId('heatmap-cell-chest-w1')).toHaveTextContent('4/10');
+    // Untouched weeks show planned-only.
+    expect(screen.getByTestId('heatmap-cell-chest-w2')).toHaveTextContent('12');
   });
 });

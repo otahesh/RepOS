@@ -1458,41 +1458,35 @@ The W3 UI assertion (overreaching toast) is `test.fixme`-gated until W3 ships.
   });
   ```
 
-- [ ] **W1.5.2 — Write the volume-rollup integration test.**
-  Create `api/tests/integration/set-logs-volume-rollup.test.ts`:
-  ```ts
-  import { describe, it, expect } from 'vitest';
-  import { build } from '../helpers/build-test-app';
-  import { seedUserWithMesocycle } from '../helpers/seed-fixtures';
+- [x] **W1.5.2 — Volume-rollup integration test + performed_sets extension.**
+  **Plan correction (2026-05-20):** the original draft assumed a per-exercise
+  `set_count` field on the rollup, but the actual `VolumeRollupResponse` is
+  week-and-muscle-shaped (`weeks[i].muscles[j] = {muscle, sets, mev, mav, mrv}`).
+  The current rollup was also purely plan-based — it summed `planned_sets ×
+  exercise_muscle_contributions` per week and never read `set_logs` — which
+  meant the W1 acceptance bullet "MyProgramPage shows volume rollup updated"
+  could not be satisfied without a service extension.
 
-  describe('set_logs → volume rollup', () => {
-    it('POST /api/set-logs increments the mesocycle volume rollup for that exercise', async () => {
-      const app = await build();
-      const { bearer, plannedSetId, mesocycleRunId, exerciseId } = await seedUserWithMesocycle();
-
-      const before = await app.inject({ method: 'GET', url: `/api/mesocycles/${mesocycleRunId}/volume-rollup`,
-        headers: { authorization: `Bearer ${bearer}` } });
-      const beforeCount = before.json().rollup.find((r: any) => r.exercise_id === exerciseId)?.set_count ?? 0;
-
-      await app.inject({ method: 'POST', url: '/api/set-logs',
-        headers: { authorization: `Bearer ${bearer}` },
-        payload: {
-          client_request_id: crypto.randomUUID(),
-          planned_set_id: plannedSetId,
-          weight_lbs: 200, reps: 5, rir: 1,
-          performed_at: new Date().toISOString(),
-        },
-      });
-
-      const after = await app.inject({ method: 'GET', url: `/api/mesocycles/${mesocycleRunId}/volume-rollup`,
-        headers: { authorization: `Bearer ${bearer}` } });
-      const afterCount = after.json().rollup.find((r: any) => r.exercise_id === exerciseId)?.set_count ?? 0;
-
-      expect(afterCount).toBe(beforeCount + 1);
-    });
-  });
-  ```
-  **Read `api/src/services/volumeRollup.ts` first** to confirm the actual endpoint path + response shape. If the endpoint mounts at a different path (e.g. `/api/programs/...` or via `mesocycles.ts`), adjust the test URLs. The rollup is a computed view — no rollup-side code change should be needed for W1; this test verifies that.
+  **Actual W1.5.2 delivery:**
+  1. Extended `api/src/services/volumeRollup.ts` with a parallel query that
+     sums `set_logs × exercise_muscle_contributions` joined back through
+     `planned_sets → day_workouts` and attributed to the planned week of
+     the parent day_workout. Added a `performed_sets: number` field to the
+     `MuscleVolume` type alongside the existing `sets` (planned).
+  2. Frontend `ProgramPage` heatmap cells now show `logged/planned`
+     (e.g. `4/10`) when `performed_sets > 0`; otherwise show planned only.
+     Cell color still reflects the planned tier (MEV/MAV/MRV) so the
+     program shape remains legible.
+  3. `api/tests/integration/set-logs-volume-rollup.test.ts` asserts:
+     - The endpoint returns both `sets` and `performed_sets` on every muscle row.
+     - POST `/api/set-logs` grows the credited muscles' `performed_sets` by
+       the seeded exercise's `SUM(exercise_muscle_contributions.contribution)`
+       (tolerance ±0.0001 for float drift). Planned `sets` is unchanged.
+  4. Fixed `tests/helpers/seed-fixtures.ts` `week_idx=0` → `week_idx=1` to
+     match the 1-indexed convention in `api/src/schemas/mesocycles.ts`
+     and the volumeRollup service's `for w in 1..nWeeks` loop. The 0-value
+     was latent under set-logs-flow tests (none iterate by week) but
+     dropped rollup rows for W1.5.2.
 
 - [ ] **W1.5.3 — Run both tests; first two assertions pass; the `test.fixme` block is skipped. Commit.**
 
