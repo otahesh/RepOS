@@ -100,14 +100,23 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
             const performed = pivot.performedByMuscleByWeek[m] ?? [];
             return (
               <Fragment key={m}>
-                <div style={{ color: 'rgba(255,255,255,0.7)' }}>{m}</div>
+                <div data-testid={`heatmap-row-${m}`} style={{ color: 'rgba(255,255,255,0.7)' }}>{m}</div>
                 {cells.map((sets, w) => {
                   const done = performed[w] ?? 0;
+                  // Hidden description region keyed via aria-describedby so
+                  // screen readers and AT can surface the full landmarks
+                  // context. The native `title` is retained for sighted-pointer
+                  // hover, but is hidden from most ATs and untouchable on
+                  // touch devices.
+                  const describeId = `heatmap-${m}-w${w + 1}-desc`;
+                  const description = `${m}, week ${w + 1}: ${Math.round(done)} logged of ${Math.round(sets)} planned. Min Effective ${lm.mev}, Max Adaptive ${lm.mav}, Max Recoverable ${lm.mrv}.`;
                   return (
                     <div
                       key={`${m}-${w}`}
                       data-testid={`heatmap-cell-${m}-w${w + 1}`}
-                      title={`${m} · W${w + 1}: ${Math.round(done)} logged / ${Math.round(sets)} planned (Min Effective ${lm.mev} / Max Adaptive ${lm.mav} / Max Recoverable ${lm.mrv})`}
+                      aria-describedby={describeId}
+                      title={description}
+                      tabIndex={0}
                       style={{
                         background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
                         borderRadius: 3,
@@ -120,6 +129,22 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
                       }}
                     >
                       {cellText(sets, done)}
+                      <span
+                        id={describeId}
+                        style={{
+                          position: 'absolute',
+                          width: 1,
+                          height: 1,
+                          padding: 0,
+                          margin: -1,
+                          overflow: 'hidden',
+                          clip: 'rect(0,0,0,0)',
+                          whiteSpace: 'nowrap',
+                          border: 0,
+                        }}
+                      >
+                        {description}
+                      </span>
                     </div>
                   );
                 })}

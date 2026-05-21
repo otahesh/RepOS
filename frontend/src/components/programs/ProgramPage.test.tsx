@@ -22,7 +22,7 @@ describe('<ProgramPage>', () => {
   });
   it('renders 5×N heatmap with current week marker', async () => {
     render(<ProgramPage mesocycleRunId="mr-1" />);
-    expect(await screen.findByText(/chest/i)).toBeInTheDocument();
+    expect(await screen.findByTestId('heatmap-row-chest')).toBeInTheDocument();
     expect(screen.getByText(/Week 2/)).toBeInTheDocument();
   });
 
@@ -39,7 +39,7 @@ describe('<ProgramPage>', () => {
     });
     render(<ProgramPage mesocycleRunId="mr-1" />);
     // Wait for chest row first to ensure the heatmap rendered.
-    await screen.findByText(/chest/i);
+    await screen.findByTestId('heatmap-row-chest');
     expect(screen.getByTestId('heatmap-cell-chest-w1')).toHaveTextContent('4/10');
     // Untouched weeks show planned-only.
     expect(screen.getByTestId('heatmap-cell-chest-w2')).toHaveTextContent('12');
@@ -63,7 +63,7 @@ describe('<ProgramPage>', () => {
       ],
     });
     render(<ProgramPage mesocycleRunId="mr-1" />);
-    await screen.findByText(/chest/i);
+    await screen.findByTestId('heatmap-row-chest');
 
     const mutedCell = screen.getByTestId('heatmap-cell-chest-w1');
     const goodCell = screen.getByTestId('heatmap-cell-chest-w2');

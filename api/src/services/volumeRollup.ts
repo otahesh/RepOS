@@ -92,20 +92,35 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
     `SELECT weeks FROM mesocycle_runs WHERE id=$1`, [runId],
   );
 
+  // Index planned sets the same way for the union below. The merge unions
+  // muscle keys from both setRows AND performedRows per week so a logged
+  // substitution that credits a muscle no planned_set credits (e.g. a swap
+  // surfaced in a later wave) still surfaces in the rollup as a planned=0,
+  // performed>0 row instead of being silently dropped.
+  const setsByKey = new Map<string, number>();
+  for (const r of setRows) {
+    setsByKey.set(`${r.week_idx}::${r.muscle_slug}`, Number(r.sets));
+  }
+
   const out: WeekVolume[] = [];
   for (let w = 1; w <= nWeeks; w++) {
-    const muscles: MuscleVolume[] = setRows
-      .filter(r => r.week_idx === w)
-      .map(r => {
-        let lm = MUSCLE_LANDMARKS[r.muscle_slug];
+    const musclesInWeek = new Set<string>();
+    for (const r of setRows) if (r.week_idx === w) musclesInWeek.add(r.muscle_slug);
+    for (const r of performedRows) if (r.week_idx === w) musclesInWeek.add(r.muscle_slug);
+
+    const muscles: MuscleVolume[] = Array.from(musclesInWeek)
+      .sort()
+      .map(slug => {
+        let lm = MUSCLE_LANDMARKS[slug];
         if (!lm) {
-          console.warn(`[volumeRollup] muscle '${r.muscle_slug}' has no landmarks; emitting zeros`);
+          console.warn(`[volumeRollup] muscle '${slug}' has no landmarks; emitting zeros`);
           lm = { mev: 0, mav: 0, mrv: 0 };
         }
-        const performed = performedByKey.get(`${w}::${r.muscle_slug}`) ?? 0;
+        const planned = setsByKey.get(`${w}::${slug}`) ?? 0;
+        const performed = performedByKey.get(`${w}::${slug}`) ?? 0;
         return {
-          muscle: r.muscle_slug,
-          sets: Number(r.sets),
+          muscle: slug,
+          sets: planned,
           performed_sets: performed,
           mev: lm.mev,
           mav: lm.mav,

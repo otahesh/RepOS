@@ -5,14 +5,25 @@
 // again. Server's minute-bucket dedupe must prevent the 4th POST from
 // creating a duplicate row.
 //
+// Scope of this spec:
+//   - IDB-side recovery + minute-bucket dedupe behavior, against a mocked
+//     `/api/set-logs` responder with its dedupe flag enabled.
+//
+// What this spec deliberately does NOT prove:
+//   - Auth-side recovery on a real "fresh PWA install." The mocked
+//     `/api/me` route in _helpers.ts auto-rehydrates the same user on the
+//     next call (see comment at _helpers.ts:55-56), so cleared cookies do
+//     not exercise a re-auth round-trip here. The auth-state-change purge
+//     contract is covered in frontend/src/auth.test.tsx:107.
+//   - Two-device cross-CRID idempotency. The full integration proof is in
+//     api/tests/integration/set-logs-flow.test.ts (POST idempotency cases);
+//     the unit-level frontend proxy is in logBuffer.test.ts.
+//
 // Mocked-backend (page.route()) translation per /goal condition (3):
 //   - We enable the responder's minute-bucket dedupe flag.
 //   - Instead of asserting `GET /api/set-logs?planned_set_id=... returns 3 rows`,
 //     we assert: 4 POSTs total; the 4th has serverDecision === 'deduped';
 //     distinct (planned_set, minute-bucket) keys === 3.
-//
-// The unit-level proxy for the two-devices-same-CRID idempotency contract
-// lives in logBuffer.test.ts (added under task #11 of this goal).
 
 import { test, expect } from '@playwright/test';
 import {
