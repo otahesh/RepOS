@@ -5,6 +5,7 @@ export const VALID_SCOPES = [
   'health:weight:write',
   'health:workouts:write',
   'program:write',
+  'set_logs:write',
 ] as const;
 
 export type Scope = typeof VALID_SCOPES[number];

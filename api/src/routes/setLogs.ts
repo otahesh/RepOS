@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { requireScope } from '../middleware/scope.js';
 import { db } from '../db/client.js';
 import {
   SetLogPostSchema,
@@ -12,8 +13,10 @@ import {
 // ---------------------------------------------------------------------------
 // Beta W1.2 — set_logs routes.
 //
-// Auth: requireBearerOrCfAccess populates req.userId; identical contract to
-// weight.ts. No new auth surface.
+// Auth: requireBearerOrCfAccess populates req.userId; requireScope enforces
+// that bearer tokens carry `set_logs:write`. CF Access JWTs (the webapp path)
+// pass through requireScope because tokenScopes is undefined — whole-host
+// CF Access already gates identity at the edge.
 //
 // IDOR: ownership of planned_set_id is verified via the planned_sets →
 // day_workouts → mesocycle_runs.user_id chain. "Not found" and "not yours"
@@ -43,7 +46,7 @@ const SELECT_COLUMNS = `
 `;
 
 export async function setLogsRoutes(app: FastifyInstance) {
-  app.post('/set-logs', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+  app.post('/set-logs', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
     const userId = (req as any).userId as string | undefined;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
@@ -137,7 +140,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // "no such id" — so the response can't be used to enumerate other users'
   // set_log IDs.
   // -------------------------------------------------------------------------
-  app.patch('/set-logs/:id', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+  app.patch('/set-logs/:id', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
     const userId = (req as any).userId as string | undefined;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
@@ -230,7 +233,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // MAV/MRV state) can't be silently retroactively wiped. Hard delete — no
   // soft-delete column in this iteration.
   // -------------------------------------------------------------------------
-  app.delete('/set-logs/:id', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+  app.delete('/set-logs/:id', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
     const userId = (req as any).userId as string | undefined;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
@@ -289,7 +292,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // needs `sl.`-prefixed column references; the ::float cast still applies so
   // weight_lbs comes back as a JS number rather than NUMERIC-as-string.
   // -------------------------------------------------------------------------
-  app.get('/set-logs', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+  app.get('/set-logs', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
     const userId = (req as any).userId as string | undefined;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 

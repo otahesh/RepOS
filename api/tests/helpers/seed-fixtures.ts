@@ -119,10 +119,11 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   );
   const userId = u.id;
 
-  // 2. Bearer token. The route currently only checks the auth middleware (not
-  //    scopes), but we still ask for the canonical scope so future scope-
-  //    gating doesn't silently rebuild fixtures.
-  const { bearer } = await mintBearer({ userId, scopes: ['health:weight:write'] });
+  // 2. Bearer token. Scope-gated per W1 reviewer matrix: set_logs routes
+  //    require `set_logs:write` (added to VALID_SCOPES alongside the existing
+  //    health:* scopes). Tests that need to assert cross-scope rejection mint
+  //    a parallel wrong-scope bearer with mintBearer(...).
+  const { bearer } = await mintBearer({ userId, scopes: ['set_logs:write'] });
 
   // 3. Pick any seeded exercise.
   const { rows: ex } = await db.query<{ id: string }>(

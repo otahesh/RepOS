@@ -23,9 +23,12 @@ import { describe, it, expect, afterEach, afterAll, beforeAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
 import {
   seedUserAndMintBearer,
+  seedUserWithMesocycle,
+  seedUserWithLoggedSet,
   cleanupSeeded,
   type SeedHandle,
 } from '../helpers/seed-fixtures.js';
+import { mintBearer } from '../helpers/seed-fixtures.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 import { db } from '../../src/db/client.js';
 
@@ -138,6 +141,150 @@ describe('scope enforcement (W1.4.0 backport)', () => {
       // CF Access auto-provisions the user on first sight, so the write
       // should succeed end-to-end (201) — no scope check fires because
       // requireScope pass-throughs when tokenScopes is undefined.
+      expect(resp.statusCode).toBe(201);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W1 reviewer-matrix Critical: /api/set-logs routes shipped without any
+// `requireScope(...)` guard. A `health:weight:write` token (the iOS weight
+// Shortcut) or a `health:workouts:write` token could write/edit/delete
+// arbitrary set_logs. W8.2 contamination row needs to exist for all four
+// HTTP verbs. The scope is `set_logs:write`.
+// ---------------------------------------------------------------------------
+
+describe('set-logs scope enforcement (W1 reviewer matrix Critical)', () => {
+  it('POST /api/set-logs → 403 when bearer lacks set_logs:write scope', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      // Mint a parallel bearer with only the workouts scope. seedUserWithMesocycle
+      // already mints a set_logs:write bearer (`seed.bearer`); the next mint adds a
+      // wrong-scope sibling token on the same user.
+      const wrong = await mintBearer({
+        userId: seed.userId,
+        scopes: ['health:workouts:write'],
+        label: 'wrong-scope',
+      });
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${wrong.bearer}` },
+        payload: {
+          client_request_id: '33333333-3333-4333-8333-333333333333',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 225.0,
+          reps: 5,
+          rir: 2,
+          performed_at: new Date().toISOString(),
+        },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:set_logs:write/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('PATCH /api/set-logs/:id → 403 when bearer lacks set_logs:write scope', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 30 });
+      handles.push(seed);
+      const wrong = await mintBearer({
+        userId: seed.userId,
+        scopes: ['health:weight:write'],
+        label: 'wrong-scope',
+      });
+
+      const resp = await app.inject({
+        method: 'PATCH',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${wrong.bearer}` },
+        payload: { weight_lbs: 230.0 },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:set_logs:write/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('DELETE /api/set-logs/:id → 403 when bearer lacks set_logs:write scope', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithLoggedSet({ minutesAgo: 30 });
+      handles.push(seed);
+      const wrong = await mintBearer({
+        userId: seed.userId,
+        scopes: ['health:weight:write'],
+        label: 'wrong-scope',
+      });
+
+      const resp = await app.inject({
+        method: 'DELETE',
+        url: `/api/set-logs/${seed.setLogId}`,
+        headers: { authorization: `Bearer ${wrong.bearer}` },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:set_logs:write/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /api/set-logs → 403 when bearer lacks set_logs:write scope', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      const wrong = await mintBearer({
+        userId: seed.userId,
+        scopes: ['health:weight:write'],
+        label: 'wrong-scope',
+      });
+
+      const resp = await app.inject({
+        method: 'GET',
+        url: `/api/set-logs?planned_set_id=${seed.plannedSetId}`,
+        headers: { authorization: `Bearer ${wrong.bearer}` },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:set_logs:write/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/set-logs → 201 with set_logs:write bearer (positive control)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '44444444-4444-4444-8444-444444444444',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 225.0,
+          reps: 5,
+          rir: 2,
+          performed_at: new Date().toISOString(),
+        },
+      });
+
       expect(resp.statusCode).toBe(201);
     } finally {
       await app.close();
