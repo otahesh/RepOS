@@ -257,6 +257,65 @@ describe('POST /api/health/workouts', () => {
     }
   });
 
+  it('400 when started_at is far in the future (analytics-pollution guard)', async () => {
+    // Reviewer Critical: unbounded started_at lets a caller log a 2099
+    // workout that pollutes daily averages forever and skews the rate-
+    // limit accounting day-key. Schema refines (now - 365d, now + 5min].
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:workouts:write'],
+      });
+      handles.push(handle);
+
+      const futureStart = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const futureEnd = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: {
+          ...validWorkoutPayload(),
+          started_at: futureStart,
+          ended_at: futureEnd,
+        },
+      });
+
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json().field).toBe('started_at');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400 when started_at is more than 365 days in the past', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:workouts:write'],
+      });
+      handles.push(handle);
+
+      const tooOldStart = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString();
+      const tooOldEnd = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString();
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: {
+          ...validWorkoutPayload(),
+          started_at: tooOldStart,
+          ended_at: tooOldEnd,
+        },
+      });
+
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json().field).toBe('started_at');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('400 {error, field: source} when source is Withings (workouts enum is Apple Health|Manual only)', async () => {
     // Workouts source enum is intentionally narrower than weight's. A future
     // contributor who assumes "all health endpoints accept the same sources"

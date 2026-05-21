@@ -33,6 +33,12 @@ export type WorkoutSource = (typeof VALID_WORKOUT_SOURCES)[number];
 // POST /api/health/workouts — inbound request body
 // ---------------------------------------------------------------------------
 
+// Bounds for started_at — same rationale as set_logs.performed_at. A 2099
+// workout would otherwise pollute analytics indefinitely. 5min forward
+// skew tolerance for client-clock drift; 365 days backfill.
+const FORWARD_SKEW_MS = 5 * 60 * 1000;
+const MAX_BACKFILL_MS = 365 * 24 * 60 * 60 * 1000;
+
 export const WorkoutIngestSchema = z
   .object({
     // Accept both '…-04:00' (Apple Health iOS Shortcut) and '…Z' (server-
@@ -56,7 +62,20 @@ export const WorkoutIngestSchema = z
   .refine((d) => Date.parse(d.ended_at) > Date.parse(d.started_at), {
     message: 'ended_at must be after started_at',
     path: ['ended_at'],
-  });
+  })
+  // Reviewer Critical: bound started_at to (now - 365d, now + 5min] so a
+  // far-future workout can't pollute analytics or rate-limit accounting.
+  .refine(
+    (d) => {
+      const t = Date.parse(d.started_at);
+      const now = Date.now();
+      return t <= now + FORWARD_SKEW_MS && t >= now - MAX_BACKFILL_MS;
+    },
+    {
+      message: 'started_at must be within the last 365 days and not >5 minutes in the future',
+      path: ['started_at'],
+    },
+  );
 
 export type WorkoutIngestInput = z.infer<typeof WorkoutIngestSchema>;
 

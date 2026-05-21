@@ -192,6 +192,87 @@ describe('POST /api/set-logs — idempotency', () => {
       await app.close();
     }
   });
+
+  it('400 when performed_at is far in the future (audit-window-defeat guard)', async () => {
+    // Reviewer Critical: unbounded performed_at lets a caller POST a row
+    // dated 2099 → its 24h audit window stays open for ~73 years. Schema
+    // refines (now - 365d, now + 5min]; this case exercises the upper
+    // bound.
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const futureIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '66666666-6666-4666-8666-666666666666',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 100,
+          reps: 1,
+          performed_at: futureIso,
+        },
+      });
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json().field).toBe('performed_at');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400 when performed_at is more than 365 days in the past (backfill out of band)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const tooOldIso = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString();
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '77777777-7777-4777-8777-777777777777',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 100,
+          reps: 1,
+          performed_at: tooOldIso,
+        },
+      });
+      expect(resp.statusCode).toBe(400);
+      expect(resp.json().field).toBe('performed_at');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('201 within the +5min forward-skew tolerance (client-clock drift)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const slightlyAheadIso = new Date(Date.now() + 60 * 1000).toISOString();
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '88888888-8888-4888-8888-888888888888',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 100,
+          reps: 1,
+          performed_at: slightlyAheadIso,
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('PATCH /api/set-logs/:id — 24h audit window', () => {

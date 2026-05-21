@@ -9,6 +9,21 @@ import { z } from 'zod';
 // these in SELECT projections so handlers can return rows directly.
 // ---------------------------------------------------------------------------
 
+// 5 minutes of forward skew tolerance — covers clients with a fast clock
+// (iOS Shortcuts can drift) without letting a malicious caller post a
+// far-future performed_at that would hold the 24h audit window open
+// indefinitely. 365 days of backfill tolerance — anything older should
+// flow through a separate backfill affordance, not the live logger.
+const FORWARD_SKEW_MS = 5 * 60 * 1000;
+const MAX_BACKFILL_MS = 365 * 24 * 60 * 60 * 1000;
+
+function performedAtRefine(iso: string): boolean {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return false;
+  const now = Date.now();
+  return t <= now + FORWARD_SKEW_MS && t >= now - MAX_BACKFILL_MS;
+}
+
 export const SetLogPostSchema = z.object({
   client_request_id: z.string().uuid(),
   planned_set_id: z.string().uuid(),
@@ -16,7 +31,16 @@ export const SetLogPostSchema = z.object({
   reps: z.number().int().min(0).max(100).optional(),
   rir: z.number().int().min(0).max(5).optional(),
   rpe: z.number().int().min(1).max(10).optional(),
-  performed_at: z.string().datetime({ offset: true }),
+  performed_at: z
+    .string()
+    .datetime({ offset: true })
+    // Reviewer Critical: an unbounded `performed_at` keeps the 24h audit
+    // window open forever (post a row dated 2099 → still editable in 2098).
+    // Bound to (now - 365d, now + 5min] so the audit gate retains its
+    // "historical analytics can't be silently rewritten" guarantee.
+    .refine(performedAtRefine, {
+      message: 'performed_at must be within the last 365 days and not >5 minutes in the future',
+    }),
   notes: z.string().max(500).optional(),
 });
 export type SetLogPost = z.infer<typeof SetLogPostSchema>;
