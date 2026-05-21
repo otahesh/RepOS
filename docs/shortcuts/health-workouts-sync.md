@@ -265,7 +265,7 @@ Inside the **If** branch (error path), add **"Show Notification"**:
 - `Title: RepOS workout sync failed`
 - `Body:` magic variable for `Dictionary Value` (the error string)
 - `Sound: Off` *(iOS 26 spot-check: pre-iOS 26 this read "Play Sound")*
-- **Why:** Single user-visible feedback. Common values: `rate_limit_exceeded` (Shortcut firing too often), `scope_required:health:workouts:write` (token minted with the wrong scope), validation field names like `modality must be one of: …`, or a generic body if the server returned 5xx with HTML.
+- **Why:** Single user-visible feedback. Common values: `rate_limited` (Shortcut firing too often), `scope_required:health:workouts:write` (token minted with the wrong scope), validation field names like `modality must be one of: …`, or a generic body if the server returned 5xx with HTML.
 
 Inside the **Otherwise** branch (success path), leave it empty — silent-on-success is the spec.
 
@@ -322,17 +322,17 @@ You should see the new row with `source = 'Apple Health'`, the mapped `modality`
 
 Run the Shortcut a second time within a few minutes — same workout, no changes in Health.
 
-**Expected:** Still no notification. In the DB: the same row exists (same `id`); `updated_at` **will** bump because the route's upsert always sets `updated_at = now()` on conflict and the table trigger backs that up. The data columns (`ended_at`, `modality`, `distance_m`, `duration_sec`) are unchanged. The HTTP response was `200 { ..., deduped: true }`.
+**Expected:** Still no notification. In the DB: the same row exists (same `id`); `updated_at` is unchanged (DO NOTHING short-circuits the trigger). The data columns (`ended_at`, `modality`, `distance_m`, `duration_sec`) are unchanged. The HTTP response was `200 { ..., deduped: true }`.
 
-**Important semantic — `deduped: true` is NOT a no-op.** The dedupe key is `(user_id, started_at, source)`. If you edit the workout in Health (or re-run with a different `Workout End`) between two Shortcut runs, the second POST **overwrites** the row's `ended_at`, `modality`, `distance_m`, and `duration_sec` with the new values, AND still returns `deduped: true`. The flag means "I have seen this `started_at` before"; it does NOT mean "I rejected your payload". Freshest payload wins. If an Apple Watch glitch causes the workout to be re-logged with a corrupted end time, the second POST will silently overwrite the good first one. There is no undo path in v1 short of editing the row in psql.
+**Important semantic — `deduped: true` means the prior row is preserved.** The dedupe key is `(user_id, started_at, source)`. If you edit the workout in Health (or re-run with a different `Workout End`) between two Shortcut runs, the second POST returns the **original** row unchanged and `deduped: true`. The flag means "I have seen this `started_at` before; the first payload wins." If an Apple Watch glitch causes the workout to be re-logged with corrupted values, the second POST will NOT overwrite the good first one. To correct a bad first ingest in v1, edit the row in psql.
 
 ### 4.4 Verify rate-limit guard (10/day)
 
-The workout endpoint caps writes at **10 per (user, day)**, where the day key is derived from the workout's `started_at` local wall-clock date. The 11th write returns `409 { "error": "rate_limit_exceeded" }`. (Note the spelling: the workout endpoint emits `rate_limit_exceeded`; the weight endpoint emits `rate_limited`. They are different strings.)
+The workout endpoint caps writes at **10 per (user, day)**, where the day key is derived from the workout's `started_at` local wall-clock date. The 11th write returns `409 { "error": "rate_limited" }`. Same error envelope as the weight endpoint, so an offline retry classifier can share one string match.
 
 Easiest way to verify: do 10 short Apple Watch workouts in a single day (or fabricate 11 POSTs via curl in §6). The 11th run produces the notification:
 
-> `RepOS workout sync failed — rate_limit_exceeded`
+> `RepOS workout sync failed — rate_limited`
 
 The cap resets at the user's local midnight (next day's `started_at` slice).
 
@@ -369,7 +369,7 @@ The procedure is identical to [`health-weight-sync.md` §5](./health-weight-sync
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `RepOS workout sync failed — rate_limit_exceeded` | More than 10 workouts in a single local-day for this user. | The cap resets at local midnight. If the Shortcut is firing in a loop (e.g. a stale automation pointing at the wrong Workout type), open the Automation tab and confirm the trigger is "Apple Watch Workout — When: Ends" and not a Time-of-Day that fires every minute. |
+| `RepOS workout sync failed — rate_limited` | More than 10 workouts in a single local-day for this user. | The cap resets at local midnight. If the Shortcut is firing in a loop (e.g. a stale automation pointing at the wrong Workout type), open the Automation tab and confirm the trigger is "Apple Watch Workout — When: Ends" and not a Time-of-Day that fires every minute. |
 | `RepOS workout sync failed — scope_required:health:workouts:write` | Token was minted with the default scope (`health:weight:write`) or without the workouts scope. | Re-mint per §1.2 with `"scopes":["health:workouts:write"]`. Swap the new token into Step 9's `Authorization` header. Revoke the old (weight-only) token via §5. |
 | `RepOS workout sync failed — modality must be one of: walk, run, cycle, row, swim, elliptical, strength, other` | Step 7's mapping let an unmapped value (e.g. raw `Running` from Apple) reach the JSON body. | Check the If chain in Step 7. The default fallthrough should set `API Modality = other`. If the variable is empty, the default Text action was never wired — re-add it. |
 | `RepOS workout sync failed — source must be one of: Apple Health, Manual` | Step 9 `source` value is a typo (`apple health`, `AppleHealth`, `Apple-Health`) **or** you're sending `Withings` / `Renpho`. The workouts endpoint accepts ONLY `Apple Health` and `Manual` — narrower than the weight endpoint. | Fix to the exact string `Apple Health`. |
@@ -436,7 +436,7 @@ curl -sS -i -X POST https://repos.jpmtech.com/api/health/workouts \
 
 **Expected (re-run same payload):** `HTTP/1.1 200` with the same `workout` object and `"deduped": true`.
 
-**Expected (11th call same local day):** `HTTP/1.1 409 {"error":"rate_limit_exceeded"}`.
+**Expected (11th call same local day):** `HTTP/1.1 409 {"error":"rate_limited"}`.
 
 **Expected (token without the workouts scope):** `HTTP/1.1 403 {"error":"scope_required:health:workouts:write"}`.
 
