@@ -51,11 +51,15 @@ interface RowInputs {
 const DEBOUNCE_MS = 500;
 
 // Map idb status → user-facing affordance text.
+// 'synced' surfaces "locked — Settings to edit" so users understand a typo can't
+// be fixed inline; the PATCH/DELETE routes exist (24h audit window) but the
+// inline edit/undo UI ships in a later wave per scope. Until then the message
+// explicitly points users at the right surface.
 function affordanceText(status: QueueRowStatus): string {
   switch (status) {
     case 'pending': return 'Queued offline';
     case 'syncing': return 'Syncing…';
-    case 'synced':  return 'Set logged';
+    case 'synced':  return 'Logged · locked (24h). Edit via Settings.';
     case 'rejected': return 'Rejected — review';
     case 'unknown':
     default: return '';

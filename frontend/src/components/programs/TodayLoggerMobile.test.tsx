@@ -136,7 +136,7 @@ describe('<TodayLoggerMobile>', () => {
     expect(await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(/queued offline/i)).toBeInTheDocument();
   });
 
-  it('shows "Set logged" when the queue status mock returns "synced"', async () => {
+  it('shows "Logged · locked" with pointer to Settings when the queue status mock returns "synced"', async () => {
     __mockedQueueStatuses.set('crid-stub', 'synced');
     const user = userEvent.setup();
     renderLogger();
@@ -144,7 +144,14 @@ describe('<TodayLoggerMobile>', () => {
     await user.type(row.getByLabelText(/weight in pounds/i), '185');
     await user.type(row.getByLabelText(/Set 1 reps/i), '7');
     await user.click(row.getByRole('button', { name: /^log$/i }));
-    expect(await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(/set logged/i)).toBeInTheDocument();
+    // Reviewer Important: "Logged" with no further guidance leaves users
+    // confused about why the row's inputs are disabled (the 24h audit
+    // window exists but the inline edit UI ships later). Affordance now
+    // surfaces the lock + points at the right surface.
+    expect(
+      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(/logged · locked/i),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('set-row-0-status')).toHaveTextContent(/edit via settings/i);
   });
 
   it('Log button is disabled for 500ms after press (debounce window)', async () => {
