@@ -84,15 +84,31 @@ describe('<SettingsStorage>', () => {
     expect(screen.queryByText(/are you sure/i)).toBeNull();
   });
 
-  it('Clear-rejected → Confirm calls idbQueue.clearRejected', async () => {
+  it('Clear-rejected → type CLEAR + Confirm calls idbQueue.clearRejected', async () => {
     const user = userEvent.setup();
     setCounts({ rejected: 2 });
     render(<SettingsStorage />);
 
     await user.click(screen.getByRole('button', { name: /clear rejected/i }));
+    // Confirm is disabled until the user types CLEAR (defense-in-depth
+    // against same-origin scripts driving Clear → Confirm with synthetic
+    // clicks).
+    expect(screen.getByRole('button', { name: /confirm/i })).toBeDisabled();
+    await user.type(screen.getByLabelText(/type clear to confirm/i), 'CLEAR');
+    expect(screen.getByRole('button', { name: /confirm/i })).not.toBeDisabled();
     await user.click(screen.getByRole('button', { name: /confirm/i }));
 
     expect(clearRejectedSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('Confirm stays disabled if the typed phrase is wrong', async () => {
+    const user = userEvent.setup();
+    setCounts({ rejected: 1 });
+    render(<SettingsStorage />);
+
+    await user.click(screen.getByRole('button', { name: /clear rejected/i }));
+    await user.type(screen.getByLabelText(/type clear to confirm/i), 'clear');
+    expect(screen.getByRole('button', { name: /confirm/i })).toBeDisabled();
   });
 
   it('shows oldest-pending age when a stale pending row is present', () => {

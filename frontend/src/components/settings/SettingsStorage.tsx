@@ -73,10 +73,17 @@ function StorageRow({ label, count, testId, caption, action }: RowProps): JSX.El
   );
 }
 
+// Per Security review: a same-origin script could otherwise drive Clear →
+// Confirm with two synthetic clicks. Requiring the user to type the literal
+// word "CLEAR" raises the bar from "one event dispatch" to "key-by-key
+// input." Trivial UX speed bump, real defense-in-depth.
+const CONFIRM_PHRASE = 'CLEAR';
+
 export default function SettingsStorage(): JSX.Element {
   const { pending, syncing, rejected, oldestPendingCreatedAt } = useIdbQueueCounts();
   const [confirming, setConfirming] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [confirmInput, setConfirmInput] = useState('');
   const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   // a11y on the confirm modal: when it opens, move focus to Cancel and let
@@ -86,6 +93,7 @@ export default function SettingsStorage(): JSX.Element {
   useEffect(() => {
     if (!confirming) return;
     cancelRef.current?.focus();
+    setConfirmInput('');
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && !clearing) {
         e.preventDefault();
@@ -219,6 +227,34 @@ export default function SettingsStorage(): JSX.Element {
             Are you sure? {rejected} rejected {rejected === 1 ? 'set' : 'sets'} will be removed
             from this device. The server keeps no copy of these.
           </div>
+          <label
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              fontSize: 12,
+              color: TOKENS.textDim,
+            }}
+          >
+            Type <code style={{ fontFamily: FONTS.mono, color: TOKENS.danger }}>{CONFIRM_PHRASE}</code> to confirm
+            <input
+              type="text"
+              aria-label="Type CLEAR to confirm"
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              disabled={clearing}
+              autoComplete="off"
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 14,
+                padding: '8px 10px',
+                background: TOKENS.bg,
+                color: TOKENS.text,
+                border: `1px solid ${TOKENS.line}`,
+                borderRadius: 6,
+              }}
+            />
+          </label>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
             <button
               ref={cancelRef}
@@ -244,10 +280,10 @@ export default function SettingsStorage(): JSX.Element {
             <button
               type="button"
               onClick={() => { void onClear(); }}
-              disabled={clearing}
+              disabled={clearing || confirmInput !== CONFIRM_PHRASE}
               style={{
-                background: TOKENS.danger,
-                color: '#FFFFFF',
+                background: confirmInput === CONFIRM_PHRASE ? TOKENS.danger : TOKENS.surface3,
+                color: confirmInput === CONFIRM_PHRASE ? '#FFFFFF' : TOKENS.textDim,
                 border: 'none',
                 padding: '8px 14px',
                 borderRadius: 6,
@@ -256,7 +292,7 @@ export default function SettingsStorage(): JSX.Element {
                 fontWeight: 600,
                 letterSpacing: 0.4,
                 textTransform: 'uppercase',
-                cursor: clearing ? 'not-allowed' : 'pointer',
+                cursor: clearing || confirmInput !== CONFIRM_PHRASE ? 'not-allowed' : 'pointer',
               }}
             >
               Confirm

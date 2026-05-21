@@ -65,6 +65,24 @@ export async function tokenRoutes(app: FastifyInstance) {
             [userId, storedHash, req.body.label ?? null, scopes],
           );
 
+      // Audit log for the mint event — there's no other persistent record of
+      // "this caller minted a token for this user_id with these scopes from
+      // this IP." Pino redact on the app already scrubs auth headers, so
+      // logging the structured metadata is safe. A future compromise of the
+      // admin key (or unexpected CF Access identity drift) can be detected
+      // via grep on this event in production logs.
+      req.log.info(
+        {
+          event: 'device_token_minted',
+          authMode: (req as { authMode?: string }).authMode ?? 'unknown',
+          targetUserId: userId,
+          tokenId: String(rows[0].id),
+          scopes: scopes ?? null,
+          ip: req.ip,
+        },
+        'device_token minted',
+      );
+
       const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
       return reply.code(201).send(mintResp);
     },
@@ -108,6 +126,16 @@ export async function tokenRoutes(app: FastifyInstance) {
         [req.params.id, userId],
       );
       if (!rowCount) return reply.code(404).send({ error: 'not found' });
+      req.log.info(
+        {
+          event: 'device_token_revoked',
+          authMode: (req as { authMode?: string }).authMode ?? 'unknown',
+          targetUserId: userId,
+          tokenId: req.params.id,
+          ip: req.ip,
+        },
+        'device_token revoked',
+      );
       return reply.code(204).send();
     },
   );
