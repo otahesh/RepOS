@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from 'react'
 import { TOKENS, FONTS, API_BASE } from './tokens'
+import { idbQueue } from './lib/idbQueue'
 
 export interface User {
   id: string
@@ -92,6 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (res.status === 200) {
           const user = (await res.json()) as User
+
+          // W1.3.7.2.5 — Auth-state-change IDB purge. If a different user
+          // signed in on the same device, drop any queued set-logs belonging
+          // to the prior owner before they'd flush against the new bearer.
+          // Owner === null means the queue is unowned (fresh install or a
+          // pre-W1.3.7.2.5 upgrade); keep those rows so existing user data
+          // isn't dropped, but claim ownership going forward.
+          try {
+            const prevOwner = await idbQueue.getQueueOwnerUserId()
+            if (prevOwner !== null && prevOwner !== user.id) {
+              await idbQueue.purgeAll()
+            }
+            await idbQueue.setQueueOwnerUserId(user.id)
+          } catch {
+            // IDB unavailable (Safari private, some browsers). Auth still works;
+            // the queue just stays in whatever state it was in.
+          }
+
+          if (cancelled) return
           setState({ status: 'authenticated', user, error: null })
           return
         }

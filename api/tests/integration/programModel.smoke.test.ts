@@ -233,9 +233,11 @@ describe('program model v1 smoke — golden path', () => {
     }
 
     // ── 7. Record a set_log (workout completion) ──────────────────────────────
-    // Grab any planned_set from this run to log against.
-    const { rows: [sampleSet] } = await db.query<{ id: string }>(
-      `SELECT ps.id FROM planned_sets ps
+    // Grab any planned_set from this run to log against. The set_logs Beta
+    // schema (migration 029) requires user_id + exercise_id + client_request_id
+    // NOT NULL, so the SELECT pulls exercise_id along with the planned_set id.
+    const { rows: [sampleSet] } = await db.query<{ id: string; exercise_id: string }>(
+      `SELECT ps.id, ps.exercise_id FROM planned_sets ps
        JOIN day_workouts dw ON dw.id = ps.day_workout_id
        WHERE dw.mesocycle_run_id = $1
        LIMIT 1`,
@@ -243,11 +245,13 @@ describe('program model v1 smoke — golden path', () => {
     );
     expect(sampleSet).toBeDefined();
 
-    // Direct DB insert for set_logs (no HTTP route yet in v1; Live Logger is v2).
+    // Direct DB insert for set_logs (no HTTP route yet in W1.1; the W1.2
+    // POST /api/set_logs route is the next task). Includes the Beta-required
+    // user_id / exercise_id / client_request_id columns.
     await db.query(
-      `INSERT INTO set_logs (planned_set_id, performed_reps, performed_load_lbs, performed_rir)
-       VALUES ($1, 8, 135.0, 2)`,
-      [sampleSet.id],
+      `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
+       VALUES ($1, $2, $3, gen_random_uuid(), 8, 135.0, 2)`,
+      [sampleSet.id, userId, sampleSet.exercise_id],
     );
 
     const { rows: [{ log_count }] } = await db.query<{ log_count: number }>(

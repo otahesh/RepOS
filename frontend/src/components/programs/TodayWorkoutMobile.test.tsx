@@ -1,9 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { TodayWorkoutMobile } from './TodayWorkoutMobile';
 import * as mesoApi from '../../lib/api/mesocycles';
 import * as plannedApi from '../../lib/api/plannedSets';
+
+const navigateMock = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => navigateMock };
+});
+
+function renderTWM(props: { onStart?: (runId: string, dayId: string) => void } = {}) {
+  return render(
+    <MemoryRouter>
+      <TodayWorkoutMobile onStart={props.onStart ?? vi.fn()} />
+    </MemoryRouter>,
+  );
+}
 
 const BASE_WORKOUT = {
   state: 'workout' as const, run_id: 'mr-1',
@@ -33,23 +48,31 @@ const WORKOUT_WITH_SUB = {
 
 describe('<TodayWorkoutMobile>', () => {
   beforeEach(() => {
+    navigateMock.mockReset();
     vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(BASE_WORKOUT);
   });
 
   it('renders day name + sets stacked', async () => {
-    render(<TodayWorkoutMobile onStart={vi.fn()} />);
+    renderTWM();
     expect(await screen.findByText(/Upper Heavy/)).toBeInTheDocument();
     expect(screen.getAllByText(/Barbell Bench Press/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows START WORKOUT CTA', async () => {
-    render(<TodayWorkoutMobile onStart={vi.fn()} />);
+    renderTWM();
     expect(await screen.findByText(/start workout/i)).toBeInTheDocument();
+  });
+
+  it('Start Workout navigates to /today/:runId/log', async () => {
+    const user = userEvent.setup();
+    renderTWM();
+    await user.click(await screen.findByRole('button', { name: /start workout/i }));
+    expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log');
   });
 
   it('renders suggested-sub Swap button when substitution present', async () => {
     vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(WORKOUT_WITH_SUB);
-    render(<TodayWorkoutMobile onStart={vi.fn()} />);
+    renderTWM();
     expect(await screen.findByText(/Incline DB Bench/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /swap/i })).toBeInTheDocument();
   });
@@ -57,7 +80,7 @@ describe('<TodayWorkoutMobile>', () => {
   it('opens MidSessionSwapSheet on Swap click', async () => {
     vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(WORKOUT_WITH_SUB);
     const user = userEvent.setup();
-    render(<TodayWorkoutMobile onStart={vi.fn()} />);
+    renderTWM();
     await user.click(await screen.findByRole('button', { name: /swap/i }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/Swap exercise\?/i)).toBeInTheDocument();
@@ -72,7 +95,7 @@ describe('<TodayWorkoutMobile>', () => {
       overridden_at: '2026-05-07T00:00:00Z',
     });
     const user = userEvent.setup();
-    render(<TodayWorkoutMobile onStart={vi.fn()} />);
+    renderTWM();
     await user.click(await screen.findByRole('button', { name: /swap/i }));
     await user.click(screen.getByText(/confirm swap/i));
     expect(plannedApi.substitutePlannedSet).toHaveBeenCalledWith('ps-1', {

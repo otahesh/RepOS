@@ -21,7 +21,7 @@ For current operational state see:
 ## Working in this Repo
 
 - **Bash tool calls do NOT preserve cwd between calls.** Always use absolute paths (e.g. `cd /Users/jasonmeyer.ict/Projects/RepOS/api && npm test`) or chain with `&&` in a single call. A bare `npm test` in a follow-up call will fail because the next bash invocation starts from the project root.
-- **Local dev DB no longer exists.** The standalone `repos-postgres` container at `192.168.88.2:5432` was retired during the monolithic-container deploy. To run `npm test` locally you need a separate dev Postgres or to test inside the production container path. (Follow-up not yet done.)
+- **Local DB is test/dev only.** Production Postgres runs inside the monolithic container on Unraid; the workstation-side DB is for `npm test` / local development only and points at `postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test` (see `api/.env`). The prior standalone container at `192.168.88.2:5432` is retired. Production code paths never reach the workstation DB.
 - **Conventional Commits** — see parent `../CLAUDE.md` for format. Frequent small commits per step, not one giant feature commit.
 
 ## Design System

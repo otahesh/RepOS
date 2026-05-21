@@ -64,7 +64,10 @@ export type TodayWorkoutResponse =
 // want a by-muscle view derive it locally — see ProgramPage.
 export type MuscleVolume = {
   muscle: string;
+  /** Planned sum of contributions (fractional). */
   sets: number;
+  /** Logged sum of contributions (fractional). 0 until the user logs sets. */
+  performed_sets: number;
   mev: number;
   mav: number;
   mrv: number;

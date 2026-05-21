@@ -541,10 +541,13 @@ describe('set_logs (migration 022)', () => {
          VALUES ($1,0,0,$2,8,12,2,120) RETURNING id`,
         [d.id, ex.id]
       );
+      // set_logs Beta schema (migration 029) requires user_id + exercise_id +
+      // client_request_id NOT NULL; the cascade-from-planned_set behaviour
+      // tested here still applies via the original migration-022 FK.
       const { rows: [sl] } = await db.query(
-        `INSERT INTO set_logs (planned_set_id, performed_reps, performed_load_lbs, performed_rir)
-         VALUES ($1,10,225.5,2) RETURNING id`,
-        [ps.id]
+        `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
+         VALUES ($1,$2,$3, gen_random_uuid(), 10,225.5,2) RETURNING id`,
+        [ps.id, u.id, ex.id]
       );
       await db.query(`DELETE FROM planned_sets WHERE id=$1`, [ps.id]);
       const { rows } = await db.query(`SELECT 1 FROM set_logs WHERE id=$1`, [sl.id]);

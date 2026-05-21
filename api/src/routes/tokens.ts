@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
+import { isValidScope } from '../auth/scopes.js';
 import type {
   TokenMintResponse,
   TokenListResponse,
@@ -20,12 +21,31 @@ function userIdFromReq(req: any, fallback: string | undefined): string | undefin
 }
 
 export async function tokenRoutes(app: FastifyInstance) {
-  app.post<{ Body: { user_id?: string; label?: string } }>(
+  app.post<{ Body: { user_id?: string; label?: string; scopes?: string[] } }>(
     '/tokens',
     { preHandler: requireAdminKeyOrCfAccess },
     async (req, reply) => {
       const userId = userIdFromReq(req, req.body.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
+
+      // Optional scopes: validate each element against VALID_SCOPES so an
+      // unknown scope is a loud 400 rather than a silently-accepted column
+      // value. When omitted, the device_tokens.scopes DEFAULT applies
+      // (['health:weight:write']) — alpha-compatible.
+      const scopes = req.body.scopes;
+      if (scopes !== undefined) {
+        if (!Array.isArray(scopes)) {
+          return reply.code(400).send({ error: 'invalid_scope' });
+        }
+        if (scopes.length === 0) {
+          return reply.code(400).send({ error: 'invalid_scope', scope: '' });
+        }
+        for (const s of scopes) {
+          if (!isValidScope(s)) {
+            return reply.code(400).send({ error: 'invalid_scope', scope: s });
+          }
+        }
+      }
 
       const prefix = randomBytes(8).toString('hex');
       const secret = randomBytes(32).toString('hex');
@@ -33,10 +53,34 @@ export async function tokenRoutes(app: FastifyInstance) {
       const hash = await argon2.hash(secret);
       const storedHash = `${prefix}:${hash}`;
 
-      const { rows } = await db.query(
-        `INSERT INTO device_tokens (user_id, token_hash, label)
-         VALUES ($1, $2, $3) RETURNING id, created_at`,
-        [userId, storedHash, req.body.label ?? null],
+      const { rows } = scopes === undefined
+        ? await db.query(
+            `INSERT INTO device_tokens (user_id, token_hash, label)
+             VALUES ($1, $2, $3) RETURNING id, created_at`,
+            [userId, storedHash, req.body.label ?? null],
+          )
+        : await db.query(
+            `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
+             VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+            [userId, storedHash, req.body.label ?? null, scopes],
+          );
+
+      // Audit log for the mint event — there's no other persistent record of
+      // "this caller minted a token for this user_id with these scopes from
+      // this IP." Pino redact on the app already scrubs auth headers, so
+      // logging the structured metadata is safe. A future compromise of the
+      // admin key (or unexpected CF Access identity drift) can be detected
+      // via grep on this event in production logs.
+      req.log.info(
+        {
+          event: 'device_token_minted',
+          authMode: (req as { authMode?: string }).authMode ?? 'unknown',
+          targetUserId: userId,
+          tokenId: String(rows[0].id),
+          scopes: scopes ?? null,
+          ip: req.ip,
+        },
+        'device_token minted',
       );
 
       const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
@@ -82,6 +126,16 @@ export async function tokenRoutes(app: FastifyInstance) {
         [req.params.id, userId],
       );
       if (!rowCount) return reply.code(404).send({ error: 'not found' });
+      req.log.info(
+        {
+          event: 'device_token_revoked',
+          authMode: (req as { authMode?: string }).authMode ?? 'unknown',
+          targetUserId: userId,
+          tokenId: req.params.id,
+          ip: req.ip,
+        },
+        'device_token revoked',
+      );
       return reply.code(204).send();
     },
   );
