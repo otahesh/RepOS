@@ -47,7 +47,7 @@ const SELECT_COLUMNS = `
 
 export async function setLogsRoutes(app: FastifyInstance) {
   app.post('/set-logs', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
-    const userId = (req as any).userId as string | undefined;
+    const userId = req.userId;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const parse = SetLogPostSchema.safeParse(req.body);
@@ -141,7 +141,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // set_log IDs.
   // -------------------------------------------------------------------------
   app.patch('/set-logs/:id', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
-    const userId = (req as any).userId as string | undefined;
+    const userId = req.userId;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const idParse = IdParamSchema.safeParse(req.params);
@@ -219,10 +219,26 @@ export async function setLogsRoutes(app: FastifyInstance) {
     // Migration 029's BEFORE UPDATE trigger bumps updated_at — no need to
     // touch it here. RETURNING uses SELECT_COLUMNS so weight_lbs comes back
     // as a JS number (the ::float cast) instead of NUMERIC-as-string.
+    const beforeRow = existing[0];
     const { rows } = await db.query<SetLogRow>(
       `UPDATE set_logs SET ${setParts.join(', ')} WHERE id = $${p}
        RETURNING ${SELECT_COLUMNS}`,
       params,
+    );
+
+    // Write-audit log for PATCH. The "who deleted/changed my PR?" incident
+    // hook — a future support query against logs should be able to recover
+    // {who, when, before→after}. Auth headers are already scrubbed by the
+    // app-level Pino redact config (api/src/app.ts), so this line is safe.
+    req.log.info(
+      {
+        event: 'set_log_patched',
+        userId,
+        setLogId: id,
+        performedAt: beforeRow.performed_at,
+        changedFields: Object.keys(fields).filter((k) => fields[k as keyof typeof fields] !== undefined),
+      },
+      'set_log mutated',
     );
     return reply.code(200).send({ set_log: rows[0] });
   });
@@ -234,7 +250,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // soft-delete column in this iteration.
   // -------------------------------------------------------------------------
   app.delete('/set-logs/:id', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
-    const userId = (req as any).userId as string | undefined;
+    const userId = req.userId;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const idParse = IdParamSchema.safeParse(req.params);
@@ -274,6 +290,17 @@ export async function setLogsRoutes(app: FastifyInstance) {
     }
 
     await db.query(`DELETE FROM set_logs WHERE id = $1`, [id]);
+
+    // Write-audit log for DELETE. See PATCH handler above for rationale.
+    req.log.info(
+      {
+        event: 'set_log_deleted',
+        userId,
+        setLogId: id,
+        performedAt: existing[0].performed_at,
+      },
+      'set_log deleted',
+    );
     return reply.code(200).send({ deleted: true });
   });
 
@@ -293,7 +320,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
   // weight_lbs comes back as a JS number rather than NUMERIC-as-string.
   // -------------------------------------------------------------------------
   app.get('/set-logs', { preHandler: [requireBearerOrCfAccess, requireScope('set_logs:write')] }, async (req, reply) => {
-    const userId = (req as any).userId as string | undefined;
+    const userId = req.userId;
     if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const parse = SetLogListQuerySchema.safeParse(req.query);

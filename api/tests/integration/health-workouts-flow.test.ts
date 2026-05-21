@@ -121,6 +121,89 @@ describe('POST /api/health/workouts', () => {
     }
   });
 
+  it('200 deduped preserves the prior modality/distance/duration (DO NOTHING contract)', async () => {
+    // Backend reviewer Important: prior `ON CONFLICT DO UPDATE` silently
+    // overwrote the row on every dedupe, mutating user data under a
+    // `deduped:true` envelope. Contract is now DO NOTHING — first ingest
+    // wins, second call returns the unchanged row.
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:workouts:write'],
+      });
+      handles.push(handle);
+
+      const first = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { ...validWorkoutPayload(), modality: 'run', distance_m: 5000 },
+      });
+      expect(first.statusCode).toBe(201);
+      const firstId = first.json().workout.id;
+
+      // Same (user, started_at, source) but different modality/distance —
+      // should NOT overwrite.
+      const second = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { ...validWorkoutPayload(), modality: 'cycle', distance_m: 12000 },
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json().deduped).toBe(true);
+      expect(second.json().workout.id).toBe(firstId);
+      expect(second.json().workout.modality).toBe('run');
+      expect(second.json().workout.distance_m).toBe(5000);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('two users with identical (started_at, source) each get their own row (IDOR positive proof)', async () => {
+    // QA reviewer Important: conflict key includes user_id, so cross-user
+    // posts coexist. Locks the ON CONFLICT shape — a future refactor that
+    // drops user_id from the conflict tuple would silently let user-A
+    // overwrite user-B's workout.
+    const app = await build();
+    try {
+      const a = await seedUserAndMintBearer({ scopes: ['health:workouts:write'] });
+      handles.push(a.handle);
+      const b = await seedUserAndMintBearer({ scopes: ['health:workouts:write'] });
+      handles.push(b.handle);
+
+      const payload = validWorkoutPayload();
+      const ra = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${a.bearer}` },
+        payload,
+      });
+      const rb = await app.inject({
+        method: 'POST',
+        url: '/api/health/workouts',
+        headers: { authorization: `Bearer ${b.bearer}` },
+        payload,
+      });
+
+      expect(ra.statusCode).toBe(201);
+      expect(rb.statusCode).toBe(201);
+      expect(ra.json().workout.id).not.toBe(rb.json().workout.id);
+
+      const { rows } = await db.query<{ user_id: string }>(
+        `SELECT user_id::text AS user_id FROM health_workouts
+         WHERE started_at = $1 AND source = $2
+         ORDER BY user_id`,
+        [payload.started_at, payload.source],
+      );
+      expect(rows.map((r) => r.user_id).sort()).toEqual(
+        [a.handle.userId, b.handle.userId].sort(),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('403 when bearer has only health:weight:write scope', async () => {
     const app = await build();
     try {
@@ -143,7 +226,7 @@ describe('POST /api/health/workouts', () => {
     }
   });
 
-  it('409 rate_limit_exceeded on 11th write within calendar day per user', async () => {
+  it('409 rate_limited on 11th write within calendar day per user', async () => {
     const app = await build();
     try {
       const { bearer, handle } = await seedUserAndMintBearer({
@@ -167,7 +250,7 @@ describe('POST /api/health/workouts', () => {
         });
         responses.push(r.statusCode);
         if (i === 10) {
-          expect(r.json()).toEqual({ error: 'rate_limit_exceeded' });
+          expect(r.json()).toEqual({ error: 'rate_limited' });
         }
       }
       expect(responses.slice(0, 10).every((s) => s === 201)).toBe(true);

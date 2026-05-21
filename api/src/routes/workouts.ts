@@ -55,55 +55,84 @@ export async function workoutsRoutes(app: FastifyInstance) {
       // no off-by-one 409 surprise near a user's wall-clock midnight.
       const logDate = parsed.started_at.slice(0, 10);
 
-      // Rate-limit FIRST so dedupes also count toward the cap (mirrors
-      // weight.ts). 11th write/day per user returns 409.
-      const { rows: [logRow] } = await db.query<{ write_count: number }>(
-        `INSERT INTO workout_write_log (user_id, log_date, write_count)
-         VALUES ($1, $2, 1)
-         ON CONFLICT (user_id, log_date) DO UPDATE
-           SET write_count = workout_write_log.write_count + 1
-         RETURNING write_count`,
-        [userId, logDate],
-      );
-      if (logRow.write_count > MAX_WRITES_PER_DAY) {
-        return reply.code(409).send({ error: 'rate_limit_exceeded' });
+      // Rate-limit bump + INSERT must roll back together so a failed INSERT
+      // (FK violation, CHECK violation, network blip mid-statement) doesn't
+      // silently shrink the user's daily cap. Same transactional discipline
+      // weight.ts:153-169 uses for backfill.
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Rate-limit FIRST so dedupes also count toward the cap (mirrors
+        // weight.ts). 11th write/day per user returns 409.
+        const { rows: [logRow] } = await client.query<{ write_count: number }>(
+          `INSERT INTO workout_write_log (user_id, log_date, write_count)
+           VALUES ($1, $2, 1)
+           ON CONFLICT (user_id, log_date) DO UPDATE
+             SET write_count = workout_write_log.write_count + 1
+           RETURNING write_count`,
+          [userId, logDate],
+        );
+        if (logRow.write_count > MAX_WRITES_PER_DAY) {
+          await client.query('ROLLBACK');
+          // Align with weight.ts's `rate_limited` envelope. The runbooks
+          // previously documented two different strings; the alpha-shipped
+          // /weight contract uses `rate_limited`, so workouts matches.
+          return reply.code(409).send({ error: 'rate_limited' });
+        }
+
+        // Dedupe via DO NOTHING + fallback SELECT — same pattern as set_logs.
+        // The prior DO UPDATE silently overwrote modality/distance/duration
+        // on a (user_id, started_at, source) collision, mutating user data
+        // under a `deduped:true` response. DO NOTHING preserves the first
+        // ingest's payload; client correction goes through PATCH (W2+ scope).
+        const { rows } = await client.query<UpsertRow>(
+          `INSERT INTO health_workouts
+             (user_id, started_at, ended_at, modality, distance_m, duration_sec, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (user_id, started_at, source) DO NOTHING
+           RETURNING id, started_at, ended_at, modality, distance_m, duration_sec, source,
+                     true AS inserted`,
+          [
+            userId,
+            parsed.started_at,
+            parsed.ended_at,
+            parsed.modality,
+            parsed.distance_m ?? null,
+            parsed.duration_sec,
+            parsed.source,
+          ],
+        );
+
+        if (rows.length === 1) {
+          await client.query('COMMIT');
+          const { inserted: _drop, ...workout } = rows[0];
+          const response: WorkoutIngestResponse = {
+            workout: workout as WorkoutRow,
+            deduped: false,
+          };
+          return reply.code(201).send(response);
+        }
+
+        // Conflict: fetch the prior row unchanged.
+        const { rows: existing } = await client.query<WorkoutRow>(
+          `SELECT id, started_at, ended_at, modality, distance_m, duration_sec, source
+           FROM health_workouts
+           WHERE user_id = $1 AND started_at = $2 AND source = $3`,
+          [userId, parsed.started_at, parsed.source],
+        );
+        await client.query('COMMIT');
+        const response: WorkoutIngestResponse = {
+          workout: existing[0],
+          deduped: true,
+        };
+        return reply.code(200).send(response);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
       }
-
-      // Upsert + insert-vs-update sentinel in one round-trip.
-      //   xmax = 0  → fresh INSERT (no prior tuple, no transaction ID slot
-      //               was used to lock an existing row).
-      //   xmax != 0 → ON CONFLICT fired and an existing row was updated.
-      // This is the canonical Postgres pattern for distinguishing the two
-      // branches from a single UPSERT; cited in the pg docs and used widely.
-      const { rows } = await db.query<UpsertRow>(
-        `INSERT INTO health_workouts
-           (user_id, started_at, ended_at, modality, distance_m, duration_sec, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (user_id, started_at, source) DO UPDATE
-           SET ended_at = EXCLUDED.ended_at,
-               modality = EXCLUDED.modality,
-               distance_m = EXCLUDED.distance_m,
-               duration_sec = EXCLUDED.duration_sec,
-               updated_at = now()
-         RETURNING id, started_at, ended_at, modality, distance_m, duration_sec, source,
-                   (xmax = 0) AS inserted`,
-        [
-          userId,
-          parsed.started_at,
-          parsed.ended_at,
-          parsed.modality,
-          parsed.distance_m ?? null,
-          parsed.duration_sec,
-          parsed.source,
-        ],
-      );
-
-      const { inserted, ...workout } = rows[0];
-      const response: WorkoutIngestResponse = {
-        workout: workout as WorkoutRow,
-        deduped: !inserted,
-      };
-      return reply.code(inserted ? 201 : 200).send(response);
     },
   );
 }
