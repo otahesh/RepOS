@@ -14,6 +14,19 @@ import ProgramsPage from './pages/ProgramsPage'
 import ProgramDetailPage from './pages/ProgramDetailPage'
 import MyProgramPage from './pages/MyProgramPage'
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
+import { useIsMobile } from './lib/useIsMobile'
+
+// TodayLoggerMobile is intentionally mobile-only (per project memory
+// project_device_split.md: desktop = data management, mobile = live workout).
+// A desktop user landing on /today/:run/log would otherwise get the mobile-
+// styled logger compressed into a 480px column on a 1440px display. Until the
+// desktop logger exists, redirect to /today which routes to the appropriate
+// device-aware surface.
+function TodayLoggerMobileGate() {
+  const isMobile = useIsMobile()
+  if (!isMobile) return <Navigate to="/today" replace />
+  return <TodayLoggerMobile />
+}
 
 function AppInner() {
   const [profile, setProfile] = useState<EquipmentProfile | null>(null)
@@ -30,7 +43,7 @@ function AppInner() {
             <Route path="programs" element={<ProgramsPage />} />
             <Route path="programs/:slug" element={<ProgramDetailPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
-            <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobile />} />
+            <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobileGate />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />

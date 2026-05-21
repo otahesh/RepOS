@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
-import { useIdbQueueCounts } from '../../hooks/useIdbQueueCounts';
+import { idbQueue } from '../../lib/idbQueue';
 
 // W1.3.7 — Session-expired surface for CF Access whole-host auth.
 //
@@ -38,25 +38,36 @@ function buildLoginUrl(): string {
 }
 
 export function SessionExpiredBanner(): JSX.Element | null {
-  const { pending, syncing, rejected } = useIdbQueueCounts();
-  const unflushed = pending + syncing + rejected;
   const [needsSafariFallback, setNeedsSafariFallback] = useState(false);
+  // Frozen at the moment the cf-access-expired event fires; rendered into
+  // the Safari fallback modal copy. We capture the count synchronously
+  // inside the event handler instead of subscribing to useIdbQueueCounts —
+  // the count is only needed at the discrete event moment, and the prior
+  // useIdbQueueCounts subscription added a 1Hz IDB poll on every page for a
+  // banner that only renders in the Safari-fallback case.
+  const [unflushedAtEvent, setUnflushedAtEvent] = useState(0);
   // One-shot guard: a re-fired `cf-access-expired` (e.g. logBuffer flushing a
   // second eligible row before the first redirect resolves) must collapse to a
   // single redirect/modal — otherwise we double-write the marker or stack the
   // modal across re-renders.
   const handledRef = useRef(false);
-  // Latest unflushed count, captured for the event handler closure so it never
-  // reads a stale value if the event fires before React commits the next pass.
-  const unflushedRef = useRef(unflushed);
-  unflushedRef.current = unflushed;
 
   useEffect(() => {
-    const onExpired = (): void => {
+    const onExpired = async (): Promise<void> => {
       if (handledRef.current) return;
       handledRef.current = true;
 
-      const marker: UnflushedMarker = { count: unflushedRef.current, at: Date.now() };
+      // Read the IDB queue counts lazily at event time. Three Promise.all
+      // peeks instead of a per-second background poll across the whole app.
+      const [pending, syncing, rejected] = await Promise.all([
+        idbQueue.peekPending(),
+        idbQueue.peekSyncing(),
+        idbQueue.peekRejected(),
+      ]);
+      const count = pending.length + syncing.length + rejected.length;
+      setUnflushedAtEvent(count);
+
+      const marker: UnflushedMarker = { count, at: Date.now() };
       try {
         window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(marker));
       } catch {
@@ -78,7 +89,7 @@ export function SessionExpiredBanner(): JSX.Element | null {
 
   if (!needsSafariFallback) return null;
 
-  const count = unflushed;
+  const count = unflushedAtEvent;
   const setWord = count === 1 ? 'set' : 'sets';
 
   return (

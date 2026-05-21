@@ -67,17 +67,34 @@ class IdbQueue {
   // Public for test spying (vi.spyOn(idbQueue.db.pendingSetLogs, 'put')).
   db: RepOSLogQueueDB = new RepOSLogQueueDB();
   private reconciled = false;
+  // Cache the in-flight reconcile promise so two concurrent ensureOpen() calls
+  // that arrive while the DB is cold both await the *same* reconciliation
+  // instead of each constructing a fresh Dexie instance + racing
+  // reconcileSyncing(). Without this, a tight pair like
+  //   void logBuffer.flush(); void logBuffer.flush();
+  // could leave one caller's `this.db` pointer stale.
+  private openPromise: Promise<void> | null = null;
 
   private async ensureOpen(): Promise<void> {
-    if (!this.db.isOpen()) {
-      // Either first call or after close(): replace with a fresh Dexie instance
-      // so the spy target on `this.db.pendingSetLogs` is current.
-      this.db = new RepOSLogQueueDB();
-      this.reconciled = false;
-    }
-    if (!this.reconciled) {
-      this.reconciled = true; // set before await to avoid re-entry
-      await this.reconcileSyncing();
+    if (this.openPromise) return this.openPromise;
+    if (this.db.isOpen() && this.reconciled) return;
+
+    this.openPromise = (async () => {
+      if (!this.db.isOpen()) {
+        // Either first call or after close(): replace with a fresh Dexie
+        // instance so the spy target on `this.db.pendingSetLogs` is current.
+        this.db = new RepOSLogQueueDB();
+        this.reconciled = false;
+      }
+      if (!this.reconciled) {
+        await this.reconcileSyncing();
+        this.reconciled = true;
+      }
+    })();
+    try {
+      await this.openPromise;
+    } finally {
+      this.openPromise = null;
     }
   }
 

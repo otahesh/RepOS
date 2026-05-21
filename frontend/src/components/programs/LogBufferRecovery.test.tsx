@@ -94,7 +94,7 @@ describe('LogBufferRecovery', () => {
   it('renders null when all counts are zero (regardless of route)', () => {
     renderAt('/today/run-1/log');
     expect(screen.queryByRole('status')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   it('renders OFFLINE banner when offline + pending > 0 on /today/run-1/log', () => {
@@ -106,6 +106,13 @@ describe('LogBufferRecovery', () => {
     expect(banner).toHaveTextContent(/3 sets queued/);
   });
 
+  it('OFFLINE banner with 1 pending uses singular "set"', () => {
+    setCounts({ pending: 1 });
+    setOnline(false);
+    renderAt('/today/run-1/log');
+    expect(screen.getByRole('status')).toHaveTextContent(/OFFLINE · 1 set queued/);
+  });
+
   it('renders syncing banner when syncing > 0 on /programs', () => {
     setCounts({ syncing: 2 });
     renderAt('/programs');
@@ -113,28 +120,40 @@ describe('LogBufferRecovery', () => {
     expect(banner).toHaveTextContent(/2 sets syncing/);
   });
 
+  it('syncing banner with 1 syncing uses singular "set"', () => {
+    setCounts({ syncing: 1 });
+    renderAt('/programs');
+    expect(screen.getByRole('status')).toHaveTextContent(/1 set syncing/);
+  });
+
   it('renders rejected banner with proper copy when rejected > 0 on /', () => {
     setCounts({ rejected: 4 });
     renderAt('/');
-    const banner = screen.getByRole('button');
+    const banner = screen.getByRole('link');
     expect(banner).toHaveTextContent(/4 sets rejected/);
     expect(banner).toHaveTextContent(/review/i);
+  });
+
+  it('rejected banner with 1 rejected uses singular "set"', () => {
+    setCounts({ rejected: 1 });
+    renderAt('/');
+    expect(screen.getByRole('link')).toHaveTextContent(/1 set rejected/);
   });
 
   it('rejected banner click navigates to /settings/storage', async () => {
     const user = userEvent.setup();
     setCounts({ rejected: 1 });
     renderAt('/today/run-1/log');
-    const banner = screen.getByRole('button');
+    const banner = screen.getByRole('link');
     await user.click(banner);
     expect(screen.getByTestId('location')).toHaveTextContent('/settings/storage');
   });
 
-  it('rejected banner keyboard (Enter) navigates to /settings/storage', async () => {
+  it('rejected banner keyboard (Enter on a Link) navigates to /settings/storage', async () => {
     const user = userEvent.setup();
     setCounts({ rejected: 1 });
     renderAt('/today/run-1/log');
-    const banner = screen.getByRole('button');
+    const banner = screen.getByRole('link');
     banner.focus();
     await user.keyboard('{Enter}');
     expect(screen.getByTestId('location')).toHaveTextContent('/settings/storage');
@@ -144,23 +163,23 @@ describe('LogBufferRecovery', () => {
     setCounts({ pending: 2 });
     renderAt('/settings/account');
     expect(screen.queryByRole('status')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   it('renders null on unknown paths like /cdn-cgi/foo (suppression check)', () => {
     setCounts({ rejected: 1 });
     renderAt('/cdn-cgi/foo');
     expect(screen.queryByRole('status')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   it('precedence: when rejected > 0 AND pending > 0, shows rejected (more urgent)', () => {
     setCounts({ pending: 5, rejected: 1 });
     renderAt('/today/run-1/log');
-    // Rejected → role=button, not role=status.
+    // Rejected → rendered as a <Link> (role=link), not role=status.
     expect(screen.queryByRole('status')).toBeNull();
-    const banner = screen.getByRole('button');
-    expect(banner).toHaveTextContent(/1 sets rejected/);
+    const banner = screen.getByRole('link');
+    expect(banner).toHaveTextContent(/1 set rejected/);
   });
 
   it('non-rejected banner has role=status + aria-live=polite', () => {

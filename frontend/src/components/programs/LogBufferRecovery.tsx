@@ -1,8 +1,11 @@
-import type { KeyboardEvent } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useNetworkState } from '../../hooks/useNetworkState';
 import { useIdbQueueCounts } from '../../hooks/useIdbQueueCounts';
+
+function pluralize(n: number, singular: string, plural?: string): string {
+  return n === 1 ? singular : (plural ?? `${singular}s`);
+}
 
 // =============================================================================
 // LogBufferRecovery
@@ -56,28 +59,28 @@ function pickVariant(
   // Precedence: offline-pending > syncing > rejected > online-pending.
   if (pending > 0 && !online) {
     return {
-      copy: `OFFLINE · ${pending} sets queued`,
+      copy: `OFFLINE · ${pending} ${pluralize(pending, 'set')} queued`,
       background: TOKENS.warn,
       clickable: false,
     };
   }
   if (syncing > 0) {
     return {
-      copy: `${syncing} sets syncing…`,
+      copy: `${syncing} ${pluralize(syncing, 'set')} syncing…`,
       background: TOKENS.accent,
       clickable: false,
     };
   }
   if (rejected > 0) {
     return {
-      copy: `⚠ ${rejected} sets rejected — review`,
+      copy: `⚠ ${rejected} ${pluralize(rejected, 'set')} rejected — review`,
       background: TOKENS.danger,
       clickable: true,
     };
   }
   if (pending > 0 && online) {
     return {
-      copy: `${pending} sets queued for sync`,
+      copy: `${pending} ${pluralize(pending, 'set')} queued for sync`,
       background: TOKENS.accent,
       clickable: false,
     };
@@ -85,28 +88,17 @@ function pickVariant(
   return null;
 }
 
-export function LogBufferRecovery(): JSX.Element | null {
+// Route gate runs OUTSIDE the rendered component so the IDB-count poll only
+// fires on pages where the banner can render. Settings pages don't need the
+// 1Hz poll; suppressing it there cuts the per-page background work.
+function InnerBanner(): JSX.Element | null {
   const { online } = useNetworkState();
   const { pending, syncing, rejected, oldestPendingCreatedAt } = useIdbQueueCounts();
-  const location = useLocation();
-  const navigate = useNavigate();
 
-  if (!isAllowedRoute(location.pathname)) return null;
   if (pending === 0 && syncing === 0 && rejected === 0) return null;
 
   const variant = pickVariant(online, pending, syncing, rejected, oldestPendingCreatedAt);
   if (variant === null) return null;
-
-  const onClickRejected = (): void => {
-    navigate('/settings/storage');
-  };
-
-  const onKeyDownRejected = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      navigate('/settings/storage');
-    }
-  };
 
   const base = {
     position: 'fixed' as const,
@@ -123,17 +115,26 @@ export function LogBufferRecovery(): JSX.Element | null {
   };
 
   if (variant.clickable) {
+    // Rejected/staleness banners navigate to /settings/storage; using a real
+    // <Link> gives screen readers the "link" role announcement and lets the
+    // browser handle keyboard activation (Enter on a Link is correct; Space
+    // is the historical role=button behavior we previously had to bind
+    // manually). The Link is rendered as a block so the full banner is the
+    // hit target.
     return (
-      <div
-        role="button"
-        tabIndex={0}
+      <Link
+        to="/settings/storage"
         aria-live="polite"
-        onClick={onClickRejected}
-        onKeyDown={onKeyDownRejected}
-        style={{ ...base, cursor: 'pointer' }}
+        style={{
+          ...base,
+          display: 'block',
+          textDecoration: 'none',
+          color: '#FFFFFF',
+          cursor: 'pointer',
+        }}
       >
         {variant.copy}
-      </div>
+      </Link>
     );
   }
 
@@ -142,4 +143,10 @@ export function LogBufferRecovery(): JSX.Element | null {
       {variant.copy}
     </div>
   );
+}
+
+export function LogBufferRecovery(): JSX.Element | null {
+  const location = useLocation();
+  if (!isAllowedRoute(location.pathname)) return null;
+  return <InnerBanner />;
 }

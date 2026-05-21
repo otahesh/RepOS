@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
+import { Term } from '../Term';
+import { useNetworkState } from '../../hooks/useNetworkState';
 import {
   getTodayWorkout,
   type TodayDay,
@@ -302,7 +304,7 @@ function LoggerInner({
                 marginTop: 4,
               }}
             >
-              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · RIR {sets[0].target_rir} · {sets[0].rest_sec}s rest
+              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · <Term k="RIR" compact /> {sets[0].target_rir} · {sets[0].rest_sec}s rest
             </div>
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {sets.map(set => (
@@ -407,6 +409,10 @@ function SetRow({
   const clientRequestId =
     state.phase === 'logged' || state.phase === 'rejected' ? state.clientRequestId : null;
   const status = useIdbQueueStatus(clientRequestId);
+  // Show "Log (offline)" on the button label when the network is down so the
+  // user sees the queue behavior BEFORE pressing, not only after — covers the
+  // mid-workout-on-an-elevator "did this even register?" UX miss.
+  const { online } = useNetworkState();
 
   const isLogged = state.phase === 'logged';
   const isLogging = state.phase === 'logging';
@@ -420,6 +426,12 @@ function SetRow({
   const canLog = !debounced && !isLogged && !isLogging
     && inputs.weight.trim() !== ''
     && inputs.reps.trim() !== '';
+
+  const logLabel = (() => {
+    if (isLogged) return 'Logged';
+    if (debounced) return 'Set queued';
+    return online ? 'Log' : 'Log (offline)';
+  })();
 
   return (
     <div
@@ -487,7 +499,7 @@ function SetRow({
             cursor: canLog ? 'pointer' : 'not-allowed',
           }}
         >
-          {debounced && !isLogged ? 'Set queued' : isLogged ? 'Logged' : 'Log'}
+          {logLabel}
         </button>
         <button
           onClick={onSkip}
@@ -615,7 +627,7 @@ function RirSlider({
     <div style={{ marginTop: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-          RIR
+          <Term k="RIR" compact />
         </span>
         <span style={{ fontFamily: FONTS.mono, fontSize: 14, color: TOKENS.text }}>
           {value}

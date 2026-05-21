@@ -101,4 +101,26 @@ describe('<SettingsStorage>', () => {
     render(<SettingsStorage />);
     expect(screen.getByTestId('row-pending')).toHaveTextContent(/10 days old/i);
   });
+
+  it('focuses Cancel when the confirm modal opens', async () => {
+    const user = userEvent.setup();
+    setCounts({ rejected: 1 });
+    render(<SettingsStorage />);
+
+    await user.click(screen.getByRole('button', { name: /clear rejected/i }));
+    expect(screen.getByRole('button', { name: /cancel/i })).toHaveFocus();
+  });
+
+  it('Escape closes the confirm modal without clearing', async () => {
+    const user = userEvent.setup();
+    setCounts({ rejected: 1 });
+    render(<SettingsStorage />);
+
+    await user.click(screen.getByRole('button', { name: /clear rejected/i }));
+    expect(screen.getByText(/are you sure/i)).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByText(/are you sure/i)).toBeNull();
+    expect(clearRejectedSpy).not.toHaveBeenCalled();
+  });
 });

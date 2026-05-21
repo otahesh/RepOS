@@ -28,29 +28,37 @@ vi.mock('../../auth', () => {
 
 vi.mock('../../lib/useIsMobile', () => ({ useIsMobile: () => true }));
 
-// useIdbQueueCounts is mocked so the banner gets a deterministic pending count
-// without touching IDB. The banner reads pending+syncing+rejected to decide
-// whether there is unflushed work; we drive each test by mutating mockCounts.
+// idbQueue is mocked so the banner gets a deterministic count without
+// touching real IDB. The banner now reads pending+syncing+rejected lazily
+// at event time via direct idbQueue.peek* calls (instead of subscribing to
+// a 1Hz poller), so the mock returns arrays of the requested length.
 const mockCounts = {
   pending: 0,
   syncing: 0,
   rejected: 0,
-  oldestPendingCreatedAt: null as number | null,
 };
-vi.mock('../../hooks/useIdbQueueCounts', () => ({
-  useIdbQueueCounts: () => mockCounts,
+vi.mock('../../lib/idbQueue', () => ({
+  idbQueue: {
+    peekPending: () => Promise.resolve(new Array(mockCounts.pending).fill({})),
+    peekSyncing: () => Promise.resolve(new Array(mockCounts.syncing).fill({})),
+    peekRejected: () => Promise.resolve(new Array(mockCounts.rejected).fill({})),
+  },
 }));
 
 function setCounts(partial: Partial<typeof mockCounts>) {
   mockCounts.pending = partial.pending ?? 0;
   mockCounts.syncing = partial.syncing ?? 0;
   mockCounts.rejected = partial.rejected ?? 0;
-  mockCounts.oldestPendingCreatedAt = partial.oldestPendingCreatedAt ?? null;
 }
 
-function fireExpired() {
-  act(() => {
+async function fireExpired() {
+  await act(async () => {
     window.dispatchEvent(new CustomEvent('cf-access-expired'));
+    // The new handler awaits three peek calls before setting state /
+    // redirecting; flush microtasks so the localStorage write + redirect
+    // happen before the test assertions read them.
+    await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -94,7 +102,7 @@ describe('<SessionExpiredBanner>', () => {
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it('on cf-access-expired stashes a synchronous localStorage marker AND redirects to CF Access login with redirect_url back to /today/:id', () => {
+  it('on cf-access-expired stashes a synchronous localStorage marker AND redirects to CF Access login with redirect_url back to /today/:id', async () => {
     setCounts({ pending: 3 });
     render(
       <MemoryRouter>
@@ -102,7 +110,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     // The localStorage marker is the synchronous "we have unflushed work"
     // signal that's available before IDB opens on next page load.
@@ -120,7 +128,7 @@ describe('<SessionExpiredBanner>', () => {
     expect(redirectUrl).toBe('/today/run-1/log');
   });
 
-  it('preserves search params in the redirect_url', () => {
+  it('preserves search params in the redirect_url', async () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       writable: true,
@@ -138,14 +146,14 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     const url = assignSpy.mock.calls[0][0] as string;
     const redirectUrl = decodeURIComponent(url.split('redirect_url=')[1]);
     expect(redirectUrl).toBe('/today/run-1/log?focus=set-2');
   });
 
-  it('does not duplicate the redirect if cf-access-expired fires twice', () => {
+  it('does not duplicate the redirect if cf-access-expired fires twice', async () => {
     setCounts({ pending: 1 });
     render(
       <MemoryRouter>
@@ -153,14 +161,14 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
-    fireExpired();
+    await fireExpired();
+    await fireExpired();
 
     expect(assignSpy).toHaveBeenCalledTimes(1);
   });
 
   // ── W1.3.7.2 — Safari private mode: localStorage.setItem throws ──────────
-  it('renders blocking modal (does NOT auto-redirect) when localStorage.setItem throws', () => {
+  it('renders blocking modal (does NOT auto-redirect) when localStorage.setItem throws', async () => {
     setCounts({ pending: 2 });
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
@@ -172,7 +180,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     expect(assignSpy).not.toHaveBeenCalled();
     const modal = screen.getByRole('alertdialog');
@@ -180,7 +188,7 @@ describe('<SessionExpiredBanner>', () => {
     expect(modal).toHaveTextContent(/save 2 unlogged sets/i);
   });
 
-  it('Safari private modal pluralises correctly for a single set', () => {
+  it('Safari private modal pluralises correctly for a single set', async () => {
     setCounts({ pending: 1 });
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
@@ -192,7 +200,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     expect(screen.getByRole('alertdialog')).toHaveTextContent(/save 1 unlogged set\b/i);
   });
@@ -210,7 +218,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(assignSpy).toHaveBeenCalledTimes(1);
@@ -219,7 +227,7 @@ describe('<SessionExpiredBanner>', () => {
     expect(url).toContain('redirect_url=');
   });
 
-  it('counts pending + syncing + rejected together in the modal copy (unflushed = anything not yet synced)', () => {
+  it('counts pending + syncing + rejected together in the modal copy (unflushed = anything not yet synced)', async () => {
     setCounts({ pending: 1, syncing: 2, rejected: 1 });
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
@@ -231,7 +239,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     expect(screen.getByRole('alertdialog')).toHaveTextContent(/save 4 unlogged sets/i);
   });
@@ -253,7 +261,7 @@ describe('<SessionExpiredBanner>', () => {
       </MemoryRouter>,
     );
 
-    fireExpired();
+    await fireExpired();
 
     expect(await screen.findByRole('alertdialog')).toHaveTextContent(/save 2 unlogged sets/i);
   });

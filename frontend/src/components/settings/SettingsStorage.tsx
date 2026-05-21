@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { useIdbQueueCounts } from '../../hooks/useIdbQueueCounts';
 import { idbQueue } from '../../lib/idbQueue';
@@ -77,6 +77,24 @@ export default function SettingsStorage(): JSX.Element {
   const { pending, syncing, rejected, oldestPendingCreatedAt } = useIdbQueueCounts();
   const [confirming, setConfirming] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
+  // a11y on the confirm modal: when it opens, move focus to Cancel and let
+  // Escape close it. The modal isn't full-screen so a focus-trap library
+  // isn't strictly needed, but the auto-focus + Escape pair covers the
+  // "keyboard users don't even know the modal appeared" failure mode.
+  useEffect(() => {
+    if (!confirming) return;
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !clearing) {
+        e.preventDefault();
+        setConfirming(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirming, clearing]);
 
   const stalePendingDays =
     oldestPendingCreatedAt !== null
@@ -203,6 +221,7 @@ export default function SettingsStorage(): JSX.Element {
           </div>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
             <button
+              ref={cancelRef}
               type="button"
               onClick={() => setConfirming(false)}
               disabled={clearing}

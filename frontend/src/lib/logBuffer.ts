@@ -195,9 +195,30 @@ export const logBuffer = {
     if (isFlushing) return;
     if (!navigator.onLine) return;
     isFlushing = true;
+    // Watchdog: if `flushOnce` hangs (e.g. Dexie connection wedged, fetch
+    // never resolves due to a broken polyfill), the 2s AppShell retry tick
+    // would become a permanent no-op and the queue would silently stop
+    // draining. The watchdog races flushOnce against a 60s timeout and
+    // force-releases the lock either way so the next tick can try again.
+    const FLUSH_WATCHDOG_MS = 60_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await flushOnce();
+      await Promise.race([
+        flushOnce(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            try {
+              // eslint-disable-next-line no-console
+              console.warn('[logBuffer] flushOnce watchdog fired after 60s; releasing lock');
+            } catch {
+              /* logging never throws */
+            }
+            resolve();
+          }, FLUSH_WATCHDOG_MS);
+        }),
+      ]);
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
       isFlushing = false;
     }
   },
