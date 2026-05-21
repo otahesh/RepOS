@@ -155,6 +155,69 @@ describe('idbQueue', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Reviewer Important: Dexie v1 → v2 migration test. The metadata table was
+// added in v2; the in-line comment in idbQueue.ts says "existing v1 rows in
+// pendingSetLogs survive the upgrade" but the contract is unverified. For
+// production users mid-flight when this code ships, an upgrade migration
+// that wipes the queue silently would be the worst possible regression.
+// ---------------------------------------------------------------------------
+
+describe('Dexie schema upgrade v1 → v2', () => {
+  it('preserves pre-existing pendingSetLogs rows when opening at v2', async () => {
+    // Each test gets a fresh DB name so the v1 → v2 upgrade actually fires
+    // instead of opening an already-v2 store. We bypass the idbQueue
+    // singleton (which only knows about RepOSLogQueue) by opening + closing
+    // a uniquely-named DB directly via Dexie.
+    const dbName = `RepOSLogQueueUpgradeTest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sentinelRow: PendingSetLog = {
+      client_request_id: 'survivor',
+      queue_owner_user_id: 'user-1',
+      planned_set_id: 'p',
+      performed_at: new Date().toISOString(),
+      weight_lbs: 100,
+      reps: 5,
+      rir: 2,
+      rpe: null,
+      notes: null,
+      status: 'pending',
+      attempt_count: 0,
+      next_attempt_at: 0,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+
+    // Step 1: open at v1, write the row, close.
+    const Dexie = (await import('dexie')).default;
+    const v1 = new Dexie(dbName);
+    v1.version(1).stores({
+      pendingSetLogs: 'client_request_id, status, created_at',
+    });
+    const v1Table = v1.table<PendingSetLog>('pendingSetLogs');
+    await v1Table.put(sentinelRow);
+    expect(await v1Table.count()).toBe(1);
+    v1.close();
+
+    // Step 2: reopen at v2 with the additive metadata table. Dexie should
+    // run an additive migration; pendingSetLogs rows persist.
+    const v2 = new Dexie(dbName);
+    v2.version(1).stores({
+      pendingSetLogs: 'client_request_id, status, created_at',
+    });
+    v2.version(2).stores({
+      pendingSetLogs: 'client_request_id, status, created_at',
+      metadata: 'key',
+    });
+    const v2Table = v2.table<PendingSetLog>('pendingSetLogs');
+    const survivors = await v2Table.toArray();
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0].client_request_id).toBe('survivor');
+    // metadata table exists and is empty (fresh additive table).
+    expect(await v2.table('metadata').count()).toBe(0);
+    v2.close();
+  });
+});
+
 function mkItem(over: Partial<PendingSetLog> = {}): PendingSetLog {
   return {
     client_request_id: 'x',

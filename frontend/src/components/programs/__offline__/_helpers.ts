@@ -90,7 +90,12 @@ const DEFAULT_DAY: SeedDay = {
   id: 'day-1',
   kind: 'strength',
   name: 'Push A',
-  week_idx: 0,
+  // week_idx is 1-indexed per the mesocycles schema (min 1). The Playwright
+  // specs talk to a mocked API so a 0 here doesn't surface as a dropped
+  // rollup row — but it's the same latent bug seed-fixtures.ts had, and a
+  // future contributor copying this helper to wire a live-API harness would
+  // reproduce it.
+  week_idx: 1,
   day_idx: 0,
 };
 
