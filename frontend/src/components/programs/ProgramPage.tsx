@@ -9,6 +9,16 @@ function tierColor(sets: number, mev: number, mav: number, mrv: number): string 
   return '#FF6A6A';
 }
 
+// Per-tier text color. The muted (below-MEV) tile is dark gray; pairing it
+// with the same near-black text the colored tiles use gave ~1.3:1 contrast,
+// well under WCAG's 4.5:1 floor, and most unfilled-future-week cells fall in
+// this tier. Switch to a high-alpha white for the muted tier; the colored
+// (green/amber/red) tiles stay with dark text — contrast there is fine.
+function cellTextColor(sets: number, mev: number): string {
+  if (sets < mev) return 'rgba(255, 255, 255, 0.92)';
+  return '#0A0D12';
+}
+
 // API returns weeks: [{ week_idx, muscles: [{ muscle, sets, performed_sets,
 // mev, mav, mrv }] }]. The heatmap renders by-muscle rows × by-week columns,
 // so we pivot once.
@@ -105,7 +115,7 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#0A0D12',
+                        color: cellTextColor(sets, lm.mev),
                         fontWeight: 600,
                       }}
                     >
