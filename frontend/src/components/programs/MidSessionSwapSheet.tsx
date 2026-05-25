@@ -29,9 +29,9 @@ export function MidSessionSwapSheet({
   }
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }}>
+    <div role="dialog" aria-modal="true" aria-labelledby="swap-sheet-title" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }}>
       <div style={{ background: '#10141C', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480, margin: '0 auto', color: '#fff', fontFamily: 'Inter Tight' }}>
-        <h3 style={{ marginTop: 0, fontSize: 16 }}>Swap exercise?</h3>
+        <h3 id="swap-sheet-title" style={{ marginTop: 0, fontSize: 16 }}>Swap exercise?</h3>
         <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>{fromName}{' → '}<strong>{toName}</strong></p>
         {err ? <div style={{ color: '#FF6A6A', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
         <div style={{ display: 'flex', gap: 8 }}>

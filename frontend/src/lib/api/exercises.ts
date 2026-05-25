@@ -26,11 +26,25 @@ export async function listExercises(): Promise<Exercise[]> {
   return body.exercises;
 }
 
+/**
+ * Beta W3.2 — `injury_advisory` is set by the server-side injuryRanker when
+ * the candidate's `joint_stress_profile` overlaps a user's recorded injury at
+ * mod or high stress. The MidSessionSwapPicker (Task 18) renders this as
+ * "Moderate knee load — you noted left knee" via `injuryAdvisoryCopy()`.
+ */
 export type SubstitutionCandidate = {
+  id: string;
   slug: string;
   name: string;
   score: number;
   reason: string;
+  injury_advisory?: {
+    joint:
+      | 'shoulder_left' | 'shoulder_right'
+      | 'low_back' | 'knee_left' | 'knee_right'
+      | 'elbow' | 'wrist';
+    level: 'mod' | 'high';
+  };
 };
 
 export type SubResult = {

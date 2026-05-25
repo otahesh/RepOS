@@ -4,7 +4,7 @@ import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocy
 import { Term } from '../Term';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
 import { BlockOverflowMenu } from './BlockOverflowMenu';
-// import { MidSessionSwapPicker } from './MidSessionSwapPicker';   // Task 18 — DEFERRED
+import { MidSessionSwapPicker } from './MidSessionSwapPicker';
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
@@ -16,9 +16,10 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
   const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
-  // W3.3 Task 17 — independent from swapTarget (which drives the inline "Suggested
-  // sub" flow). pickerTargetBlockIdx drives the "Got a tweak?" picker (Task 18).
-  const [, setPickerTargetBlockIdx] = useState<number | null>(null);
+  // W3.3 Task 17/18 — independent from swapTarget (which drives the inline
+  // "Suggested sub" flow). pickerTargetBlockIdx drives the "Got a tweak?"
+  // picker, which lists ranked candidates before opening the confirm sheet.
+  const [pickerTargetBlockIdx, setPickerTargetBlockIdx] = useState<number | null>(null);
 
   const fetchToday = useCallback(() => {
     getTodayWorkout().then(setData).catch(() => setData(null));
@@ -111,6 +112,22 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
           }}
         />
       ) : null}
+      {pickerTargetBlockIdx !== null && (() => {
+        const blockSets = groups.get(pickerTargetBlockIdx);
+        if (!blockSets || blockSets.length === 0) return null;
+        const first = blockSets[0];
+        return (
+          <MidSessionSwapPicker
+            plannedSetId={first.id}
+            fromName={first.exercise.name}
+            fromSlug={first.exercise.slug}
+            onClose={(changed) => {
+              setPickerTargetBlockIdx(null);
+              if (changed) fetchToday();
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
