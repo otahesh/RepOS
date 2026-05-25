@@ -1,1 +1,1 @@
-export const Quux = () => <button title="MEV target reached">click</button>;
+export const Quux = () => <MetricCard label="MEV target reached" />;

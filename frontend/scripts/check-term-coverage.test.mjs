@@ -22,4 +22,8 @@ describe('check-term-coverage', () => {
     const out = await findOffenders([fix('attribute.tsx')]);
     expect(out.map(o => o.token)).toEqual(['MEV']);
   });
+  it('ignores terms in a11y and UA-tooltip string attributes', async () => {
+    const out = await findOffenders([fix('a11y-attribute.tsx')]);
+    expect(out).toEqual([]);
+  });
 });

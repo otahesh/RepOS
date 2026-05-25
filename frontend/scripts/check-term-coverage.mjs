@@ -68,6 +68,20 @@ function inTermWrapper(jsxPath) {
   return false;
 }
 
+// Accessibility / UA-tooltip string attributes ARE the screen-reader and hover
+// expansion of terms-of-art — they should spell them out, not hide them behind
+// a <Term> tooltip that an AT user can't reach. JSXText coverage still applies.
+const A11Y_ATTRS = new Set([
+  'aria-label',
+  'aria-description',
+  'aria-roledescription',
+  'aria-placeholder',
+  'aria-valuetext',
+  'title',
+  'alt',
+  'placeholder',
+]);
+
 export async function findOffenders(files) {
   const { shorts, fulls } = await loadTerms();
   const tokens = [...new Set([...shorts, ...fulls])];
@@ -102,6 +116,8 @@ export async function findOffenders(files) {
       },
       JSXAttribute(p) {
         if (inTermWrapper(p)) return;
+        const name = p.node.name;
+        if (name?.type === 'JSXIdentifier' && A11Y_ATTRS.has(name.name)) return;
         const v = p.node.value;
         if (!v || v.type !== 'StringLiteral') return;
         for (const { token, re } of matchers) {

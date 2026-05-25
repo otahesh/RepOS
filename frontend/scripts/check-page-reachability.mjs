@@ -103,6 +103,7 @@ const ORPHAN_IGNORE_GLOBS = [
   '**/__page-fixtures__/**',
   '**/__sanity__/**',
   '**/__smoke__/**',
+  '**/__offline__/**',
 ];
 
 /**
