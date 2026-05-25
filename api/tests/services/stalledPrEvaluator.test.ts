@@ -74,4 +74,70 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     });
     expect(r.triggered).toBe(false);
   });
+
+  // W3 backend-reviewer Important #3 — null runId must fail-closed.
+  // Without an active run, the prior code's deload guard short-circuited
+  // but the stagnation query still ran across the user's entire history.
+  it('does NOT fire when runId is null (fail-closed)', async () => {
+    const seed = await seedStalledPr({ pattern: 'stalled' });
+    handles.push(seed);
+    const r = await stalledPrEvaluator.evaluate({
+      userId: seed.userId, runId: null, weekIdx: 0,
+    });
+    expect(r.triggered).toBe(false);
+  });
+
+  // W3 backend-reviewer Important #1 — stagnation in a prior, completed
+  // mesocycle must not bleed into the current run's evaluation. The query
+  // now anchors on dw.mesocycle_run_id, so sessions in an older run are
+  // out of scope even if they form a perfect 3-session RIR-0 streak.
+  it('does NOT fire when the stalled streak is in a prior mesocycle_run', async () => {
+    // 'stalled' seed gives us 3 identical RIR-0 sessions in mesocycleRunId.
+    const seed = await seedStalledPr({ pattern: 'stalled' });
+    handles.push(seed);
+    // Mark the seeded run as completed so we can create a fresh active run
+    // for the same user (the unique idx_meso_one_active_per_user partial index
+    // forbids two active runs per user).
+    await db.query(
+      `UPDATE mesocycle_runs SET status = 'completed' WHERE id = $1`,
+      [seed.mesocycleRunId],
+    );
+    const { rows: [freshRun] } = await db.query<{ id: string }>(
+      `INSERT INTO mesocycle_runs
+         (user_id, user_program_id, status, weeks, current_week, start_date, start_tz)
+       SELECT user_id, user_program_id, 'active', 4, 1, current_date, start_tz
+       FROM mesocycle_runs WHERE id = $1
+       RETURNING id`,
+      [seed.mesocycleRunId],
+    );
+    const r = await stalledPrEvaluator.evaluate({
+      userId: seed.userId, runId: freshRun.id, weekIdx: 0,
+    });
+    expect(r.triggered).toBe(false);
+    await db.query(`DELETE FROM mesocycle_runs WHERE id = $1`, [freshRun.id]);
+  });
+
+  // W3 backend-reviewer Important #2 — a session with internal load variance
+  // (top-set + back-off sets at lower load) should NOT collapse to its
+  // top-set tuple and falsely match a uniform-load session.
+  it('does NOT fire when a session has internal load variance (top-set + back-offs)', async () => {
+    const seed = await seedStalledPr({ pattern: 'stalled' });
+    handles.push(seed);
+    // Add a 4th set_log to the most-recent session at a different load — that
+    // session becomes non-uniform (max_load ≠ min_load) and the streak check
+    // should drop it as ineligible.
+    await db.query(
+      `INSERT INTO set_logs
+         (user_id, exercise_id, planned_set_id, client_request_id,
+          performed_load_lbs, performed_reps, performed_rir, performed_at)
+       VALUES ($1, $2, $3, gen_random_uuid(),
+          $4, 8, 0,
+          now() - INTERVAL '1 day' + INTERVAL '5 minutes')`,
+      [seed.userId, seed.exerciseId, seed.plannedSetId, 185], // back-off load vs 225 base
+    );
+    const r = await stalledPrEvaluator.evaluate({
+      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+    });
+    expect(r.triggered).toBe(false);
+  });
 });
