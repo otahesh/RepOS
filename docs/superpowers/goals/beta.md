@@ -2,7 +2,7 @@
 
 > Operating dashboard for the alpha→Beta transition. Source-of-truth for *what's true right now*; the master plan is `docs/superpowers/plans/2026-05-11-repos-beta.md`. When this file conflicts with the master plan, the master plan wins — correct this file.
 
-**Last updated:** 2026-05-18 (mid-W1.3, branch `beta/w1-live-data-foundation`, 34 commits ahead of main).
+**Last updated:** 2026-05-22 (W1 merged to `main` at `2ce4c82`; next critical-path action is W3).
 
 ---
 
@@ -29,27 +29,27 @@ Until Milestone 2 lands the system is "Beta-launched" but not "Beta-validated." 
 
 ```
 [x] W0 — Auth flip + cutover (merged PR #11)
-[~] W1 — Live data foundation (branch: beta/w1-live-data-foundation, 34 commits, no PR open)
+[x] W1 — Live data foundation (merged to main at 2ce4c82)
     [x] W1.1 — set_logs schema + migration 029
     [x] W1.2 — set-logs CRUD (POST/PATCH/DELETE/GET) with 24h audit window + IDOR tests
     [x] W1.4 — health_workouts table + ingest + iOS Shortcuts runbook
         [x] W1.4.0 scope-enforcement middleware (backported)
-    [~] W1.3 — TodayLoggerMobile + offline foundation (frontend suite at 205/205 green)
+    [x] W1.3 — TodayLoggerMobile + offline foundation
         [x] W1.3.1 idbQueue (Dexie wrapper)
         [x] W1.3.2 logBuffer (flush + exponential backoff)
         [x] W1.3.3 useNetworkState + useRestTimer hooks
         [x] W1.3.4 TodayLoggerMobile component + /today/:runId/log route + useIdbQueueStatus
         [x] W1.3.5 LogBufferRecovery banner + useIdbQueueCounts hook
-        [ ] W1.3.6 O1–O8 Playwright matrix                       ← NEXT (longest remaining task in W1)
-        [ ] W1.3.7 CF Access expiry handling (SessionExpiredBanner + Safari private-mode + auth-state purge)
-        [ ] W1.3.8 Settings storage UI ("Clear offline sessions")
-        [ ] W1.3.9 typecheck + tests final sweep
-    [ ] W1.5 — e2e Playwright (overreaching toast / W1→W3 proof)
+        [x] W1.3.6 O1–O8 offline Playwright matrix + companion specs
+        [x] W1.3.7 SessionExpiredBanner + auth-state purge + CF-Access expiry
+        [x] W1.3.8 /settings/storage clear-rejected page
+        [x] W1.3.9 typecheck + tests final sweep
+    [x] W1.5 — e2e Playwright (W3-shape signal + volume rollup invariant)
 [ ] W2 — Onboarding + clinical safety (PAR-Q, deload, core)     parallel-eligible from now
-[ ] W3 — Clinical signals + injury swap                          gated on W1 fully merged
-[ ] W4 — Desktop authoring + landmarks editor                    parallel from W1 close
-[ ] W5 — Backups + restore UI (maintenance-mode)                 parallel from W1 close
-[ ] W6 — Account ops + sign-out-everywhere                       parallel from W1 close
+[ ] W3 — Clinical signals + injury swap                          ← NEXT critical-path action (W1 now merged)
+[ ] W4 — Desktop authoring + landmarks editor                    parallel-eligible from now (was gated on W1)
+[ ] W5 — Backups + restore UI (maintenance-mode)                 parallel-eligible from now
+[ ] W6 — Account ops + sign-out-everywhere                       parallel-eligible from now
 [ ] W7 — In-app feedback loop                                    trailing
 [ ] W8 — Beta entry gates                                        continuous; closes after W7
 ─── MILESTONE 1 (Beta cutover authorized) ───
@@ -68,8 +68,8 @@ Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
 |------|----------------------------------------|--------|------------------|--------------|
 | **G1** | CI has api-unit + api-integration + frontend-unit + typecheck + build as required checks; deliberate-break PR confirmed gate blocks merge. | `[ ]` | W8.1, W8.5 | `.github/workflows/test.yml` + branch-protection screenshot |
 | **G2** | Every per-user route has a contamination integration test asserting 404/403 (never 200-with-other-user-data); matrix ≥35 routes; `mkUserPair()` fixture exists. | `[~]` partial | W8.2 (per-route as routes land) | `api/tests/integration/contamination/` |
-| **G3** | Playwright suite covers (a) unauth→CF Access, (b) signed-in→`/`, (c) sign-out clears, (d) sign-out-everywhere revokes bearers, (e) expired JWT mid-set-log buffers + recovers, (f) bearer mint→use→revoke→401. Run against prod CF Access topology in pre-cutover window. | `[~]` partial (W0 covers a/b/c) | W1.3 (e), W6.7 (d), W8.3 (suite) | `tests/e2e/` |
-| **G4** | All 8 offline scenarios O1–O8 pass with Playwright + IndexedDB inspection; zero silent set loss on O1/O2/O4/O5/O8. | `[ ]` | W1.3 entirely | `frontend/playwright/` + `src/components/programs/__offline__/` |
+| **G3** | Playwright suite covers (a) unauth→CF Access, (b) signed-in→`/`, (c) sign-out clears, (d) sign-out-everywhere revokes bearers, (e) expired JWT mid-set-log buffers + recovers, (f) bearer mint→use→revoke→401. Run against prod CF Access topology in pre-cutover window. | `[~]` partial (W0 covers a/b/c; W1.3.7 covers e) | W6.7 (d), W8.3 (suite + prod-window pass) | `tests/e2e/` |
+| **G4** | All 8 offline scenarios O1–O8 pass with Playwright + IndexedDB inspection; zero silent set loss on O1/O2/O4/O5/O8. | `[x]` | — | `frontend/src/components/programs/__offline__/` (W1.3.6) |
 | **G5** | Manual backup → sidecar JSON; `gunzip\|pg_restore -l` integrity check; `tests/dr/restore-into-ephemeral.sh` green; 4 restore tests pass (happy / crash-mid-restore / sigterm-drain / migration-failure-rollback); DR dry-fire within 7 days of cutover. | `[ ]` | W5 entirely | `api/tests/integration/restore*.test.ts` + `tests/dr/` |
 | **G6** | Every post-alpha migration is two-step destructive (Step 2 in next migration); every Step-2 PR links a successful dry-run; most recent migration rehearsed forward→restore→reapply with zero data loss. | `[~]` enforce-going-forward | W8.6 (CI script `check-migration-dryrun.sh`) | `scripts/check-migration-dryrun.sh` + PR-description links |
 | **G7** | Every Beta surface reachable from `/` in ≤3 clicks for a logged-in user; prior-mesocycle recap reachable; no surface requires URL knowledge. | `[ ]` | W8.8 (audit), all UI waves | `docs/qa/beta-reachability.md` |
@@ -89,21 +89,19 @@ Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
 ## Critical path + parallelization
 
 ```
-W0 ✓ ───► W1 (W1.3, W1.5) ───► W3 ───► (W8 continuous closes)
-                │
-                ├─ W2 parallel (start NOW; no W1 dependency)
-                ├─ W4 parallel (after W1 closes — uses W1.2 routes)
-                ├─ W5 parallel (no W1 dependency; can start NOW)
-                ├─ W6 parallel (no W1 dependency; can start NOW)
-                └─ W7 trailing
+W0 ✓ ───► W1 ✓ ───► W3 ───► (W8 continuous closes)
+              │
+              ├─ W2 parallel (unblocked NOW)
+              ├─ W4 parallel (unblocked NOW — uses W1.2 read-only routes)
+              ├─ W5 parallel (unblocked NOW)
+              ├─ W6 parallel (unblocked NOW)
+              └─ W7 trailing
 ```
 
 **Dispatch model (single-engineer + agents per master plan):**
-- Serialize W1.3 → W1.5 → W1 PR → merge.
-- In parallel with W1.3/W1.5: dispatch W2 or W5 (both unblocked).
-- After W1 merges: dispatch W3.
-- After W3 merges: parallelize W4 + W6 (W5 already running).
-- W7 trails. W8.x rows land per-wave-as-they-ship; W8.3/W8.4 final passes run in pre-cutover prod window.
+- W3 is the next critical-path serial step; dispatch it first with a written per-wave plan.
+- W2 + W5 + W6 are dispatchable in parallel worktrees from now. W4 joins after a `Plan`-agent surface-collision check vs W3.
+- W7 trails the UI surfaces it observes. W8.x rows land per-wave-as-they-ship; W8.3/W8.4 final passes run in the pre-cutover prod window.
 
 **Per memory `feedback_worktree_isolation.md`:** dispatched-agent prompts must NOT contain absolute paths into `/Users/jasonmeyer.ict/Projects/RepOS` when using `isolation: "worktree"` — that silently bypasses worktree isolation.
 
@@ -111,13 +109,22 @@ W0 ✓ ───► W1 (W1.3, W1.5) ───► W3 ───► (W8 continuous 
 
 ## Next dispatch
 
-**Immediate next action: W1.3.6 — O1–O8 offline Playwright matrix.**
+**Immediate next critical-path action: W3 — Clinical signals + injury swap.** Now unblocked (was gated on W1 merging). Needs a per-wave plan written via `superpowers:writing-plans` before dispatch.
 
-W1.3.1–W1.3.5 (idbQueue + logBuffer + hooks + TodayLoggerMobile + LogBufferRecovery) all merged this session. Frontend suite green at 205/205. Next is the 8-scenario offline-resilience matrix (`frontend/src/components/programs/__offline__/O{N}-*.spec.ts`) with shared `_helpers.ts`. This needs Playwright running against the dev server with API mocking via `page.route()` for most scenarios; O2 + parts of O3 + O4 want a real backend. The W1 per-wave plan W1.3.6 section (lines 1279–1372) has the per-scenario specs.
+W1 closed clean: live logger, offline buffer (idbQueue + logBuffer + LogBufferRecovery + SessionExpiredBanner + `/settings/storage`), O1–O8 offline matrix (G4 green), volume rollup with `performed_sets`, health_workouts ingest with scope-gated routes, W1.5 e2e (W3-shape signal + volume invariant). Reviewer-matrix Important findings closed in `27a4c73`, `0a79f9b`, `adc85e0`, `56ce4af`.
 
-**After W1.3.6:** W1.3.7 (CF Access expiry — SessionExpiredBanner + Safari private-mode + auth-state purge), W1.3.8 (Settings storage UI), W1.3.9 (final sweep), then PR + merge.
+**Parallel-dispatchable now** (no shared state with W3, can run concurrently — see [[feedback_act_with_agency]] + [[feedback_worktree_isolation]]):
 
-**Parallel-dispatchable from now:** W2 (onboarding + PAR-Q + deload) and W5 (backups + restore UI) have no W1 dependency. Each gets its own per-wave plan written via `superpowers:writing-plans` before dispatch.
+| Wave | Scope | Why parallel-safe |
+|------|-------|-------------------|
+| **W2** | Onboarding + PAR-Q + deload + core (clinical safety) | New tables (`par_q_acknowledgments`), no overlap with W3 routes |
+| **W4** | Desktop authoring + landmarks editor (now unblocked — uses W1.2 set-logs routes read-only) | UI surface only; no schema collision with W3 |
+| **W5** | Backups + restore UI + maintenance-mode | Ops surface; touches `docker/`, `scripts/`, settings page |
+| **W6** | Account ops + sign-out-everywhere + bearer revoke audit | Auth surface; new `/account/*` routes |
+
+**Recommended dispatch order:** W3 first (it gates the longest tail), then fan out W2 + W5 + W6 in parallel worktrees. W4 can join once a `Plan` agent confirms no surface conflict with W3's clinical-signal UI. Each parallel wave needs its own per-wave plan before agent dispatch.
+
+**W7 trails** — feedback loop lands after the UI surfaces it observes have stabilized. **W8.x rows** land continuously per-wave-as-they-ship; W8.3/W8.4 final passes run in the pre-cutover prod window.
 
 ---
 
@@ -127,9 +134,10 @@ Full register lives in master plan. These are the ones likely to fire imminently
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| **W1.3 IndexedDB quota / Safari private-mode** kills offline queue silently | Medium | O6 (quota-exceeded banner) and Safari-private-mode blocking modal are in spec; W1.3.5 status-banner test must cover both. Verify in Playwright with simulated quota cap. |
-| **First user-reachability gap** surfaces when W1.3 lands — route `/today/:mesocycleRunId/log` may not be linked from `/` | Medium | W1.3.4.3 explicitly mounts the new route AND adds the entry-point link from MyProgramPage; G7 audit pass after W1.3 merge will catch a regression. |
-| **W1 PR review velocity** stalls the branch (24 commits in already; split risk on W1.3 size) | Medium | Master plan permits splitting into `beta/w1-backend` (mergeable now) + `beta/w1-frontend` post-W1.3 if review backs up. Decision at W1.3 50%-built checkpoint. |
+| **W3 clinical-signal thresholds drift** from what W1's volume-rollup actually emits (`performed_sets`, set-volume, RPE distribution) | Medium-high | The W1.5 e2e (`tests/e2e/w3-shape-signal.spec.ts`) pins the shape contract; W3 plan must consume it as a fixture rather than re-deriving thresholds. Audit at plan-review checkpoint per [[feedback_get_plan_reviewed]]. |
+| **Parallel-wave schema collisions** (W2 `par_q_acknowledgments`, W3 `injury_swaps`, W6 `account_events`) clash on migration numbering or shared enum types | Medium | Each per-wave plan must claim its migration number range upfront in the plan front-matter; reviewer-pass per wave checks `api/migrations/` for collisions before merge. |
+| **First post-W1 user-reachability gap** — W3's recovery flags + W4's landmarks editor may not be linked from `/` (per [[feedback_user_reachability_dod]]) | Medium | G7 audit (W8.8) runs after every UI-touching wave merges, not just at end. Each per-wave plan must list its entry-point link from `/` in acceptance gates. |
+| **Worktree-isolation regression** when dispatching the parallel fan-out (4 waves at once, per [[feedback_worktree_isolation]]) | High if not enforced | Every parallel-agent prompt must omit absolute paths into the project root; use `isolation: "worktree"` and verify via `git worktree list` before dispatch. |
 
 ---
 
