@@ -22,6 +22,38 @@ const CHIPS: InjuryJoint[] = [
 ];
 const SEVERITIES: InjurySeverity[] = ['low', 'mod', 'high'];
 
+/**
+ * Controlled <input> that:
+ *  - Tracks edits in local state (so React owns the value).
+ *  - Re-syncs from `value` when the server returns a transformed payload
+ *    after PATCH (e.g., trimmed notes or normalized date).
+ *  - Calls `onCommit` on blur ONLY when the value actually changed, so a
+ *    tab-through doesn't fire a no-op PATCH that would bounce updated_at.
+ */
+function ControlledField({
+  value, onCommit, type, placeholder, style,
+}: {
+  value: string;
+  onCommit: (v: string) => Promise<void> | void;
+  type?: string;
+  placeholder?: string;
+  style?: React.CSSProperties;
+}): JSX.Element {
+  const [v, setV] = useState(value);
+  // Re-sync when the prop changes (PATCH success → parent updates `item`).
+  useEffect(() => { setV(value); }, [value]);
+  return (
+    <input
+      type={type ?? 'text'}
+      value={v}
+      placeholder={placeholder}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => { if (v !== value) void onCommit(v); }}
+      style={style}
+    />
+  );
+}
+
 export function InjuryChipsEditor(): JSX.Element {
   const [items, setItems] = useState<UserInjury[]>([]);
   const [expanded, setExpanded] = useState<InjuryJoint | null>(null);
@@ -48,6 +80,12 @@ export function InjuryChipsEditor(): JSX.Element {
         const created = await upsertInjury({ joint: j });
         setItems((prev) => [...prev, created]);
         setExpanded(j);
+      } catch (err) {
+        // Without this catch the chip silently fails to activate — pending
+        // clears in `finally` but no surface tells the user the POST never
+        // landed. Mirror the patchWithRollback error envelope so the
+        // role=alert region picks up the message.
+        setError(err instanceof Error ? err.message : 'Could not add injury — try again');
       } finally {
         setPending((p) => {
           const n = new Set(p);
@@ -186,10 +224,11 @@ export function InjuryChipsEditor(): JSX.Element {
                 );
               })}
             </div>
-            <input
-              defaultValue={item.notes}
+            <ControlledField
+              key={`notes-${item.joint}`}
+              value={item.notes}
               placeholder="Notes (optional)"
-              onBlur={(e) => { void updateNotes(item.joint, e.target.value); }}
+              onCommit={(v) => updateNotes(item.joint, v)}
               style={{
                 width: '100%',
                 background: TOKENS.surface,
@@ -200,10 +239,11 @@ export function InjuryChipsEditor(): JSX.Element {
                 fontSize: 12,
               }}
             />
-            <input
+            <ControlledField
+              key={`onset-${item.joint}`}
               type="date"
-              defaultValue={item.onset_at ?? ''}
-              onBlur={(e) => { void updateOnset(item.joint, e.target.value || null); }}
+              value={item.onset_at ?? ''}
+              onCommit={(v) => updateOnset(item.joint, v || null)}
               style={{
                 marginTop: 6,
                 background: TOKENS.surface,

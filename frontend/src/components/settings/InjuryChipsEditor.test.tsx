@@ -79,6 +79,40 @@ describe('<InjuryChipsEditor>', () => {
     expect(within(panel).getByRole('button', { name: 'mod', pressed: true })).toBeInTheDocument();
   });
 
+  it('surfaces error when upsertInjury fails — chip does not silently fail to activate', async () => {
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([]);
+    vi.mocked(api.upsertInjury).mockRejectedValueOnce(new Error('500 server'));
+    render(<InjuryChipsEditor />);
+    await waitFor(() => screen.getByText('knee_left'));
+    fireEvent.click(screen.getByRole('button', { name: /knee_left/i }));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(screen.getByRole('alert').textContent).toMatch(/500 server/);
+  });
+
+  it('notes input only PATCHes on commit when the value actually changed', async () => {
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
+      joint: 'elbow', severity: 'mod', notes: 'tendonitis', onset_at: null,
+      created_at: '', updated_at: '',
+    }]);
+    vi.mocked(api.patchInjury).mockResolvedValueOnce({
+      joint: 'elbow', severity: 'mod', notes: 'tendonitis flaring up', onset_at: null,
+      created_at: '', updated_at: '',
+    });
+    render(<InjuryChipsEditor />);
+    await waitFor(() => screen.getByText('elbow'));
+    fireEvent.click(screen.getByRole('button', { name: /elbow/i }));
+    const notesInput = screen.getByDisplayValue('tendonitis') as HTMLInputElement;
+    // Tab-through with no change → no PATCH.
+    fireEvent.blur(notesInput);
+    expect(api.patchInjury).not.toHaveBeenCalled();
+    // Real edit → PATCH fires.
+    fireEvent.change(notesInput, { target: { value: 'tendonitis flaring up' } });
+    fireEvent.blur(notesInput);
+    await waitFor(() =>
+      expect(api.patchInjury).toHaveBeenCalledWith('elbow', { notes: 'tendonitis flaring up' }),
+    );
+  });
+
   it('Remove button inside expanded panel calls deleteInjury', async () => {
     vi.mocked(api.listInjuries).mockResolvedValueOnce([{
       joint: 'wrist', severity: 'mod', notes: '', onset_at: null,
