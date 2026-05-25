@@ -302,8 +302,7 @@ describe('set-logs scope enforcement (W1 reviewer matrix Critical)', () => {
 // ---------------------------------------------------------------------------
 
 describe('user_injuries scope enforcement (W3 Task 4 failure-first)', () => {
-  it.skip('GET /api/user/injuries requires health:injuries:read scope', async () => {
-    // TODO Task 5: flip to it(...) once GET /api/user/injuries ships.
+  it('GET /api/user/injuries requires health:injuries:read scope', async () => {
     const app = await build();
     try {
       const { bearer, handle } = await seedUserAndMintBearer({
