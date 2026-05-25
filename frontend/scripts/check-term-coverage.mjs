@@ -12,7 +12,24 @@ const __dirname = path.dirname(__filename);
 
 async function loadTerms() {
   const tsPath = path.resolve(__dirname, '..', 'src', 'lib', 'terms.ts');
-  const src = readFileSync(tsPath, 'utf8');
+  const fullSrc = readFileSync(tsPath, 'utf8');
+  // Scope to the TERMS dictionary literal only — terms.ts also exports other
+  // `Record<…>` objects (e.g. INJURY_ADVISORY_COPY) whose 2-space-indented keys
+  // would otherwise be matched as term keys despite having no short/full fields.
+  const start = fullSrc.search(/export const TERMS\b[^=]*=\s*\{/);
+  if (start < 0) throw new Error('term-coverage: could not locate TERMS literal in terms.ts');
+  let depth = 0;
+  let end = -1;
+  for (let i = fullSrc.indexOf('{', start); i < fullSrc.length; i++) {
+    const c = fullSrc[i];
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end < 0) throw new Error('term-coverage: could not find end of TERMS literal in terms.ts');
+  const src = fullSrc.slice(start, end);
   // Pull TERMS keys + short/full strings via simple regex over the dictionary literal.
   const keys = [...src.matchAll(/^\s{2}([A-Za-z_]\w*):\s*\{/gm)].map(m => m[1]);
   const shorts = [...src.matchAll(/short:\s*['"]([^'"]+)['"]/g)].map(m => m[1]);
