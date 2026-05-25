@@ -2,7 +2,7 @@
 
 > Operating dashboard for the alpha→Beta transition. Source-of-truth for *what's true right now*; the master plan is `docs/superpowers/plans/2026-05-11-repos-beta.md`. When this file conflicts with the master plan, the master plan wins — correct this file.
 
-**Last updated:** 2026-05-22 (W1 merged to `main` at `2ce4c82`; next critical-path action is W3).
+**Last updated:** 2026-05-25 (W3 merged to `main` at `0d5a2cd`; parallel-eligible waves W2/W4/W5/W6 are now the next dispatch).
 
 ---
 
@@ -46,7 +46,12 @@ Until Milestone 2 lands the system is "Beta-launched" but not "Beta-validated." 
         [x] W1.3.9 typecheck + tests final sweep
     [x] W1.5 — e2e Playwright (W3-shape signal + volume rollup invariant)
 [ ] W2 — Onboarding + clinical safety (PAR-Q, deload, core)     parallel-eligible from now
-[ ] W3 — Clinical signals + injury swap                          ← NEXT critical-path action (W1 now merged)
+[x] W3 — Clinical signals + injury swap (merged to main at 0d5a2cd)
+    [x] W3.1 — Recovery flag evaluators (overreaching + stalled-PR) + recovery_flag_events telemetry
+    [x] W3.2 — injuryRanker + applyInjuryAdvisory wired into substitutions
+    [x] W3.3 — Mid-session swap UI (BlockOverflowMenu + MidSessionSwapPicker → MidSessionSwapSheet)
+    [x] W3.4 — Injury chips Settings (InjuryChipsEditor + /settings/injuries + Settings nav link)
+    [x] W3 reviewer matrix (backend/frontend/clinical/security) — 2 Critical + 7 Important fixed inline; 5 Important deferred per [[reference_w3_tuning_candidates]]
 [ ] W4 — Desktop authoring + landmarks editor                    parallel-eligible from now (was gated on W1)
 [ ] W5 — Backups + restore UI (maintenance-mode)                 parallel-eligible from now
 [ ] W6 — Account ops + sign-out-everywhere                       parallel-eligible from now
@@ -67,12 +72,12 @@ Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
 | Gate | Predicate (one line; verbatim summary) | Status | Blocking wave(s) | Verification |
 |------|----------------------------------------|--------|------------------|--------------|
 | **G1** | CI has api-unit + api-integration + frontend-unit + typecheck + build as required checks; deliberate-break PR confirmed gate blocks merge. | `[ ]` | W8.1, W8.5 | `.github/workflows/test.yml` + branch-protection screenshot |
-| **G2** | Every per-user route has a contamination integration test asserting 404/403 (never 200-with-other-user-data); matrix ≥35 routes; `mkUserPair()` fixture exists. | `[~]` partial | W8.2 (per-route as routes land) | `api/tests/integration/contamination/` |
+| **G2** | Every per-user route has a contamination integration test asserting 404/403 (never 200-with-other-user-data); matrix ≥35 routes; `mkUserPair()` fixture exists. | `[~]` partial (W3 added user_injuries CRUD matrix at `47b875d`) | W8.2 (per-route as routes land) | `api/tests/integration/contamination/` |
 | **G3** | Playwright suite covers (a) unauth→CF Access, (b) signed-in→`/`, (c) sign-out clears, (d) sign-out-everywhere revokes bearers, (e) expired JWT mid-set-log buffers + recovers, (f) bearer mint→use→revoke→401. Run against prod CF Access topology in pre-cutover window. | `[~]` partial (W0 covers a/b/c; W1.3.7 covers e) | W6.7 (d), W8.3 (suite + prod-window pass) | `tests/e2e/` |
 | **G4** | All 8 offline scenarios O1–O8 pass with Playwright + IndexedDB inspection; zero silent set loss on O1/O2/O4/O5/O8. | `[x]` | — | `frontend/src/components/programs/__offline__/` (W1.3.6) |
 | **G5** | Manual backup → sidecar JSON; `gunzip\|pg_restore -l` integrity check; `tests/dr/restore-into-ephemeral.sh` green; 4 restore tests pass (happy / crash-mid-restore / sigterm-drain / migration-failure-rollback); DR dry-fire within 7 days of cutover. | `[ ]` | W5 entirely | `api/tests/integration/restore*.test.ts` + `tests/dr/` |
 | **G6** | Every post-alpha migration is two-step destructive (Step 2 in next migration); every Step-2 PR links a successful dry-run; most recent migration rehearsed forward→restore→reapply with zero data loss. | `[~]` enforce-going-forward | W8.6 (CI script `check-migration-dryrun.sh`) | `scripts/check-migration-dryrun.sh` + PR-description links |
-| **G7** | Every Beta surface reachable from `/` in ≤3 clicks for a logged-in user; prior-mesocycle recap reachable; no surface requires URL knowledge. | `[ ]` | W8.8 (audit), all UI waves | `docs/qa/beta-reachability.md` |
+| **G7** | Every Beta surface reachable from `/` in ≤3 clicks for a logged-in user; prior-mesocycle recap reachable; no surface requires URL knowledge. | `[~]` partial (W3 surfaces verified at `b562338`: /settings/injuries 2 clicks, mid-session swap 3 clicks) | W8.8 (audit), all UI waves | `docs/qa/beta-reachability.md` |
 | **G8** | Zero `PLACEHOLDER_USER_ID` in non-test code; ESLint rule blocks re-introduction; runtime guard rejects placeholder inserts in non-test envs; cutover script ran with documented before/after counts. | `[~]` (W0 covers grep + runtime guard + cutover; ESLint rule pending W8.9) | W0 ✓ + W8.9 | `scripts/cutover/001-placeholder-to-jmeyer.sql` results in PASSDOWN + ESLint config |
 | **G9** | k6 baseline at `tests/perf/beta-baseline-<date>.json` shows p95 within budget for every hot endpoint at 25 VUs; zero 5xx during 1→50 VU burst; contingency window used (or not) captured in PASSDOWN. | `[ ]` | W8.4 (run in pre-cutover prod window) | `tests/perf/beta-baseline-<date>.json` |
 | **G10** | `docs/runbooks/bug-triage.md` with severity tiers + TTM; `docker/scripts/rollback.sh <sha>` tested; Sev-1 dry-fire timestamped <10 min declaration→mitigation. | `[ ]` | W8.6 | `docs/runbooks/` + PASSDOWN timestamps |
@@ -89,7 +94,7 @@ Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
 ## Critical path + parallelization
 
 ```
-W0 ✓ ───► W1 ✓ ───► W3 ───► (W8 continuous closes)
+W0 ✓ ───► W1 ✓ ───► W3 ✓ ───► (W8 continuous closes)
               │
               ├─ W2 parallel (unblocked NOW)
               ├─ W4 parallel (unblocked NOW — uses W1.2 read-only routes)
@@ -99,8 +104,7 @@ W0 ✓ ───► W1 ✓ ───► W3 ───► (W8 continuous closes)
 ```
 
 **Dispatch model (single-engineer + agents per master plan):**
-- W3 is the next critical-path serial step; dispatch it first with a written per-wave plan.
-- W2 + W5 + W6 are dispatchable in parallel worktrees from now. W4 joins after a `Plan`-agent surface-collision check vs W3.
+- W3 closed — W2 + W4 + W5 + W6 are now the active parallel surface. Dispatch in worktrees.
 - W7 trails the UI surfaces it observes. W8.x rows land per-wave-as-they-ship; W8.3/W8.4 final passes run in the pre-cutover prod window.
 
 **Per memory `feedback_worktree_isolation.md`:** dispatched-agent prompts must NOT contain absolute paths into `/Users/jasonmeyer.ict/Projects/RepOS` when using `isolation: "worktree"` — that silently bypasses worktree isolation.
@@ -109,20 +113,20 @@ W0 ✓ ───► W1 ✓ ───► W3 ───► (W8 continuous closes)
 
 ## Next dispatch
 
-**Immediate next critical-path action: W3 — Clinical signals + injury swap.** Now unblocked (was gated on W1 merging). Needs a per-wave plan written via `superpowers:writing-plans` before dispatch.
+**No serial critical-path action remains** — W3 was the last serial step. The next dispatch is **W2 + W4 + W5 + W6 in parallel worktrees**.
 
-W1 closed clean: live logger, offline buffer (idbQueue + logBuffer + LogBufferRecovery + SessionExpiredBanner + `/settings/storage`), O1–O8 offline matrix (G4 green), volume rollup with `performed_sets`, health_workouts ingest with scope-gated routes, W1.5 e2e (W3-shape signal + volume invariant). Reviewer-matrix Important findings closed in `27a4c73`, `0a79f9b`, `adc85e0`, `56ce4af`.
+W3 closed clean (merge `0d5a2cd`): overreaching + stalled-PR evaluators with recovery_flag_events telemetry, joint_root injury_advisory wiring, mid-session swap UI with click-through, injury chip Settings page at /settings/injuries. Reviewer matrix dispatched (backend/frontend/clinical/security in parallel); Critical+Important fixed inline at `bde6b66`, `466d512`, `fdea791`, `f9c8c62`, `30805b9`. Deferred items captured in `reference_w3_tuning_candidates` (post-Beta tuning, gated on alpha-cohort `recovery_flag_events` telemetry).
 
-**Parallel-dispatchable now** (no shared state with W3, can run concurrently — see [[feedback_act_with_agency]] + [[feedback_worktree_isolation]]):
+**Parallel-dispatchable now** (no remaining serial blockers, can run concurrently — see [[feedback_act_with_agency]] + [[feedback_worktree_isolation]]):
 
 | Wave | Scope | Why parallel-safe |
 |------|-------|-------------------|
-| **W2** | Onboarding + PAR-Q + deload + core (clinical safety) | New tables (`par_q_acknowledgments`), no overlap with W3 routes |
-| **W4** | Desktop authoring + landmarks editor (now unblocked — uses W1.2 set-logs routes read-only) | UI surface only; no schema collision with W3 |
+| **W2** | Onboarding + PAR-Q + deload + core (clinical safety) | New tables (`par_q_acknowledgments`); deload signal owns `day_workouts.is_deload` (W3 stalledPr uses interim `current_week >= weeks` until W2 swaps it in) |
+| **W4** | Desktop authoring + landmarks editor (uses W1.2 set-logs routes read-only) | UI surface only; no schema collision with W3 |
 | **W5** | Backups + restore UI + maintenance-mode | Ops surface; touches `docker/`, `scripts/`, settings page |
 | **W6** | Account ops + sign-out-everywhere + bearer revoke audit | Auth surface; new `/account/*` routes |
 
-**Recommended dispatch order:** W3 first (it gates the longest tail), then fan out W2 + W5 + W6 in parallel worktrees. W4 can join once a `Plan` agent confirms no surface conflict with W3's clinical-signal UI. Each parallel wave needs its own per-wave plan before agent dispatch.
+**Recommended dispatch order:** fan out W2 + W4 + W5 + W6 in parallel worktrees immediately. Each needs its own per-wave plan via `superpowers:writing-plans` before agent dispatch.
 
 **W7 trails** — feedback loop lands after the UI surfaces it observes have stabilized. **W8.x rows** land continuously per-wave-as-they-ship; W8.3/W8.4 final passes run in the pre-cutover prod window.
 
