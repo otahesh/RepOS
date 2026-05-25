@@ -95,11 +95,14 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
   // -------------------------------------------------------------------------
   // POST /api/user/injuries — upsert by (user_id, joint).
   //
-  // Idempotent shape: 201 on insert, 200 on update. The "isNew" decision is a
-  // separate SELECT before INSERT...ON CONFLICT because Postgres has no
-  // standard way to surface "did this collide" cheaply from a single RETURNING
-  // statement (xmax tricks are fragile across PG versions). Two queries inside
-  // the same request is acceptable for a low-frequency settings write.
+  // Idempotent shape: 201 on insert, 200 on update. The "isNew" decision is
+  // derived atomically from RETURNING — we project (created_at = updated_at)
+  // as a boolean. On a fresh INSERT both columns are populated from the same
+  // now() default at row birth, so they're equal; on an UPDATE that ran the
+  // SET ... updated_at = now() clause, created_at is the original row's
+  // timestamp and updated_at is current — they differ. This avoids the prior
+  // SELECT-then-INSERT race where two concurrent writers could each observe
+  // existing=null and both return 201 even though only one actually inserted.
   //
   // [FIX-29] req.userId guard identical to GET above — middleware contract
   // violation surfaces as 500, not a silent NULL user_id insert.
@@ -124,13 +127,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
       const { joint, severity, notes, onset_at } = parsed.data;
 
-      const { rows: [existing] } = await db.query<{ joint: string }>(
-        `SELECT joint FROM user_injuries WHERE user_id=$1 AND joint=$2`,
-        [userId, joint],
-      );
-      const isNew = !existing;
-
-      const { rows: [row] } = await db.query<InjuryRow>(
+      const { rows: [row] } = await db.query<InjuryRow & { is_new: boolean }>(
         `INSERT INTO user_injuries (user_id, joint, severity, notes, onset_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (user_id, joint) DO UPDATE SET
@@ -140,11 +137,12 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
            updated_at = now()
          RETURNING joint, severity, notes,
                    to_char(onset_at, 'YYYY-MM-DD') AS onset_at,
-                   created_at, updated_at`,
+                   created_at, updated_at,
+                   (created_at = updated_at) AS is_new`,
         [userId, joint, severity, notes, onset_at ?? null],
       );
 
-      return reply.code(isNew ? 201 : 200).send({ injury: rowToInjury(row) });
+      return reply.code(row.is_new ? 201 : 200).send({ injury: rowToInjury(row) });
     },
   );
 
