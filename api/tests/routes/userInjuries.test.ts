@@ -140,3 +140,29 @@ describe('PATCH /api/user/injuries/:joint', () => {
     expect(resp.statusCode).toBe(400);
   });
 });
+
+describe('DELETE /api/user/injuries/:joint', () => {
+  it('removes the row and returns 204', async () => {
+    await app.inject({
+      method: 'POST', url: '/api/user/injuries',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { joint: 'wrist' },
+    });
+    const resp = await app.inject({
+      method: 'DELETE', url: '/api/user/injuries/wrist',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(resp.statusCode).toBe(204);
+    const { rows } = await db.query(
+      `SELECT 1 FROM user_injuries WHERE user_id=$1 AND joint='wrist'`, [userId]);
+    expect(rows.length).toBe(0);
+  });
+
+  it('204 idempotent on missing row', async () => {
+    const resp = await app.inject({
+      method: 'DELETE', url: '/api/user/injuries/knee_right',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(resp.statusCode).toBe(204);
+  });
+});

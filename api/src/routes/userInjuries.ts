@@ -223,4 +223,35 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       return reply.send({ injury });
     },
   );
+
+  // -------------------------------------------------------------------------
+  // DELETE /api/user/injuries/:joint — idempotent removal.
+  //
+  // Contract:
+  //   - 204 on successful delete (row existed and is now gone).
+  //   - 204 on missing row (idempotent — caller intent is "ensure this joint
+  //     has no injury record"; if it already doesn't, that's success).
+  //   - 400 on unknown :joint path param — same envelope as PATCH.
+  //   - 500 on missing req.userId (FIX-29 middleware-contract guard).
+  //
+  // DELETE intentionally does NOT distinguish "row existed" from "row didn't"
+  // — surfacing that would let an unauthenticated probe enumerate which joints
+  // a user has injured (timing aside, even response-code variance is signal).
+  // -------------------------------------------------------------------------
+  app.delete<{ Params: { joint: string } }>(
+    '/user/injuries/:joint',
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:injuries:write')] },
+    async (req, reply) => {
+      if (!INJURY_JOINTS.includes(req.params.joint as (typeof INJURY_JOINTS)[number])) {
+        return reply.code(400).send({ error: 'unknown_joint' });
+      }
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      await db.query(
+        `DELETE FROM user_injuries WHERE user_id=$1 AND joint=$2`,
+        [userId, req.params.joint],
+      );
+      return reply.code(204).send();
+    },
+  );
 }
