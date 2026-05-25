@@ -3,9 +3,14 @@ import { TOKENS } from '../../tokens';
 
 export function BlockOverflowMenu({
   blockName,
+  blockIdx,
   onGotATweak,
 }: {
   blockName: string;
+  /** Zero-indexed block position in the day. Appended to aria-label so two
+   *  blocks that share an exercise name don't collide for screen-reader /
+   *  test selectors. */
+  blockIdx: number;
   onGotATweak: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -50,7 +55,7 @@ export function BlockOverflowMenu({
       <button
         ref={triggerRef}
         type="button"
-        aria-label={`More options for ${blockName}`}
+        aria-label={`More options for ${blockName}, block ${blockIdx + 1}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}

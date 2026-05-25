@@ -53,6 +53,7 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{first.exercise.name}</div>
                 <BlockOverflowMenu
                   blockName={first.exercise.name}
+                  blockIdx={blockIdx}
                   onGotATweak={() => setPickerTargetBlockIdx(blockIdx)}
                 />
               </div>
