@@ -12,12 +12,18 @@ export function BlockOverflowMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
+  // Tracks whether the menu has been opened at least once. Without this, the
+  // initial-mount effect (open=false) would steal focus to the trigger when
+  // multiple BlockOverflowMenu instances render in a list (T16 review finding).
+  const hasOpenedRef = useRef(false);
 
   // [FIX-21] focus on open, return focus on close
   useEffect(() => {
     if (open) {
+      hasOpenedRef.current = true;
       firstItemRef.current?.focus();
-    } else {
+    } else if (hasOpenedRef.current) {
+      // Only restore focus to trigger if menu was previously open
       triggerRef.current?.focus({ preventScroll: true });
     }
   }, [open]);

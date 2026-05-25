@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
+import { BlockOverflowMenu } from './BlockOverflowMenu';
+// import { MidSessionSwapPicker } from './MidSessionSwapPicker';   // Task 18 — DEFERRED
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
@@ -14,6 +16,9 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
   const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
   const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
+  // W3.3 Task 17 — independent from swapTarget (which drives the inline "Suggested
+  // sub" flow). pickerTargetBlockIdx drives the "Got a tweak?" picker (Task 18).
+  const [, setPickerTargetBlockIdx] = useState<number | null>(null);
 
   const fetchToday = useCallback(() => {
     getTodayWorkout().then(setData).catch(() => setData(null));
@@ -43,7 +48,13 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
           const first = blockSets[0];
           return (
             <li key={blockIdx} style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{first.exercise.name}</div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{first.exercise.name}</div>
+                <BlockOverflowMenu
+                  blockName={first.exercise.name}
+                  onGotATweak={() => setPickerTargetBlockIdx(blockIdx)}
+                />
+              </div>
               <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
                 {blockSets.length} <Term k="working_set" compact />{'s · '}{first.target_reps_low}{'–'}{first.target_reps_high}{' reps · '}<Term k="RIR" compact />{' '}{first.target_rir}{' · '}{first.rest_sec}{'s rest'}
               </div>

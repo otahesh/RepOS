@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { TodayWorkoutMobile } from './TodayWorkoutMobile';
@@ -107,5 +107,15 @@ describe('<TodayWorkoutMobile>', () => {
     });
     // Sheet should be gone
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // TODO Task 18: flip to it() when MidSessionSwapPicker lands
+  it.skip('opens MidSessionSwapPicker pre-loaded with injury context when "Got a tweak?" is tapped', async () => {
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    const moreBtns = screen.getAllByRole('button', { name: /more options/i });
+    fireEvent.click(moreBtns[0]);
+    fireEvent.click(screen.getByRole('menuitem', { name: /got a tweak/i }));
+    expect(await screen.findByRole('dialog', { name: /swap/i })).toBeInTheDocument();
   });
 });
