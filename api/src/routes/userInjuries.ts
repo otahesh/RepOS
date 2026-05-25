@@ -26,7 +26,9 @@ import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
 import {
+  INJURY_JOINTS,
   UserInjuryListResponseSchema,
+  UserInjuryPatchRequestSchema,
   UserInjuryUpsertRequestSchema,
   type UserInjuryItem,
   type UserInjuryListResponse,
@@ -143,6 +145,82 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
         updated_at: row.updated_at.toISOString(),
       } as UserInjuryItem;
       return reply.code(isNew ? 201 : 200).send({ injury });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // PATCH /api/user/injuries/:joint — partial update.
+  //
+  // Dynamic UPDATE field list — only columns actually present in the body are
+  // rewritten. This is distinct from POST upsert (which overwrites every
+  // column with EXCLUDED values, including defaulted ones); PATCH is the right
+  // surface for the frontend's per-chip edit affordances.
+  //
+  // Ordering matters:
+  //   1. INJURY_JOINTS guard runs FIRST — catches URL-path injection
+  //      (`/user/injuries/../something`) before we touch zod or the DB.
+  //   2. Zod safeParse on the body — same 400 envelope as POST for frontend
+  //      consistency (see Task 6 reviewer note).
+  //   3. req.userId guard (FIX-29) — middleware contract violation → 500.
+  //   4. Empty patch → 400 `empty_patch` — protects against no-op writes
+  //      that would still bump updated_at and confuse the UI's "dirty" state.
+  //   5. UPDATE...RETURNING; null row → 404 (not_found). PATCH is NOT
+  //      idempotent like POST — a missing row is a real client error.
+  // -------------------------------------------------------------------------
+  app.patch<{ Params: { joint: string } }>(
+    '/user/injuries/:joint',
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:injuries:write')] },
+    async (req, reply) => {
+      if (!INJURY_JOINTS.includes(req.params.joint as (typeof INJURY_JOINTS)[number])) {
+        return reply.code(400).send({ error: 'unknown_joint' });
+      }
+      const parsed = UserInjuryPatchRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_payload',
+          field_error: zodToFieldError(parsed.error),
+        });
+      }
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
+      const fields: string[] = [];
+      const values: unknown[] = [userId, req.params.joint];
+      let i = 3;
+      for (const k of ['severity', 'notes', 'onset_at'] as const) {
+        if (parsed.data[k] !== undefined) {
+          fields.push(`${k} = $${i++}`);
+          values.push(parsed.data[k]);
+        }
+      }
+      if (!fields.length) return reply.code(400).send({ error: 'empty_patch' });
+
+      const { rows: [row] } = await db.query<{
+        joint: string;
+        severity: string;
+        notes: string;
+        onset_at: string | null;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `UPDATE user_injuries SET ${fields.join(', ')}, updated_at = now()
+         WHERE user_id = $1 AND joint = $2
+         RETURNING joint, severity, notes,
+                   to_char(onset_at, 'YYYY-MM-DD') AS onset_at,
+                   created_at, updated_at`,
+        values,
+      );
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+
+      const injury: UserInjuryItem = {
+        joint: row.joint as UserInjuryItem['joint'],
+        severity: row.severity as UserInjuryItem['severity'],
+        notes: row.notes,
+        onset_at: row.onset_at,
+        created_at: row.created_at.toISOString(),
+        updated_at: row.updated_at.toISOString(),
+      };
+      return reply.send({ injury });
     },
   );
 }

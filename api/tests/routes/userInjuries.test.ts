@@ -105,3 +105,38 @@ describe('POST /api/user/injuries', () => {
     expect(resp.json<{ field_error?: object }>().field_error).toBeDefined();
   });
 });
+
+describe('PATCH /api/user/injuries/:joint', () => {
+  it('updates severity + notes; returns 200 with new shape', async () => {
+    await app.inject({
+      method: 'POST', url: '/api/user/injuries',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { joint: 'elbow' },
+    });
+    const resp = await app.inject({
+      method: 'PATCH', url: '/api/user/injuries/elbow',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { severity: 'high', notes: 'tendonitis' },
+    });
+    expect(resp.statusCode).toBe(200);
+    expect(resp.json<{ injury: { severity: string } }>().injury.severity).toBe('high');
+  });
+
+  it('404 when row does not exist', async () => {
+    const resp = await app.inject({
+      method: 'PATCH', url: '/api/user/injuries/wrist',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { severity: 'low' },
+    });
+    expect(resp.statusCode).toBe(404);
+  });
+
+  it('400 on unknown :joint path param', async () => {
+    const resp = await app.inject({
+      method: 'PATCH', url: '/api/user/injuries/ankle',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(resp.statusCode).toBe(400);
+  });
+});
