@@ -68,3 +68,40 @@ describe('GET /api/user/injuries', () => {
     expect(body.injuries.map((r) => r.joint)).toEqual(['knee_left']);
   });
 });
+
+describe('POST /api/user/injuries', () => {
+  it('creates a new row and returns 201 with the persisted shape', async () => {
+    const resp = await app.inject({
+      method: 'POST',
+      url: '/api/user/injuries',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { joint: 'shoulder_left', severity: 'high', notes: 'impingement', onset_at: '2025-11-03' },
+    });
+    expect(resp.statusCode).toBe(201);
+    const body = resp.json<{ injury: { joint: string; severity: string } }>();
+    expect(body.injury).toMatchObject({ joint: 'shoulder_left', severity: 'high', notes: 'impingement' });
+  });
+
+  it('upserts on duplicate (user_id, joint) — 200 + updated row', async () => {
+    const resp = await app.inject({
+      method: 'POST',
+      url: '/api/user/injuries',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { joint: 'shoulder_left', severity: 'low', notes: 'better now' },
+    });
+    expect(resp.statusCode).toBe(200);
+    const body = resp.json<{ injury: { severity: string; notes: string } }>();
+    expect(body.injury).toMatchObject({ severity: 'low', notes: 'better now' });
+  });
+
+  it('rejects unknown joint with 400 field_error', async () => {
+    const resp = await app.inject({
+      method: 'POST',
+      url: '/api/user/injuries',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { joint: 'ankle' },
+    });
+    expect(resp.statusCode).toBe(400);
+    expect(resp.json<{ field_error?: object }>().field_error).toBeDefined();
+  });
+});

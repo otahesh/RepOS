@@ -27,8 +27,11 @@ import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
 import {
   UserInjuryListResponseSchema,
+  UserInjuryUpsertRequestSchema,
+  type UserInjuryItem,
   type UserInjuryListResponse,
 } from '../schemas/userInjuries.js';
+import { zodToFieldError } from '../utils/zodToFieldError.js';
 
 export async function userInjuriesRoutes(app: FastifyInstance) {
   app.get(
@@ -69,6 +72,77 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       // value not yet in INJURY_JOINTS) becomes a loud 500 in the catch-all
       // rather than silently leaking through to the client.
       return reply.send(UserInjuryListResponseSchema.parse(body));
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /api/user/injuries — upsert by (user_id, joint).
+  //
+  // Idempotent shape: 201 on insert, 200 on update. The "isNew" decision is a
+  // separate SELECT before INSERT...ON CONFLICT because Postgres has no
+  // standard way to surface "did this collide" cheaply from a single RETURNING
+  // statement (xmax tricks are fragile across PG versions). Two queries inside
+  // the same request is acceptable for a low-frequency settings write.
+  //
+  // [FIX-29] req.userId guard identical to GET above — middleware contract
+  // violation surfaces as 500, not a silent NULL user_id insert.
+  //
+  // 400 envelope: { error: 'invalid_payload', field_error: { error, field } }
+  // — distinct from other routes that return the bare zodToFieldError shape,
+  // because the W3.4 frontend (InjuryChipsEditor, Task 20) discriminates on
+  // body.field_error to highlight the offending chip.
+  // -------------------------------------------------------------------------
+  app.post(
+    '/user/injuries',
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:injuries:write')] },
+    async (req, reply) => {
+      const parsed = UserInjuryUpsertRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_payload',
+          field_error: zodToFieldError(parsed.error),
+        });
+      }
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      const { joint, severity, notes, onset_at } = parsed.data;
+
+      const { rows: [existing] } = await db.query<{ joint: string }>(
+        `SELECT joint FROM user_injuries WHERE user_id=$1 AND joint=$2`,
+        [userId, joint],
+      );
+      const isNew = !existing;
+
+      const { rows: [row] } = await db.query<{
+        joint: string;
+        severity: string;
+        notes: string;
+        onset_at: string | null;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `INSERT INTO user_injuries (user_id, joint, severity, notes, onset_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, joint) DO UPDATE SET
+           severity   = EXCLUDED.severity,
+           notes      = EXCLUDED.notes,
+           onset_at   = EXCLUDED.onset_at,
+           updated_at = now()
+         RETURNING joint, severity, notes,
+                   to_char(onset_at, 'YYYY-MM-DD') AS onset_at,
+                   created_at, updated_at`,
+        [userId, joint, severity, notes, onset_at ?? null],
+      );
+
+      const injury = {
+        joint: row.joint,
+        severity: row.severity,
+        notes: row.notes,
+        onset_at: row.onset_at,
+        created_at: row.created_at.toISOString(),
+        updated_at: row.updated_at.toISOString(),
+      } as UserInjuryItem;
+      return reply.code(isNew ? 201 : 200).send({ injury });
     },
   );
 }

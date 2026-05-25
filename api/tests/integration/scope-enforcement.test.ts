@@ -323,8 +323,7 @@ describe('user_injuries scope enforcement (W3 Task 4 failure-first)', () => {
     }
   });
 
-  it.skip('POST /api/user/injuries requires health:injuries:write scope', async () => {
-    // TODO Task 6: flip to it(...) once POST /api/user/injuries ships.
+  it('POST /api/user/injuries requires health:injuries:write scope', async () => {
     // A read-only bearer is the precise failure-mode the scope guard must
     // catch — read-scope alone must not authorize a write.
     const app = await build();
