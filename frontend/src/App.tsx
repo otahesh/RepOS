@@ -13,6 +13,7 @@ import TodayPage from './pages/TodayPage'
 import ProgramsPage from './pages/ProgramsPage'
 import ProgramDetailPage from './pages/ProgramDetailPage'
 import MyProgramPage from './pages/MyProgramPage'
+import SettingsInjuriesPage from './pages/SettingsInjuriesPage'
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
 import { useIsMobile } from './lib/useIsMobile'
 
@@ -48,6 +49,7 @@ function AppInner() {
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />
             <Route path="settings/storage" element={<SettingsStorage />} />
+            <Route path="settings/injuries" element={<SettingsInjuriesPage />} />
             {import.meta.env.DEV && <Route path="dev/picker" element={<ExercisePickerDemo />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
