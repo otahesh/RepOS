@@ -35,6 +35,35 @@ import {
 } from '../schemas/userInjuries.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 
+// ---------------------------------------------------------------------------
+// Row → response-item helper.
+//
+// All three serializing routes (GET / POST / PATCH) project the same six DB
+// columns into the same UserInjuryItem shape. Centralizing the cast pattern
+// keeps the joint/severity enum narrowing + Date→ISO conversion in one place,
+// so a future column addition (e.g. severity_changed_at) is a one-line edit
+// instead of three. DELETE doesn't return a body so it doesn't call this.
+// ---------------------------------------------------------------------------
+type InjuryRow = {
+  joint: string;
+  severity: string;
+  notes: string;
+  onset_at: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+function rowToInjury(r: InjuryRow): UserInjuryItem {
+  return {
+    joint: r.joint as UserInjuryItem['joint'],
+    severity: r.severity as UserInjuryItem['severity'],
+    notes: r.notes,
+    onset_at: r.onset_at,
+    created_at: r.created_at.toISOString(),
+    updated_at: r.updated_at.toISOString(),
+  };
+}
+
 export async function userInjuriesRoutes(app: FastifyInstance) {
   app.get(
     '/user/injuries',
@@ -43,14 +72,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
-      const { rows } = await db.query<{
-        joint: string;
-        severity: string;
-        notes: string;
-        onset_at: string | null;
-        created_at: Date;
-        updated_at: Date;
-      }>(
+      const { rows } = await db.query<InjuryRow>(
         `SELECT joint, severity, notes,
                 to_char(onset_at, 'YYYY-MM-DD') AS onset_at,
                 created_at, updated_at
@@ -61,14 +83,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       );
 
       const body: UserInjuryListResponse = {
-        injuries: rows.map((r) => ({
-          joint: r.joint,
-          severity: r.severity,
-          notes: r.notes,
-          onset_at: r.onset_at, // null if NULL in DB
-          created_at: r.created_at.toISOString(),
-          updated_at: r.updated_at.toISOString(),
-        })) as UserInjuryListResponse['injuries'],
+        injuries: rows.map(rowToInjury),
       };
       // Re-parse at the boundary so an unexpected DB shape (e.g. a new joint
       // value not yet in INJURY_JOINTS) becomes a loud 500 in the catch-all
@@ -115,14 +130,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       );
       const isNew = !existing;
 
-      const { rows: [row] } = await db.query<{
-        joint: string;
-        severity: string;
-        notes: string;
-        onset_at: string | null;
-        created_at: Date;
-        updated_at: Date;
-      }>(
+      const { rows: [row] } = await db.query<InjuryRow>(
         `INSERT INTO user_injuries (user_id, joint, severity, notes, onset_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (user_id, joint) DO UPDATE SET
@@ -136,15 +144,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
         [userId, joint, severity, notes, onset_at ?? null],
       );
 
-      const injury = {
-        joint: row.joint,
-        severity: row.severity,
-        notes: row.notes,
-        onset_at: row.onset_at,
-        created_at: row.created_at.toISOString(),
-        updated_at: row.updated_at.toISOString(),
-      } as UserInjuryItem;
-      return reply.code(isNew ? 201 : 200).send({ injury });
+      return reply.code(isNew ? 201 : 200).send({ injury: rowToInjury(row) });
     },
   );
 
@@ -195,14 +195,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       }
       if (!fields.length) return reply.code(400).send({ error: 'empty_patch' });
 
-      const { rows: [row] } = await db.query<{
-        joint: string;
-        severity: string;
-        notes: string;
-        onset_at: string | null;
-        created_at: Date;
-        updated_at: Date;
-      }>(
+      const { rows: [row] } = await db.query<InjuryRow>(
         `UPDATE user_injuries SET ${fields.join(', ')}, updated_at = now()
          WHERE user_id = $1 AND joint = $2
          RETURNING joint, severity, notes,
@@ -212,15 +205,7 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       );
       if (!row) return reply.code(404).send({ error: 'not_found' });
 
-      const injury: UserInjuryItem = {
-        joint: row.joint as UserInjuryItem['joint'],
-        severity: row.severity as UserInjuryItem['severity'],
-        notes: row.notes,
-        onset_at: row.onset_at,
-        created_at: row.created_at.toISOString(),
-        updated_at: row.updated_at.toISOString(),
-      };
-      return reply.send({ injury });
+      return reply.send({ injury: rowToInjury(row) });
     },
   );
 
