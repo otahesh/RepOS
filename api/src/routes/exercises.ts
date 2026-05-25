@@ -67,7 +67,10 @@ export async function exerciseRoutes(app: FastifyInstance) {
         `SELECT equipment_profile FROM users WHERE id=$1`, [userId]
       );
       if (rows.length === 0) { reply.code(404); return { error: 'user not found' }; }
-      const result = await findSubstitutions(req.params.slug, rows[0].equipment_profile);
+      // Beta W3.2 — pass userId so findSubstitutions invokes the injuryRanker
+      // and tags candidates whose joint_stress_profile overlaps the caller's
+      // recorded user_injuries.
+      const result = await findSubstitutions(req.params.slug, rows[0].equipment_profile, userId);
       if (!result) { reply.code(404); return { error: 'exercise not found', field: 'slug' }; }
       reply.header('cache-control', 'private, max-age=60');
       reply.header('vary', 'Authorization');

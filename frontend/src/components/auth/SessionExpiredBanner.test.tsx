@@ -168,9 +168,11 @@ describe('<SessionExpiredBanner>', () => {
   });
 
   // ── W1.3.7.2 — Safari private mode: localStorage.setItem throws ──────────
+  // Spy on Storage.prototype (not the localStorage instance): vi.spyOn on the
+  // instance is a silent no-op against jsdom's native Storage in vitest@2.1.
   it('renders blocking modal (does NOT auto-redirect) when localStorage.setItem throws', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
 
@@ -190,7 +192,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('Safari private modal pluralises correctly for a single set', async () => {
     setCounts({ pending: 1 });
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
 
@@ -207,7 +209,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('Safari modal Sign-in CTA redirects to CF Access login', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
     const user = userEvent.setup();
@@ -229,7 +231,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('counts pending + syncing + rejected together in the modal copy (unflushed = anything not yet synced)', async () => {
     setCounts({ pending: 1, syncing: 2, rejected: 1 });
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
 
@@ -247,7 +249,7 @@ describe('<SessionExpiredBanner>', () => {
   // ── W1.3.7.3 — wired into AppShell ────────────────────────────────────────
   it('is mounted inside AppShell — Safari-fallback modal surfaces on cf-access-expired event', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
 

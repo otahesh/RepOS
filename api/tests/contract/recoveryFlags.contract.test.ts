@@ -29,7 +29,7 @@ beforeAll(async () => {
   const mint = await app.inject({
     method: 'POST',
     url: '/api/tokens',
-    body: { user_id: userId, label: 'contract-test' },
+    body: { user_id: userId, label: 'contract-test', scopes: ['health:recovery:read'] },
   });
   token = mint.json<{ token: string }>().token;
 }, 30_000);

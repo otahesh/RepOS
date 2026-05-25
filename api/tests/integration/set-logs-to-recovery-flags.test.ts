@@ -29,6 +29,7 @@ import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
 import {
   seedUserWithMesocycle,
+  seedUserOverreaching,
   cleanupSeeded,
   type SeedHandle,
 } from '../helpers/seed-fixtures.js';
@@ -129,11 +130,30 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     await app.close();
   });
 
-  // W3 UI assertion is `test.skip`-gated — re-enable when W3.1 lands the
-  // /api/recovery-flags evaluator + the /today overreaching toast. The skip
-  // intentionally fails noisily ("expected:passing") if the underlying signal
-  // ever regresses, so the W3 reviewer notices the gap before re-enabling.
-  it.skip('the /today overreaching toast appears after three RIR-0 logs (W3.1)', async () => {
-    expect(false).toBe(true);
+  // [W3.1 Task 13] Re-enabled. The W1.5 author left this as an
+  // it.skip-with-expected-fail placeholder pending the W3 evaluator landing.
+  // Now that overreachingEvaluator + route registration + telemetry are in
+  // place (Tasks 10–12.5), GET /api/recovery-flags returns the flag whenever
+  // the strict AND-gate conditions hold. seedUserOverreaching seeds exactly
+  // those conditions: 3 RIR-0 compound sessions in 7d + current-week
+  // performed_sets >= MAV. This locks in the cross-wave W1→W3 contract.
+  it('the /today overreaching toast appears after three RIR-0 logs (W3.1)', async () => {
+    const app = await build();
+    const seed = await seedUserOverreaching();
+    handles.push(seed);
+
+    const flags = await app.inject({
+      method: 'GET',
+      url: '/api/recovery-flags',
+      headers: { authorization: `Bearer ${seed.bearer}` },
+    });
+    expect(flags.statusCode).toBe(200);
+    expect(
+      flags.json<{ flags: Array<{ flag: string }> }>().flags.some(
+        (f) => f.flag === 'overreaching',
+      ),
+    ).toBe(true);
+
+    await app.close();
   });
 });

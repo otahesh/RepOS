@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { TodayWorkoutMobile } from './TodayWorkoutMobile';
 import * as mesoApi from '../../lib/api/mesocycles';
 import * as plannedApi from '../../lib/api/plannedSets';
+import * as exApi from '../../lib/api/exercises';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -107,5 +108,21 @@ describe('<TodayWorkoutMobile>', () => {
     });
     // Sheet should be gone
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('opens MidSessionSwapPicker pre-loaded with injury context when "Got a tweak?" is tapped', async () => {
+    vi.spyOn(exApi, 'getSubstitutions').mockResolvedValue({
+      from: { slug: 'barbell-bench-press', name: 'Barbell Bench Press' },
+      subs: [
+        { id: 'sub-1', slug: 'incline-db-bench', name: 'Incline DB Bench', score: 500, reason: 'Same pattern' },
+      ],
+      truncated: false,
+    });
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    const moreBtns = screen.getAllByRole('button', { name: /more options/i });
+    fireEvent.click(moreBtns[0]);
+    fireEvent.click(screen.getByRole('menuitem', { name: /got a tweak/i }));
+    expect(await screen.findByRole('dialog', { name: /swap/i })).toBeInTheDocument();
   });
 });

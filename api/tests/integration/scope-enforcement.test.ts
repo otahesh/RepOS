@@ -291,3 +291,112 @@ describe('set-logs scope enforcement (W1 reviewer matrix Critical)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W3 Task 4 (FIX-3) — failure-first markers for the new injury scopes.
+// The scope strings land in VALID_SCOPES in this commit, but the routes
+// (/api/user/injuries CRUD) ship in Tasks 5–8. These tests are written now as
+// the failure-first contract; they are .skip-gated and re-enabled in Task 5
+// once the routes exist. Without the skip the route returns 404 (not 403) and
+// the suite goes red on this branch.
+// ---------------------------------------------------------------------------
+
+describe('user_injuries scope enforcement (W3 Task 4 failure-first)', () => {
+  it('GET /api/user/injuries requires health:injuries:read scope', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['set_logs:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'GET',
+        url: '/api/user/injuries',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:injuries:read/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/user/injuries requires health:injuries:write scope', async () => {
+    // A read-only bearer is the precise failure-mode the scope guard must
+    // catch — read-scope alone must not authorize a write.
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['health:injuries:read'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/user/injuries',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { joint: 'knee_left' },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:injuries:write/);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3 Task 12.5 (FIX-28) — scope-gate the pre-existing /api/recovery-flags
+// routes. Task 12 added recovery_flag_events telemetry writes to both the GET
+// and the POST /dismiss handlers, which turns the missing scope into a
+// write-amplification vector via stale bearers. Both routes must now require
+// `health:recovery:read`.
+// ---------------------------------------------------------------------------
+
+describe('recovery-flags scope enforcement (W3 Task 12.5, FIX-28)', () => {
+  it('GET /api/recovery-flags requires health:recovery:read scope', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['set_logs:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'GET',
+        url: '/api/recovery-flags',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:recovery:read/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/recovery-flags/dismiss requires health:recovery:read scope', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['set_logs:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/recovery-flags/dismiss',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { flag: 'overreaching' },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:recovery:read/);
+    } finally {
+      await app.close();
+    }
+  });
+});

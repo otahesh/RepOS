@@ -182,3 +182,25 @@ export const TERMS: Record<TermKey, TermDef> = {
     whyMatters: 'Warmup sets don\'t count toward volume. Working sets do.',
   },
 };
+
+// ---------------------------------------------------------------------------
+// Beta W3.2/W3.3 — injury advisory copy
+// ---------------------------------------------------------------------------
+// Used by MidSessionSwapPicker to render a one-line warning under candidates
+// the server-side injuryRanker tagged. Keys mirror the InjuryJoint enum
+// (api/src/schemas/userInjuries.ts) and the SubstitutionCandidate.injury_advisory
+// shape in api/src/services/substitutions.ts. The copy is intentionally plain
+// ("you noted ...") — the user has already declared the joint in Settings.
+export const INJURY_ADVISORY_COPY: Record<string, Record<'mod' | 'high', string>> = {
+  shoulder_left:  { mod: 'Moderate shoulder load — you noted left shoulder',  high: 'High shoulder load — you noted left shoulder' },
+  shoulder_right: { mod: 'Moderate shoulder load — you noted right shoulder', high: 'High shoulder load — you noted right shoulder' },
+  low_back:       { mod: 'Moderate low-back load — you noted low back',       high: 'High low-back load — you noted low back' },
+  knee_left:      { mod: 'Moderate knee load — you noted left knee',          high: 'High knee load — you noted left knee' },
+  knee_right:     { mod: 'Moderate knee load — you noted right knee',         high: 'High knee load — you noted right knee' },
+  elbow:          { mod: 'Moderate elbow load — you noted elbow',             high: 'High elbow load — you noted elbow' },
+  wrist:          { mod: 'Moderate wrist load — you noted wrist',             high: 'High wrist load — you noted wrist' },
+};
+
+export function injuryAdvisoryCopy(joint: string, level: 'mod' | 'high'): string {
+  return INJURY_ADVISORY_COPY[joint]?.[level] ?? 'Joint stress on this lift';
+}
