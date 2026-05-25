@@ -123,7 +123,17 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   //    require `set_logs:write` (added to VALID_SCOPES alongside the existing
   //    health:* scopes). Tests that need to assert cross-scope rejection mint
   //    a parallel wrong-scope bearer with mintBearer(...).
-  const { bearer } = await mintBearer({ userId, scopes: ['set_logs:write'] });
+  //
+  //    [FIX-28 / Task 12.5] Additive `health:recovery:read` so seeds that
+  //    transitively hit /api/recovery-flags (e.g. seedUserOverreaching for the
+  //    recovery_flag_events telemetry test) keep passing once Task 12.5's
+  //    scope gate lands. Scope-rejection tests that need a bearer WITHOUT
+  //    set_logs:write or WITHOUT health:recovery:read still mint parallel
+  //    wrong-scope bearers via mintBearer(...).
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read'],
+  });
 
   // 3. Pick any seeded exercise.
   const { rows: ex } = await db.query<{ id: string }>(

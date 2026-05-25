@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { requireScope } from '../middleware/scope.js';
 import {
   evaluateAll,
   bodyweightCrashEvaluator,
@@ -43,7 +44,9 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
   registerEvaluator(stalledPrEvaluator);
   registerEvaluator(overreachingEvaluator);
 
-  app.get('/recovery-flags', { preHandler: requireBearerOrCfAccess }, async (req) => {
+  app.get('/recovery-flags', {
+    preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')],
+  }, async (req) => {
     const userId = (req as any).userId as string;
 
     // Resolve the user's active mesocycle_run so run-anchored evaluators
@@ -98,7 +101,7 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
 
   app.post<{ Body: unknown }>(
     '/recovery-flags/dismiss',
-    { preHandler: requireBearerOrCfAccess },
+    { preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')] },
     async (req, reply) => {
       const userId = (req as any).userId as string;
 

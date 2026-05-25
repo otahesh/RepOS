@@ -41,7 +41,7 @@ beforeAll(async () => {
   const mint = await app.inject({
     method: 'POST',
     url: '/api/tokens',
-    body: { user_id: userId, label: 'rf-route-test' },
+    body: { user_id: userId, label: 'rf-route-test', scopes: ['health:recovery:read'] },
   });
   token = mint.json<{ token: string }>().token;
 
@@ -55,7 +55,7 @@ beforeAll(async () => {
   const cutMint = await app.inject({
     method: 'POST',
     url: '/api/tokens',
-    body: { user_id: cutUserId, label: 'rf-route-cut-test' },
+    body: { user_id: cutUserId, label: 'rf-route-cut-test', scopes: ['health:recovery:read'] },
   });
   cutToken = cutMint.json<{ token: string }>().token;
 

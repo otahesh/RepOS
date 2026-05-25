@@ -347,3 +347,56 @@ describe('user_injuries scope enforcement (W3 Task 4 failure-first)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// W3 Task 12.5 (FIX-28) — scope-gate the pre-existing /api/recovery-flags
+// routes. Task 12 added recovery_flag_events telemetry writes to both the GET
+// and the POST /dismiss handlers, which turns the missing scope into a
+// write-amplification vector via stale bearers. Both routes must now require
+// `health:recovery:read`.
+// ---------------------------------------------------------------------------
+
+describe('recovery-flags scope enforcement (W3 Task 12.5, FIX-28)', () => {
+  it('GET /api/recovery-flags requires health:recovery:read scope', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['set_logs:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'GET',
+        url: '/api/recovery-flags',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:recovery:read/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/recovery-flags/dismiss requires health:recovery:read scope', async () => {
+    const app = await build();
+    try {
+      const { bearer, handle } = await seedUserAndMintBearer({
+        scopes: ['set_logs:write'],
+      });
+      handles.push(handle);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/recovery-flags/dismiss',
+        headers: { authorization: `Bearer ${bearer}` },
+        payload: { flag: 'overreaching' },
+      });
+
+      expect(resp.statusCode).toBe(403);
+      expect(resp.json().error).toMatch(/scope_required:health:recovery:read/);
+    } finally {
+      await app.close();
+    }
+  });
+});
