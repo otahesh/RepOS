@@ -98,7 +98,10 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
     const fits = allPredicatesSatisfied(predicates, profile);
     let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
     if (!fits) {
-      const sub = await findSubstitutions(s.ex_slug, profile);
+      // Beta W3.2 — pass userId so the picked suggested_substitution also
+      // reflects injury-aware ranking (knee-stressful alternative for a knee
+      // injury would otherwise outrank a safer choice).
+      const sub = await findSubstitutions(s.ex_slug, profile, userId);
       const top = sub?.subs?.[0];
       if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
     }

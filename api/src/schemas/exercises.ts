@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { INJURY_JOINTS } from './userInjuries.js';
 
 // ---------------------------------------------------------------------------
 // Shared exercise shape
@@ -51,11 +52,21 @@ export type ExerciseDetailResponse = z.infer<typeof ExerciseDetailResponseSchema
 // GET /api/exercises/:slug/substitutions — response
 // ---------------------------------------------------------------------------
 
+// Beta W3.2 — `injury_advisory` is set by the injuryRanker (Task 14) when the
+// candidate's `joint_stress_profile` overlaps a user's recorded injury at
+// mod or high stress. The frontend (Task 18) renders the
+// `injuryAdvisoryCopy` line under demoted candidates. Optional: callers
+// without a userId, or candidates whose joints don't intersect any active
+// injury, simply omit the field.
 const SubstitutionCandidateSchema = z.object({
   slug: z.string(),
   name: z.string(),
   score: z.number(),
   reason: z.string(),
+  injury_advisory: z.object({
+    joint: z.enum(INJURY_JOINTS),
+    level: z.enum(['mod', 'high']),
+  }).optional(),
 });
 
 const ClosestPartialSchema = z.object({
