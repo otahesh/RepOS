@@ -361,6 +361,135 @@ export async function seedStalledPr(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// seedUserOverreaching — sets up a SeedHandle whose state satisfies BOTH
+// conditions of the strict AND-gate overreaching evaluator:
+//   (1) >= 3 RIR-0 sessions on COMPOUND exercises in the trailing 7d
+//   (2) current-week performed_sets >= MAV for at least one worked muscle
+//
+// Compound = exercises.movement_pattern IN
+//   ('squat','hinge','push_horizontal','push_vertical',
+//    'pull_horizontal','pull_vertical').
+// The base seedUserWithMesocycle picks `SELECT id FROM exercises LIMIT 1`,
+// which is a compound (bench press et al. — they all use compound patterns;
+// even isolation lifts like dumbbell-lateral-raise are tagged push_vertical
+// in the enum because there's no canonical 'isolation' pattern). So the
+// base seed already satisfies the compound check.
+//
+// MAV: with 6 set_logs × 3 sessions × 1.0 primary-muscle contribution = 18
+// performed sets — enough to exceed the highest MAV landmark (side_delt=18).
+// Most primary muscles have MAV <= 16, so 18 >= MAV reliably triggers.
+//
+// Timestamps are staggered (i+1 minutes ago) to avoid the
+// set_logs_minute_dedupe_key UNIQUE index collision.
+// ---------------------------------------------------------------------------
+export async function seedUserOverreaching(): Promise<SeedHandle> {
+  const seed = await seedUserWithMesocycle();
+  // Ensure NOT in deload AND current_week aligns with the day_workouts'
+  // week_idx so computeVolumeRollup → evaluator current-week lookup finds
+  // populated volume. The base seed creates day_workouts at week_idx=1; the
+  // overreaching evaluator looks up mesocycle_runs.current_week (=1) and
+  // matches WeekVolume.week_idx=1. weeks=4 keeps current_week (1) < weeks
+  // so the conservative "not deload" stance holds for parity with stalledPr.
+  await db.query(
+    `UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`,
+    [seed.mesocycleRunId],
+  );
+  const sessions = await addThreeDistinctSessions(seed);
+  // 3 RIR-0 compound sessions in trailing 7d, each with enough sets to push
+  // volume >= MAV on the primary muscle. Per-session minutes-ago is
+  // (sessionIdx*10 + i) so the (planned_set_id, minute) dedupe key never
+  // collides across the 6 sets within a session OR across the 3 sessions.
+  for (let s = 0; s < 3; s++) {
+    for (let i = 0; i < 6; i++) {
+      const minutesAgo = s * 10 + i + 1;
+      await db.query(
+        `INSERT INTO set_logs
+           (user_id, exercise_id, planned_set_id, client_request_id,
+            performed_load_lbs, performed_reps, performed_rir, performed_at)
+         VALUES ($1, $2, $3, gen_random_uuid(),
+            225, 8, 0,
+            now() - ($4 || ' minutes')::interval)`,
+        [seed.userId, seed.exerciseId, sessions[s].plannedSetId, String(minutesAgo)],
+      );
+    }
+  }
+  return seed;
+}
+
+// ---------------------------------------------------------------------------
+// seedOverreachingPartial — sets up a SeedHandle that satisfies SOME but
+// not ALL conditions of the overreaching evaluator. Used to test the
+// strict AND-gate.
+//
+//   { rir0Sessions: 2 } — only 2 RIR-0 sessions (need 3); volume DOES hit MAV.
+//   { exerciseType: 'isolation' } — 3 RIR-0 sessions but the planned_sets'
+//                                   exercise is re-pointed to a non-compound
+//                                   pattern (lunge/carry/rotation/etc.); the
+//                                   evaluator's compound filter rejects it
+//                                   even though volume + RIR still qualify.
+//   { underMav: true } — 3 RIR-0 compound sessions but only 1 set per session
+//                        (3 total) so volume stays well under any MAV.
+// ---------------------------------------------------------------------------
+export async function seedOverreachingPartial(opts: {
+  rir0Sessions?: 2;
+  exerciseType?: 'isolation';
+  underMav?: true;
+}): Promise<SeedHandle> {
+  const seed = await seedUserWithMesocycle();
+  await db.query(
+    `UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`,
+    [seed.mesocycleRunId],
+  );
+  const sessions = await addThreeDistinctSessions(seed);
+
+  // 'isolation' variant: re-point planned_sets + set_logs to an exercise whose
+  // movement_pattern is NOT in the compound set. lunge/carry/rotation/etc.
+  // exercises exist in seed (see api/src/seed/exercises.ts:625+).
+  let exerciseIdForLogs = seed.exerciseId;
+  if (opts.exerciseType === 'isolation') {
+    const { rows } = await db.query<{ id: string }>(
+      `SELECT id FROM exercises
+       WHERE movement_pattern NOT IN
+         ('squat','hinge','push_horizontal','push_vertical',
+          'pull_horizontal','pull_vertical')
+       LIMIT 1`,
+    );
+    if (rows.length === 0) {
+      throw new Error(
+        'seedOverreachingPartial: no non-compound exercise seeded — ' +
+        'check api/src/seed/exercises.ts',
+      );
+    }
+    exerciseIdForLogs = rows[0].id;
+    for (const sess of sessions) {
+      await db.query(
+        `UPDATE planned_sets SET exercise_id = $1 WHERE id = $2`,
+        [exerciseIdForLogs, sess.plannedSetId],
+      );
+    }
+  }
+
+  const numSessions = opts.rir0Sessions === 2 ? 2 : 3;
+  const setsPerSession = opts.underMav ? 1 : 6;
+
+  for (let s = 0; s < numSessions; s++) {
+    for (let i = 0; i < setsPerSession; i++) {
+      const minutesAgo = s * 10 + i + 1;
+      await db.query(
+        `INSERT INTO set_logs
+           (user_id, exercise_id, planned_set_id, client_request_id,
+            performed_load_lbs, performed_reps, performed_rir, performed_at)
+         VALUES ($1, $2, $3, gen_random_uuid(),
+            225, 8, 0,
+            now() - ($4 || ' minutes')::interval)`,
+        [seed.userId, exerciseIdForLogs, sessions[s].plannedSetId, String(minutesAgo)],
+      );
+    }
+  }
+  return seed;
+}
+
+// ---------------------------------------------------------------------------
 // cleanupSeeded — cascading DELETE on users removes everything that hangs off
 // them (device_tokens, user_programs → mesocycle_runs → day_workouts →
 // planned_sets → set_logs). We additionally drop the per-seed
