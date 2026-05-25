@@ -255,6 +255,112 @@ export async function seedThreeLogsOnSamePlannedSet(): Promise<SeedHandleWithLog
 }
 
 // ---------------------------------------------------------------------------
+// addThreeDistinctSessions — inserts 2 additional (day_workouts, planned_sets)
+// pairs on the same mesocycle_run as `seed`, pointing to the same exercise.
+// Returns array of 3 sessions (the seeded one + 2 new) with their
+// plannedSetId + dayWorkoutId. The caller inserts set_logs against these
+// to build a multi-session history for evaluators (W3.1 stalled-PR).
+//
+// Existing seedUserWithMesocycle creates day_workout (week_idx=1, day_idx=0)
+// because the volume-rollup service iterates week_idx 1..nWeeks. We add two
+// more at (week_idx=1, day_idx=1) and (week_idx=1, day_idx=2) so the
+// UNIQUE (mesocycle_run_id, week_idx, day_idx) constraint isn't violated and
+// they sit on the same week as the seed.
+// ---------------------------------------------------------------------------
+export async function addThreeDistinctSessions(seed: SeedHandle): Promise<Array<{
+  plannedSetId: string;
+  dayWorkoutId: string;
+}>> {
+  const { mesocycleRunId, dayWorkoutId, plannedSetId } = seed;
+  const sessions: Array<{ plannedSetId: string; dayWorkoutId: string }> = [
+    { plannedSetId, dayWorkoutId },
+  ];
+  for (let i = 1; i < 3; i++) {
+    const { rows: [dw] } = await db.query<{ id: string }>(
+      `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
+       SELECT $1, 1, $2::int, CURRENT_DATE + $2::int, kind, name, 'completed'
+       FROM day_workouts WHERE id = $3
+       RETURNING id`,
+      [mesocycleRunId, i, dayWorkoutId],
+    );
+    const { rows: [ps] } = await db.query<{ id: string }>(
+      `INSERT INTO planned_sets
+         (day_workout_id, block_idx, set_idx, exercise_id,
+          target_reps_low, target_reps_high, target_rir, rest_sec)
+       SELECT $1, block_idx, set_idx, exercise_id,
+              target_reps_low, target_reps_high, target_rir, rest_sec
+       FROM planned_sets WHERE id = $2
+       RETURNING id`,
+      [dw.id, plannedSetId],
+    );
+    sessions.push({ plannedSetId: ps.id, dayWorkoutId: dw.id });
+  }
+  return sessions;
+}
+
+// ---------------------------------------------------------------------------
+// seedStalledPr — sets up a SeedHandle whose set_logs reflect one of 5
+// patterns for the W3.1 stalled-PR evaluator to triage. Pattern semantics:
+//
+//   'stalled'      — 3 identical RIR-0 sessions (8 reps @ 225 lbs, 0 RIR)
+//   'progressing'  — last session jumps load to 235 (PR fired, not stalled)
+//   'rir-mixed'    — middle session has RIR=2 (not max effort)
+//   'deload'       — mesocycle_runs.current_week === weeks (last week)
+//   'low-rep'      — sessions at 3 reps (strength range, FIX-25 gates this)
+//
+// Non-deload patterns force weeks=4 + current_week=2 so the evaluator's
+// deload guard (current_week >= weeks, see FIX-24 ADAPTED in
+// stalledPrEvaluator) doesn't trip. The base seedUserWithMesocycle creates
+// weeks=1 + current_week=1 which would always look like a deload.
+// ---------------------------------------------------------------------------
+export async function seedStalledPr(opts: {
+  pattern: 'stalled' | 'progressing' | 'rir-mixed' | 'deload' | 'low-rep';
+}): Promise<SeedHandle> {
+  const seed = await seedUserWithMesocycle();
+  const { userId, mesocycleRunId, exerciseId } = seed;
+
+  if (opts.pattern === 'deload') {
+    // [FIX-24 ADAPTED] Last week of mesocycle = deload. Force
+    // current_week === weeks. The base seed already has weeks=1
+    // current_week=1, so this is a no-op, but assert explicitly for clarity.
+    await db.query(
+      `UPDATE mesocycle_runs SET weeks = 4, current_week = 4 WHERE id = $1`,
+      [mesocycleRunId],
+    );
+  } else {
+    // Make sure we're NOT in the last week (current_week < weeks).
+    await db.query(
+      `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
+      [mesocycleRunId],
+    );
+  }
+
+  const sessions = await addThreeDistinctSessions(seed);
+
+  const baseLoad = 225;
+  const baseReps = opts.pattern === 'low-rep' ? 3 : 8;
+  // Order: i=0 oldest (3 days ago), i=2 most recent (1 day ago).
+  for (let i = 0; i < 3; i++) {
+    let load = baseLoad;
+    const reps = baseReps;
+    let rir = 0;
+    if (opts.pattern === 'progressing' && i === 2) load = 235;
+    if (opts.pattern === 'rir-mixed' && i === 1) rir = 2;
+    await db.query(
+      `INSERT INTO set_logs
+         (user_id, exercise_id, planned_set_id, client_request_id,
+          performed_load_lbs, performed_reps, performed_rir,
+          performed_at)
+       VALUES ($1, $2, $3, gen_random_uuid(),
+          $4, $5, $6,
+          now() - ($7::int * INTERVAL '1 day'))`,
+      [userId, exerciseId, sessions[i].plannedSetId, load, reps, rir, 3 - i],
+    );
+  }
+  return seed;
+}
+
+// ---------------------------------------------------------------------------
 // cleanupSeeded — cascading DELETE on users removes everything that hangs off
 // them (device_tokens, user_programs → mesocycle_runs → day_workouts →
 // planned_sets → set_logs). We additionally drop the per-seed
