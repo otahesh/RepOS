@@ -289,6 +289,9 @@ async function main() {
     // W6 Task 13 — display-name + timezone editor. Mounted by
     // SettingsAccount in Task 16. Remove when Task 16 lands.
     'settings/AccountProfileEditor.tsx',
+    // W6 Task 14 — active-sessions surface w/ per-token revoke. Mounted by
+    // SettingsAccount in Task 16. Remove when Task 16 lands.
+    'settings/ActiveSessionsTable.tsx',
   ]);
 
   // 1. Orphan components.

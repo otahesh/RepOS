@@ -94,6 +94,12 @@ const DOM_ID_REF_ATTRS = new Set([
   'aria-owns',
   'aria-activedescendant',
   'form',
+  // Test-hook selectors are programmatic identifiers consumed by the test
+  // runner — never rendered to the user or voiced by assistive tech. A term
+  // substring inside a value like "session-card" is not a user-visible
+  // "session" mention (e.g. the I-SESSIONS-MOBILE-mandated session-row /
+  // session-card hooks on ActiveSessionsTable).
+  'data-testid',
 ]);
 
 export async function findOffenders(files) {

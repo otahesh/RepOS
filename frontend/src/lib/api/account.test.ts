@@ -6,6 +6,7 @@ import {
   signOutEverywhere,
   listSessions,
   listEvents,
+  revokeSession,
 } from './account';
 
 beforeEach(() => {
@@ -91,6 +92,20 @@ describe('lib/api/account', () => {
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining('before_id=42'),
       expect.any(Object),
+    );
+  });
+
+  it('revokeSession DELETEs /api/account/sessions/:id with CSRF header', async () => {
+    const spy = vi
+      .spyOn(auth, 'apiFetch')
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    await revokeSession('tok-123');
+    expect(spy).toHaveBeenCalledWith(
+      '/api/account/sessions/tok-123',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ 'X-RepOS-CSRF': '1' }),
+      }),
     );
   });
 

@@ -187,6 +187,29 @@ export async function listSessions(): Promise<SessionRow[]> {
   return body.sessions;
 }
 
+// ───────────────────────── DELETE /api/account/sessions/:id ───────────────
+
+/**
+ * Revoke a single bearer token (session) by id. Per the I-CONTAM-MATRIX
+ * decision recorded in Task 14 (option a), this is shipped alongside the
+ * sessions list so the "here are your sessions" surface has a matching
+ * action affordance.
+ *
+ * Server returns 204 on success or 404 if the token id doesn't belong to
+ * the caller (silent contamination guard — never reveals existence of
+ * another user's token).
+ */
+export async function revokeSession(id: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/account/sessions/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: CSRF_HEADER,
+    },
+  );
+  await expectNoContent(res);
+}
+
 // ───────────────────────── GET /api/account/events ────────────────────────
 
 /**

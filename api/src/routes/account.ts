@@ -237,6 +237,61 @@ export async function accountRoutes(app: FastifyInstance) {
     },
   );
 
+  // DELETE /api/account/sessions/:id — revoke a single bearer token (Task 14).
+  //
+  // Per I-CONTAM-MATRIX option (a): shipped alongside GET /account/sessions so
+  // the "here are your sessions" surface has a matching action affordance. The
+  // WHERE clause pins user_id=$1 (identity from req.userId) — that's the
+  // contamination guard: user-A can never revoke user-B's token (rowCount=0 →
+  // 404, never 204). Covered by account-sessions-delete-contamination.test.ts.
+  //
+  // Auth: requireBearerOrCfAccess (a user must be able to revoke their own
+  // sessions from either the bearer or the cookie path — unlike DELETE /me,
+  // which is CF-Access-only). csrfOrigin guards the CF-Access cookie path.
+  //
+  // userEmail: bearer auth populates req.userId but NOT req.userEmail (see
+  // middleware/cfAccess.ts requireAuth) — mirror the PATCH /me/profile fallback
+  // and re-read email from users when req.userEmail is undefined so the audit
+  // event always has the actor's email.
+  app.delete<{ Params: { id: string } }>(
+    '/account/sessions/:id',
+    { preHandler: [requireBearerOrCfAccess, csrfOrigin] },
+    async (req, reply) => {
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+
+      const { rowCount } = await db.query(
+        `UPDATE device_tokens
+            SET revoked_at = now(), revoke_reason = 'user_revoked'
+          WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+        [req.params.id, userId],
+      );
+      if (rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+
+      // Re-read email if the bearer path didn't plumb it through.
+      let userEmail = getUserEmail(req);
+      if (!userEmail) {
+        const { rows } = await db.query<{ email: string }>(
+          `SELECT email FROM users WHERE id=$1`,
+          [userId],
+        );
+        if (rows.length === 0) {
+          return reply.code(500).send({ error: 'auth_state_missing' });
+        }
+        userEmail = rows[0].email;
+      }
+
+      await recordAccountEvent({
+        userId,
+        userEmail,
+        kind: 'token_revoked',
+        ip: req.ip,
+        meta: { token_id: req.params.id },
+      });
+      return reply.code(204).send();
+    },
+  );
+
   // DELETE /api/me — full-cascade account deletion (Task 9).
   //
   // Auth: CF-Access-JWT-only (per C-SIGNOUT-CFACCESS-ONLY) — a stolen bearer
