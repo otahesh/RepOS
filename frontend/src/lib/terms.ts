@@ -16,7 +16,8 @@ export type TermKey =
   | 'hinge' | 'squat' | 'lunge' | 'carry'
   | 'rotation' | 'anti_rotation'
   | 'compound' | 'isolation'
-  | 'accumulation' | 'working_set';
+  | 'accumulation' | 'working_set'
+  | 'PAT' | 'bearer_token' | 'session' | 'IANA_timezone' | 'truncated_ip_24';
 
 export const TERMS: Record<TermKey, TermDef> = {
   RIR: {
@@ -180,6 +181,36 @@ export const TERMS: Record<TermKey, TermDef> = {
     full: 'Working set',
     plain: 'A set at the prescribed RIR target — counted toward weekly volume.',
     whyMatters: 'Warmup sets don\'t count toward volume. Working sets do.',
+  },
+  PAT: {
+    short: 'PAT',
+    full: 'Personal Access Token',
+    plain: 'A long-lived token your iOS Shortcut or other automation uses to talk to RepOS on your behalf.',
+    whyMatters: 'Bearer tokens are device-level. If you lose a device, revoke that token here — your CF Access login on browsers is separate.',
+  },
+  bearer_token: {
+    short: 'bearer token',
+    full: 'Bearer token',
+    plain: 'A long secret string an automation sends with each request to prove it is allowed to act for you.',
+    whyMatters: 'Anyone with the secret can act as you. Revoke immediately if a device is lost or shared.',
+  },
+  session: {
+    short: 'session',
+    full: 'Active session',
+    plain: 'A browser or device that has authenticated to RepOS and can call the API.',
+    whyMatters: 'Sign out everywhere ends all sessions and bearer tokens at once — useful if you suspect any device is compromised.',
+  },
+  IANA_timezone: {
+    short: 'time zone',
+    full: 'IANA time zone',
+    plain: 'The named time zone (like America/New_York) RepOS uses to compute "today" for your workouts.',
+    whyMatters: 'If your time zone is wrong, the home page may show yesterday\'s or tomorrow\'s workout instead of today\'s.',
+  },
+  truncated_ip_24: {
+    short: 'IP /24',
+    full: 'Truncated IP address (/24)',
+    plain: 'RepOS shows only the network portion of your last-used IP (e.g., 192.168.88.0/24) — not the exact address.',
+    whyMatters: 'Enough information for "did I sign in from work or home?" without storing your precise location across every session.',
   },
 };
 

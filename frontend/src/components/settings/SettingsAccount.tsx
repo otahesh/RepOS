@@ -1,5 +1,6 @@
 import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
+import { Term } from '../Term'
 
 export default function SettingsAccount() {
   const { user } = useCurrentUser()
@@ -69,7 +70,7 @@ export default function SettingsAccount() {
         color: TOKENS.textDim,
         lineHeight: 1.5,
       }}>
-        Profile editing and session management land in upcoming Beta waves. Account state is sourced from Cloudflare Access.
+        Profile editing and <Term k="session">session</Term> management land in upcoming Beta waves. Account state is sourced from Cloudflare Access.
       </div>
     </div>
   )

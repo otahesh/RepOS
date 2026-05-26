@@ -26,4 +26,8 @@ describe('check-term-coverage', () => {
     const out = await findOffenders([fix('a11y-attribute.tsx')]);
     expect(out).toEqual([]);
   });
+  it('ignores terms in DOM-id reference attributes (id/htmlFor/aria-labelledby etc.)', async () => {
+    const out = await findOffenders([fix('dom-id-ref-attribute.tsx')]);
+    expect(out).toEqual([]);
+  });
 });
