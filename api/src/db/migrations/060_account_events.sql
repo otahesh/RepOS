@@ -1,4 +1,5 @@
 -- Beta W6 — append-only audit trail for account-scoped operations.
+-- Numbering: jumps from migration 033 → 060. Range 060–069 is reserved for W6 per the W6 plan migration-range claim; intermediate numbers are deliberately unallocated.
 -- One row per profile-change / token-mint-via-account-surface / token-revoke /
 -- signout-everywhere / delete-account event (W6) + par_q_acknowledged /
 -- onboarding_completed (W2) + restore_replayed (W5). Drives:

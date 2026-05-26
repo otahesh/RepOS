@@ -1,8 +1,10 @@
 import 'dotenv/config';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
-describe('migration 060: account_events', () => {
+describe('account_events schema (migration 060)', () => {
+  afterAll(async () => { await db.end(); });
+
   it('table exists with the required columns + types', async () => {
     const { rows } = await db.query<{ column_name: string; data_type: string; is_nullable: string }>(
       `SELECT column_name, data_type, is_nullable
@@ -15,7 +17,9 @@ describe('migration 060: account_events', () => {
     expect(cols.get('user_id')?.data_type).toBe('uuid');
     expect(cols.get('user_id')?.is_nullable).toBe('YES'); // D8 — SET NULL on user delete
     expect(cols.get('user_email_at_event')?.data_type).toBe('text'); // D8 PII snapshot
+    expect(cols.get('user_email_at_event')?.is_nullable).toBe('YES'); // D8 — survives FK SET NULL
     expect(cols.get('user_id_at_event')?.data_type).toBe('uuid'); // D8 immutable snapshot
+    expect(cols.get('user_id_at_event')?.is_nullable).toBe('YES'); // D8 — survives FK SET NULL
     expect(cols.get('kind')?.data_type).toBe('text');
     expect(cols.get('ip')?.data_type).toBe('text');
     expect(cols.get('meta')?.data_type).toBe('jsonb');
@@ -39,12 +43,30 @@ describe('migration 060: account_events', () => {
     );
     // Inserting a kind the DB doesn't know about should succeed at SQL level
     // (the app-layer union prevents it in production code paths).
-    await expect(
-      db.query(
-        `INSERT INTO account_events (user_id, kind, ip, meta) VALUES ($1, 'arbitrary_app_layer_kind', '1.2.3.4', '{}'::jsonb)`,
-        [u.id],
-      ),
-    ).resolves.toBeDefined();
+    const { rows: [evt] } = await db.query<{ id: string }>(
+      `INSERT INTO account_events (user_id, kind, ip, meta) VALUES ($1, 'arbitrary_app_layer_kind', '1.2.3.4', '{}'::jsonb) RETURNING id`,
+      [u.id],
+    );
+    expect(evt.id).toBeDefined();
+    // Clean up the event explicitly BEFORE the user — FK is ON DELETE SET NULL
+    // (D8), so deleting the user first would orphan the row with user_id=NULL
+    // and accumulate across re-runs.
+    await db.query('DELETE FROM account_events WHERE id=$1', [evt.id]);
+    await db.query('DELETE FROM users WHERE id=$1', [u.id]);
+  });
+
+  it('occurred_at defaults to now(), meta defaults to {}', async () => {
+    const { rows: [u] } = await db.query<{ id: string }>(
+      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
+      [`vitest.acct-events.${crypto.randomUUID()}@repos.test`],
+    );
+    const { rows: [evt] } = await db.query<{ id: string; occurred_at: Date | null; meta: unknown }>(
+      `INSERT INTO account_events (user_id, kind) VALUES ($1, 'defaults_probe') RETURNING id, occurred_at, meta`,
+      [u.id],
+    );
+    expect(evt.occurred_at).not.toBeNull();
+    expect(evt.meta).toEqual({});
+    await db.query('DELETE FROM account_events WHERE id=$1', [evt.id]);
     await db.query('DELETE FROM users WHERE id=$1', [u.id]);
   });
 
