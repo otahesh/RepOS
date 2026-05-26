@@ -226,7 +226,10 @@ export async function requireAdminKeyOrCfAccess(req: FastifyRequest, reply: Fast
 // delegate to the existing CF Access JWT validator.
 //
 // We deliberately call `requireCfAccess` directly: same code path used by the
-// cookie branch of `requireBearerOrCfAccess`, no refactor required.
+// cookie branch of `requireBearerOrCfAccess`, no refactor required. After a
+// successful JWT validation we stamp `authMode='cf_access'` so the downstream
+// `csrfOrigin` preHandler enforces the Origin guard (per C-CSRF-ORIGIN) — a
+// stolen JWT replayed cross-origin must still be blocked.
 export async function requireCfAccessOnly(
   req: FastifyRequest,
   reply: FastifyReply,
@@ -236,5 +239,7 @@ export async function requireCfAccessOnly(
     req.log.warn({ path: req.url }, 'bearer_rejected_on_cf_access_only_route');
     return reply.code(403).send({ error: 'cf_access_required' });
   }
-  return requireCfAccess(req, reply);
+  await requireCfAccess(req, reply);
+  if (reply.sent) return;
+  (req as any).authMode = 'cf_access';
 }
