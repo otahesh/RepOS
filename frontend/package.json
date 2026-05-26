@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-pages": "node scripts/check-page-reachability.mjs",
-    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs"
+    "check-tz-sync": "node ../scripts/check-tz-sync.mjs",
+    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs && node ../scripts/check-tz-sync.mjs"
   },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.2",
