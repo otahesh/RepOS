@@ -12,6 +12,7 @@ import {
   type UserProgramDetail,
 } from '../lib/api/userPrograms'
 import { TOKENS } from '../tokens'
+import { pushToast } from '../components/common/ToastHost'
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -166,7 +167,7 @@ export default function MyProgramPage() {
                 day={d}
                 onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
                 onRemoveSet={(dayIdx, blockIdx, setIdx) => void handleRemoveSet(dayIdx, blockIdx, setIdx)}
-                onSwap={(_dayIdx, _blockIdx) => alert('Exercise picker not yet wired — coming in next PR.')}
+                onSwap={(_dayIdx, _blockIdx) => pushToast({ severity: 'info', body: 'Exercise picker lands in W4. Use mid-session swap on mobile.' })}
               />
             ))}
           </div>

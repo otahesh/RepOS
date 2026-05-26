@@ -4,12 +4,13 @@ import { TodayCard } from '../components/programs/TodayCard'
 import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile'
 import MobileWeightChip from '../components/MobileWeightChip'
 import DesktopDashboard from '../components/dashboard/DesktopDashboard'
+import { pushToast } from '../components/common/ToastHost'
 
 // Desktop TodayCard's onStart still routes through this placeholder until the
 // desktop logger ships (W2.x); mobile path now navigates via TodayWorkoutMobile's
 // internal useNavigate to /today/:runId/log.
 function handleDesktopStart(_runId: string, _dayId: string) {
-  alert('Desktop workout execution flow not yet wired — coming in a follow-up PR.')
+  pushToast({ severity: 'info', body: 'Desktop workout execution lands later in Beta. Use the mobile logger.' })
 }
 
 export default function TodayPage() {
