@@ -292,6 +292,10 @@ async function main() {
     // W6 Task 14 — active-sessions surface w/ per-token revoke. Mounted by
     // SettingsAccount in Task 16. Remove when Task 16 lands.
     'settings/ActiveSessionsTable.tsx',
+    // W6 Task 15 — sign-out-everywhere control (CF Access logout redirect +
+    // cross-tab BroadcastChannel signal). Mounted by SettingsAccount in
+    // Task 16. Remove when Task 16 lands.
+    'settings/SignOutEverywhereButton.tsx',
   ]);
 
   // 1. Orphan components.

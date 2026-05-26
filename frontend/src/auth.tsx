@@ -140,6 +140,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // W6 Task 15 — cross-tab sign-out (per I-BROADCASTCHANNEL). When any RepOS
+  // tab in this browser fires the "sign out everywhere" flow it posts a
+  // `{ type: 'signout_everywhere' }` message on BroadcastChannel('repos-auth').
+  // Every other tab listens here and redirects itself to the CF Access logout
+  // so the whole browser tears down its session at once — not just the tab
+  // that clicked the button. Wrapped in try/catch for browsers without
+  // BroadcastChannel; they simply don't get the cross-tab nudge.
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null
+    try {
+      ch = new BroadcastChannel('repos-auth')
+      ch.onmessage = (e: MessageEvent) => {
+        if ((e.data as { type?: string } | null)?.type === 'signout_everywhere') {
+          window.location.assign('/cdn-cgi/access/logout')
+        }
+      }
+    } catch {
+      /* BroadcastChannel unavailable (old browser) — ignore. */
+    }
+    return () => {
+      ch?.close()
+    }
+  }, [])
+
   return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>
 }
 
