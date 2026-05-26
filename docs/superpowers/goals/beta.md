@@ -2,7 +2,7 @@
 
 > Operating dashboard for the alpha→Beta transition. Source-of-truth for *what's true right now*; the master plan is `docs/superpowers/plans/2026-05-11-repos-beta.md`. When this file conflicts with the master plan, the master plan wins — correct this file.
 
-**Last updated:** 2026-05-25 (W3 merged to `main` at `0d5a2cd`; parallel-eligible waves W2/W4/W5/W6 are now the next dispatch).
+**Last updated:** 2026-05-26 (W3 merged to `main` at `0d5a2cd`; per-wave plans drafted + panel-reviewed + revised for W2/W4/W5/W6 — see "Next dispatch" below; **W6 ships first** as it owns `SETTINGS_SECTIONS` + `ConfirmDialog` primitives consumed by W2/W4/W5).
 
 ---
 
@@ -113,20 +113,20 @@ W0 ✓ ───► W1 ✓ ───► W3 ✓ ───► (W8 continuous close
 
 ## Next dispatch
 
-**No serial critical-path action remains** — W3 was the last serial step. The next dispatch is **W2 + W4 + W5 + W6 in parallel worktrees**.
+**Per-wave plans drafted, panel-reviewed (16 reviewers, 4 per wave), and revised** as of 2026-05-26. **W6 ships first** as the sidebar + ConfirmDialog primitive owner; W2/W4/W5 then fan out in parallel worktrees.
 
-W3 closed clean (merge `0d5a2cd`): overreaching + stalled-PR evaluators with recovery_flag_events telemetry, joint_root injury_advisory wiring, mid-session swap UI with click-through, injury chip Settings page at /settings/injuries. Reviewer matrix dispatched (backend/frontend/clinical/security in parallel); Critical+Important fixed inline at `bde6b66`, `466d512`, `fdea791`, `f9c8c62`, `30805b9`. Deferred items captured in `reference_w3_tuning_candidates` (post-Beta tuning, gated on alpha-cohort `recovery_flag_events` telemetry).
+| Wave | Plan | Migrations | Ship order |
+|------|------|------------|------------|
+| **W6** | `docs/superpowers/plans/2026-05-25-w6-account-ops.md` | 060–062 | **First** — owns `SETTINGS_SECTIONS` + `ConfirmDialog` + `ToastHost` + `REPOS_ADMIN_EMAILS` admin gate consumed by other waves |
+| **W2** | `docs/superpowers/plans/2026-05-25-w2-onboarding-clinical-safety.md` | 034–040 | After W6 — onboarding + PAR-Q (with Q5→`user_injuries` pipeline + `par_q_advisory_active` mode); deload signal owns `day_workouts.is_deload`; `_deloadConstants.ts` published here |
+| **W4** | `docs/superpowers/plans/2026-05-25-w4-desktop-authoring.md` | 041–042 | After W6 — desktop authoring + landmarks editor with clinical floors/ceilings; `run-it-back` collapsed into `POST /user-programs/:id/start?intent=` |
+| **W5** | `docs/superpowers/plans/2026-05-25-w5-backups-restore.md` | 050–051 | After W6 — backups + restore (atomic ordering: flag → SIGTERM API → drain → pre-snapshot → pg_restore → migrate → device_tokens wipe → restart) |
 
-**Parallel-dispatchable now** (no remaining serial blockers, can run concurrently — see [[feedback_act_with_agency]] + [[feedback_worktree_isolation]]):
+**Cross-wave contracts pinned in plans:** (a) `SETTINGS_SECTIONS` const (8 entries, W6-owned, all other waves register routes only); (b) `account_events.kind` app-layer union (`par_q_acknowledged`, `onboarding_completed`, `restore_replayed` consumed cross-wave); (c) `_deloadConstants.ts` (`MANUAL_DELOAD_MAV_FACTOR=0.5`, `MANUAL_DELOAD_RIR=4`); (d) `mesocycle_runs.is_deload=true` ↔ `day_workouts.is_deload=true` invariant; (e) `device_tokens.revoke_reason` enum (`user_revoked, signout_everywhere, account_deleted, restore_replayed, legacy_revoke, cf_access_logout`).
 
-| Wave | Scope | Why parallel-safe |
-|------|-------|-------------------|
-| **W2** | Onboarding + PAR-Q + deload + core (clinical safety) | New tables (`par_q_acknowledgments`); deload signal owns `day_workouts.is_deload` (W3 stalledPr uses interim `current_week >= weeks` until W2 swaps it in) |
-| **W4** | Desktop authoring + landmarks editor (uses W1.2 set-logs routes read-only) | UI surface only; no schema collision with W3 |
-| **W5** | Backups + restore UI + maintenance-mode | Ops surface; touches `docker/`, `scripts/`, settings page |
-| **W6** | Account ops + sign-out-everywhere + bearer revoke audit | Auth surface; new `/account/*` routes |
+**Deferred to W7+ with written reasons** (per `reference_w3_tuning_candidates.md` rows 13–14): cardio first-class surfaces (onboarding goal, landmarks, manual-deload coverage) and lbs/kg units conversion (full-pipeline render-layer work).
 
-**Recommended dispatch order:** fan out W2 + W4 + W5 + W6 in parallel worktrees immediately. Each needs its own per-wave plan via `superpowers:writing-plans` before agent dispatch.
+W3 closed clean (merge `0d5a2cd`): overreaching + stalled-PR evaluators with recovery_flag_events telemetry, joint_root injury_advisory wiring, mid-session swap UI with click-through, injury chip Settings page at /settings/injuries. Deferred items captured in `reference_w3_tuning_candidates` (post-Beta tuning, gated on alpha-cohort `recovery_flag_events` telemetry).
 
 **W7 trails** — feedback loop lands after the UI surfaces it observes have stabilized. **W8.x rows** land continuously per-wave-as-they-ship; W8.3/W8.4 final passes run in the pre-cutover prod window.
 
