@@ -280,22 +280,12 @@ async function main() {
     // returning { weeks, total_sets, prs }; placeholder zeros would falsely
     // tell the user "0 sets · 0 PRs". Remove when the endpoint lands.
     'programs/MesocycleRecap.tsx',
-    // W6 Task 12 — two-tier destructive-confirm primitive. Mounted by
-    // AccountProfileEditor (Task 13), ActiveSessionsTable (Task 14),
-    // SignOutEverywhereButton (Task 15), DeleteAccountSection (Task 16),
-    // and the Abandon-mesocycle / Equipment-reset / mid-session swap
-    // call-sites (Task 17). Remove when any of those land.
-    'common/ConfirmDialog.tsx',
-    // W6 Task 13 — display-name + timezone editor. Mounted by
-    // SettingsAccount in Task 16. Remove when Task 16 lands.
-    'settings/AccountProfileEditor.tsx',
-    // W6 Task 14 — active-sessions surface w/ per-token revoke. Mounted by
-    // SettingsAccount in Task 16. Remove when Task 16 lands.
-    'settings/ActiveSessionsTable.tsx',
-    // W6 Task 15 — sign-out-everywhere control (CF Access logout redirect +
-    // cross-tab BroadcastChannel signal). Mounted by SettingsAccount in
-    // Task 16. Remove when Task 16 lands.
-    'settings/SignOutEverywhereButton.tsx',
+    // W6 Task 16 mounted the full /settings/account surface — SettingsAccount
+    // now renders AccountProfileEditor, ActiveSessionsTable,
+    // SignOutEverywhereButton, AccountEventsTimeline, and DeleteAccountSection
+    // (which together pull in common/ConfirmDialog). Those entries are removed
+    // from this set; they are reachable from main.tsx via the routed
+    // SettingsAccount page.
   ]);
 
   // 1. Orphan components.
