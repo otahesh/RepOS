@@ -286,6 +286,9 @@ async function main() {
     // and the Abandon-mesocycle / Equipment-reset / mid-session swap
     // call-sites (Task 17). Remove when any of those land.
     'common/ConfirmDialog.tsx',
+    // W6 Task 13 — display-name + timezone editor. Mounted by
+    // SettingsAccount in Task 16. Remove when Task 16 lands.
+    'settings/AccountProfileEditor.tsx',
   ]);
 
   // 1. Orphan components.
