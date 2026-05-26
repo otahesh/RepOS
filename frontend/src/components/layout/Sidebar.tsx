@@ -5,6 +5,7 @@ import { TOKENS, FONTS } from '../../tokens'
 import { useCurrentUser } from '../../auth'
 import { useIsMobile } from '../../lib/useIsMobile'
 import Icon from '../Icon'
+import { SETTINGS_SECTIONS } from '../settings/SettingsSidebar'
 
 function monogram(displayName: string | null | undefined, email: string): string {
   const trimmedName = displayName?.trim() ?? ''
@@ -29,15 +30,9 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { name: 'Today', icon: 'flame', to: '/', exact: true },
   { name: 'Programs', icon: 'dumbbell', to: '/programs', matchPrefixes: ['/programs', '/my-programs'] },
-  { name: 'Settings', icon: 'settings', to: '/settings/integrations', matchPrefixes: ['/settings'] },
-]
-
-const SETTINGS_SUB = [
-  { label: 'Integrations', to: '/settings/integrations' },
-  { label: 'Units & equipment', to: '/settings/equipment' },
-  { label: 'Account', to: '/settings/account' },
-  { label: 'Storage', to: '/settings/storage' },
-  { label: 'Injuries', to: '/settings/injuries' },
+  // I-MOBILE-SIGNOUT-PATH (W6 D7): Settings nav now lands on /settings/account
+  // (Account is the W6 owner-wave entry and first in SETTINGS_SECTIONS).
+  { name: 'Settings', icon: 'settings', to: '/settings/account', matchPrefixes: ['/settings'] },
 ]
 
 interface SidebarProps {
@@ -181,7 +176,8 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
                 </div>
               </NavLink>
 
-              {/* Settings sub-nav */}
+              {/* Settings sub-nav — flat list over SETTINGS_SECTIONS (D7:
+                  Storage + Injuries stay top-level, no nested tiers). */}
               {item.name === 'Settings' && isSettings && (
                 <div style={{
                   paddingLeft: 38,
@@ -191,7 +187,27 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
                   marginBottom: 4,
                   marginTop: 2,
                 }}>
-                  {SETTINGS_SUB.map(sub => {
+                  {SETTINGS_SECTIONS.map(sub => {
+                    if (sub.disabled) {
+                      // Non-navigable placeholder for W4/W5/W7 slots. Skips
+                      // tab order via aria-disabled + tabIndex=-1.
+                      return (
+                        <div
+                          key={sub.label}
+                          aria-disabled="true"
+                          tabIndex={-1}
+                          style={{
+                            fontSize: 12,
+                            padding: '5px 10px',
+                            borderRadius: 6,
+                            color: TOKENS.textMute,
+                            fontWeight: 500,
+                            background: 'transparent',
+                            cursor: 'not-allowed',
+                            opacity: 0.6,
+                          }}>{sub.label}</div>
+                      )
+                    }
                     const subActive = location.pathname === sub.to
                     return (
                       <NavLink
