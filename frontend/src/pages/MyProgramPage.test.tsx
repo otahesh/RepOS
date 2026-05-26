@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import MyProgramPage from './MyProgramPage'
@@ -165,5 +165,39 @@ describe('MyProgramPage', () => {
     await screen.findByText(/Take a deload/i)
     await userEvent.click(screen.getByText(/Take a deload/i))
     expect(screen.getByTestId('programs-catalog-page')).toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // Abandon mesocycle — heavy-tier destructive confirm (typed = program name)
+  // -------------------------------------------------------------------------
+
+  it('gates Abandon behind a heavy typed-confirm and only abandons after the name is typed', async () => {
+    const abandonSpy = vi
+      .spyOn(mesoApi, 'abandonMesocycle')
+      .mockResolvedValue({ mesocycle_run_id: 'mr-1', status: 'abandoned', finished_at: '2026-05-26T00:00:00Z' })
+    const user = userEvent.setup()
+    renderPage()
+
+    // Open the heavy confirm dialog from the Danger zone button.
+    const trigger = await screen.findByRole('button', { name: /abandon this program/i })
+    await user.click(trigger)
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+
+    // Confirm is disabled until the typed value matches the program name.
+    // Scope to the dialog so the matcher doesn't collide with the trigger.
+    const confirmBtn = within(dialog).getByRole('button', { name: /abandon|abandoning/i })
+    expect(confirmBtn).toBeDisabled()
+    expect(abandonSpy).not.toHaveBeenCalled()
+
+    // Type the program name to unlock Confirm.
+    await user.type(within(dialog).getByRole('textbox'), 'Full Body 3x')
+    expect(confirmBtn).toBeEnabled()
+    await user.click(confirmBtn)
+
+    expect(abandonSpy).toHaveBeenCalledWith('mr-1')
+    // After abandoning, the page navigates to the catalog.
+    await waitFor(() => expect(screen.getByTestId('programs-catalog-page')).toBeInTheDocument())
   })
 })

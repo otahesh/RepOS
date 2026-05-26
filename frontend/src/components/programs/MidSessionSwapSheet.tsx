@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { substitutePlannedSet } from '../../lib/api/plannedSets';
+import { pushToast } from '../common/ToastHost';
 
 export function MidSessionSwapSheet({
   plannedSetId,
@@ -20,7 +21,34 @@ export function MidSessionSwapSheet({
   async function confirm() {
     setBusy(true);
     try {
-      await substitutePlannedSet(plannedSetId, { to_exercise_id: toId });
+      // The substitute response carries `substituted_from_exercise_id` — the
+      // exercise we swapped away from. That's the source of truth for Undo:
+      // re-substituting back to it reverses this swap via the same endpoint
+      // (no dedicated undo route needed). The light-tier "Toast + Undo"
+      // pattern (C-CONFIRMDIALOG-LIGHT-API) replaces a blocking confirm for
+      // this reversible action.
+      const res = await substitutePlannedSet(plannedSetId, { to_exercise_id: toId });
+      const fromExerciseId = res.substituted_from_exercise_id;
+      pushToast({
+        severity: 'success',
+        body: 'Swapped.',
+        actionLabel: 'Undo',
+        // Only offer a real reversal when the server reported the prior
+        // exercise id. If it's null (no prior substitution recorded) we still
+        // show the toast but skip a no-op undo to avoid a misleading affordance.
+        onAction: fromExerciseId
+          ? () => {
+              void substitutePlannedSet(plannedSetId, { to_exercise_id: fromExerciseId }).catch(
+                (e: unknown) => {
+                  pushToast({
+                    severity: 'error',
+                    body: `Undo failed: ${e instanceof Error ? e.message : String(e)}`,
+                  });
+                },
+              );
+            }
+          : undefined,
+      });
       onClose(true);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));

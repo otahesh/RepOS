@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getEquipmentProfile, putEquipmentProfile, type EquipmentProfile } from '../../lib/api/equipment.ts';
+import { listMyPrograms } from '../../lib/api/userPrograms.ts';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { pushToast } from '../common/ToastHost';
 
 type Section = { title: string; items: ItemDef[] };
 type ItemDef =
@@ -41,9 +44,25 @@ export function EquipmentEditor() {
   const [profile, setProfile] = useState<EquipmentProfile | null>(null);
   const [draft, setDraft] = useState<EquipmentProfile>({ _v: 1 });
   const [saving, setSaving] = useState(false);
+  // Whether the user has an active program. Resetting equipment while a program
+  // is running can strip exercises out from under it, so we gate the reset
+  // behind a medium-tier confirm in that case (per W6 destructive-confirm tiers).
+  const [hasActiveProgram, setHasActiveProgram] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     getEquipmentProfile().then(p => { setProfile(p); setDraft(p); });
+    listMyPrograms()
+      .then(programs => {
+        setHasActiveProgram(programs.some(p => p.status === 'active' || p.status === 'paused'));
+      })
+      .catch(() => {
+        // Non-fatal: if we can't determine program state, fall back to NOT
+        // claiming an active program. The reset still confirms (see below) so
+        // the destructive action is never silent.
+        setHasActiveProgram(false);
+      });
   }, []);
 
   const updateKey = (key: string, val: unknown) => {
@@ -54,6 +73,35 @@ export function EquipmentEditor() {
     setSaving(true);
     try { setProfile(await putEquipmentProfile(draft)); }
     finally { setSaving(false); }
+  };
+
+  // Clear every equipment selection. When a program is active this is
+  // destructive (it can invalidate the program's exercise selections), so the
+  // button opens a medium-tier confirm. With no active program the same action
+  // is harmless, so it applies immediately.
+  const performReset = async () => {
+    setResetting(true);
+    try {
+      const cleared: EquipmentProfile = { _v: 1 };
+      const saved = await putEquipmentProfile(cleared);
+      setProfile(saved);
+      setDraft(saved);
+      setResetOpen(false);
+      pushToast({ severity: 'success', body: 'Equipment reset.' });
+    } catch (e) {
+      setResetOpen(false);
+      pushToast({ severity: 'error', body: `Reset failed: ${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const onResetClick = () => {
+    if (hasActiveProgram) {
+      setResetOpen(true);
+    } else {
+      void performReset();
+    }
   };
 
   if (!profile) return <div style={{ padding: 24 }}>Loading…</div>;
@@ -79,17 +127,42 @@ export function EquipmentEditor() {
           </div>
         </details>
       ))}
-      <button
-        onClick={save}
-        disabled={saving}
-        style={{
-          marginTop: 16, padding: '10px 20px', borderRadius: 8, border: 'none',
-          background: '#4D8DFF', color: '#fff', fontSize: 14, fontWeight: 700,
-          cursor: saving ? 'wait' : 'pointer',
-        }}
-      >
-        {saving ? 'Saving…' : 'Save'}
-      </button>
+      <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{
+            padding: '10px 20px', borderRadius: 8, border: 'none',
+            background: '#4D8DFF', color: '#fff', fontSize: 14, fontWeight: 700,
+            cursor: saving ? 'wait' : 'pointer',
+          }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={onResetClick}
+          disabled={resetting}
+          style={{
+            padding: '10px 20px', borderRadius: 8, border: '1px solid rgba(255,106,106,0.5)',
+            background: 'transparent', color: '#FF6A6A', fontSize: 14, fontWeight: 600,
+            cursor: resetting ? 'wait' : 'pointer',
+          }}
+        >
+          {resetting ? 'Resetting…' : 'Reset all equipment'}
+        </button>
+      </div>
+
+      <ConfirmDialog
+        open={resetOpen}
+        tier="medium"
+        severity="danger"
+        title="Reset all equipment?"
+        body="You have an active program. Clearing your equipment can remove exercises and substitutions it depends on. You can re-add equipment afterward, but the program may need adjusting."
+        confirmLabel={resetting ? 'Resetting…' : 'Reset'}
+        onConfirm={() => void performReset()}
+        onCancel={() => setResetOpen(false)}
+      />
     </div>
   );
 }
