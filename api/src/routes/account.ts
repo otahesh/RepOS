@@ -19,7 +19,7 @@
 // 'cf_access') — same convention as middleware/csrfOrigin.ts.
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { db } from '../db/client.js';
-import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
+import { requireBearerOrCfAccess, requireCfAccessOnly } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
 import {
   recordAccountEvent,
@@ -30,6 +30,7 @@ import {
   SessionListResponseSchema,
   AccountEventListResponseSchema,
   DeleteMeRequestSchema,
+  CONFIRM_DELETE_ACCOUNT_PHRASE,
 } from '../schemas/account.js';
 import { IANA_TIMEZONES } from '../lib/timezones.js'; // static fallback per I-IANA-TIMEZONES
 
@@ -236,18 +237,75 @@ export async function accountRoutes(app: FastifyInstance) {
     },
   );
 
-  // DELETE /api/me — placeholder until Task 9 fleshes out. Stubbed 405 so the
-  // route is reserved but a partial-merge of Task 7 doesn't open a security
-  // hole. csrfOrigin attached so the contract is correct when the real handler
-  // lands.
+  // DELETE /api/me — full-cascade account deletion (Task 9).
+  //
+  // Auth: CF-Access-JWT-only (per C-SIGNOUT-CFACCESS-ONLY) — a stolen bearer
+  // must NEVER be able to delete a user's account. requireCfAccessOnly 403s
+  // any Authorization: Bearer header before JWT validation and stamps
+  // authMode='cf_access' so the chained csrfOrigin guard runs.
+  //
+  // Body: { confirm: "DELETE my account" } — exact-match typed-confirm phrase
+  // (per I-CONFIRM-PHRASE-CONST) so a misclicked DELETE without the dialog
+  // never lands.
+  //
+  // Cascade: DB-level ON DELETE CASCADE on users.id (per D8 + the migration
+  // FK shapes — every per-user table FKs back to users with CASCADE) does the
+  // wipe. account_events FK is ON DELETE SET NULL with user_id_at_event +
+  // user_email_at_event preserved — forensic survival.
+  //
+  // Atomicity: single BEGIN/COMMIT against a pooled client. ROLLBACK + 500
+  // on any error inside the txn. The structured log fires AFTER the COMMIT
+  // (per I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
   app.delete(
     '/me',
-    { preHandler: [requireBearerOrCfAccess, csrfOrigin] },
-    async (_req, reply) => {
-      return reply.code(405).send({ error: 'not_implemented' });
+    { preHandler: [requireCfAccessOnly, csrfOrigin] },
+    async (req, reply) => {
+      const userId = (req as { userId?: string }).userId;
+      const userEmail = (req as { userEmail?: string }).userEmail;
+      if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
+
+      const parsed = DeleteMeRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
+      }
+
+      const { rows: tokRows } = await db.query<{ n: number }>(
+        `SELECT count(*)::int n FROM device_tokens WHERE user_id=$1`,
+        [userId],
+      );
+      const previousTokenCount = tokRows[0]?.n ?? 0;
+
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM users WHERE id=$1', [userId]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        req.log.error({ err, userId }, 'account_delete_failed');
+        return reply.code(500).send({ error: 'delete_failed' });
+      } finally {
+        client.release();
+      }
+
+      req.log.info(
+        {
+          event: 'account_deleted',
+          userId,
+          userEmail,
+          previous_token_count: previousTokenCount,
+          ip: req.ip,
+        },
+        'account_deleted',
+      );
+
+      reply.header(
+        'Set-Cookie',
+        'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
+      );
+      return reply.code(204).send();
     },
   );
-
-  // Suppress unused-import lint for DeleteMeRequestSchema until Task 9 lands.
-  void DeleteMeRequestSchema;
 }
