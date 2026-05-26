@@ -82,6 +82,26 @@ const A11Y_ATTRS = new Set([
   'placeholder',
 ]);
 
+// DOM-id reference attributes — values are programmatic identifiers, never
+// reach the user's eyes or assistive-tech voice. A term substring inside an
+// id like "session-expired-title" is not a user-visible "session" mention.
+const DOM_ID_REF_ATTRS = new Set([
+  'id',
+  'htmlFor',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-controls',
+  'aria-owns',
+  'aria-activedescendant',
+  'form',
+  // Test-hook selectors are programmatic identifiers consumed by the test
+  // runner — never rendered to the user or voiced by assistive tech. A term
+  // substring inside a value like "session-card" is not a user-visible
+  // "session" mention (e.g. the I-SESSIONS-MOBILE-mandated session-row /
+  // session-card hooks on ActiveSessionsTable).
+  'data-testid',
+]);
+
 export async function findOffenders(files) {
   const { shorts, fulls } = await loadTerms();
   const tokens = [...new Set([...shorts, ...fulls])];
@@ -118,6 +138,7 @@ export async function findOffenders(files) {
         if (inTermWrapper(p)) return;
         const name = p.node.name;
         if (name?.type === 'JSXIdentifier' && A11Y_ATTRS.has(name.name)) return;
+        if (name?.type === 'JSXIdentifier' && DOM_ID_REF_ATTRS.has(name.name)) return;
         const v = p.node.value;
         if (!v || v.type !== 'StringLiteral') return;
         for (const { token, re } of matchers) {

@@ -280,6 +280,12 @@ async function main() {
     // returning { weeks, total_sets, prs }; placeholder zeros would falsely
     // tell the user "0 sets · 0 PRs". Remove when the endpoint lands.
     'programs/MesocycleRecap.tsx',
+    // W6 Task 16 mounted the full /settings/account surface — SettingsAccount
+    // now renders AccountProfileEditor, ActiveSessionsTable,
+    // SignOutEverywhereButton, AccountEventsTimeline, and DeleteAccountSection
+    // (which together pull in common/ConfirmDialog). Those entries are removed
+    // from this set; they are reachable from main.tsx via the routed
+    // SettingsAccount page.
   ]);
 
   // 1. Orphan components.

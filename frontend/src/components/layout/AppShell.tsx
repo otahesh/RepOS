@@ -6,6 +6,7 @@ import { RouteErrorBoundary } from './RouteErrorBoundary'
 import { useIsMobile } from '../../lib/useIsMobile'
 import { LogBufferRecovery } from '../programs/LogBufferRecovery'
 import { SessionExpiredBanner } from '../auth/SessionExpiredBanner'
+import { ToastHost } from '../common/ToastHost'
 import { logBuffer } from '../../lib/logBuffer'
 
 export default function AppShell() {
@@ -76,6 +77,7 @@ export default function AppShell() {
             <Outlet />
           </RouteErrorBoundary>
         </main>
+        <ToastHost />
 
         {/* Backdrop */}
         <div
@@ -125,6 +127,7 @@ export default function AppShell() {
             <Outlet />
           </RouteErrorBoundary>
         </main>
+        <ToastHost />
       </div>
     </div>
   )

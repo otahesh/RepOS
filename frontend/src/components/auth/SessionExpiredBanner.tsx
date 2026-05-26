@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { idbQueue } from '../../lib/idbQueue';
+import { Term } from '../Term';
 
 // W1.3.7 — Session-expired surface for CF Access whole-host auth.
 //
@@ -128,7 +129,7 @@ export function SessionExpiredBanner(): JSX.Element | null {
           id="session-expired-title"
           style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}
         >
-          Your session expired
+          Your <Term k="session">session</Term> expired
         </div>
         <div
           id="session-expired-desc"

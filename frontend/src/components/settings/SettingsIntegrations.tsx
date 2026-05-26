@@ -5,6 +5,7 @@ import { useIsMobile } from '../../lib/useIsMobile'
 import Icon from '../Icon'
 import TokenTable, { TokenRow } from './TokenTable'
 import GenerateTokenModal from './GenerateTokenModal'
+import { pushToast } from '../common/ToastHost'
 
 interface SyncStatus {
   source: string
@@ -101,7 +102,7 @@ export default function SettingsIntegrations() {
       setGeneratedToken(data.token)
       await fetchTokens()
     } catch (err) {
-      alert(`Failed to generate token: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      pushToast({ severity: 'error', body: `Failed to generate token: ${err instanceof Error ? err.message : 'Unknown error'}` })
     } finally {
       setGenerating(false)
     }
@@ -118,7 +119,7 @@ export default function SettingsIntegrations() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setTokens(prev => prev.filter(t => t.id !== id))
     } catch (err) {
-      alert(`Failed to revoke token: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      pushToast({ severity: 'error', body: `Failed to revoke token: ${err instanceof Error ? err.message : 'Unknown error'}` })
     } finally {
       setRevoking(null)
     }

@@ -4,7 +4,7 @@ import { ProgramPage } from '../components/programs/ProgramPage'
 import { DayCard } from '../components/programs/DayCard'
 import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings'
 import { MesocycleRecap, type RecapChoice } from '../components/programs/MesocycleRecap'
-import { getMesocycle, getMesocycleRecapStats, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
+import { getMesocycle, getMesocycleRecapStats, abandonMesocycle, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
 import {
   getUserProgram,
   getUserProgramWarnings,
@@ -12,6 +12,9 @@ import {
   type UserProgramDetail,
 } from '../lib/api/userPrograms'
 import { TOKENS } from '../tokens'
+import { pushToast } from '../components/common/ToastHost'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { Term } from '../components/Term'
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -25,6 +28,8 @@ export default function MyProgramPage() {
   const [recapStats, setRecapStats] = useState<MesocycleRecapStats | null>(null)
   const [recapErr, setRecapErr] = useState<string | null>(null)
   const [recapLoading, setRecapLoading] = useState(false)
+  const [abandonOpen, setAbandonOpen] = useState(false)
+  const [abandoning, setAbandoning] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -126,6 +131,24 @@ export default function MyProgramPage() {
     }
   }
 
+  // Heavy-tier destructive action. The ConfirmDialog gates this behind a typed
+  // match of the program name (per the W6 destructive-confirm tier ladder).
+  async function handleAbandon() {
+    if (!run) return
+    setAbandoning(true)
+    try {
+      await abandonMesocycle(run.id)
+      setAbandonOpen(false)
+      pushToast({ severity: 'success', body: 'Mesocycle abandoned.' })
+      navigate('/programs')
+    } catch (e) {
+      setAbandonOpen(false)
+      setErr(`Abandon failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setAbandoning(false)
+    }
+  }
+
   if (err) return <div style={{ padding: 16, color: TOKENS.danger }}>Couldn't load program: {err}</div>
   if (!run) return <div style={{ padding: 16, color: TOKENS.textDim }}>Loading…</div>
 
@@ -148,6 +171,8 @@ export default function MyProgramPage() {
     return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>
   }
 
+  const programName = up?.effective_name ?? up?.name ?? ''
+
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}>
       <ProgramPage mesocycleRunId={id} />
@@ -166,12 +191,50 @@ export default function MyProgramPage() {
                 day={d}
                 onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
                 onRemoveSet={(dayIdx, blockIdx, setIdx) => void handleRemoveSet(dayIdx, blockIdx, setIdx)}
-                onSwap={(_dayIdx, _blockIdx) => alert('Exercise picker not yet wired — coming in next PR.')}
+                onSwap={(_dayIdx, _blockIdx) => pushToast({ severity: 'info', body: 'Exercise picker lands in W4. Use mid-session swap on mobile.' })}
               />
             ))}
           </div>
         </section>
       ) : null}
+
+      <section style={{ padding: '0 24px 32px' }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: 14, color: TOKENS.danger, fontFamily: 'Inter Tight' }}>
+          Danger zone
+        </h3>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: TOKENS.textDim, maxWidth: 520, lineHeight: 1.5 }}>
+          Abandoning this <Term k="mesocycle" variant="abbr" /> ends it permanently. Logged sets are
+          kept for your history, but the remaining schedule is discarded and cannot be resumed.
+        </p>
+        <button
+          type="button"
+          onClick={() => setAbandonOpen(true)}
+          style={{
+            padding: '8px 14px',
+            background: 'transparent',
+            border: `1px solid ${TOKENS.danger}`,
+            borderRadius: 6,
+            color: TOKENS.danger,
+            fontFamily: 'Inter Tight',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Abandon this program
+        </button>
+      </section>
+
+      <ConfirmDialog
+        open={abandonOpen}
+        tier="heavy"
+        severity="danger"
+        title="Abandon this program?"
+        body={`This permanently ends “${programName}”. The remaining schedule is discarded and cannot be resumed. Type the program name to confirm.`}
+        requireTyped={programName}
+        confirmLabel={abandoning ? 'Abandoning…' : 'Abandon'}
+        onConfirm={() => void handleAbandon()}
+        onCancel={() => setAbandonOpen(false)}
+      />
     </div>
   )
 }

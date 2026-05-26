@@ -15,6 +15,8 @@ import { plannedSetRoutes } from './routes/plannedSets.js';
 import { recoveryFlagRoutes } from './routes/recoveryFlags.js';
 import { setLogsRoutes } from './routes/setLogs.js';
 import { userInjuriesRoutes } from './routes/userInjuries.js';
+import { accountRoutes } from './routes/account.js';
+import { authSignoutRoutes } from './routes/authSignout.js';
 import { requireCfAccess } from './middleware/cfAccess.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -49,6 +51,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(syncRoutes, { prefix: '/api/health' });
   await app.register(setLogsRoutes, { prefix: '/api' });
   await app.register(userInjuriesRoutes, { prefix: '/api' });
+  await app.register(accountRoutes, { prefix: '/api' });
+  await app.register(authSignoutRoutes, { prefix: '/api' });
 
   // Whoami: returns the CF-Access-derived identity. 503 when the feature
   // flag is off (deployable transition state); 401 with WWW-Authenticate

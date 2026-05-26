@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ExercisePicker } from './ExercisePicker.tsx';
 import { SubstitutionRow } from './SubstitutionRow.tsx';
 import type { Exercise } from '../../lib/api/exercises.ts';
+import { pushToast } from '../common/ToastHost';
 
 export function ExercisePickerDemo() {
   const [picked, setPicked] = useState<Exercise | null>(null);
@@ -17,7 +18,7 @@ export function ExercisePickerDemo() {
           <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1.4, color: '#4D8DFF', marginTop: 16, marginBottom: 8 }}>
             SUBSTITUTIONS
           </div>
-          <SubstitutionRow fromSlug={picked.slug} onSelect={(slug) => alert(`Selected substitute: ${slug}`)} />
+          <SubstitutionRow fromSlug={picked.slug} onSelect={(slug) => pushToast({ severity: 'info', body: `Selected substitute: ${slug}` })} />
         </div>
       )}
     </div>

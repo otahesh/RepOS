@@ -6,6 +6,7 @@ const ALL_KEYS: TermKey[] = [
   'Z2','Z4','Z5','peak_tension_length','push_horizontal','pull_horizontal',
   'push_vertical','pull_vertical','hinge','squat','lunge','carry','rotation',
   'anti_rotation','compound','isolation','accumulation','working_set',
+  'PAT','bearer_token','session','IANA_timezone','truncated_ip_24',
 ];
 
 describe('TERMS dictionary', () => {
@@ -26,5 +27,13 @@ describe('TERMS dictionary', () => {
   it('full forms are unique', () => {
     const fulls = Object.values(TERMS).map(t => t.full.toLowerCase());
     expect(new Set(fulls).size).toBe(fulls.length);
+  });
+});
+
+describe('W6 term additions', () => {
+  it.each(['PAT','bearer_token','session','IANA_timezone','truncated_ip_24'] as const)('has TERMS entry for %s', (k) => {
+    expect(TERMS[k as keyof typeof TERMS]).toBeDefined();
+    expect(TERMS[k as keyof typeof TERMS].short.length).toBeGreaterThan(0);
+    expect(TERMS[k as keyof typeof TERMS].plain.length).toBeGreaterThan(0);
   });
 });

@@ -73,7 +73,9 @@ describe('navigation smoke', () => {
       </MemoryRouter>,
     )
     const sidebar = screen.getByRole('complementary')
-    const expectedSubNav = ['Integrations', 'Units & equipment', 'Account']
+    // Sub-nav now reads from SETTINGS_SECTIONS (W6 D7). All 8 entries
+    // render (3 disabled = W4/W5/W7 slots; still visible as dimmed labels).
+    const expectedSubNav = ['Account', 'Equipment', 'Integrations', 'Storage', 'Injuries']
     for (const name of expectedSubNav) {
       expect(
         within(sidebar).getByText(name),

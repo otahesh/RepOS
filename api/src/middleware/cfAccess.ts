@@ -195,8 +195,51 @@ export async function requireAdminKeyOrCfAccess(req: FastifyRequest, reply: Fast
     await requireCfAccess(req, reply);
     if (reply.sent) return;
     (req as any).authMode = 'cf_access';
+
+    // Per D10: when authenticated via CF Access (not the admin key), enforce
+    // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
+    // Migration 063 reserves users.role TEXT for post-Beta cohort scale-up;
+    // until then REPOS_ADMIN_EMAILS is the source of truth.
+    const adminEmails = process.env.REPOS_ADMIN_EMAILS;
+    if (!adminEmails) {
+      req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
+      return reply.code(403).send({ error: 'admin_check_misconfigured' });
+    }
+    const allowed = adminEmails
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const userEmail = ((req as any).userEmail as string | undefined) ?? '';
+    if (!allowed.includes(userEmail)) {
+      req.log.warn({ userEmail }, 'admin_check_rejected');
+      return reply.code(403).send({ error: 'not_an_admin' });
+    }
     return;
   }
 
   return reply.code(401).send({ error: 'unauthorized' });
+}
+
+// Per C-SIGNOUT-CFACCESS-ONLY — gate routes that must NEVER act on a stolen
+// bearer (signout-everywhere, account deletion). If an Authorization: Bearer
+// header is present, reject 403 even before JWT validation. Otherwise
+// delegate to the existing CF Access JWT validator.
+//
+// We deliberately call `requireCfAccess` directly: same code path used by the
+// cookie branch of `requireBearerOrCfAccess`, no refactor required. After a
+// successful JWT validation we stamp `authMode='cf_access'` so the downstream
+// `csrfOrigin` preHandler enforces the Origin guard (per C-CSRF-ORIGIN) — a
+// stolen JWT replayed cross-origin must still be blocked.
+export async function requireCfAccessOnly(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    req.log.warn({ path: req.url }, 'bearer_rejected_on_cf_access_only_route');
+    return reply.code(403).send({ error: 'cf_access_required' });
+  }
+  await requireCfAccess(req, reply);
+  if (reply.sent) return;
+  (req as any).authMode = 'cf_access';
 }
