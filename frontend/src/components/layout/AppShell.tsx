@@ -8,12 +8,56 @@ import { LogBufferRecovery } from '../programs/LogBufferRecovery'
 import { SessionExpiredBanner } from '../auth/SessionExpiredBanner'
 import { ToastHost } from '../common/ToastHost'
 import { logBuffer } from '../../lib/logBuffer'
+import { useCurrentUser } from '../../auth'
+import { OnboardingOverlay } from '../onboarding/OnboardingOverlay'
+import { ParQGate } from '../onboarding/ParQGate'
+import { getParQStatus } from '../../lib/api/parQ'
+
+// W2 (panel C-MOUNT) — derived state machine that mounts ONE of the two
+// AppShell overlays (or neither) as a sibling of <Outlet>. Onboarding always
+// precedes PAR-Q; never both at once.
+//   1. user data still loading → render nothing.
+//   2. !onboarding_completed_at → OnboardingOverlay only.
+//   3. else PAR-Q needs_prompt  → ParQGate only.
+//   4. else                     → neither.
+// Each overlay's onComplete advances the local gate state without a full
+// /api/me re-bootstrap.
+function useOnboardingGate(): React.ReactNode {
+  const { user } = useCurrentUser()
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null)
+  const [parQNeedsPrompt, setParQNeedsPrompt] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (!user) return
+    setOnboardingDone(!!user.onboarding_completed_at)
+  }, [user])
+
+  const refreshParQ = useCallback(() => {
+    getParQStatus()
+      .then((s) => setParQNeedsPrompt(s.needs_prompt))
+      .catch(() => setParQNeedsPrompt(false))
+  }, [])
+
+  useEffect(() => {
+    // PAR-Q follows onboarding — only check it once onboarding is complete.
+    if (onboardingDone) refreshParQ()
+  }, [onboardingDone, refreshParQ])
+
+  const reloadOnboarding = useCallback(() => { setOnboardingDone(true) }, [])
+  const reloadParQ = useCallback(() => { setParQNeedsPrompt(false); refreshParQ() }, [refreshParQ])
+
+  if (!user) return null
+  if (onboardingDone === false) return <OnboardingOverlay onComplete={reloadOnboarding} />
+  if (onboardingDone && parQNeedsPrompt) return <ParQGate onComplete={reloadParQ} />
+  return null
+}
 
 export default function AppShell() {
   const isMobile = useIsMobile()
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const onboardingOverlay = useOnboardingGate()
 
   // Wire offline-queue flush at the app shell level. Without this nothing in
   // production code drains the IDB queue on offline→online or retries stalled
@@ -78,6 +122,7 @@ export default function AppShell() {
           </RouteErrorBoundary>
         </main>
         <ToastHost />
+        {onboardingOverlay}
 
         {/* Backdrop */}
         <div
@@ -129,6 +174,7 @@ export default function AppShell() {
         </main>
         <ToastHost />
       </div>
+      {onboardingOverlay}
     </div>
   )
 }
