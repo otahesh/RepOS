@@ -14,7 +14,10 @@
 import { db } from '../db/client.js';
 import type { InjuryJoint, InjurySeverity } from '../schemas/userInjuries.js';
 
-const JOINT_ROOT: Record<InjuryJoint, string> = {
+// Exported for W4 [C-JOINT-ROOT-ENDPOINT]: the /api/muscles/joint-stress
+// catalog endpoint and deriveInjuryConstraints both consume this map as the
+// single server-side source of truth (replaces the dropped frontend mirror).
+export const JOINT_ROOT: Record<InjuryJoint, string> = {
   // Bilateral mapping is intentional. Exercise joint_stress_profile carries
   // no laterality — both knees take the penalty for a one-sided knee injury.
   // See [[reference_w3_tuning_candidates]] memory for the future sided-stress

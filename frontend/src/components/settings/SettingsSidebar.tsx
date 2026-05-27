@@ -18,10 +18,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { label: 'Health',        to: '/settings/health',        disabled: false, ownerWave: 'W2' },
   { label: 'Equipment',     to: '/settings/equipment',     disabled: false, ownerWave: 'W1' },
   { label: 'Integrations',  to: '/settings/integrations',  disabled: false, ownerWave: 'W1' },
-  // Program prefs (landmarks editor) stays a disabled placeholder until W4.3
-  // flips it. W2 leaves W6's gating mechanism intact (see featureFlags.ts +
-  // panel I-PROGRAM-PREFS-STUB note in the W2 plan).
-  { label: 'Program prefs', to: '/settings/program-prefs', disabled: true,  ownerWave: 'W4' },
+  { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed — flipped from disabled
   { label: 'Backups',       to: '/settings/backups',       disabled: true,  ownerWave: 'W5' },
   { label: 'Feedback',      to: '/settings/feedback',      disabled: true,  ownerWave: 'W7' },
   // D7: Storage + Injuries stay top-level.

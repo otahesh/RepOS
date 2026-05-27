@@ -125,9 +125,19 @@ export type UserProgramWarningsResponse = z.infer<typeof UserProgramWarningsResp
 export const UserProgramStartRequestSchema = z.object({
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
   start_tz: z.string().min(1).max(64),
+  // [C-RUN-IT-BACK-ROUTE] intent collapses the former /run-it-back route into
+  // this start route. May also be supplied as a `?intent=` query param (the
+  // route reads the query first, falling back to the body).
+  intent: z.enum(['normal', 'deload']).optional(),
 });
 
 export type UserProgramStartRequest = z.infer<typeof UserProgramStartRequestSchema>;
+
+// Query-string intent guard — separate schema so `?intent=garbage` is a clean
+// 400 before the body is even read.
+export const UserProgramStartIntentQuerySchema = z.object({
+  intent: z.enum(['normal', 'deload']).optional(),
+});
 
 export const UserProgramStartResponseSchema = z.object({
   mesocycle_run_id: z.string().uuid(),
@@ -136,6 +146,7 @@ export const UserProgramStartResponseSchema = z.object({
   weeks: z.number().int().min(1),
   status: z.string(),
   current_week: z.number().int().min(1),
+  is_deload: z.boolean(),
 });
 
 export type UserProgramStartResponse = z.infer<typeof UserProgramStartResponseSchema>;

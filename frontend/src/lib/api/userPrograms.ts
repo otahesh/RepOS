@@ -20,6 +20,7 @@ export type UserProgramDetail = UserProgramRecord & {
 export type UserProgramPatch =
   | { op: 'rename'; name: string }
   | { op: 'swap_exercise'; day_idx: number; block_idx: number; to_exercise_slug: string }
+  | { op: 'swap_exercise_all'; from_slug: string; to_exercise_slug: string } // W4.1 every-occurrence swap
   | { op: 'add_set'; day_idx: number; block_idx: number }
   | { op: 'remove_set'; day_idx: number; block_idx: number }
   | { op: 'change_rir'; week_idx: number; day_idx: number; block_idx: number; target_rir: number }

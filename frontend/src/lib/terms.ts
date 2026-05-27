@@ -7,7 +7,7 @@ export type TermDef = {
 };
 
 export type TermKey =
-  | 'RIR' | 'RPE' | 'MEV' | 'MAV' | 'MRV'
+  | 'RIR' | 'RPE' | 'MV' | 'MEV' | 'MAV' | 'MRV' | 'landmark'
   | 'mesocycle' | 'deload' | 'hypertrophy' | 'AMRAP'
   | 'Z2' | 'Z4' | 'Z5'
   | 'peak_tension_length'
@@ -33,6 +33,12 @@ export const TERMS: Record<TermKey, TermDef> = {
     plain: 'A 1–10 scale of how hard a set felt. RPE 10 is true failure.',
     whyMatters: 'RPE and RIR are interchangeable: RPE 8 ≈ RIR 2. RepOS speaks RIR; convert if you prefer RPE.',
   },
+  MV: {
+    short: 'MV',
+    full: 'Maintenance Volume',
+    plain: 'The set count that holds onto what you\'ve built — below it you slowly shrink.',
+    whyMatters: 'A useful floor when life is heavy and you just need to not regress. Optional in the landmarks editor.',
+  },
   MEV: {
     short: 'MEV',
     full: 'Minimum Effective Volume',
@@ -51,6 +57,12 @@ export const TERMS: Record<TermKey, TermDef> = {
     plain: 'The most weekly volume you can recover from inside one mesocycle.',
     whyMatters: 'Crossing MRV stalls you. RepOS ramps to MRV-1 then deloads.',
   },
+  landmark: {
+    short: 'landmark',
+    full: 'Volume landmark',
+    plain: 'A weekly set count threshold — MV, MEV, MAV, or MRV — that anchors the volume ramp.',
+    whyMatters: 'Landmarks let RepOS ramp you from MEV toward MRV across a mesocycle, then deload. Edit them if defaults don\'t match your recovery.',
+  },
   mesocycle: {
     short: 'mesocycle',
     full: 'Mesocycle',
@@ -58,10 +70,12 @@ export const TERMS: Record<TermKey, TermDef> = {
     whyMatters: 'The atomic unit of programming in RepOS. Volume ramps within it; you reset between them.',
   },
   deload: {
+    // [I-DELOAD-WEEK-TERM] `full`/`plain` now cover BOTH senses: a single light
+    // week inside a mesocycle, OR an entire low-volume deload mesocycle.
     short: 'deload',
-    full: 'Deload week',
-    plain: 'A planned light week — fewer sets, more reps in reserve — to dump fatigue.',
-    whyMatters: 'You don\'t adapt to training; you adapt to training plus recovery. Deload is the recovery.',
+    full: 'Deload — a planned light week, or a whole light mesocycle',
+    plain: 'Either a single light week inside a mesocycle, or an entire low-volume mesocycle. Fewer sets, more reps in reserve. Both serve recovery.',
+    whyMatters: 'You adapt to training PLUS recovery, not training alone. Skipping a deload makes the next mesocycle worse, not better.',
   },
   hypertrophy: {
     short: 'hypertrophy',
