@@ -5,6 +5,7 @@ import { Term } from '../Term';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
 import { BlockOverflowMenu } from './BlockOverflowMenu';
 import { MidSessionSwapPicker } from './MidSessionSwapPicker';
+import { DeloadThisWeekButton } from './DeloadThisWeekButton';
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
@@ -38,11 +39,15 @@ export function TodayWorkoutMobile({ onStart }: { onStart?: (runId: string, dayI
   }
   return (
     <div style={{ padding: 16, fontFamily: 'Inter Tight', color: '#fff', maxWidth: 480, margin: '0 auto' }}>
-      <header style={{ marginBottom: 16 }}>
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, letterSpacing: 1, color: '#4D8DFF', textTransform: 'uppercase' }}>
-          Week {day.week_idx} · Day {day.day_idx + 1}
+      <header style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div>
+          <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, letterSpacing: 1, color: '#4D8DFF', textTransform: 'uppercase' }}>
+            Week {day.week_idx} · Day {day.day_idx + 1}
+          </div>
+          <h2 style={{ margin: '4px 0 0', fontSize: 22 }}>{day.name}</h2>
         </div>
-        <h2 style={{ margin: '4px 0 0', fontSize: 22 }}>{day.name}</h2>
+        {/* W2.6 — session-level manual deload (mobile). */}
+        <DeloadThisWeekButton runId={data.run_id} onChanged={fetchToday} />
       </header>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {[...groups.entries()].map(([blockIdx, blockSets]) => {
