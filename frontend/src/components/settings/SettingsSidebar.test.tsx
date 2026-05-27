@@ -8,9 +8,10 @@ describe('SETTINGS_SECTIONS authoritative layout (D7 — 8 top-level entries)', 
     ]);
   });
 
-  it('marks slots W4/W5/W7 will populate as disabled until those waves land', () => {
+  it('marks slots W5/W7 will populate as disabled until those waves land (W4 Program prefs now enabled)', () => {
     const byLabel = new Map(SETTINGS_SECTIONS.map((s) => [s.label, s]));
-    expect(byLabel.get('Program prefs')?.disabled).toBe(true);
+    // W4.3 has landed — Program prefs is now navigable.
+    expect(byLabel.get('Program prefs')?.disabled).toBe(false);
     expect(byLabel.get('Backups')?.disabled).toBe(true);
     expect(byLabel.get('Feedback')?.disabled).toBe(true);
     expect(byLabel.get('Account')?.disabled).toBe(false);

@@ -147,7 +147,7 @@ export function LandmarksEditor() {
       {/* [D2] PAR-Q advisory banner */}
       {parQActive && (
         <div role="note" style={{ padding: 12, background: 'rgba(255,180,40,0.10)', border: `1px solid ${TOKENS.warn}`, borderRadius: 8, color: TOKENS.text, fontSize: 13, marginBottom: 12 }}>
-          <strong>PAR-Q advisory active</strong> — talk to a clinician before increasing volume landmarks above the default. MAV/MRV are soft-capped at 80% of seeded defaults. Use "Override anyway?" per-muscle if your clinician has cleared higher volume.
+          <strong>PAR-Q advisory active</strong> — talk to a clinician before increasing volume landmarks above the default. <Term k="MAV" />/<Term k="MRV" /> are soft-capped at 80% of seeded defaults. Use "Override anyway?" per-muscle if your clinician has cleared higher volume.
         </div>
       )}
 
