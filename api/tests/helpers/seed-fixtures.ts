@@ -505,6 +505,61 @@ export async function seedOverreachingPartial(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// mkUserPair / cleanupUserPair — the W8.2 contamination fixture (G2). Two
+// fully-independent users, each with its OWN bearer token minted with the
+// account:write scope (so the PAR-Q / onboarding / deload routes accept
+// either user's token). Contamination tests use this to prove user B cannot
+// read or mutate user A's rows.
+//
+// Each side is a minimal user+bearer (no mesocycle chain) — the deload
+// contamination tests attach a mesocycle to userA explicitly via
+// seedFullMesocycleForUser(pair.userA.userId).
+// ---------------------------------------------------------------------------
+export interface UserPairHandle {
+  userA: SeedHandle;
+  userB: SeedHandle;
+}
+
+async function mkLoneUser(tag: string): Promise<SeedHandle> {
+  const userTag = randomUUID();
+  const email = `pair-${tag}.${userTag}@repos.test`;
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [email],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+    label: `pair-${tag}`,
+  });
+  return {
+    userId,
+    bearer,
+    userProgramId: '',
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
+export async function mkUserPair(): Promise<UserPairHandle> {
+  const [userA, userB] = await Promise.all([mkLoneUser('a'), mkLoneUser('b')]);
+  return { userA, userB };
+}
+
+export async function cleanupUserPair(
+  handles: UserPairHandle | UserPairHandle[],
+): Promise<void> {
+  const list = Array.isArray(handles) ? handles : [handles];
+  if (list.length === 0) return;
+  const flat: SeedHandle[] = [];
+  for (const p of list) { flat.push(p.userA, p.userB); }
+  await cleanupSeeded(flat);
+}
+
+// ---------------------------------------------------------------------------
 // cleanupSeeded — cascading DELETE on users removes everything that hangs off
 // them (device_tokens, user_programs → mesocycle_runs → day_workouts →
 // planned_sets → set_logs). We additionally drop the per-seed
