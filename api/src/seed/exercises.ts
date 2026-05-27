@@ -817,11 +817,11 @@ export const exercises: ExerciseSeed[] = [
     name: 'Hanging Leg Raise',
     primary_muscle: 'core',
     muscle_contributions: { core: 1.0, biceps: 0.2 },
-    movement_pattern: 'anti_rotation',  // → spinal_flexion in Task 3.4b
+    movement_pattern: 'spinal_flexion',  // W2.4 (migration 040)
     peak_tension_length: 'long',
     required_equipment: { _v: 1, requires: [{ type: 'pullup_bar' }] },
     skill_complexity: 3, loading_demand: 2, systemic_fatigue: 2,
-    joint_stress_profile: { _v: 1, lumbar: 'low', shoulder: 'low' },
+    joint_stress_profile: { _v: 1, lumbar: 'mod', shoulder: 'low' },
     eccentric_overload_capable: false,
     contraindications: [],
     requires_shoulder_flexion_overhead: false,
@@ -837,11 +837,11 @@ export const exercises: ExerciseSeed[] = [
     name: 'Ab Wheel Rollout',
     primary_muscle: 'core',
     muscle_contributions: { core: 1.0, lats: 0.4 },
-    movement_pattern: 'anti_rotation',  // → anti_extension in Task 3.4b
+    movement_pattern: 'anti_extension',  // W2.4 (migration 040)
     peak_tension_length: 'long',
     required_equipment: { _v: 1, requires: [{ type: 'ab_wheel' }] },
     skill_complexity: 4, loading_demand: 2, systemic_fatigue: 2,
-    joint_stress_profile: { _v: 1, lumbar: 'mod', shoulder: 'mod' },
+    joint_stress_profile: { _v: 1, lumbar: 'high', shoulder: 'high' },
     eccentric_overload_capable: true,
     contraindications: ['low_back_disc'],
     requires_shoulder_flexion_overhead: false,
@@ -877,11 +877,11 @@ export const exercises: ExerciseSeed[] = [
     name: 'Cable Crunch',
     primary_muscle: 'core',
     muscle_contributions: { core: 1.0 },
-    movement_pattern: 'anti_rotation',  // → spinal_flexion in Task 3.4b
+    movement_pattern: 'spinal_flexion',  // W2.4 (migration 040)
     peak_tension_length: 'long',
     required_equipment: { _v: 1, requires: [{ type: 'cable_stack' }] },
     skill_complexity: 2, loading_demand: 2, systemic_fatigue: 1,
-    joint_stress_profile: { _v: 1, lumbar: 'mod' },
+    joint_stress_profile: { _v: 1, lumbar: 'high' },
     eccentric_overload_capable: true,
     contraindications: ['low_back_disc'],
     requires_shoulder_flexion_overhead: false,
