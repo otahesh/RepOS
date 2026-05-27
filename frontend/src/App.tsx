@@ -14,6 +14,7 @@ import ProgramsPage from './pages/ProgramsPage'
 import ProgramDetailPage from './pages/ProgramDetailPage'
 import MyProgramPage from './pages/MyProgramPage'
 import SettingsInjuriesPage from './pages/SettingsInjuriesPage'
+import SettingsHealthPage from './pages/SettingsHealthPage'
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
 import { ComingSoonPlaceholder } from './components/common/ComingSoonPlaceholder'
 import { useIsMobile } from './lib/useIsMobile'
@@ -49,6 +50,7 @@ function AppInner() {
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />
+            <Route path="settings/health" element={<SettingsHealthPage />} />
             <Route path="settings/storage" element={<SettingsStorage />} />
             <Route path="settings/injuries" element={<SettingsInjuriesPage />} />
             <Route path="settings/program-prefs" element={

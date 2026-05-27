@@ -1,11 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { SETTINGS_SECTIONS } from './SettingsSidebar';
 
-describe('SETTINGS_SECTIONS authoritative layout (D7 — 8 top-level entries)', () => {
-  it('ships exactly 8 top-level entries (Storage + Injuries stay top-level per D7)', () => {
+describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
+  it('ships the W6 lineup plus the W2 Health entry (slotted after Account)', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.label)).toEqual([
-      'Account','Equipment','Integrations','Program prefs','Backups','Feedback','Storage','Injuries',
+      'Account','Health','Equipment','Integrations','Program prefs','Backups','Feedback','Storage','Injuries',
     ]);
+  });
+
+  it('Health is a live W2 entry (navigable, not a disabled placeholder)', () => {
+    const health = SETTINGS_SECTIONS.find((s) => s.label === 'Health');
+    expect(health?.disabled).toBe(false);
+    expect(health?.ownerWave).toBe('W2');
+    expect(health?.to).toBe('/settings/health');
   });
 
   it('marks slots W4/W5/W7 will populate as disabled until those waves land', () => {
