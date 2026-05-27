@@ -563,6 +563,69 @@ async function mkFixtureTemplate(opts: {
   return tpl;
 }
 
+// seedUserProgramAtTemplateVersion — reproduce the "alpha fork pinned to a
+// stale template version" condition deterministically. We build a dedicated
+// 'system' template AT THE CURRENT VERSION (default 2, with core blocks) and
+// pin the fork to `opts.templateVersion` (default 1, the pre-core version).
+//
+// The seed adapter UPDATES the template row in place rather than keeping
+// per-version rows, so an old structure no longer exists in the DB to
+// materialize from. The actual safety guarantee is STRONGER than "materialize
+// the old structure" — materializeMesocycle hard-stops a stale fork with
+// TemplateOutdatedError, forcing an explicit re-fork. We build the template at
+// a known version (independent of the environment-dependent curated versions)
+// so the stale-fork condition is reproducible.
+export async function seedUserProgramAtTemplateVersion(opts: {
+  templateVersion: number;            // the fork's pinned (stale) version
+  currentTemplateVersion?: number;    // the template row's actual version (default 2)
+}): Promise<SeedHandle> {
+  const currentVersion = opts.currentTemplateVersion ?? 2;
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [`w2-altfork.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+  // Dedicated 'system' template at currentVersion, with a core block (mirrors
+  // the post-W2 curated structure). The fork below pins the older version.
+  const slug = `w2-altfork-tpl-${userTag}`;
+  const structure = {
+    _v: 1,
+    days: [
+      {
+        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        blocks: [
+          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
+          { exercise_slug: 'side-plank',          mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 15, target_rir: 2, rest_sec: 60 },
+        ],
+      },
+    ],
+  };
+  const { rows: [tpl] } = await db.query<{ id: string }>(
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
+     VALUES ($1, $2, 5, 1, $3::jsonb, $4, 'system') RETURNING id`,
+    [slug, `Alt Fork Tpl ${userTag}`, JSON.stringify(structure), currentVersion],
+  );
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
+    [userId, tpl.id, opts.templateVersion, `Alpha Fork ${userTag}`],
+  );
+  return {
+    userId,
+    bearer,
+    userProgramId: up.id,
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
 export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<SeedHandle> {
   const weeks = opts.weeks ?? 5;
   const userTag = randomUUID();
