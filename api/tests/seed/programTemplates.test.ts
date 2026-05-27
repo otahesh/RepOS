@@ -15,7 +15,23 @@ beforeAll(async () => {
   await db.query(`DELETE FROM program_templates WHERE seed_key='program_templates'`);
   await db.query(`DELETE FROM _seed_meta WHERE key='program_templates'`);
 });
-afterAll(async () => { await db.end(); });
+// Restore the canonical curated lineup before releasing the shared DB. The
+// "removing a template soft-archives it" case above leaves strength-cardio-3-2
+// ARCHIVED; without this restore the next suite (notably the integration
+// core-blocks test) sees only 2 active curated templates. Re-run the real
+// seed so all 3 curated rows are active + current again.
+afterAll(async () => {
+  try {
+    const all = (await db.query<{ slug: string }>(`SELECT slug FROM exercises WHERE archived_at IS NULL`)).rows.map(r => r.slug);
+    const cardio = (await db.query<{ slug: string }>(`SELECT slug FROM exercises WHERE archived_at IS NULL AND movement_pattern='gait'`)).rows.map(r => r.slug);
+    await runSeed({
+      key: 'program_templates',
+      entries: programTemplates,
+      adapter: makeProgramTemplateAdapter(new Set(all), new Set(cardio)),
+    });
+  } catch { /* best-effort restore */ }
+  await db.end();
+});
 
 describe('program_templates seed (e2e)', () => {
   it('inserts 3 active templates on first run', async () => {
