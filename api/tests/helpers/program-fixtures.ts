@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { db } from '../../src/db/client.js';
+import { buildApp } from '../../src/app.js';
 
 export interface MkUserOpts {
   /** Tag included in the email for log readability. Default 'vitest'. */
@@ -97,6 +98,100 @@ export async function mkUserProgram(opts: MkUserProgramOpts): Promise<{ id: stri
     ],
   );
   return up;
+}
+
+export interface MkUserWithProgramOpts {
+  /** Tag included in the email for log readability. Default 'vitest-wp'. */
+  prefix?: string;
+  /** Template slug to fork + start. Default 'upper-lower-4-day' (seeded). */
+  templateSlug?: string;
+}
+
+export interface UserWithProgram {
+  userId: string;
+  token: string;
+  mesocycleRunId: string;
+  firstPlannedSetId: string;
+  firstExerciseId: string;
+}
+
+/**
+ * W5 — compose mkUser + a real materialized mesocycle so set-log POSTs have a
+ * valid planned_set to write against. Mints a bearer token scoped for
+ * set_logs:write (so requireScope passes on the bearer path) and forks+starts
+ * the seeded `upper-lower-4-day` template via the HTTP API (materializeMesocycle
+ * under the hood). Returns the first planned_set + its exercise_id.
+ *
+ * Pattern matches programModel.smoke.test.ts:60–270.
+ */
+export async function mkUserWithProgram(
+  opts: MkUserWithProgramOpts = {},
+): Promise<UserWithProgram> {
+  const prefix = opts.prefix ?? 'vitest-wp';
+  const templateSlug = opts.templateSlug ?? 'upper-lower-4-day';
+  const app = await buildApp();
+  try {
+    const u = await mkUser({ prefix, goal: 'maintain' });
+
+    // Mint a bearer token with set_logs:write so set-log POSTs pass requireScope.
+    // ADMIN_API_KEY unset in tests → requireAdminKeyOrCfAccess open path.
+    const mint = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      payload: { user_id: u.id, label: `${prefix}-token`, scopes: ['set_logs:write'] },
+    });
+    if (mint.statusCode !== 201) {
+      throw new Error(`mkUserWithProgram: token mint failed (${mint.statusCode})`);
+    }
+    const token = mint.json<{ token: string }>().token;
+    const auth = { authorization: `Bearer ${token}` };
+
+    const fork = await app.inject({
+      method: 'POST',
+      url: `/api/program-templates/${templateSlug}/fork`,
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { name: `${prefix} run` },
+    });
+    if (fork.statusCode !== 201) {
+      throw new Error(`mkUserWithProgram: fork failed (${fork.statusCode})`);
+    }
+    const userProgramId = fork.json<{ id: string }>().id;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const start = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${userProgramId}/start`,
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { start_date: today, start_tz: 'America/Indiana/Indianapolis' },
+    });
+    if (start.statusCode !== 201) {
+      throw new Error(`mkUserWithProgram: start failed (${start.statusCode})`);
+    }
+    const mesocycleRunId = start.json<{ mesocycle_run_id: string }>().mesocycle_run_id;
+
+    const { rows } = await db.query<{ id: string; exercise_id: string }>(
+      `SELECT ps.id, ps.exercise_id
+         FROM planned_sets ps
+         JOIN day_workouts dw ON dw.id = ps.day_workout_id
+        WHERE dw.mesocycle_run_id = $1
+        ORDER BY dw.week_idx, dw.day_idx, ps.block_idx, ps.set_idx
+        LIMIT 1`,
+      [mesocycleRunId],
+    );
+    if (rows.length === 0) {
+      throw new Error('mkUserWithProgram: no planned_sets materialized');
+    }
+
+    return {
+      userId: u.id,
+      token,
+      mesocycleRunId,
+      firstPlannedSetId: rows[0].id,
+      firstExerciseId: rows[0].exercise_id,
+    };
+  } finally {
+    await app.close();
+  }
 }
 
 /** Idempotent: ignores undefined ids. Cascades take care of dependent rows. */
