@@ -2,26 +2,26 @@
   {
     "week": 1,
     "triggered": true,
-    "exercise_id": "fda192c0-8fbe-4214-89b7-154f34a96761"
+    "exercise_slug": "barbell-bench-press"
   },
   {
     "week": 2,
     "triggered": true,
-    "exercise_id": "fda192c0-8fbe-4214-89b7-154f34a96761"
+    "exercise_slug": "barbell-bench-press"
   },
   {
     "week": 3,
     "triggered": true,
-    "exercise_id": "fda192c0-8fbe-4214-89b7-154f34a96761"
+    "exercise_slug": "barbell-bench-press"
   },
   {
     "week": 4,
     "triggered": true,
-    "exercise_id": "fda192c0-8fbe-4214-89b7-154f34a96761"
+    "exercise_slug": "barbell-bench-press"
   },
   {
     "week": 5,
     "triggered": true,
-    "exercise_id": "fda192c0-8fbe-4214-89b7-154f34a96761"
+    "exercise_slug": "barbell-bench-press"
   }
 ]

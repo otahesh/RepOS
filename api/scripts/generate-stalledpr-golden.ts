@@ -15,16 +15,23 @@ import { db } from '../src/db/client.js';
 
 (async () => {
   const seed = await seedStalledPrMultiWeekFixture();
-  const out: Array<{ week: number; triggered: boolean; exercise_id: string | null }> = [];
+  // Resolve the fired exercise to its STABLE slug (not the per-DB-instance
+  // UUID, which changes on every reseed). The golden therefore survives a
+  // DROP SCHEMA + reseed: parity compares triggered + exercise_slug.
+  const out: Array<{ week: number; triggered: boolean; exercise_slug: string | null }> = [];
   for (let w = 1; w <= 5; w++) {
     const res = await stalledPrEvaluator.evaluate({
       userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: w,
     });
-    out.push({
-      week: w,
-      triggered: res.triggered,
-      exercise_id: res.triggered ? (res.payload?.exercise_id as string ?? null) : null,
-    });
+    let slug: string | null = null;
+    if (res.triggered && res.payload?.exercise_id) {
+      const { rows } = await db.query<{ slug: string }>(
+        `SELECT slug FROM exercises WHERE id = $1`,
+        [res.payload.exercise_id as string],
+      );
+      slug = rows[0]?.slug ?? null;
+    }
+    out.push({ week: w, triggered: res.triggered, exercise_slug: slug });
   }
   await cleanupSeeded([{ userId: seed.userId }]);
   await db.end();

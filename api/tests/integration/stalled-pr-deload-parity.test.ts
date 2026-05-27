@@ -18,12 +18,13 @@ afterAll(async () => { await db.end(); });
 
 describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
   it('post-swap evaluator produces output identical to the pre-swap golden fixture (multi-week)', async () => {
-    // Load the golden captured pre-swap (Task 2.4.0a).
+    // Load the golden captured pre-swap (Task 2.4.0a). It stores the STABLE
+    // exercise slug, not the per-DB-instance UUID, so it survives a reseed.
     const goldenPath = join(__dirname, '../fixtures/stalledPrEvaluator-pre-swap-golden.json');
     const golden = JSON.parse(readFileSync(goldenPath, 'utf-8')) as Array<{
       week: number;
       triggered: boolean;
-      exercise_id: string | null;
+      exercise_slug: string | null;
     }>;
     expect(golden.length).toBe(5);  // 5-week mesocycle
 
@@ -38,8 +39,15 @@ describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
         userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: g.week,
       });
       expect(res.triggered, `week ${g.week} triggered parity`).toBe(g.triggered);
-      const postExerciseId = res.triggered ? (res.payload?.exercise_id as string ?? null) : null;
-      expect(postExerciseId, `week ${g.week} exercise_id parity`).toBe(g.exercise_id);
+      let postSlug: string | null = null;
+      if (res.triggered && res.payload?.exercise_id) {
+        const { rows } = await db.query<{ slug: string }>(
+          `SELECT slug FROM exercises WHERE id = $1`,
+          [res.payload.exercise_id as string],
+        );
+        postSlug = rows[0]?.slug ?? null;
+      }
+      expect(postSlug, `week ${g.week} exercise_slug parity`).toBe(g.exercise_slug);
     }
   });
 

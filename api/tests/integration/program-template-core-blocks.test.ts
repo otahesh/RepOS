@@ -14,11 +14,16 @@ afterAll(async () => { await db.end(); });
 
 describe('W2 — curated programs include core blocks (new version) but old forks untouched', () => {
   it('latest program_templates version has at least one block with primary_muscle=core', async () => {
+    // Scope to the curated lineup by slug — other tests seed throwaway
+    // created_by='system' fixture templates (no core block) that would
+    // otherwise pollute an "all system templates" query under parallelism.
+    const CURATED = ['full-body-3-day', 'upper-lower-4-day', 'strength-cardio-3-2'];
     const { rows: templates } = await db.query<{ slug: string; version: number; structure: any }>(
       `SELECT slug, version, structure FROM program_templates
-       WHERE archived_at IS NULL AND created_by = 'system'`,
+       WHERE archived_at IS NULL AND created_by = 'system' AND slug = ANY($1::text[])`,
+      [CURATED],
     );
-    expect(templates.length).toBeGreaterThan(0);
+    expect(templates.length).toBe(CURATED.length);
     // Walk structure.days[].blocks[].exercise_slug; cross-reference exercises table.
     for (const tpl of templates) {
       const slugs: string[] = [];
