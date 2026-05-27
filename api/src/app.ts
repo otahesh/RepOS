@@ -6,6 +6,7 @@ import { workoutsRoutes } from './routes/workouts.js';
 import { syncRoutes } from './routes/sync.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { muscleRoutes } from './routes/muscles.js';
+import { muscleJointStressRoutes } from './routes/muscleJointStress.js';
 import { exerciseRoutes } from './routes/exercises.js';
 import { equipmentRoutes } from './routes/equipment.js';
 import { programRoutes } from './routes/programs.js';
@@ -39,6 +40,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(sensible);
   await app.register(tokenRoutes, { prefix: '/api' });
   await app.register(muscleRoutes, { prefix: '/api' });
+  await app.register(muscleJointStressRoutes, { prefix: '/api' });
   await app.register(exerciseRoutes, { prefix: '/api' });
   await app.register(equipmentRoutes, { prefix: '/api' });
   await app.register(programRoutes, { prefix: '/api' });
