@@ -44,7 +44,7 @@ Until Milestone 2 lands the system is "Beta-launched" but not "Beta-validated." 
         [x] W1.3.7 SessionExpiredBanner + auth-state purge + CF-Access expiry
         [x] W1.3.8 /settings/storage clear-rejected page
         [x] W1.3.9 typecheck + tests final sweep
-    [x] W1.5 — e2e Playwright (W3-shape signal + volume rollup invariant)
+    [x] W1.5 — W3-shape signal at api/tests/integration/set-logs-volume-rollup.test.ts + volume rollup invariant
 [ ] W2 — Onboarding + clinical safety (PAR-Q, deload, core)     parallel-eligible from now
 [x] W3 — Clinical signals + injury swap (merged to main at 0d5a2cd)
     [x] W3.1 — Recovery flag evaluators (overreaching + stalled-PR) + recovery_flag_events telemetry
@@ -138,7 +138,7 @@ Full register lives in master plan. These are the ones likely to fire imminently
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| **W3 clinical-signal thresholds drift** from what W1's volume-rollup actually emits (`performed_sets`, set-volume, RPE distribution) | Medium-high | The W1.5 e2e (`tests/e2e/w3-shape-signal.spec.ts`) pins the shape contract; W3 plan must consume it as a fixture rather than re-deriving thresholds. Audit at plan-review checkpoint per [[feedback_get_plan_reviewed]]. |
+| **W3 clinical-signal thresholds drift** from what W1's volume-rollup actually emits (`performed_sets`, set-volume, RPE distribution) | Medium-high | The W1.5 contract test (`api/tests/integration/set-logs-volume-rollup.test.ts`) pins the shape contract; W3 plan must consume it as a fixture rather than re-deriving thresholds. Audit at plan-review checkpoint per [[feedback_get_plan_reviewed]]. |
 | **Parallel-wave schema collisions** (W2 `par_q_acknowledgments`, W3 `injury_swaps`, W6 `account_events`) clash on migration numbering or shared enum types | Medium | Each per-wave plan must claim its migration number range upfront in the plan front-matter; reviewer-pass per wave checks `api/migrations/` for collisions before merge. |
 | **First post-W1 user-reachability gap** — W3's recovery flags + W4's landmarks editor may not be linked from `/` (per [[feedback_user_reachability_dod]]) | Medium | G7 audit (W8.8) runs after every UI-touching wave merges, not just at end. Each per-wave plan must list its entry-point link from `/` in acceptance gates. |
 | **Worktree-isolation regression** when dispatching the parallel fan-out (4 waves at once, per [[feedback_worktree_isolation]]) | High if not enforced | Every parallel-agent prompt must omit absolute paths into the project root; use `isolation: "worktree"` and verify via `git worktree list` before dispatch. |
