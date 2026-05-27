@@ -1,4 +1,5 @@
 import { db } from '../db/client.js';
+import type { PoolClient } from 'pg';
 
 export type AccountEventKind =
   | 'profile_changed' | 'token_minted' | 'token_revoked' | 'signout_everywhere' | 'delete_initiated'
@@ -15,6 +16,24 @@ export interface RecordAccountEventArgs {
 
 export async function recordAccountEvent(args: RecordAccountEventArgs): Promise<void> {
   await db.query(
+    `INSERT INTO account_events
+       (user_id, user_id_at_event, user_email_at_event, kind, ip, meta)
+     VALUES ($1, $1, $2, $3, $4, $5::jsonb)`,
+    [args.userId, args.userEmail, args.kind, args.ip, JSON.stringify(args.meta)],
+  );
+}
+
+// W2: transaction-scoped variant. The W2 routes (PAR-Q POST, onboarding
+// POST) emit the account event in the SAME transaction as their primary
+// INSERT/UPDATE so the audit row and the state change commit atomically.
+// W6 already shipped the table + the 'par_q_acknowledged' / 'onboarding_completed'
+// enum values, so no try/catch shim is needed (the plan's W2→W6 transitional
+// `tryRecordAccountEvent` posture is moot now that W6 is merged).
+export async function recordAccountEventTx(
+  client: PoolClient,
+  args: RecordAccountEventArgs,
+): Promise<void> {
+  await client.query(
     `INSERT INTO account_events
        (user_id, user_id_at_event, user_email_at_event, kind, ip, meta)
      VALUES ($1, $1, $2, $3, $4, $5::jsonb)`,
