@@ -91,19 +91,36 @@ export function currentCodeRev(): number {
 }
 
 /**
- * Highest _migrations filename rev recorded in the dump TOC. Reads
- * `pg_restore -l` output; the _migrations table data isn't in the TOC, so we
- * cannot read the actual rows from -l alone. Production extracts the rev by
- * restoring _migrations into a temp schema; here we expose a test override
- * (REPOS_TEST_FORCE_FUTURE_DUMP_REV) so the integration suite can exercise the
- * rejection path deterministically without a crafted dump.
+ * Highest migration rev recorded in the dump's `_migrations` table. Extracts
+ * the table data DB-free — pipes the dump through
+ * `pg_restore --data-only --table=_migrations` (same gunzip|pg_restore stdin
+ * mechanism as integrityCheck) and reads the max numeric filename prefix. No
+ * temp DB or CREATEDB privilege required, so it works in the locked-down prod
+ * container. Returns null only when the rev can't be determined (corrupt or
+ * pre-_migrations dump); assertSchemaRevCompatible then ALLOWS, so an
+ * extraction hiccup never bricks disaster recovery.
  */
-export function dumpSchemaRev(_dumpPath: string): number | null {
-  const forced = process.env.REPOS_TEST_FORCE_FUTURE_DUMP_REV;
-  if (forced) return Number(forced);
-  // Best-effort: if the TOC has no usable rev, return null → "allow" (any
-  // restore older than W0.0 is already filtered by the filename allow-list).
-  return null;
+export function dumpSchemaRev(dumpPath: string): number | null {
+  const res = spawnSync(
+    'bash',
+    ['-c', `gunzip -c "${dumpPath}" | pg_restore --data-only --table=_migrations -f - 2>/dev/null`],
+    { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+  );
+  if (res.status !== 0 || typeof res.stdout !== 'string') return null;
+  let max = 0;
+  let found = false;
+  for (const line of res.stdout.split('\n')) {
+    // COPY data rows are tab-delimited "<filename>\t<applied_at>"; migration
+    // filenames are "NNN_description.sql". The COPY header and \. terminator
+    // don't match this shape.
+    const m = /^(\d+)_[^\t]*\.sql\t/.exec(line);
+    if (m) {
+      found = true;
+      const n = Number(m[1]);
+      if (n > max) max = n;
+    }
+  }
+  return found ? max : null;
 }
 
 export function assertSchemaRevCompatible(dumpPath: string): void {

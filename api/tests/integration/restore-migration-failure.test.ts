@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
+import { dumpSchemaRev, currentCodeRev, assertSchemaRevCompatible } from '../../src/services/restoreRunner.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
@@ -105,35 +106,51 @@ describe('G5 case 4 — migration failure rollback to pre-snapshot', () => {
     expect(res.json().error).toBe('no_pre_restore_snapshot');
   });
 
-  // C-FORWARD-INCOMPAT-CHECK — reject a restore when the dump schema rev is
-  // newer than the running code's highest migration.
-  it('rejects restore when dump schema rev > current code rev', async () => {
+  // C-FORWARD-INCOMPAT-CHECK — reject a restore when the dump's recorded schema
+  // rev is newer than the running code's highest migration. Exercises the REAL
+  // extraction (dumpSchemaRev reads the dump's _migrations rows) — no test-only
+  // rev override.
+  it('rejects restore when the dump _migrations rev > current code rev', async () => {
     const futureDump = join(backupsDir, 'repos-20260601T000000Z.dump.gz');
-    // A real, restorable dump (integrity check passes) — the rejection is
-    // driven by the schema-rev preflight, not a corrupt file.
-    execSync(
-      `pg_dump --format=custom "${process.env.DATABASE_URL}" | gzip -6 > "${futureDump}"`,
-      { stdio: 'pipe', shell: '/bin/bash' },
-    );
+    // Stamp a future migration into _migrations so the dump records rev 999,
+    // then remove it so the live DB stays clean. The dump file retains 999.
+    await db.query(`INSERT INTO _migrations (filename) VALUES ('999_future_test_only.sql')`);
+    try {
+      execSync(
+        `pg_dump --format=custom "${process.env.DATABASE_URL}" | gzip -6 > "${futureDump}"`,
+        { stdio: 'pipe', shell: '/bin/bash' },
+      );
+    } finally {
+      await db.query(`DELETE FROM _migrations WHERE filename = '999_future_test_only.sql'`);
+    }
     await db.query(
       `INSERT INTO backup_runs (trigger, event_kind, status, file_path, integrity_verified, started_at, finished_at)
        VALUES ('manual', 'create', 'ok', $1, true, now(), now())`,
       [futureDump],
     );
-    process.env.REPOS_TEST_FORCE_FUTURE_DUMP_REV = '999';
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: `/api/backups/${basename(futureDump)}/restore`,
-        payload: { confirm: 'RESTORE' },
-        headers: { 'content-type': 'application/json' },
-      });
-      expect(res.statusCode).toBe(409);
-      expect(res.json().error).toBe('dump_schema_rev_too_new');
-    } finally {
-      delete process.env.REPOS_TEST_FORCE_FUTURE_DUMP_REV;
-    }
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/backups/${basename(futureDump)}/restore`,
+      payload: { confirm: 'RESTORE' },
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('dump_schema_rev_too_new');
     // The flag must NOT have been written (rejection happens pre-flag).
     expect(existsSync(flagPath)).toBe(false);
+  });
+
+  // Proves the extraction is real (not null-on-everything): a current dump
+  // resolves to the live code rev, so assertSchemaRevCompatible does NOT throw.
+  it('dumpSchemaRev extracts the real max rev from a current dump', async () => {
+    const okDump = join(backupsDir, 'repos-20260527T000000Z.dump.gz');
+    execSync(
+      `pg_dump --format=custom "${process.env.DATABASE_URL}" | gzip -6 > "${okDump}"`,
+      { stdio: 'pipe', shell: '/bin/bash' },
+    );
+    const rev = dumpSchemaRev(okDump);
+    expect(rev).toBe(currentCodeRev());
+    expect(rev).toBeGreaterThan(0);
+    expect(() => assertSchemaRevCompatible(okDump)).not.toThrow();
   });
 });
