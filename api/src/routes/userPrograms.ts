@@ -95,8 +95,13 @@ export async function userProgramRoutes(app: FastifyInstance) {
       try {
         await client.query('BEGIN');
 
+        // [I-SWAP-RACE] FOR UPDATE on the user_programs row so a double-click
+        // can't lose a write under READ COMMITTED — the second PATCH blocks
+        // until the first commits, then reads the already-mutated
+        // customizations. Protects BOTH swap_exercise and swap_exercise_all
+        // (and every other reducer op that read-modify-writes customizations).
         const { rows } = await client.query(
-          `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2`,
+          `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
           [req.params.id, userId],
         );
         if (rows.length === 0) {
@@ -135,6 +140,58 @@ export async function userProgramRoutes(app: FastifyInstance) {
                 week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx,
                 from_slug: auditFromSlug, to_slug: op.to_exercise_slug,
               });
+              break;
+            }
+            case 'swap_exercise_all': {
+              // [I-SWAP-WEEK-IDX] Verified against
+              // api/src/services/resolveUserProgramStructure.ts:126-135 — the
+              // resolver applies swap entries with week_idx===1 to the
+              // single-week effective_structure blueprint, and materialize
+              // (api/src/services/materializeMesocycle.ts) loops the SAME
+              // template.structure.days for every week. So a week_idx:1 swap
+              // entry IS a program-wide swap (outcome (a) in the plan). No
+              // resolver change needed.
+              //
+              // Look up template structure once; locate every (day_idx,
+              // block_idx) whose exercise_slug matches from_slug. Ownership is
+              // implicit — the row we SELECTed FOR UPDATE at the top of the
+              // route is gated by user_id=$2; the multi-entry rewrite is to
+              // customizations on that SAME row. Cross-user contamination is
+              // impossible here because we never SELECT or UPDATE a row keyed
+              // on anything other than (id, user_id). (Master plan §319: the
+              // "every-occurrence" guarantee is about every BLOCK, not every
+              // USER — one user_programs row, many customizations entries.)
+              const tmplRow = await client.query(
+                `SELECT structure FROM program_templates WHERE id=$1`,
+                [rows[0].template_id],
+              );
+              const days = tmplRow.rows[0]?.structure?.days ?? [];
+              type Match = { day_idx: number; block_idx: number };
+              const matches: Match[] = [];
+              for (const d of days) {
+                (d.blocks ?? []).forEach((b: any, blockIdx: number) => {
+                  if (b.exercise_slug === op.from_slug) matches.push({ day_idx: d.idx, block_idx: blockIdx });
+                });
+              }
+              if (matches.length === 0) {
+                badBlock = true; // reuses existing 400 response with field=block_idx
+                await client.query('ROLLBACK');
+                break;
+              }
+              // Rewrite each match as an individual swap entry — keeps the
+              // per-block ownership model intact (a later swap of (day,block)
+              // still works); also record a sibling `swaps_all` audit list.
+              cust.swaps = (cust.swaps ?? []).filter((s: any) =>
+                !matches.some((m) => s.week_idx === 1 && s.day_idx === m.day_idx && s.block_idx === m.block_idx)
+              );
+              for (const m of matches) {
+                cust.swaps.push({
+                  week_idx: 1, day_idx: m.day_idx, block_idx: m.block_idx,
+                  from_slug: op.from_slug, to_slug: op.to_exercise_slug,
+                });
+              }
+              cust.swaps_all = [...(cust.swaps_all ?? []), { from_slug: op.from_slug, to_slug: op.to_exercise_slug }];
+              auditFromSlug = op.from_slug;
               break;
             }
             case 'add_set':
