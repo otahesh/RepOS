@@ -323,10 +323,11 @@ export async function addThreeDistinctSessions(seed: SeedHandle): Promise<Array<
 //   'deload'       — mesocycle_runs.current_week === weeks (last week)
 //   'low-rep'      — sessions at 3 reps (strength range, FIX-25 gates this)
 //
-// Non-deload patterns force weeks=4 + current_week=2 so the evaluator's
-// deload guard (current_week >= weeks, see FIX-24 ADAPTED in
-// stalledPrEvaluator) doesn't trip. The base seedUserWithMesocycle creates
-// weeks=1 + current_week=1 which would always look like a deload.
+// [W2 SWAP] The deload signal is now the per-row `day_workouts.is_deload`
+// flag, NOT the `current_week >= weeks` heuristic. The 'deload' pattern flips
+// is_deload=true on the three session day_workouts (post-addThreeDistinctSessions)
+// so the evaluator filters them out; non-deload patterns leave is_deload=false.
+// weeks=4 + current_week=2 is kept for shape but no longer drives the guard.
 // ---------------------------------------------------------------------------
 export async function seedStalledPr(opts: {
   pattern: 'stalled' | 'progressing' | 'rir-mixed' | 'deload' | 'low-rep';
@@ -334,23 +335,24 @@ export async function seedStalledPr(opts: {
   const seed = await seedUserWithMesocycle();
   const { userId, mesocycleRunId, exerciseId } = seed;
 
-  if (opts.pattern === 'deload') {
-    // [FIX-24 ADAPTED] Last week of mesocycle = deload. Force
-    // current_week === weeks. The base seed already has weeks=1
-    // current_week=1, so this is a no-op, but assert explicitly for clarity.
-    await db.query(
-      `UPDATE mesocycle_runs SET weeks = 4, current_week = 4 WHERE id = $1`,
-      [mesocycleRunId],
-    );
-  } else {
-    // Make sure we're NOT in the last week (current_week < weeks).
-    await db.query(
-      `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
-      [mesocycleRunId],
-    );
-  }
+  // Shape only — the per-row is_deload flag (set below for the 'deload'
+  // pattern) is what actually drives the W2-swapped evaluator's guard.
+  await db.query(
+    `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
+    [mesocycleRunId],
+  );
 
   const sessions = await addThreeDistinctSessions(seed);
+
+  if (opts.pattern === 'deload') {
+    // [W2 SWAP] Mark all three session day_workouts as deload so the per-row
+    // guard mutes the evaluator (replaces the old current_week === weeks
+    // heuristic).
+    await db.query(
+      `UPDATE day_workouts SET is_deload = true WHERE id = ANY($1::uuid[])`,
+      [sessions.map((s) => s.dayWorkoutId)],
+    );
+  }
 
   const baseLoad = 225;
   const baseReps = opts.pattern === 'low-rep' ? 3 : 8;
