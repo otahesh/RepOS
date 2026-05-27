@@ -4,7 +4,7 @@ import { ProgramPage } from '../components/programs/ProgramPage'
 import { DayCard } from '../components/programs/DayCard'
 import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings'
 import { MesocycleRecap, type RecapChoice } from '../components/programs/MesocycleRecap'
-import { getMesocycle, getMesocycleRecapStats, abandonMesocycle, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
+import { getMesocycle, getMesocycleRecapStats, abandonMesocycle, startMesocycle, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
 import {
   getUserProgram,
   getUserProgramWarnings,
@@ -15,6 +15,8 @@ import { TOKENS } from '../tokens'
 import { pushToast } from '../components/common/ToastHost'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { Term } from '../components/Term'
+import { DesktopSwapSheet } from '../components/programs/DesktopSwapSheet'
+import { useIsMobile } from '../lib/useIsMobile'
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -30,6 +32,11 @@ export default function MyProgramPage() {
   const [recapLoading, setRecapLoading] = useState(false)
   const [abandonOpen, setAbandonOpen] = useState(false)
   const [abandoning, setAbandoning] = useState(false)
+  // [W4.1] desktop swap side-sheet target (day/block whose exercise to swap).
+  const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null)
+  // [W4.5 / D4] deload confirm dialog gate.
+  const [confirmDeload, setConfirmDeload] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     if (!id) return
@@ -73,31 +80,38 @@ export default function MyProgramPage() {
     return () => { ignore = true }
   }, [run])
 
-  function handleChoice(choice: RecapChoice) {
-    // up may not yet be loaded if the user_program fetch raced. Fall back to
-    // the catalog so the user always ends up somewhere useful.
-    const slug = up?.template_slug ?? null
-
+  async function handleChoice(choice: RecapChoice) {
     if (choice === 'deload') {
-      // V2 will generate a dedicated deload mesocycle. For now, navigate to the
-      // fork wizard for the same template with an intent hint so the user can
-      // manually select a lighter week. If the template was archived (no slug),
-      // fall through to catalog.
-      if (slug) {
-        navigate(`/programs/${encodeURIComponent(slug)}?intent=deload`)
-      } else {
-        navigate('/programs')
-      }
-    } else if (choice === 'run_it_back') {
-      // Fork wizard for the same template — no special flag.
-      if (slug) {
-        navigate(`/programs/${encodeURIComponent(slug)}`)
-      } else {
-        navigate('/programs')
+      // [D4] Don't fire the backend until the user confirms the volume math.
+      setConfirmDeload(true)
+      return
+    }
+    if (choice === 'run_it_back') {
+      // [C-RUN-IT-BACK-ROUTE] "Run it back" is now a real new mesocycle via the
+      // unified start route (intent=normal), not a fork-wizard navigation.
+      if (!up) { navigate('/programs'); return }
+      try {
+        const r = await startMesocycle({ user_program_id: up.id, intent: 'normal' })
+        navigate(`/my-programs/${r.mesocycle_run_id}`)
+      } catch (e) {
+        setErr(`Couldn't restart mesocycle: ${e instanceof Error ? e.message : String(e)}`)
       }
     } else {
       // 'new_program' — browse catalog.
       navigate('/programs')
+    }
+  }
+
+  // [D4] Fires only after the user confirms in the heavy ConfirmDialog.
+  async function onConfirmDeload() {
+    if (!up) { navigate('/programs'); return }
+    try {
+      const r = await startMesocycle({ user_program_id: up.id, intent: 'deload' })
+      navigate(`/my-programs/${r.mesocycle_run_id}`)
+    } catch (e) {
+      setErr(`Couldn't start deload mesocycle: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setConfirmDeload(false)
     }
   }
 
@@ -164,7 +178,29 @@ export default function MyProgramPage() {
       )
     }
     if (recapStats) {
-      return <MesocycleRecap stats={recapStats} onChoice={handleChoice} />
+      const deloadWeeks = run.weeks ?? 4
+      return (
+        <>
+          <MesocycleRecap stats={recapStats} onChoice={(c) => void handleChoice(c)} />
+          {/* [D4] Confirm with templated volume math before generating a real
+              deload mesocycle. Reuses the W6 ConfirmDialog. DEVIATION: the plan
+              specified tier="heavy", but the W6 ConfirmDialog disables Confirm
+              on heavy WITHOUT requireTyped (typedOk=false), and a deload is
+              CONSTRUCTIVE (creates a new meso), not destructive like Abandon
+              (which uses heavy + typed name match). tier="medium" is the correct
+              fit: a confirmation modal without typed-match friction. */}
+          <ConfirmDialog
+            open={confirmDeload}
+            tier="medium"
+            title="Take a deload mesocycle?"
+            body={`This will create a ${deloadWeeks}-week deload mesocycle at ~50% of your MAV with RIR 4 throughout. Continue?`}
+            confirmLabel="Continue"
+            cancelLabel="Cancel"
+            onConfirm={() => void onConfirmDeload()}
+            onCancel={() => setConfirmDeload(false)}
+          />
+        </>
+      )
     }
     // recapStats not yet populated (first render before effect fires) — show
     // a brief spinner to avoid a flash of empty content.
@@ -191,12 +227,50 @@ export default function MyProgramPage() {
                 day={d}
                 onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
                 onRemoveSet={(dayIdx, blockIdx, setIdx) => void handleRemoveSet(dayIdx, blockIdx, setIdx)}
-                onSwap={(_dayIdx, _blockIdx) => pushToast({ severity: 'info', body: 'Exercise picker lands in W4. Use mid-session swap on mobile.' })}
+                onSwap={(dayIdx, blockIdx) => {
+                  // [W4.1] Desktop opens the swap side-sheet. Mobile keeps the
+                  // existing mid-session swap flow (BlockOverflowMenu →
+                  // MidSessionSwapPicker) wired into TodayWorkoutMobile; this
+                  // planning surface is desktop-primary, so on mobile we just
+                  // hint the user toward the live-workout swap.
+                  if (isMobile) {
+                    pushToast({ severity: 'info', body: 'Swap exercises from the live workout on mobile.' })
+                  } else {
+                    setSwapTarget({ dayIdx, blockIdx })
+                  }
+                }}
               />
             ))}
           </div>
         </section>
       ) : null}
+
+      {/* [W4.1] Desktop swap side-sheet — desktop only. */}
+      {!isMobile && swapTarget && up && (() => {
+        const block = up.effective_structure.days[swapTarget.dayIdx]?.blocks[swapTarget.blockIdx]
+        if (!block) return null
+        return (
+          <DesktopSwapSheet
+            open
+            context="program_edit"
+            fromSlug={block.exercise_slug}
+            onClose={() => setSwapTarget(null)}
+            onApply={async ({ scope, toExerciseSlug }) => {
+              if (!up) return
+              try {
+                const op = scope === 'all'
+                  ? { op: 'swap_exercise_all' as const, from_slug: block.exercise_slug, to_exercise_slug: toExerciseSlug }
+                  : { op: 'swap_exercise' as const, day_idx: swapTarget.dayIdx, block_idx: swapTarget.blockIdx, to_exercise_slug: toExerciseSlug }
+                await patchUserProgram(up.id, op)
+                await refreshUserProgram()
+                setSwapTarget(null)
+              } catch (e) {
+                setErr(`Swap failed: ${e instanceof Error ? e.message : String(e)}`)
+              }
+            }}
+          />
+        )
+      })()}
 
       <section style={{ padding: '0 24px 32px' }}>
         <h3 style={{ margin: '0 0 8px', fontSize: 14, color: TOKENS.danger, fontFamily: 'Inter Tight' }}>
