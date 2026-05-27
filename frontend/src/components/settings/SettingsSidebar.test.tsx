@@ -8,10 +8,11 @@ describe('SETTINGS_SECTIONS authoritative layout (D7 — 8 top-level entries)', 
     ]);
   });
 
-  it('marks slots W4/W5/W7 will populate as disabled until those waves land', () => {
+  it('marks slots W4/W7 will populate as disabled until those waves land (W5 Backups now enabled)', () => {
     const byLabel = new Map(SETTINGS_SECTIONS.map((s) => [s.label, s]));
     expect(byLabel.get('Program prefs')?.disabled).toBe(true);
-    expect(byLabel.get('Backups')?.disabled).toBe(true);
+    // W5 — Backups is now live (its wave shipped).
+    expect(byLabel.get('Backups')?.disabled).toBe(false);
     expect(byLabel.get('Feedback')?.disabled).toBe(true);
     expect(byLabel.get('Account')?.disabled).toBe(false);
     expect(byLabel.get('Equipment')?.disabled).toBe(false);

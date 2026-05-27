@@ -18,7 +18,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { label: 'Equipment',     to: '/settings/equipment',     disabled: false, ownerWave: 'W1' },
   { label: 'Integrations',  to: '/settings/integrations',  disabled: false, ownerWave: 'W1' },
   { label: 'Program prefs', to: '/settings/program-prefs', disabled: true,  ownerWave: 'W4' },
-  { label: 'Backups',       to: '/settings/backups',       disabled: true,  ownerWave: 'W5' },
+  { label: 'Backups',       to: '/settings/backups',       disabled: false, ownerWave: 'W5' },
   { label: 'Feedback',      to: '/settings/feedback',      disabled: true,  ownerWave: 'W7' },
   // D7: Storage + Injuries stay top-level.
   { label: 'Storage',       to: '/settings/storage',       disabled: false, ownerWave: 'W1' },
