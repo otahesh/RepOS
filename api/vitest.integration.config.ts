@@ -29,7 +29,14 @@ export default defineConfig({
     hookTimeout: 60_000,
     // Integration tests must run serially — they share DB state and the
     // beforeAll/afterAll cleanup must complete before the next suite starts.
+    // singleFork keeps everything in one worker; fileParallelism:false also
+    // stops vitest from INTERLEAVING test files within that worker. Without
+    // the latter, a suite's beforeEach `DELETE FROM <global table>` can wipe a
+    // sibling suite's just-inserted row between its INSERT and SELECT — which
+    // surfaced once W5 added count-based assertions on the non-user-scoped
+    // backup_runs table (W5 P6).
     pool: 'forks',
     singleFork: true,
+    fileParallelism: false,
   },
 });

@@ -21,6 +21,7 @@ afterAll(async () => {
   await app.close();
   rmSync(backupsDir, { recursive: true, force: true });
   delete process.env.BACKUPS_DIR;
+  await db.query(`DELETE FROM backup_runs`);
   await db.end();
 });
 

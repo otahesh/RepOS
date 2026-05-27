@@ -22,6 +22,7 @@ afterAll(async () => {
   await app.close();
   rmSync(flagDir, { recursive: true, force: true });
   delete process.env.MAINTENANCE_FLAG_PATH;
+  await db.query(`DELETE FROM backup_runs`);
   await db.end();
 });
 

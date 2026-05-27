@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,7 +20,14 @@ afterAll(async () => {
   await app.close();
   rmSync(backupsDir, { recursive: true, force: true });
   delete process.env.BACKUPS_DIR;
+  await db.query(`DELETE FROM backup_runs`);
   await db.end();
+});
+
+// backup_runs is a global (non-user-scoped) table — clean it between tests so
+// download/delete audit-row counts don't pick up rows from sibling suites.
+beforeEach(async () => {
+  await db.query(`DELETE FROM backup_runs`);
 });
 
 describe('DELETE /api/backups/:id', () => {

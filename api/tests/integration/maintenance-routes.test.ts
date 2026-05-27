@@ -35,6 +35,7 @@ afterAll(async () => {
   delete process.env.MAINTENANCE_FLAG_PATH;
   delete process.env.RESTORE_STATE_PATH;
   delete process.env.BACKUPS_DIR;
+  await db.query(`DELETE FROM backup_runs`);
   await db.end();
 });
 beforeEach(async () => {
