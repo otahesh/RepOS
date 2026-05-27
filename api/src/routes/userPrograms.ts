@@ -15,6 +15,7 @@ import {
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import {
   UserProgramStartRequestSchema,
+  UserProgramStartIntentQuerySchema,
   type UserProgramListResponse,
   type UserProgramDetailResponse,
   type UserProgramPatchResponse,
@@ -315,16 +316,25 @@ export async function userProgramRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Params: { id: string }; Body: unknown }>(
+  app.post<{ Params: { id: string }; Querystring: { intent?: string }; Body: unknown }>(
     '/user-programs/:id/start',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
       const userId = (req as any).userId as string;
+      // [C-RUN-IT-BACK-ROUTE] Parse the ?intent= query guard FIRST so
+      // `?intent=garbage` is a clean 400 before any body work.
+      const queryParsed = UserProgramStartIntentQuerySchema.safeParse(req.query);
+      if (!queryParsed.success) {
+        reply.code(400);
+        return zodToFieldError(queryParsed.error);
+      }
       const parsed = UserProgramStartRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
         return zodToFieldError(parsed.error);
       }
+      // Query intent wins over body intent; default 'normal'.
+      const intent = queryParsed.data.intent ?? parsed.data.intent ?? 'normal';
       // Ownership check
       const { rows } = await db.query(
         `SELECT id FROM user_programs WHERE id=$1 AND user_id=$2`,
@@ -339,10 +349,11 @@ export async function userProgramRoutes(app: FastifyInstance) {
           userProgramId: req.params.id,
           startDate: parsed.data.start_date,
           startTz: parsed.data.start_tz,
+          intent, // [C-RUN-IT-BACK-ROUTE] deload math runs in-txn (materialize service)
         });
         // Enrich response with mesocycle_runs row
         const { rows: [run] } = await db.query(
-          `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks, status, current_week
+          `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks, status, current_week, is_deload
            FROM mesocycle_runs WHERE id=$1`,
           [run_id],
         );
@@ -353,6 +364,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
           weeks: run.weeks,
           status: run.status,
           current_week: run.current_week,
+          is_deload: run.is_deload,
         };
         reply.code(201);
         return startResp;
