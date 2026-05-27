@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TERMS, type TermKey } from './terms';
 
 const ALL_KEYS: TermKey[] = [
-  'RIR','RPE','MEV','MAV','MRV','mesocycle','deload','hypertrophy','AMRAP',
+  'RIR','RPE','MV','MEV','MAV','MRV','landmark','mesocycle','deload','hypertrophy','AMRAP',
   'Z2','Z4','Z5','peak_tension_length','push_horizontal','pull_horizontal',
   'push_vertical','pull_vertical','hinge','squat','lunge','carry','rotation',
   'anti_rotation','compound','isolation','accumulation','working_set',
