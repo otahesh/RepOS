@@ -53,6 +53,7 @@ function compileOne(p: PredicateT, prof: string): string {
     case 'pullup_bar':
     case 'dip_station':
     case 'cable_stack':
+    case 'ab_wheel':
     case 'rowing_erg':
     case 'treadmill':
       return `${prof}->>'${p.type}' = 'true'`;
