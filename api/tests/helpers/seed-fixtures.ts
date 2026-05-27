@@ -130,9 +130,14 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   //    scope gate lands. Scope-rejection tests that need a bearer WITHOUT
   //    set_logs:write or WITHOUT health:recovery:read still mint parallel
   //    wrong-scope bearers via mintBearer(...).
+  //
+  //    [W2] Additive `account:write` so seeds reused by W2's PAR-Q /
+  //    onboarding / deload-now integration tests carry the scope those routes
+  //    require (requireScope('account:write')). Scope-rejection tests still
+  //    mint parallel wrong-scope bearers.
   const { bearer } = await mintBearer({
     userId,
-    scopes: ['set_logs:write', 'health:recovery:read'],
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
   });
 
   // 3. Pick any seeded exercise.
