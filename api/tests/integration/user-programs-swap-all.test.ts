@@ -1,12 +1,16 @@
 import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { mkUser, cleanupUser, mkTemplate, mkUserProgram } from '../helpers/program-fixtures.js';
+import { mkUser, cleanupUser, mkTemplate, mkUserProgram, cleanupTemplate } from '../helpers/program-fixtures.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 let userId: string;
 let token: string;
+// program_templates are created_by='system' — cleanupUser does NOT cascade to
+// them, so track + clean up here to avoid polluting the global template-count
+// test in tests/programs.test.ts.
+const templateIds: string[] = [];
 
 beforeAll(async () => {
   app = await buildApp();
@@ -17,7 +21,14 @@ beforeAll(async () => {
   });
   token = t.json<{ token: string }>().token;
 });
-afterAll(async () => { await cleanupUser(userId); await app.close(); });
+afterAll(async () => {
+  // Delete the user FIRST — cascades to user_programs, which RESTRICT-reference
+  // program_templates via user_programs_template_id_fkey. Templates must be
+  // dropped only after their referencing user_programs are gone.
+  await cleanupUser(userId);
+  for (const id of templateIds) await cleanupTemplate(id);
+  await app.close();
+});
 
 describe('PATCH /user-programs/:id op=swap_exercise_all', () => {
   it('rewrites every block carrying from_slug across all weeks of the program', async () => {
@@ -39,7 +50,7 @@ describe('PATCH /user-programs/:id op=swap_exercise_all', () => {
         ],
       },
     });
-    const up = await mkUserProgram({ userId, templateId: tpl.id, templateVersion: 1 });
+    templateIds.push(tpl.id);    const up = await mkUserProgram({ userId, templateId: tpl.id, templateVersion: 1 });
 
     const r = await app.inject({
       method: 'PATCH', url: `/api/user-programs/${up.id}`,
@@ -66,7 +77,7 @@ describe('PATCH /user-programs/:id op=swap_exercise_all', () => {
         ]},
       ]},
     });
-    const up = await mkUserProgram({ userId, templateId: tpl.id, templateVersion: 1 });
+    templateIds.push(tpl.id);    const up = await mkUserProgram({ userId, templateId: tpl.id, templateVersion: 1 });
     const r = await app.inject({
       method: 'PATCH', url: `/api/user-programs/${up.id}`,
       headers: { authorization: `Bearer ${token}` },

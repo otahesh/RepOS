@@ -2,8 +2,18 @@ import { db } from '../db/client.js';
 import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
 import { addDaysISO } from './_dateUtil.js';
 import { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
+import { resolveUserLandmarksWith } from './resolveUserLandmarks.js';
 
 export { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
+
+// [D3] Deload formula constants. W2 publishes these in
+// api/src/services/_deloadConstants.ts (DELOAD_MAV_FRACTION=0.5,
+// DELOAD_TARGET_RIR=4). W2 has not merged at W4-ship time, so they are inlined
+// here per the plan's fallback instruction. TODO(W2): replace these two consts
+// with `import { DELOAD_MAV_FRACTION, DELOAD_TARGET_RIR } from './_deloadConstants.js';`
+// once W2 lands.
+const DELOAD_MAV_FRACTION = 0.5;
+const DELOAD_TARGET_RIR = 4;
 
 type Block = {
   exercise_slug: string;
@@ -21,6 +31,10 @@ export type MaterializeInput = {
   userProgramId: string;
   startDate: string;     // YYYY-MM-DD
   startTz: string;       // IANA tz
+  // [C-RUN-IT-BACK-ROUTE + I-DELOAD-TXN-BOUNDARY] When 'deload', the deload
+  // post-process runs INSIDE the same SERIALIZABLE txn as materialize (no
+  // second client, no commit-then-mutate window).
+  intent?: 'normal' | 'deload';
 };
 export type MaterializeResult = { run_id: string };
 
@@ -44,12 +58,22 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
 
     // Step 2: template version match.
     const { rows: [up] } = await client.query<{
-      template_id: string | null; template_version: number | null; customizations: any;
+      user_id: string; template_id: string | null; template_version: number | null; customizations: any;
     }>(
-      `SELECT template_id, template_version, customizations
+      `SELECT user_id, template_id, template_version, customizations
        FROM user_programs WHERE id=$1 FOR UPDATE`, [input.userProgramId],
     );
     if (!up) { await client.query('ROLLBACK'); throw new Error('user_program not found'); }
+
+    // [C-LANDMARKS-ACTIVE-RUN] Resolve the user's effective landmarks ONCE per
+    // materialize. The merge of MUSCLE_LANDMARKS defaults + the user's overrides
+    // is snapshotted into mesocycle_runs.landmarks_snapshot below so the run's
+    // volume-rollup and clinical evaluators never re-read users.muscle_landmarks
+    // during an active run — a mid-run PATCH /me/landmarks affects only FUTURE
+    // mesocycles. CRITICAL: resolve on THIS txn `client`, not the shared pool —
+    // checking out a second connection here doubled peak connection demand and
+    // exhausted the pool under the 50-parallel-starts concurrency guardrail.
+    const resolvedLandmarks = await resolveUserLandmarksWith(client, up.user_id);
 
     let structure: Structure;
     let weeks: number;
@@ -90,6 +114,14 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       }
       throw e;
     }
+
+    // [C-LANDMARKS-ACTIVE-RUN] Snapshot the resolved landmarks into the run row
+    // (same txn). Mid-run PATCH /me/landmarks cannot silently change the MAV
+    // thresholds the user is training against — the snapshot is the contract.
+    await client.query(
+      `UPDATE mesocycle_runs SET landmarks_snapshot=$2::jsonb WHERE id=$1`,
+      [runId, JSON.stringify(resolvedLandmarks)],
+    );
 
     // Step 6: day_workouts (UNNEST bulk insert).
     const dayRows: { week_idx: number; day_idx: number; scheduled_date: string; kind: string; name: string }[] = [];
@@ -163,8 +195,10 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       }
 
       // For each muscle, compute week target from landmarks then distribute.
+      // [C-LANDMARKS-ACTIVE-RUN] Read from the per-user resolved landmarks
+      // (defaults + overrides), NOT the global MUSCLE_LANDMARKS constant.
       for (const [muscleSlug, blocks] of muscleGroups) {
-        const lm = MUSCLE_LANDMARKS[muscleSlug];
+        const lm = resolvedLandmarks[muscleSlug];
         if (!lm) throw new Error(`muscle '${muscleSlug}' has no MEV/MAV/MRV landmarks`);
         const weekTarget = computeRamp({ mev: lm.mev, mav: lm.mav, mrv: lm.mrv, week: w, totalWeeks: weeks });
         const dist = distributeWeekTargetAcrossBlocks(
@@ -246,11 +280,65 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       );
     }
 
+    // [I-DELOAD-TXN-BOUNDARY + D3 + C-IS-DELOAD] Deload post-process — runs
+    // INSIDE this SERIALIZABLE txn (no second client, no commit-then-mutate
+    // window). Only when intent='deload'.
+    if (input.intent === 'deload') {
+      // [D3] Per-muscle weekly set count caps at floor(MAV * 0.5). We cap each
+      // (day_workout, primary_muscle) group's total sets, deleting the highest
+      // set_idx rows that exceed the cap. MAV comes from the resolved landmarks
+      // snapshot (per-user overrides honored).
+      //
+      // [I-DELOAD-PLANNED-SETS-FK] Verified: set_logs.planned_set_id FK is
+      // ON DELETE CASCADE (pg_constraint.confdeltype='c'). A deload run requires
+      // no active run (partial unique index), so there are no set_logs to
+      // cascade, and the SERIALIZABLE txn prevents an in-flight insert racing
+      // the DELETE. No extra guard needed.
+      await client.query(
+        `WITH per_muscle AS (
+           SELECT ps.id, dw.id AS dw_id, m.slug AS muscle_slug,
+                  ps.set_idx,
+                  ROW_NUMBER() OVER (PARTITION BY dw.id, m.slug ORDER BY ps.set_idx) AS rn
+           FROM planned_sets ps
+           JOIN day_workouts dw ON dw.id = ps.day_workout_id
+           JOIN exercises e ON e.id = ps.exercise_id
+           JOIN muscles m ON m.id = e.primary_muscle_id
+           WHERE dw.mesocycle_run_id = $1
+         ),
+         caps AS (
+           SELECT dw_id, muscle_slug, GREATEST(1, FLOOR(($2::jsonb -> muscle_slug ->> 'mav')::int * $3::numeric))::int AS cap
+           FROM (SELECT DISTINCT dw_id, muscle_slug FROM per_muscle) g
+         )
+         DELETE FROM planned_sets
+         WHERE id IN (
+           SELECT pm.id FROM per_muscle pm
+           JOIN caps c ON c.dw_id = pm.dw_id AND c.muscle_slug = pm.muscle_slug
+           WHERE pm.rn > c.cap
+         )`,
+        [runId, JSON.stringify(resolvedLandmarks), DELOAD_MAV_FRACTION],
+      );
+      // [D3] Pin RIR=4 (not 3) on what remains.
+      await client.query(
+        `UPDATE planned_sets SET target_rir=$2
+         WHERE day_workout_id IN (SELECT id FROM day_workouts WHERE mesocycle_run_id=$1)`,
+        [runId, DELOAD_TARGET_RIR],
+      );
+      // [C-IS-DELOAD] Update BOTH is_deload columns coherently (run-level +
+      // every week's day_workouts) so the overreaching-evaluator guard and
+      // MesocycleRecap copy both see a consistent deload context.
+      await client.query(
+        `UPDATE mesocycle_runs SET is_deload=true WHERE id=$1`, [runId],
+      );
+      await client.query(
+        `UPDATE day_workouts SET is_deload=true WHERE mesocycle_run_id=$1`, [runId],
+      );
+    }
+
     // Step 8: started event.
     await client.query(
       `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
        VALUES ($1, 'started', $2::jsonb)`,
-      [runId, JSON.stringify({ user_program_id: input.userProgramId })],
+      [runId, JSON.stringify({ user_program_id: input.userProgramId, intent: input.intent ?? 'normal' })],
     );
 
     await client.query('COMMIT');

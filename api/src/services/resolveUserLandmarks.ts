@@ -4,8 +4,19 @@ import type { ResolvedLandmarks } from '../schemas/userLandmarks.js';
 
 const VALID_SLUGS = new Set(Object.keys(MUSCLE_LANDMARKS));
 
+// Minimal queryable surface — accepts either the shared pool (`db`) or an
+// in-transaction PoolClient. This lets materializeMesocycle resolve landmarks
+// on the SAME connection it already holds for its SERIALIZABLE txn, instead of
+// checking out a SECOND pool connection (which doubled peak connection demand
+// and exhausted the pool under the 50-parallel-starts concurrency guardrail).
+type Queryable = { query: typeof db.query };
+
 export async function resolveUserLandmarks(userId: string): Promise<ResolvedLandmarks> {
-  const { rows } = await db.query<{ ml: { _v: number; overrides?: Record<string, { mev: number; mav: number; mrv: number; mv?: number }> } }>(
+  return resolveUserLandmarksWith(db, userId);
+}
+
+export async function resolveUserLandmarksWith(client: Queryable, userId: string): Promise<ResolvedLandmarks> {
+  const { rows } = await client.query<{ ml: { _v: number; overrides?: Record<string, { mev: number; mav: number; mrv: number; mv?: number }> } }>(
     `SELECT muscle_landmarks AS ml FROM users WHERE id=$1`, [userId],
   );
   if (rows.length === 0) throw new Error('user not found');
