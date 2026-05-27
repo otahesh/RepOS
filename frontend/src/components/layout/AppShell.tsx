@@ -7,6 +7,7 @@ import { useIsMobile } from '../../lib/useIsMobile'
 import { LogBufferRecovery } from '../programs/LogBufferRecovery'
 import { SessionExpiredBanner } from '../auth/SessionExpiredBanner'
 import { ToastHost } from '../common/ToastHost'
+import { MaintenanceBanner } from '../maintenance/MaintenanceBanner'
 import { logBuffer } from '../../lib/logBuffer'
 import { useCurrentUser } from '../../auth'
 import { OnboardingOverlay } from '../onboarding/OnboardingOverlay'
@@ -110,6 +111,7 @@ export default function AppShell() {
         minHeight: 0,
       }}>
         <Topbar onToggleSidebar={toggleDrawer} mobileOpen={mobileOpen} triggerRef={triggerRef} />
+        <MaintenanceBanner />
         <LogBufferRecovery />
         <SessionExpiredBanner />
         <main style={{
@@ -162,6 +164,7 @@ export default function AppShell() {
         overflow: 'hidden',
       }}>
         <Topbar />
+        <MaintenanceBanner />
         <LogBufferRecovery />
         <SessionExpiredBanner />
         <main style={{

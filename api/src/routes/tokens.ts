@@ -23,7 +23,7 @@ function userIdFromReq(req: any, fallback: string | undefined): string | undefin
 export async function tokenRoutes(app: FastifyInstance) {
   app.post<{ Body: { user_id?: string; label?: string; scopes?: string[] } }>(
     '/tokens',
-    { preHandler: requireAdminKeyOrCfAccess },
+    { preHandler: requireAdminKeyOrCfAccess() },
     async (req, reply) => {
       const userId = userIdFromReq(req, req.body.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
@@ -90,7 +90,7 @@ export async function tokenRoutes(app: FastifyInstance) {
 
   app.get<{ Querystring: { user_id?: string } }>(
     '/tokens',
-    { preHandler: requireAdminKeyOrCfAccess },
+    { preHandler: requireAdminKeyOrCfAccess() },
     async (req, reply) => {
       const userId = userIdFromReq(req, req.query.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
@@ -114,7 +114,7 @@ export async function tokenRoutes(app: FastifyInstance) {
 
   app.delete<{ Params: { id: string }; Querystring: { user_id?: string } }>(
     '/tokens/:id',
-    { preHandler: requireAdminKeyOrCfAccess },
+    { preHandler: requireAdminKeyOrCfAccess() },
     async (req, reply) => {
       const userId = userIdFromReq(req, req.query.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });

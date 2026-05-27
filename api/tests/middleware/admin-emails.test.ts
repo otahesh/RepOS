@@ -58,7 +58,7 @@ afterEach(() => {
 
 async function buildTestApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  app.get('/admin-echo', { preHandler: requireAdminKeyOrCfAccess }, async (req) => ({
+  app.get('/admin-echo', { preHandler: requireAdminKeyOrCfAccess() }, async (req) => ({
     ok: true,
     authMode: (req as any).authMode,
     userEmail: (req as any).userEmail ?? null,

@@ -7,6 +7,10 @@ export type PickerProps = {
   onPick: (e: Exercise) => void;
   defaultEquipmentToggle?: boolean;
   source?: 'catalog' | 'mine';   // reserved for v3; UI hides until then
+  // [W4.1 C-DESKTOPSWAPSHEET-A11Y (e)] Optional loading callback so a wrapping
+  // dialog (DesktopSwapSheet) can move focus to the first candidate once the
+  // exercise list resolves. Backward-compatible: default no-op.
+  onLoadingChange?: (loading: boolean) => void;
 };
 
 const GROUP_TO_SLUGS: Record<string, string[]> = {
@@ -18,14 +22,24 @@ const GROUP_TO_SLUGS: Record<string, string[]> = {
   core: ['core'],   // W2.4: core muscle is now first-class
 };
 
-export function ExercisePicker({ onPick, defaultEquipmentToggle = true }: PickerProps) {
+export function ExercisePicker({ onPick, defaultEquipmentToggle = true, onLoadingChange }: PickerProps) {
   const [all, setAll] = useState<Exercise[]>([]);
   const [q, setQ] = useState('');
   const [muscles, setMuscles] = useState<Set<string>>(new Set());
   const [equipOnly, setEquipOnly] = useState(defaultEquipmentToggle);
   const [profile, setProfile] = useState<EquipmentProfile | null>(null);
 
-  useEffect(() => { listExercises().then(setAll).catch(() => setAll([])); }, []);
+  useEffect(() => {
+    onLoadingChange?.(true);
+    listExercises()
+      .then(setAll)
+      .catch(() => setAll([]))
+      .finally(() => onLoadingChange?.(false));
+    // onLoadingChange is intentionally excluded from deps — it's a stable
+    // callback in practice and re-running this fetch on its identity change
+    // would re-trigger the list load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     getEquipmentProfile().then(setProfile).catch(() => setProfile({ _v: 1 }));
   }, []);

@@ -18,6 +18,14 @@ export const UserProgramPatchSchema = z.discriminatedUnion('op', [
     to_exercise_slug: z.string().regex(SLUG_RE),
   }),
   z.object({
+    op: z.literal('swap_exercise_all'),
+    // Every block carrying from_slug in the template structure (any day, any
+    // block index) is rewritten. The reducer scans template.structure.days
+    // for matches; an empty match-set returns 400.
+    from_slug: z.string().regex(SLUG_RE),
+    to_exercise_slug: z.string().regex(SLUG_RE),
+  }),
+  z.object({
     op: z.literal('add_set'),
     day_idx: z.number().int().min(0).max(6),
     block_idx: z.number().int().min(0).max(20),

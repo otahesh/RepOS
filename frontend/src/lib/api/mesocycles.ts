@@ -153,3 +153,41 @@ export async function getMesocycleRecapStats(id: string): Promise<MesocycleRecap
   });
   return jsonOrThrow(res);
 }
+
+// [C-RUN-IT-BACK-ROUTE] Start a mesocycle via the unified
+// POST /api/user-programs/:id/start?intent=normal|deload route. There is NO
+// separate /run-it-back endpoint — "run it back" (normal) and "take a deload"
+// (deload) both hit this with the appropriate intent.
+export type StartMesocycleInput = {
+  user_program_id: string;
+  intent?: 'normal' | 'deload';
+  start_date?: string;
+  start_tz?: string;
+};
+export type StartMesocycleResponse = {
+  mesocycle_run_id: string;
+  start_date: string;
+  start_tz: string;
+  weeks: number;
+  status: string;
+  current_week: number;
+  is_deload: boolean;
+};
+
+export async function startMesocycle(input: StartMesocycleInput): Promise<StartMesocycleResponse> {
+  const body = {
+    start_date: input.start_date ?? new Date().toISOString().slice(0, 10),
+    start_tz: input.start_tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+  const intent = input.intent ?? 'normal';
+  const res = await fetch(
+    `/api/user-programs/${encodeURIComponent(input.user_program_id)}/start?intent=${intent}`,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  return jsonOrThrow(res);
+}

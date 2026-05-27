@@ -19,9 +19,17 @@ set -euo pipefail
 : "${DATABASE_URL:?DATABASE_URL must be set}"
 
 BACKUPS_DIR="${BACKUPS_DIR:-/config/backups}"
-TS=$(date -u +%Y%m%dT%H%M%SZ)
-OUT_DUMP="${BACKUPS_DIR}/pre-restore-${TS}.sql.gz"
-OUT_SIDECAR="${BACKUPS_DIR}/pre-restore-${TS}.json"
+# W5 — the restore runner predetermines the snapshot filename (so the
+# /config/restore-state.json sentinel is complete from t=0). Honor it when
+# supplied; otherwise fall back to a fresh timestamp (cutover use).
+if [ -n "${PRE_SNAPSHOT_FILENAME:-}" ]; then
+  OUT_DUMP="${BACKUPS_DIR}/${PRE_SNAPSHOT_FILENAME}"
+  OUT_SIDECAR="${BACKUPS_DIR}/${PRE_SNAPSHOT_FILENAME%.sql.gz}.json"
+else
+  TS=$(date -u +%Y%m%dT%H%M%SZ)
+  OUT_DUMP="${BACKUPS_DIR}/pre-restore-${TS}.sql.gz"
+  OUT_SIDECAR="${BACKUPS_DIR}/pre-restore-${TS}.json"
+fi
 
 mkdir -p "${BACKUPS_DIR}"
 
@@ -37,6 +45,17 @@ cat > "${OUT_SIDECAR}" <<EOF
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+chmod 0640 "${OUT_SIDECAR}" 2>/dev/null || true
+
+# W5 — INSERT the backup_runs audit row so /api/maintenance/status sees a
+# pre_restore snapshot and exposes recovery_available=true. event_kind='create'
+# is the default. Best-effort: a failed INSERT must not abort the snapshot
+# (the file on disk is still the rollback path).
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<SQL || echo "WARN: backup_runs audit insert failed (non-fatal)"
+INSERT INTO backup_runs (trigger, event_kind, status, file_path, size_bytes,
+                         integrity_verified, started_at, finished_at)
+VALUES ('pre_restore', 'create', 'ok', '${OUT_DUMP}', ${SIZE}, true, now(), now());
+SQL
 
 echo "✓ pre-restore snapshot captured: ${OUT_DUMP} (${SIZE} bytes)"
 echo "  sidecar: ${OUT_SIDECAR}"
