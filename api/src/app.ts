@@ -18,6 +18,7 @@ import { userInjuriesRoutes } from './routes/userInjuries.js';
 import { accountRoutes } from './routes/account.js';
 import { authSignoutRoutes } from './routes/authSignout.js';
 import { requireCfAccess } from './middleware/cfAccess.js';
+import { registerMaintenanceGate } from './middleware/maintenance.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
   const app = Fastify({
@@ -37,6 +38,10 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(sensible);
+  // W5 — maintenance gate. Registers the onRequest 503 hook + /health/user-facing
+  // BEFORE any /api/* route plugin so a set flag short-circuits everything
+  // except /api/maintenance/* and /health.
+  await registerMaintenanceGate(app);
   await app.register(tokenRoutes, { prefix: '/api' });
   await app.register(muscleRoutes, { prefix: '/api' });
   await app.register(exerciseRoutes, { prefix: '/api' });
