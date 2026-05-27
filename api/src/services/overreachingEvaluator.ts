@@ -53,6 +53,22 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // No active run → no current-week volume to compare → fail-closed.
     if (!runId) return { triggered: false };
 
+    // [I-OVERREACHING-DELOAD-GUARD + C-IS-DELOAD] Deload-context guard. Fetch
+    // BOTH the run-level flag (mesocycle_runs.is_deload — W4) AND the
+    // current-week flag (day_workouts.is_deload — W2.5). Either being true
+    // means "deload context" — return no-fire. A deload is intentionally low
+    // load; an overreaching advisory here is a false alarm. Mirrors the
+    // stalledPrEvaluator deload-skip approach but adds the run-level guard.
+    const { rows: [ctx] } = await db.query<{ is_deload_run: boolean; is_deload_week: boolean }>(
+      `SELECT bool_or(mr.is_deload) AS is_deload_run,
+              COALESCE(bool_or(dw.is_deload), false) AS is_deload_week
+       FROM mesocycle_runs mr
+       LEFT JOIN day_workouts dw ON dw.mesocycle_run_id = mr.id AND dw.week_idx = mr.current_week
+       WHERE mr.id = $1`,
+      [runId],
+    );
+    if (ctx?.is_deload_run || ctx?.is_deload_week) return { triggered: false };
+
     // Condition 1: >= 3 distinct RIR-0 sessions on compound exercises in
     // trailing 7d. "Session" = day_workout (one per calendar day per user
     // in practice); COUNT DISTINCT dw.id collapses multiple RIR-0 sets in
