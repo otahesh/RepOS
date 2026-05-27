@@ -11,6 +11,11 @@ BACKUP_MIN="${REPOS_BACKUP_MIN:-15}"
 
 mkdir -p /config/log/backup
 
+# W5 ABS-7 — prune scheduler.log to match dump retention (14d) so the
+# scheduler log doesn't grow unbounded between backup-log rotations.
+find /config/log/backup -maxdepth 1 -type f -name 'scheduler.log*' \
+  -mtime +"${REPOS_BACKUP_RETAIN_DAYS:-14}" -delete 2>/dev/null || true
+
 while :; do
   now_s="$(date -u +%s)"
   secs_today=$(( now_s % 86400 ))

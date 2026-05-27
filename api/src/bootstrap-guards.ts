@@ -41,5 +41,15 @@ export function validateStartupEnv(env: NodeJS.ProcessEnv): StartupGuardResult {
     .filter(Boolean);
   info.push({ allowListCount: allowList.length });
 
+  // W5 ABS-5 — Healthchecks.io alerting is optional (alerting, not gating).
+  // Surface an INFO line when a UUID is unset so an operator notices the
+  // backup/health pings are disabled rather than silently absent.
+  if (!env.HEALTHCHECKS_BACKUP_UUID) {
+    info.push({ msg: 'HEALTHCHECKS_BACKUP_UUID unset — backup-job alerting disabled' });
+  }
+  if (!env.HEALTHCHECKS_HEALTH_UUID) {
+    info.push({ msg: 'HEALTHCHECKS_HEALTH_UUID unset — health-ping alerting disabled' });
+  }
+
   return { fatal, info };
 }

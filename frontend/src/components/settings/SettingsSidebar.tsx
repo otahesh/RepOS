@@ -18,8 +18,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { label: 'Health',        to: '/settings/health',        disabled: false, ownerWave: 'W2' },
   { label: 'Equipment',     to: '/settings/equipment',     disabled: false, ownerWave: 'W1' },
   { label: 'Integrations',  to: '/settings/integrations',  disabled: false, ownerWave: 'W1' },
-  { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed — flipped from disabled
-  { label: 'Backups',       to: '/settings/backups',       disabled: true,  ownerWave: 'W5' },
+  { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed
+  { label: 'Backups',       to: '/settings/backups',       disabled: false, ownerWave: 'W5' }, // W5 landed
   { label: 'Feedback',      to: '/settings/feedback',      disabled: true,  ownerWave: 'W7' },
   // D7: Storage + Injuries stay top-level.
   { label: 'Storage',       to: '/settings/storage',       disabled: false, ownerWave: 'W1' },

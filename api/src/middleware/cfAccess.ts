@@ -170,54 +170,99 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
   return requireCfAccess(req, reply);
 }
 
+// Shared helper: enforce that the CF-Access-authenticated user's email is in
+// REPOS_ADMIN_EMAILS. Fail closed if env unset (per D10). Returns true if the
+// reply was already sent (caller must short-circuit).
+function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolean {
+  const adminEmails = process.env.REPOS_ADMIN_EMAILS;
+  if (!adminEmails) {
+    req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
+    reply.code(403).send({ error: 'admin_check_misconfigured' });
+    return true;
+  }
+  const allowed = adminEmails
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const userEmail = ((req as any).userEmail as string | undefined) ?? '';
+  if (!allowed.includes(userEmail)) {
+    req.log.warn({ userEmail }, 'admin_check_rejected');
+    reply.code(403).send({ error: 'not_an_admin' });
+    return true;
+  }
+  return false;
+}
+
 // /api/tokens auth: admin API key path keeps body `user_id` semantics for
 // CLI / tests; CF Access path derives identity from the JWT. authMode is
 // stashed on the request so handlers can pick the right user_id source.
-export async function requireAdminKeyOrCfAccess(req: FastifyRequest, reply: FastifyReply) {
-  const adminKey = process.env.ADMIN_API_KEY;
-
-  // Dev / test: ADMIN_API_KEY unset means open admin path.
-  if (!adminKey) {
-    (req as any).authMode = 'admin';
-    return;
-  }
-
-  const provided = req.headers['x-admin-key'];
-  if (typeof provided === 'string' && provided.length > 0) {
-    if (provided !== adminKey) {
-      return reply.code(401).send({ error: 'unauthorized' });
+//
+// FACTORY (W5): call `requireAdminKeyOrCfAccess()` to get a preHandler.
+//   - default ({}): dual-auth (X-Admin-Key OR CF Access JWT + admin email).
+//   - { requireFreshCfAccess: true } (per C-RESTORE-AUTH-CFACCESS): destructive
+//     admin ops (restore) — REJECT the X-Admin-Key path, require CF Access JWT
+//     + admin email. The opaque bearer escape hatch is not enough for a
+//     restore that DROPs the database.
+export function requireAdminKeyOrCfAccess(
+  opts: { requireFreshCfAccess?: boolean } = {},
+) {
+  return async function adminGate(req: FastifyRequest, reply: FastifyReply) {
+    if (opts.requireFreshCfAccess) {
+      // Dev / test: ADMIN_API_KEY unset means open admin path — same bypass
+      // the dual-auth branch uses below. Production always sets ADMIN_API_KEY,
+      // so the strict CF-Access-only path below is enforced in prod.
+      if (!process.env.ADMIN_API_KEY) {
+        (req as any).authMode = 'cf_access_fresh';
+        return;
+      }
+      // Restore endpoints — reject any X-Admin-Key presence, require CF Access.
+      const adminKeyHeader = req.headers['x-admin-key'];
+      if (typeof adminKeyHeader === 'string' && adminKeyHeader.length > 0) {
+        req.log.warn({ path: req.url }, 'admin_key_rejected_on_fresh_cf_access_route');
+        return reply.code(403).send({ error: 'cf_access_required' });
+      }
+      if (!isCfAccessEnabled()) {
+        return reply.code(503).send({ error: 'cf_access_unavailable' });
+      }
+      await requireCfAccess(req, reply);
+      if (reply.sent) return;
+      if (rejectIfNotAdminEmail(req, reply)) return;
+      (req as any).authMode = 'cf_access_fresh';
+      return;
     }
-    (req as any).authMode = 'admin';
-    return;
-  }
 
-  if (isCfAccessEnabled()) {
-    await requireCfAccess(req, reply);
-    if (reply.sent) return;
-    (req as any).authMode = 'cf_access';
+    const adminKey = process.env.ADMIN_API_KEY;
 
-    // Per D10: when authenticated via CF Access (not the admin key), enforce
-    // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
-    // Migration 063 reserves users.role TEXT for post-Beta cohort scale-up;
-    // until then REPOS_ADMIN_EMAILS is the source of truth.
-    const adminEmails = process.env.REPOS_ADMIN_EMAILS;
-    if (!adminEmails) {
-      req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
-      return reply.code(403).send({ error: 'admin_check_misconfigured' });
+    // Dev / test: ADMIN_API_KEY unset means open admin path.
+    if (!adminKey) {
+      (req as any).authMode = 'admin';
+      return;
     }
-    const allowed = adminEmails
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-    const userEmail = ((req as any).userEmail as string | undefined) ?? '';
-    if (!allowed.includes(userEmail)) {
-      req.log.warn({ userEmail }, 'admin_check_rejected');
-      return reply.code(403).send({ error: 'not_an_admin' });
-    }
-    return;
-  }
 
-  return reply.code(401).send({ error: 'unauthorized' });
+    const provided = req.headers['x-admin-key'];
+    if (typeof provided === 'string' && provided.length > 0) {
+      if (provided !== adminKey) {
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+      (req as any).authMode = 'admin';
+      return;
+    }
+
+    if (isCfAccessEnabled()) {
+      await requireCfAccess(req, reply);
+      if (reply.sent) return;
+      (req as any).authMode = 'cf_access';
+
+      // Per D10: when authenticated via CF Access (not the admin key), enforce
+      // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
+      // Migration 063 reserves users.role TEXT for post-Beta cohort scale-up;
+      // until then REPOS_ADMIN_EMAILS is the source of truth.
+      if (rejectIfNotAdminEmail(req, reply)) return;
+      return;
+    }
+
+    return reply.code(401).send({ error: 'unauthorized' });
+  };
 }
 
 // Per C-SIGNOUT-CFACCESS-ONLY — gate routes that must NEVER act on a stolen
