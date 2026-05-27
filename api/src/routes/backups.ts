@@ -19,6 +19,7 @@ import {
   type BackupItem,
   type VerifiedRestorable,
 } from '../schemas/backups.js';
+import { runManualBackup } from '../services/backupRunner.js';
 
 function backupsDir(): string {
   return process.env.BACKUPS_DIR ?? '/config/backups';
@@ -77,5 +78,22 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
 
     const body = BackupListResponseSchema.parse({ items });
     return reply.send(body);
+  });
+
+  app.post('/backups', { preHandler: requireAdminKeyOrCfAccess() }, async (req, reply) => {
+    const result = await runManualBackup({
+      adminUserId: (req as any).userId ?? null, // C-ADMIN-USER-ID
+      sourceIp:
+        (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
+        req.ip ??
+        null,
+    });
+    return reply.code(201).send({
+      id: result.id,
+      trigger: 'manual',
+      size_bytes: result.size_bytes,
+      verified_restorable: 'good',
+      created_at: new Date().toISOString(),
+    });
   });
 }
