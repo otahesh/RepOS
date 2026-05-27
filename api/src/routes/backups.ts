@@ -10,7 +10,7 @@
 // File-id contract: the filename IS the API id. Filenames are sortable
 // (ISO timestamp) + unique by-design via the timestamp; no separate UUID.
 import type { FastifyInstance } from 'fastify';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
@@ -29,6 +29,27 @@ function badgeFor(fileExists: boolean, integrityVerified: boolean): VerifiedRest
   if (!fileExists) return 'warn';
   if (!integrityVerified) return 'danger';
   return 'good';
+}
+
+// Filename whitelist: must match the timestamped pattern OR pre-restore-*.
+// Returns null for anything else (path-traversal defence — the id can never
+// contain a slash or `..` and still pass).
+export function safeBackupPath(id: string): string | null {
+  if (!/^(repos-\d{8}T\d{6}Z\.dump\.gz|pre-restore-\d{8}T\d{6}Z\.sql\.gz)$/.test(id)) {
+    return null;
+  }
+  return join(backupsDir(), id);
+}
+
+// Derive caller context for audit rows (C-ADMIN-USER-ID + C-DOWNLOAD-AUDIT).
+function callerContext(req: any): { adminUserId: string | null; sourceIp: string | null } {
+  return {
+    adminUserId: req.userId ?? null,
+    sourceIp:
+      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
+      req.ip ??
+      null,
+  };
 }
 
 function readSidecar(
@@ -96,4 +117,51 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
       created_at: new Date().toISOString(),
     });
   });
+
+  app.delete<{ Params: { id: string } }>(
+    '/backups/:id',
+    { preHandler: requireAdminKeyOrCfAccess() },
+    async (req, reply) => {
+      const { id } = req.params;
+      const filePath = safeBackupPath(id);
+      if (!filePath) return reply.code(400).send({ error: 'invalid_backup_id' });
+      const sizeBytes = existsSync(filePath) ? statSync(filePath).size : 0;
+      if (existsSync(filePath)) unlinkSync(filePath);
+      const sidecar = filePath.replace(/\.(dump|sql)\.gz$/, '.json');
+      if (existsSync(sidecar)) unlinkSync(sidecar);
+      // I-DELETE-BACKUP-AUDIT — append a row recording who deleted what.
+      const { adminUserId, sourceIp } = callerContext(req);
+      await db.query(
+        `INSERT INTO backup_runs (trigger, event_kind, status, file_path, size_bytes,
+                                  admin_user_id, source_ip, started_at, finished_at)
+         VALUES ('manual', 'delete', 'ok', $1, $2, $3, $4, now(), now())`,
+        [filePath, sizeBytes, adminUserId, sourceIp],
+      );
+      return reply.code(204).send();
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/backups/:id/download',
+    { preHandler: requireAdminKeyOrCfAccess() },
+    async (req, reply) => {
+      const { id } = req.params;
+      const filePath = safeBackupPath(id);
+      if (!filePath || !existsSync(filePath)) return reply.code(404).send({ error: 'not_found' });
+      const sizeBytes = statSync(filePath).size;
+      // C-DOWNLOAD-AUDIT — D9 — every download writes a new backup_runs row.
+      const { adminUserId, sourceIp } = callerContext(req);
+      await db.query(
+        `INSERT INTO backup_runs (trigger, event_kind, status, file_path, size_bytes,
+                                  admin_user_id, source_ip, started_at, finished_at)
+         VALUES ('manual', 'download', 'ok', $1, $2, $3, $4, now(), now())`,
+        [filePath, sizeBytes, adminUserId, sourceIp],
+      );
+      reply
+        .header('Content-Type', 'application/gzip')
+        .header('Content-Length', String(sizeBytes)) // I-CONTENT-LENGTH — browser shows progress
+        .header('Content-Disposition', `attachment; filename="${id}"`);
+      return reply.send(createReadStream(filePath));
+    },
+  );
 }
