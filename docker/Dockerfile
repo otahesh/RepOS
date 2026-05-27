@@ -23,6 +23,9 @@ FROM lscr.io/linuxserver/baseimage-alpine:3.21
 
 # Runtime packages: postgres + node + nginx + tooling.
 # postgresql16-client supplies pg_isready and psql for init scripts.
+# curl  — W5 ABS-5: repos-backup.sh pings hc-ping.com on success.
+# python3 — W5 residual-risk #13: scripts/run-restore.sh uses python3 for the
+#           atomic (write-temp + fsync + rename) restore-state.json updates.
 RUN apk add --no-cache \
       nodejs \
       postgresql16 \
@@ -30,12 +33,17 @@ RUN apk add --no-cache \
       postgresql16-contrib \
       nginx \
       bash \
+      curl \
+      python3 \
       tzdata
 
 # Verify postgres binaries are where the s6 scripts expect them.
 # Alpine's postgresql16 package puts binaries in /usr/bin/. Fail the build
 # loudly if a future Alpine release moves them.
-RUN test -x /usr/bin/postgres && test -x /usr/bin/initdb && test -x /usr/bin/pg_isready && test -x /usr/bin/pg_dump
+RUN test -x /usr/bin/postgres && test -x /usr/bin/initdb && test -x /usr/bin/pg_isready && test -x /usr/bin/pg_dump && test -x /usr/bin/pg_restore
+# W5 — verify curl (Healthchecks ping) + python3 (run-restore.sh atomic JSON)
+# survived the multi-stage build.
+RUN command -v curl >/dev/null && command -v python3 >/dev/null
 
 # App layout (lsio uses /config for persistent data; /app for read-only code)
 RUN mkdir -p /app/api /app/frontend /config /config/backups /config/log/backup
@@ -61,7 +69,8 @@ RUN sed -i \
 
 # Make all script files executable (COPY does not preserve unless explicit)
 RUN find /etc/s6-overlay -type f \( -name 'run' -o -name 'up' -o -path '*scripts*' \) -exec chmod +x {} + && \
-    chmod +x /usr/local/bin/repos-backup.sh
+    chmod +x /usr/local/bin/repos-backup.sh && \
+    chmod +x /scripts/pre-restore-snapshot.sh /scripts/run-restore.sh
 
 # lsio's stock cont-init.d chowns /config recursively to abc:abc (PUID:PGID).
 # That would steal /config/postgres from the postgres user (uid 70) on every
