@@ -90,3 +90,23 @@ The Playwright reachability spec
 All W6 owner-wave surfaces are reachable within the ≤3-click budget (1 click on
 desktop, ≤3 on mobile). Injuries stays preserved at 2 clicks (desktop). **G7 ✓
 for W6.**
+
+---
+
+## W4 — Desktop authoring + landmarks editor
+
+| Surface | Path from `/` | Click count | Viewport |
+|---|---|---|---|
+| `<DesktopSwapSheet>` (program authoring swap) | `/` → "Programs" nav → click an active program card (lands `/my-programs/:id`) → click an exercise name in any `<DayCard>` | **3 clicks** ✓ | desktop only (mobile falls through to the W3 `<MidSessionSwapPicker>` via the `<BlockOverflowMenu>` already wired into the live-workout surface; the planning view hints the user toward the live-workout swap on mobile) |
+| `/settings/program-prefs` — `<LandmarksEditor>` (desktop) / `<LandmarksSummary>` (mobile) | `/` → "Settings" nav → "Program prefs" sub-nav | **2 clicks** ✓ | desktop = editor; mobile = read-only summary (same route, viewport-aware via `useIsMobile()`) |
+| Deload mesocycle generation (MesocycleRecap → `startMesocycle({intent:'deload'})` against `POST /api/user-programs/:id/start?intent=deload`) | `/` → "Programs" nav → click a completed program card (lands `/my-programs/:id` MesocycleRecap) → click "Take a deload" | **3 clicks** ✓ (the ConfirmDialog is a confirmation modal, not a navigation click — the surface is REACHED at click 3) | desktop primary (MesocycleRecap renders responsively; the same handler fires on mobile if a mobile user lands on a completed run) |
+
+### Source-of-truth selectors
+
+- "Programs" nav: `frontend/src/components/layout/Sidebar.tsx`. Active program click lands on `/my-programs/:id` (`frontend/src/pages/MyProgramPage.tsx`). Block-level exercise button: `frontend/src/components/programs/DayCard.tsx` (the `onSwap` button, exercise name as text).
+- "Settings" + "Program prefs" sub-nav: `frontend/src/components/layout/Sidebar.tsx` maps over `SETTINGS_SECTIONS` (`frontend/src/components/settings/SettingsSidebar.tsx`); the "Program prefs" entry flipped `disabled: false` when W4.3 landed. Route `settings/program-prefs` in `frontend/src/App.tsx` → `frontend/src/pages/SettingsProgramPrefsPage.tsx` (desktop `<LandmarksEditor>` / mobile `<LandmarksSummary>`).
+- "Take a deload" button: `frontend/src/components/programs/MesocycleRecap.tsx` (the first `<Choice>`); the deload handler lives in `MyProgramPage.tsx` (`handleChoice` → `onConfirmDeload` → `startMesocycle`).
+
+### G7 status for W4
+
+All three W4 surfaces are inside the ≤3-click budget (DesktopSwapSheet 3, program-prefs 2, deload 3). **G7 ✓ for W4.**
