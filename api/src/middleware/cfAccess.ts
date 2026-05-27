@@ -208,6 +208,13 @@ export function requireAdminKeyOrCfAccess(
 ) {
   return async function adminGate(req: FastifyRequest, reply: FastifyReply) {
     if (opts.requireFreshCfAccess) {
+      // Dev / test: ADMIN_API_KEY unset means open admin path — same bypass
+      // the dual-auth branch uses below. Production always sets ADMIN_API_KEY,
+      // so the strict CF-Access-only path below is enforced in prod.
+      if (!process.env.ADMIN_API_KEY) {
+        (req as any).authMode = 'cf_access_fresh';
+        return;
+      }
       // Restore endpoints — reject any X-Admin-Key presence, require CF Access.
       const adminKeyHeader = req.headers['x-admin-key'];
       if (typeof adminKeyHeader === 'string' && adminKeyHeader.length > 0) {

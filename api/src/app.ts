@@ -20,6 +20,7 @@ import { authSignoutRoutes } from './routes/authSignout.js';
 import { requireCfAccess } from './middleware/cfAccess.js';
 import { registerMaintenanceGate } from './middleware/maintenance.js';
 import { backupRoutes } from './routes/backups.js';
+import { maintenanceRoutes } from './routes/maintenance.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
   const app = Fastify({
@@ -43,6 +44,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   // BEFORE any /api/* route plugin so a set flag short-circuits everything
   // except /api/maintenance/* and /health.
   await registerMaintenanceGate(app);
+  await app.register(maintenanceRoutes, { prefix: '/api' });
   await app.register(backupRoutes, { prefix: '/api' });
   await app.register(tokenRoutes, { prefix: '/api' });
   await app.register(muscleRoutes, { prefix: '/api' });

@@ -16,10 +16,12 @@ import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 import {
   BackupListResponseSchema,
+  RestoreRequestSchema,
   type BackupItem,
   type VerifiedRestorable,
 } from '../schemas/backups.js';
 import { runManualBackup } from '../services/backupRunner.js';
+import { kickOffRestore, DumpSchemaRevTooNewError } from '../services/restoreRunner.js';
 
 function backupsDir(): string {
   return process.env.BACKUPS_DIR ?? '/config/backups';
@@ -162,6 +164,37 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
         .header('Content-Length', String(sizeBytes)) // I-CONTENT-LENGTH — browser shows progress
         .header('Content-Disposition', `attachment; filename="${id}"`);
       return reply.send(createReadStream(filePath));
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/backups/:id/restore',
+    // C-RESTORE-AUTH-CFACCESS — destructive admin op REQUIRES a fresh CF Access
+    // JWT, rejects the X-Admin-Key path. The bearer escape hatch is not enough.
+    { preHandler: requireAdminKeyOrCfAccess({ requireFreshCfAccess: true }) },
+    async (req, reply) => {
+      const parsedBody = RestoreRequestSchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_confirm', message: 'body must be {confirm:"RESTORE"}' });
+      }
+      const { id } = req.params;
+      const filePath = safeBackupPath(id);
+      if (!filePath || !existsSync(filePath)) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
+      try {
+        const result = await kickOffRestore(id, callerContext(req));
+        return reply.code(202).send({ restore_id: result.restore_id, source: id });
+      } catch (err) {
+        if (err instanceof DumpSchemaRevTooNewError) {
+          // C-FORWARD-INCOMPAT-CHECK — dump is from a newer RepOS than the
+          // running code; reject before any destructive op.
+          return reply.code(409).send({ error: 'dump_schema_rev_too_new', message: err.message });
+        }
+        throw err;
+      }
     },
   );
 }
