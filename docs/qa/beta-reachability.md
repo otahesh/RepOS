@@ -90,3 +90,33 @@ The Playwright reachability spec
 All W6 owner-wave surfaces are reachable within the ≤3-click budget (1 click on
 desktop, ≤3 on mobile). Injuries stays preserved at 2 clicks (desktop). **G7 ✓
 for W6.**
+
+---
+
+## W5 — Backups + Restore
+
+| Surface | Path from `/` | Click count |
+|---|---|---|
+| `/settings/backups` — SnapshotTable + Backup Now (desktop) | `/` → "Settings" nav → "Backups" sub-nav | **2 clicks** ✓ |
+| Pre-snapshot rollback affordance (when restore fails) | Surfaced inline site-wide via MaintenanceBanner | **2 clicks** (same as parent page) ✓ |
+
+### Source-of-truth selectors
+
+- "Settings" + "Backups" nav items: `frontend/src/components/settings/SettingsSidebar.tsx::SETTINGS_SECTIONS` (W5 flips the pre-provisioned `Backups` slot `disabled: false`). The flat sub-nav renders over `SETTINGS_SECTIONS` in `frontend/src/components/layout/Sidebar.tsx`.
+- Route `settings/backups` in `frontend/src/App.tsx` → `frontend/src/pages/SettingsBackupsPage.tsx` (mounts `SnapshotTable`).
+- MaintenanceBanner: `frontend/src/components/maintenance/MaintenanceBanner.tsx`, mounted in `AppShell.tsx` (both mobile + desktop branches).
+- Playwright spec: `frontend/playwright/w5-backups-reachability.spec.ts`.
+
+### Mobile
+
+Per project memory `project_device_split`, `/settings/backups` is
+desktop-primary. Mobile renders the route but hides Backup Now / Restore /
+Delete; the per-table footer reads "Backups must be managed from desktop."
+(I-MOBILE-AFFORDANCE). The MaintenanceBanner DOES render on mobile (it gates
+the whole app), and on `/today/:runId/log` it shows a soft Reload CTA instead
+of force-reloading (C-MOBILE-MAINTENANCE).
+
+### G7 status for W5
+
+Both surfaces are reachable inside the 3-click budget (2 clicks desktop).
+**G7 ✓ for W5.**
