@@ -130,9 +130,14 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   //    scope gate lands. Scope-rejection tests that need a bearer WITHOUT
   //    set_logs:write or WITHOUT health:recovery:read still mint parallel
   //    wrong-scope bearers via mintBearer(...).
+  //
+  //    [W2] Additive `account:write` so seeds reused by W2's PAR-Q /
+  //    onboarding / deload-now integration tests carry the scope those routes
+  //    require (requireScope('account:write')). Scope-rejection tests still
+  //    mint parallel wrong-scope bearers.
   const { bearer } = await mintBearer({
     userId,
-    scopes: ['set_logs:write', 'health:recovery:read'],
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
   });
 
   // 3. Pick any seeded exercise.
@@ -318,10 +323,11 @@ export async function addThreeDistinctSessions(seed: SeedHandle): Promise<Array<
 //   'deload'       — mesocycle_runs.current_week === weeks (last week)
 //   'low-rep'      — sessions at 3 reps (strength range, FIX-25 gates this)
 //
-// Non-deload patterns force weeks=4 + current_week=2 so the evaluator's
-// deload guard (current_week >= weeks, see FIX-24 ADAPTED in
-// stalledPrEvaluator) doesn't trip. The base seedUserWithMesocycle creates
-// weeks=1 + current_week=1 which would always look like a deload.
+// [W2 SWAP] The deload signal is now the per-row `day_workouts.is_deload`
+// flag, NOT the `current_week >= weeks` heuristic. The 'deload' pattern flips
+// is_deload=true on the three session day_workouts (post-addThreeDistinctSessions)
+// so the evaluator filters them out; non-deload patterns leave is_deload=false.
+// weeks=4 + current_week=2 is kept for shape but no longer drives the guard.
 // ---------------------------------------------------------------------------
 export async function seedStalledPr(opts: {
   pattern: 'stalled' | 'progressing' | 'rir-mixed' | 'deload' | 'low-rep';
@@ -329,23 +335,24 @@ export async function seedStalledPr(opts: {
   const seed = await seedUserWithMesocycle();
   const { userId, mesocycleRunId, exerciseId } = seed;
 
-  if (opts.pattern === 'deload') {
-    // [FIX-24 ADAPTED] Last week of mesocycle = deload. Force
-    // current_week === weeks. The base seed already has weeks=1
-    // current_week=1, so this is a no-op, but assert explicitly for clarity.
-    await db.query(
-      `UPDATE mesocycle_runs SET weeks = 4, current_week = 4 WHERE id = $1`,
-      [mesocycleRunId],
-    );
-  } else {
-    // Make sure we're NOT in the last week (current_week < weeks).
-    await db.query(
-      `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
-      [mesocycleRunId],
-    );
-  }
+  // Shape only — the per-row is_deload flag (set below for the 'deload'
+  // pattern) is what actually drives the W2-swapped evaluator's guard.
+  await db.query(
+    `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
+    [mesocycleRunId],
+  );
 
   const sessions = await addThreeDistinctSessions(seed);
+
+  if (opts.pattern === 'deload') {
+    // [W2 SWAP] Mark all three session day_workouts as deload so the per-row
+    // guard mutes the evaluator (replaces the old current_week === weeks
+    // heuristic).
+    await db.query(
+      `UPDATE day_workouts SET is_deload = true WHERE id = ANY($1::uuid[])`,
+      [sessions.map((s) => s.dayWorkoutId)],
+    );
+  }
 
   const baseLoad = 225;
   const baseReps = opts.pattern === 'low-rep' ? 3 : 8;
@@ -500,13 +507,473 @@ export async function seedOverreachingPartial(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// W2 program/mesocycle fixtures.
+//
+// seedUserProgram        — user + a real multi-week template + user_program
+//                          (status 'active'), but does NOT materialize. The
+//                          caller invokes materializeMesocycle() itself (used
+//                          by the day-workouts-is-deload test).
+// seedFullMesocycleForUser — materialize a full run for an EXISTING user;
+//                          returns the run_id (used by deload contamination).
+// seedUserWithFullMesocycle — user + materialized run, returns a SeedHandle.
+//                          Supports {weeks, currentWeek, status,
+//                          blockMuscleMavOverrides}.
+//
+// The template uses real seeded exercise slugs so materializeMesocycle's
+// muscle-landmark ramp resolves. A 2-day-per-week strength shape keeps the
+// fixture small while still spanning multiple weeks.
+// ---------------------------------------------------------------------------
+
+// Default fixture template: 2 strength days/week, well-known seeded slugs.
+// barbell-bench-press → chest; dumbbell-curl → biceps. Both primary muscles
+// have seeded MUSCLE_LANDMARKS so the ramp + distributor resolve.
+function fixtureTemplateStructure(): unknown {
+  return {
+    _v: 1,
+    days: [
+      {
+        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        blocks: [
+          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
+        ],
+      },
+      {
+        idx: 1, day_offset: 2, kind: 'strength', name: 'Day B',
+        blocks: [
+          { exercise_slug: 'dumbbell-curl', mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 12, target_rir: 2, rest_sec: 90 },
+        ],
+      },
+    ],
+  };
+}
+
+async function mkFixtureTemplate(opts: {
+  weeks: number;
+  version?: number;
+  structure?: unknown;
+}): Promise<{ id: string }> {
+  const slug = `w2-fixture-tpl-${randomUUID()}`;
+  const { rows: [tpl] } = await db.query<{ id: string }>(
+    `INSERT INTO program_templates
+       (slug, name, weeks, days_per_week, structure, version, created_by)
+     VALUES ($1, $2, $3, 2, $4::jsonb, $5, 'system')
+     RETURNING id`,
+    [slug, `W2 Fixture ${slug}`, opts.weeks, JSON.stringify(opts.structure ?? fixtureTemplateStructure()), opts.version ?? 1],
+  );
+  return tpl;
+}
+
+// seedUserProgramAtTemplateVersion — reproduce the "alpha fork pinned to a
+// stale template version" condition deterministically. We build a dedicated
+// 'system' template AT THE CURRENT VERSION (default 2, with core blocks) and
+// pin the fork to `opts.templateVersion` (default 1, the pre-core version).
+//
+// The seed adapter UPDATES the template row in place rather than keeping
+// per-version rows, so an old structure no longer exists in the DB to
+// materialize from. The actual safety guarantee is STRONGER than "materialize
+// the old structure" — materializeMesocycle hard-stops a stale fork with
+// TemplateOutdatedError, forcing an explicit re-fork. We build the template at
+// a known version (independent of the environment-dependent curated versions)
+// so the stale-fork condition is reproducible.
+export async function seedUserProgramAtTemplateVersion(opts: {
+  templateVersion: number;            // the fork's pinned (stale) version
+  currentTemplateVersion?: number;    // the template row's actual version (default 2)
+}): Promise<SeedHandle> {
+  const currentVersion = opts.currentTemplateVersion ?? 2;
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [`w2-altfork.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+  // Dedicated 'system' template at currentVersion, with a core block (mirrors
+  // the post-W2 curated structure). The fork below pins the older version.
+  const slug = `w2-altfork-tpl-${userTag}`;
+  const structure = {
+    _v: 1,
+    days: [
+      {
+        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        blocks: [
+          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
+          { exercise_slug: 'side-plank',          mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 15, target_rir: 2, rest_sec: 60 },
+        ],
+      },
+    ],
+  };
+  const { rows: [tpl] } = await db.query<{ id: string }>(
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
+     VALUES ($1, $2, 5, 1, $3::jsonb, $4, 'system') RETURNING id`,
+    [slug, `Alt Fork Tpl ${userTag}`, JSON.stringify(structure), currentVersion],
+  );
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
+    [userId, tpl.id, opts.templateVersion, `Alpha Fork ${userTag}`],
+  );
+  return {
+    userId,
+    bearer,
+    userProgramId: up.id,
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
+export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<SeedHandle> {
+  const weeks = opts.weeks ?? 5;
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [`w2-userprogram.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+  const tpl = await mkFixtureTemplate({ weeks });
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
+    [userId, tpl.id, `W2 Program ${userTag}`],
+  );
+  return {
+    userId,
+    bearer,
+    userProgramId: up.id,
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// mkUserPair / cleanupUserPair — the W8.2 contamination fixture (G2). Two
+// fully-independent users, each with its OWN bearer token minted with the
+// account:write scope (so the PAR-Q / onboarding / deload routes accept
+// either user's token). Contamination tests use this to prove user B cannot
+// read or mutate user A's rows.
+//
+// Each side is a minimal user+bearer (no mesocycle chain) — the deload
+// contamination tests attach a mesocycle to userA explicitly via
+// seedFullMesocycleForUser(pair.userA.userId).
+// ---------------------------------------------------------------------------
+export interface UserPairHandle {
+  userA: SeedHandle;
+  userB: SeedHandle;
+}
+
+async function mkLoneUser(tag: string): Promise<SeedHandle> {
+  const userTag = randomUUID();
+  const email = `pair-${tag}.${userTag}@repos.test`;
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [email],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+    label: `pair-${tag}`,
+  });
+  return {
+    userId,
+    bearer,
+    userProgramId: '',
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
+export async function mkUserPair(): Promise<UserPairHandle> {
+  const [userA, userB] = await Promise.all([mkLoneUser('a'), mkLoneUser('b')]);
+  return { userA, userB };
+}
+
+export async function cleanupUserPair(
+  handles: UserPairHandle | UserPairHandle[],
+): Promise<void> {
+  const list = Array.isArray(handles) ? handles : [handles];
+  if (list.length === 0) return;
+  const flat: SeedHandle[] = [];
+  for (const p of list) { flat.push(p.userA, p.userB); }
+  await cleanupSeeded(flat);
+}
+
+// ---------------------------------------------------------------------------
+// seedFullMesocycleForUser — materialize a real run for an EXISTING user.
+// Builds a fresh template + user_program owned by that user, then runs
+// materializeMesocycle. Returns the run_id. Used by deload contamination
+// tests (the user is one half of an mkUserPair).
+// ---------------------------------------------------------------------------
+export async function seedFullMesocycleForUser(
+  userId: string,
+  opts: { weeks?: number; currentWeek?: number } = {},
+): Promise<string> {
+  const weeks = opts.weeks ?? 5;
+  const { materializeMesocycle } = await import('../../src/services/materializeMesocycle.js');
+  const tpl = await mkFixtureTemplate({ weeks });
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
+    [userId, tpl.id, `W2 Full Meso ${randomUUID()}`],
+  );
+  const { run_id } = await materializeMesocycle({
+    userProgramId: up.id,
+    startDate: '2026-06-01',
+    startTz: 'UTC',
+  });
+  if (opts.currentWeek !== undefined) {
+    await db.query(`UPDATE mesocycle_runs SET current_week = $2 WHERE id = $1`, [run_id, opts.currentWeek]);
+  }
+  return run_id;
+}
+
+// ---------------------------------------------------------------------------
+// seedUserWithFullMesocycle — user + materialized run, returned as a
+// SeedHandle. Supports weeks / currentWeek / status, plus
+// blockMuscleMavOverrides for the manual-deload boundary test: it inserts
+// extra single-set blocks whose exercises map to the named muscles so the
+// deload formula floor(MAV*0.5) can be asserted per muscle.
+// ---------------------------------------------------------------------------
+export interface FullMesocycleHandle extends SeedHandle {
+  templateId: string;
+}
+
+// A muscle → seeded-exercise-slug map for blockMuscleMavOverrides. Each slug
+// is a real seed entry whose primary muscle matches the key.
+const MUSCLE_TO_SEED_SLUG: Record<string, string> = {
+  chest: 'barbell-bench-press',
+  biceps: 'dumbbell-curl',
+  calves: 'dumbbell-standing-calf-raise',
+  quads: 'barbell-back-squat',
+  core: 'cable-pallof-press', // re-tagged to core in Phase 3
+};
+
+export async function seedUserWithFullMesocycle(opts: {
+  weeks: number;
+  currentWeek: number;
+  status?: 'active' | 'paused' | 'completed' | 'abandoned';
+  blockMuscleMavOverrides?: Record<string, number>;
+}): Promise<FullMesocycleHandle> {
+  const { materializeMesocycle } = await import('../../src/services/materializeMesocycle.js');
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'America/New_York') RETURNING id`,
+    [`w2-fullmeso.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+
+  // Build the template structure. If blockMuscleMavOverrides is given, create
+  // one strength day with one block per named muscle (single block each); the
+  // materializer's distributor will allocate sets up to that muscle's MAV.
+  let structure: unknown;
+  if (opts.blockMuscleMavOverrides) {
+    const blocks = Object.keys(opts.blockMuscleMavOverrides).map((muscle) => {
+      const slug = MUSCLE_TO_SEED_SLUG[muscle];
+      if (!slug) throw new Error(`seedUserWithFullMesocycle: no seed slug for muscle '${muscle}'`);
+      return { exercise_slug: slug, mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 12, target_rir: 2, rest_sec: 90 };
+    });
+    structure = { _v: 1, days: [{ idx: 0, day_offset: 0, kind: 'strength', name: 'Day A', blocks }] };
+  } else {
+    structure = fixtureTemplateStructure();
+  }
+
+  const tpl = await mkFixtureTemplate({ weeks: opts.weeks, structure });
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
+    [userId, tpl.id, `W2 Full Meso ${userTag}`],
+  );
+  const { run_id } = await materializeMesocycle({
+    userProgramId: up.id,
+    startDate: '2026-06-01',
+    startTz: 'UTC',
+  });
+
+  await db.query(
+    `UPDATE mesocycle_runs SET current_week = $2, status = $3 WHERE id = $1`,
+    [run_id, opts.currentWeek, opts.status ?? 'active'],
+  );
+
+  // Pick a representative day_workout + planned_set for the SeedHandle shape.
+  const { rows: [dw] } = await db.query<{ id: string }>(
+    `SELECT id FROM day_workouts WHERE mesocycle_run_id=$1 ORDER BY week_idx, day_idx LIMIT 1`,
+    [run_id],
+  );
+  const { rows: [ps] } = await db.query<{ id: string; exercise_id: string }>(
+    `SELECT id, exercise_id FROM planned_sets WHERE day_workout_id=$1 LIMIT 1`,
+    [dw?.id],
+  );
+
+  return {
+    userId,
+    bearer,
+    userProgramId: up.id,
+    mesocycleRunId: run_id,
+    dayWorkoutId: dw?.id ?? '',
+    plannedSetId: ps?.id ?? '',
+    exerciseId: ps?.exercise_id ?? '',
+    templateId: tpl.id,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W2 stalled-PR deload-signal parity fixtures.
+//
+// seedStalledPrMultiWeekFixture — 5-week bench-press meso. Three identical
+//   RIR-0 stalled sessions in weeks 3 & 4 (NON-deload), NO sessions in week 5.
+//   current_week=3 < weeks=5 so the PRE-swap heuristic (current_week >= weeks)
+//   does NOT mute. Because all stalled sessions live in non-deload weeks and
+//   week 5 has none, the pre-swap (whole-run) and post-swap (per-row is_deload)
+//   filterings see the SAME 3 sessions → identical fire. This is the golden
+//   parity anchor.
+//
+// seedUserWithStalledPrFixture — targeted: 3 identical RIR-0 sessions in a
+//   chosen week, optionally flipping those day_workouts to is_deload=true.
+// ---------------------------------------------------------------------------
+export interface StalledPrMultiWeekFixtureHandle {
+  userId: string;
+  mesocycleRunId: string;
+  bearer: string;
+}
+export type StalledPrFixtureHandle = StalledPrMultiWeekFixtureHandle & {
+  currentWeek: number;
+};
+
+// Internal: insert a day_workout + a bench-press planned_set + a set_log on a
+// given run/week. Returns the day_workout id. load/reps/rir parameterize the
+// session shape; daysAgo controls performed_at ordering.
+async function insertStalledSession(opts: {
+  runId: string;
+  userId: string;
+  exerciseId: string;
+  weekIdx: number;
+  dayIdx: number;
+  load: number;
+  reps: number;
+  rir: number;
+  minutesAgo: number;
+  isDeload?: boolean;
+}): Promise<string> {
+  const { rows: [dw] } = await db.query<{ id: string }>(
+    `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status, is_deload)
+     VALUES ($1, $2, $3, CURRENT_DATE, 'strength', 'Stalled Day', 'completed', $4)
+     RETURNING id`,
+    [opts.runId, opts.weekIdx, opts.dayIdx, opts.isDeload ?? false],
+  );
+  const { rows: [ps] } = await db.query<{ id: string }>(
+    `INSERT INTO planned_sets
+       (day_workout_id, block_idx, set_idx, exercise_id,
+        target_reps_low, target_reps_high, target_rir, rest_sec)
+     VALUES ($1, 0, 0, $2, 5, 8, 2, 150) RETURNING id`,
+    [dw.id, opts.exerciseId],
+  );
+  await db.query(
+    `INSERT INTO set_logs
+       (user_id, exercise_id, planned_set_id, client_request_id,
+        performed_load_lbs, performed_reps, performed_rir, performed_at)
+     VALUES ($1, $2, $3, gen_random_uuid(), $4, $5, $6, now() - ($7 || ' minutes')::interval)`,
+    [opts.userId, opts.exerciseId, ps.id, opts.load, opts.reps, opts.rir, String(opts.minutesAgo)],
+  );
+  return dw.id;
+}
+
+async function mkBenchRun(opts: { weeks: number; currentWeek: number }): Promise<{
+  userId: string; bearer: string; runId: string; exerciseId: string;
+}> {
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [`w2-stalledpr.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+  const { rows: ex } = await db.query<{ id: string }>(
+    `SELECT id FROM exercises WHERE slug='barbell-bench-press' AND archived_at IS NULL LIMIT 1`,
+  );
+  if (ex.length === 0) throw new Error('mkBenchRun: barbell-bench-press not seeded');
+  const exerciseId = ex[0].id;
+
+  // Minimal template + user_program so the run FK resolves (structure unused —
+  // we insert day_workouts/planned_sets/set_logs by hand).
+  const slug = `w2-stalled-tpl-${userTag}`;
+  const { rows: [tpl] } = await db.query<{ id: string }>(
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
+     VALUES ($1, $2, $3, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system') RETURNING id`,
+    [slug, `Stalled ${userTag}`, opts.weeks],
+  );
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
+    [userId, tpl.id, `Stalled Program ${userTag}`],
+  );
+  const { rows: [mr] } = await db.query<{ id: string }>(
+    `INSERT INTO mesocycle_runs
+       (user_program_id, user_id, start_date, start_tz, weeks, current_week, status)
+     VALUES ($1, $2, CURRENT_DATE, 'UTC', $3, $4, 'active') RETURNING id`,
+    [up.id, userId, opts.weeks, opts.currentWeek],
+  );
+  return { userId, bearer, runId: mr.id, exerciseId };
+}
+
+export async function seedStalledPrMultiWeekFixture(): Promise<StalledPrMultiWeekFixtureHandle> {
+  const { userId, bearer, runId, exerciseId } = await mkBenchRun({ weeks: 5, currentWeek: 3 });
+  // 3 identical RIR-0 stalled bench sessions across weeks 3 & 4 (non-deload).
+  // Most-recent first via minutesAgo. No sessions in week 5 (deload week).
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 3, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 4320 }); // ~3d ago
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 3, dayIdx: 1, load: 220, reps: 5, rir: 0, minutesAgo: 2880 }); // ~2d ago
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 4, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 1440 }); // ~1d ago
+  return { userId, mesocycleRunId: runId, bearer };
+}
+
+export async function seedUserWithStalledPrFixture(opts: {
+  markLastSessionDeload: boolean;
+  sessionsInWeek?: number;
+  weeks?: number;
+}): Promise<StalledPrFixtureHandle> {
+  const weeks = opts.weeks ?? 5;
+  // The week the 3 stalled sessions land in.
+  const targetWeek = opts.sessionsInWeek ?? 3;
+  // current_week must be < weeks so the run isn't a pre-swap deload run; we set
+  // it to the target week so the evaluator's weekIdx aligns naturally.
+  const currentWeek = Math.min(targetWeek, weeks);
+  const { userId, bearer, runId, exerciseId } = await mkBenchRun({ weeks, currentWeek });
+  // 3 identical RIR-0 stalled sessions in the target week. If
+  // markLastSessionDeload, flip ALL three day_workouts to is_deload=true so the
+  // per-row guard mutes the evaluator.
+  const isDeload = opts.markLastSessionDeload;
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 4320, isDeload });
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 1, load: 220, reps: 5, rir: 0, minutesAgo: 2880, isDeload });
+  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 2, load: 220, reps: 5, rir: 0, minutesAgo: 1440, isDeload });
+  return { userId, mesocycleRunId: runId, bearer, currentWeek };
+}
+
+// ---------------------------------------------------------------------------
 // cleanupSeeded — cascading DELETE on users removes everything that hangs off
 // them (device_tokens, user_programs → mesocycle_runs → day_workouts →
 // planned_sets → set_logs). We additionally drop the per-seed
 // program_templates rows because templates aren't owned by users.
 // ---------------------------------------------------------------------------
 export async function cleanupSeeded(
-  handles: SeedHandle | SeedHandle[],
+  handles: { userId: string } | { userId: string }[],
 ): Promise<void> {
   const list = Array.isArray(handles) ? handles : [handles];
   if (list.length === 0) return;

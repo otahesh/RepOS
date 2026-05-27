@@ -12,4 +12,5 @@ export const MUSCLE_LANDMARKS: Record<string, { mev: number; mav: number; mrv: n
   hamstrings:  { mev: 6,  mav: 12, mrv: 18 },
   glutes:      { mev: 4,  mav: 12, mrv: 16 },
   calves:      { mev: 10, mav: 14, mrv: 22 },
+  core:        { mev: 6,  mav: 12, mrv: 18 },  // W2.4 — core/abs landmarks
 };

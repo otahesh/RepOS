@@ -15,6 +15,7 @@ import { TOKENS } from '../tokens'
 import { pushToast } from '../components/common/ToastHost'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { Term } from '../components/Term'
+import { DeloadThisWeekButton } from '../components/programs/DeloadThisWeekButton'
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -30,6 +31,7 @@ export default function MyProgramPage() {
   const [recapLoading, setRecapLoading] = useState(false)
   const [abandonOpen, setAbandonOpen] = useState(false)
   const [abandoning, setAbandoning] = useState(false)
+  const [reloadTick, setReloadTick] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -175,7 +177,14 @@ export default function MyProgramPage() {
 
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <ProgramPage mesocycleRunId={id} />
+      <ProgramPage key={reloadTick} mesocycleRunId={id} />
+
+      {/* W2.6 — manual mid-meso deload (active runs only). */}
+      {run.status === 'active' && (
+        <section style={{ padding: '0 24px', display: 'flex', justifyContent: 'flex-end' }}>
+          <DeloadThisWeekButton runId={run.id} onChanged={() => setReloadTick((t) => t + 1)} />
+        </section>
+      )}
 
       <ScheduleWarnings warnings={warnings} />
 

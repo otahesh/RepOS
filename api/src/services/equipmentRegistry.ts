@@ -19,6 +19,8 @@ const REGISTRY: Record<string, EquipmentKeyShape> = {
   // Machines
   cable_stack:      { kind: 'boolean' },
   machines:         { kind: 'object', fields: ['leg_press','lat_pulldown','chest_press','leg_extension','leg_curl'] },
+  // Core / accessory (W2.4)
+  ab_wheel:         { kind: 'boolean' },
   // Cardio
   treadmill:        { kind: 'boolean' },
   stationary_bike:  { kind: 'boolean' },

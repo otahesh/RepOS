@@ -13,13 +13,24 @@
 //           ctx is { userId, runId, weekIdx }; result is
 //           { triggered: false } | { triggered: true, message, payload? }.
 //           No `flag` field on the result.
-// [FIX-24 ADAPTED]
-//           Deload guard. The plan's preferred signal — `day_workouts.is_deload`
-//           — does NOT yet exist in the schema (W2 owns that column). As an
-//           interim signal we use `mesocycle_runs.current_week >= weeks`:
-//           by RP-hypertrophy convention the last week of a mesocycle IS the
-//           deload week. This is a deliberate Phase 1 deviation; replace with
-//           is_deload once W2 ships it. User-approved 2026-05-25.
+// [W2 SWAP, 2026-05-26]
+//           Deload guard switched from the interim `mesocycle_runs.current_week
+//           >= weeks` heuristic to the per-row `day_workouts.is_deload` flag.
+//           Owned by the program engine (materializeMesocycle.ts) for new runs;
+//           populated by migration 036 for existing alpha-cohort runs.
+//
+//           W4 cross-wave contract: when W4 ships full deload-mesocycles
+//           (mesocycle_runs.is_deload), W4 Task 12 will ALSO flip every
+//           constituent day_workouts.is_deload=true so this per-row gate
+//           continues to mute the evaluator across the entire deload run. W2
+//           publishes that contract; W4 honors it. No further change needed
+//           here when W4 lands.
+//
+//           Parity test:
+//             api/tests/integration/stalled-pr-deload-parity.test.ts
+//           Golden fixture (pre-swap; stalledPrEvaluator unchanged since
+//           d5110bc so the current evaluator IS the pre-swap source of truth):
+//             api/tests/fixtures/stalledPrEvaluator-pre-swap-golden.json
 // [FIX-25]  Gate on max_reps >= 5 — strength blocks at 2-3 reps legitimately
 //           stall numerically and that is not a recovery signal. This rule
 //           targets hypertrophy stagnation only.
@@ -41,22 +52,21 @@ export const stalledPrEvaluator: RecoveryFlagEvaluator = {
   key: 'stalled_pr',
   version: 1,
   async evaluate({ userId, runId }) {
-    // No active run → fail-closed. Without a runId we can't (a) consult the
-    // deload guard so we'd evaluate during the user's deload week and (b)
-    // anchor the session-aggregate query to the active mesocycle so we'd
-    // reach back into completed mesocycles and produce stale false positives
-    // at meso-boundary transitions. Either failure mode dwarfs the missed-fire
-    // risk for users without an active run.
+    // No active run → fail-closed. Without a runId we can't anchor the
+    // session-aggregate query to the active mesocycle so we'd reach back into
+    // completed mesocycles and produce stale false positives at meso-boundary
+    // transitions. That failure mode dwarfs the missed-fire risk for users
+    // without an active run.
     if (!runId) return { triggered: false };
 
-    // [FIX-24 ADAPTED] Deload guard via mesocycle_runs.current_week >= weeks.
-    const { rows: [run] } = await db.query<{ is_deload_week: boolean }>(
-      `SELECT (current_week >= weeks) AS is_deload_week
-       FROM mesocycle_runs WHERE id = $1`,
-      [runId],
-    );
-    if (!run || run.is_deload_week) return { triggered: false };
-
+    // [W2 SWAP] Deload guard via the per-row `day_workouts.is_deload` flag.
+    // No early-return at the run level — we filter at the session_agg level so
+    // per-session deload-day rows simply don't contribute to the streak. This
+    // matches the interim `current_week >= weeks` heuristic for the final week
+    // (migration 036 backfilled those rows is_deload=true) and additionally
+    // honors W2's manual mid-meso deload + W4's full deload-meso (both flip
+    // is_deload per row).
+    //
     // Anchor the aggregate to the active mesocycle_run. Without this, sessions
     // from a completed prior run would bleed into the "last 3 sessions per
     // exercise" window — a user who hit RIR-0 5×5 for three weeks at the end
@@ -78,6 +88,7 @@ export const stalledPrEvaluator: RecoveryFlagEvaluator = {
          JOIN day_workouts dw ON dw.id = ps.day_workout_id
          WHERE sl.user_id = $1
            AND dw.mesocycle_run_id = $2
+           AND dw.is_deload = false           -- W2 swap: per-row deload guard
          GROUP BY ps.exercise_id, dw.id
        ),
        ranked AS (

@@ -23,6 +23,11 @@ export interface User {
   email: string
   display_name: string | null
   timezone: string
+  // W2: drive the AppShell onboarding/PAR-Q derived state machine. Optional so
+  // older callers / test fixtures that build a User without them still compile.
+  onboarding_completed_at?: string | null
+  par_q_version?: number
+  par_q_advisory_active?: boolean
 }
 
 export type AuthStatus = 'loading' | 'authenticated' | 'error'

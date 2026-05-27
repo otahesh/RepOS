@@ -27,16 +27,21 @@ describe('program enum types (migration 014)', () => {
     );
   });
 
-  it('mesocycle_run_event_type enum carries the 9 v1 events', async () => {
+  it('mesocycle_run_event_type enum carries the 9 v1 events (+ W2 manual_deload pair)', async () => {
     const { rows } = await db.query(
       `SELECT enumlabel FROM pg_enum
         WHERE enumtypid = 'mesocycle_run_event_type'::regtype
         ORDER BY enumsortorder`
     );
-    expect(rows.map(r => r.enumlabel)).toEqual([
+    const labels = rows.map(r => r.enumlabel);
+    // The 9 v1 events remain, in order, as the leading prefix.
+    expect(labels.slice(0, 9)).toEqual([
       'started','paused','resumed','day_overridden','set_overridden',
       'day_skipped','customized','completed','abandoned',
     ]);
+    // W2.5 (migration 037) appended the manual-deload audit pair.
+    expect(labels).toContain('manual_deload');
+    expect(labels).toContain('manual_deload_undone');
   });
 });
 

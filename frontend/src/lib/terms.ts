@@ -17,7 +17,8 @@ export type TermKey =
   | 'rotation' | 'anti_rotation'
   | 'compound' | 'isolation'
   | 'accumulation' | 'working_set'
-  | 'PAT' | 'bearer_token' | 'session' | 'IANA_timezone' | 'truncated_ip_24';
+  | 'PAT' | 'bearer_token' | 'session' | 'IANA_timezone' | 'truncated_ip_24'
+  | 'PAR_Q' | 'core' | 'intro_week' | 'soft_gate' | 'manual_deload' | 'advisory_mode';
 
 export const TERMS: Record<TermKey, TermDef> = {
   RIR: {
@@ -211,6 +212,42 @@ export const TERMS: Record<TermKey, TermDef> = {
     full: 'Truncated IP address (/24)',
     plain: 'RepOS shows only the network portion of your last-used IP (e.g., 192.168.88.0/24) — not the exact address.',
     whyMatters: 'Enough information for "did I sign in from work or home?" without storing your precise location across every session.',
+  },
+  PAR_Q: {
+    short: 'PAR-Q',
+    full: 'Physical Activity Readiness Questionnaire',
+    plain: 'A 9-question screen for conditions that need clinician sign-off before changing your training.',
+    whyMatters: 'A "yes" doesn\'t lock you out — it puts your program into advisory mode (volume capped at MEV, RIR floored at 3) until you clear it on the Settings → Health page.',
+  },
+  advisory_mode: {
+    short: 'advisory mode',
+    full: 'Clinical advisory mode',
+    plain: 'A precaution the app applies after a PAR-Q "yes". Your program stays at MEV (minimum-effective volume) with RIR floored at 3 instead of progressing through the normal ramp.',
+    whyMatters: 'It is reversible: once you have spoken to a clinician you can mark yourself cleared on Settings → Health and the program goes back to normal progression.',
+  },
+  core: {
+    short: 'core',
+    full: 'Core (abdominals + obliques + spinal stabilizers)',
+    plain: 'The muscles that resist or produce trunk motion — abs, obliques, and the deep stabilizers along your spine.',
+    whyMatters: 'Trained for stiffness more than size in RepOS. Anti-rotation work transfers to every other lift.',
+  },
+  intro_week: {
+    short: 'intro week',
+    full: 'Intro week',
+    plain: 'Week 1 of a mesocycle — light loads, full RIR budget, a deliberate ramp-on.',
+    whyMatters: 'Lets your tendons and CNS catch up to the new program before volume ramps.',
+  },
+  soft_gate: {
+    short: 'soft gate',
+    full: 'Soft gate',
+    plain: 'An advisory the app shows but does not enforce.',
+    whyMatters: 'You can always click through. RepOS never hard-blocks training based on a self-reported answer.',
+  },
+  manual_deload: {
+    short: 'manual deload',
+    full: 'Manual deload',
+    plain: 'A user-triggered deload that rewrites the remaining weeks of your mesocycle to lighter sets at RIR 4.',
+    whyMatters: 'Use it when life pushes back — sick, slept badly, joint cranky. Undoable for 24 hours.',
   },
 };
 

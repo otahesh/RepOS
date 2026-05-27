@@ -50,6 +50,9 @@ export const programTemplates: ProgramTemplateSeed[] = [
             { exercise_slug: 'incline-dumbbell-bench-press',   mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 120 },
             { exercise_slug: 'dumbbell-rear-delt-raise',       mev: 2, mav: 3, target_reps_low: 12, target_reps_high: 15, target_rir: 1, rest_sec: 60  },
             { exercise_slug: 'dumbbell-lateral-raise',         mev: 2, mav: 3, target_reps_low: 12, target_reps_high: 15, target_rir: 1, rest_sec: 60  },
+            // W2.4 — late-session core blocks (bodyweight; no equipment dependency).
+            { exercise_slug: 'dead-bug',                       mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 60  },
+            { exercise_slug: 'side-plank',                     mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 15, target_rir: 2, rest_sec: 60  },
           ],
         },
       ],
@@ -113,6 +116,10 @@ export const programTemplates: ProgramTemplateSeed[] = [
             { exercise_slug: 'dumbbell-walking-lunge',     mev: 2, mav: 4, target_reps_low: 10, target_reps_high: 12, target_rir: 1, rest_sec: 120 },
             { exercise_slug: 'dumbbell-hip-thrust',        mev: 3, mav: 5, target_reps_low: 8,  target_reps_high: 12, target_rir: 1, rest_sec: 120 },
             { exercise_slug: 'dumbbell-standing-calf-raise',mev: 3, mav: 4, target_reps_low: 12, target_reps_high: 20, target_rir: 1, rest_sec: 60  },
+            // W2.4 — late-session core blocks. Pull-up bar is in this template's
+            // garage-gym equipment minimum; side-plank is bodyweight.
+            { exercise_slug: 'hanging-leg-raise',          mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 15, target_rir: 2, rest_sec: 75  },
+            { exercise_slug: 'side-plank',                 mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 15, target_rir: 2, rest_sec: 60  },
           ],
         },
       ],
@@ -173,6 +180,8 @@ export const programTemplates: ProgramTemplateSeed[] = [
             { exercise_slug: 'dumbbell-bulgarian-split-squat', mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 120 },
             { exercise_slug: 'incline-dumbbell-bench-press',   mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 120 },
             { exercise_slug: 'chest-supported-dumbbell-row',   mev: 2, mav: 3, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 120 },
+            // W2.4 — late-session core block (bodyweight; no equipment dependency).
+            { exercise_slug: 'dead-bug',                       mev: 2, mav: 4, target_reps_low: 8,  target_reps_high: 12, target_rir: 2, rest_sec: 60  },
           ],
         },
         {

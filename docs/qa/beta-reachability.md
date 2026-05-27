@@ -90,3 +90,47 @@ The Playwright reachability spec
 All W6 owner-wave surfaces are reachable within the ≤3-click budget (1 click on
 desktop, ≤3 on mobile). Injuries stays preserved at 2 clicks (desktop). **G7 ✓
 for W6.**
+
+## W2 — Onboarding + clinical safety
+
+| Surface | Path from `/` | Click count |
+|---|---|---|
+| OnboardingOverlay (5-step responsive wizard, AppShell-mounted overlay) | `/` (renders on first sign-in when `onboarding_completed_at IS NULL`; not URL-addressable) | **0 clicks** (modal on `/`) ✓ |
+| PAR-Q gate (9-question soft-gate, AppShell-mounted overlay) | `/` (renders on first sign-in after onboarding when `par_q_version < PAR_Q_VERSION`) | **0 clicks** (modal on `/`) ✓ |
+| `/settings/health` — Re-review PAR-Q + view status + "Mark cleared" | `/` → "Settings" nav → "Health" sub-nav | **2 clicks** ✓ |
+| Deload this week (desktop, MyProgramPage) | `/` → "Programs" nav → "My program" → "Deload this week" button → sheet | **3 clicks** ✓ |
+| Deload this week (mobile, TodayWorkoutMobile header) | `/` → Today active-run header "Deload this week" → sheet | **1 click** ✓ |
+| Manual deload undo | Toast "Undo" action shown immediately after a deload (within 24h) | **1 click** ✓ |
+
+**Deferred surfaces (not counted against W2 G7):**
+
+- `/settings/program-prefs` — W4.3 owns; entry stays W6's disabled placeholder
+  (`disabled: true`, ownerWave `W4`) until W4.3 flips it.
+
+### Source-of-truth selectors
+
+- OnboardingOverlay: `role="dialog"` + `aria-labelledby="onboarding-title"` + the
+  "ONBOARDING · STEP X / 5" header.
+- PAR-Q gate: `role="dialog"`; question list under
+  `data-testid="parq-questions"`; joint picker under
+  `data-testid="parq-q5-joints"`.
+- "Deload this week" button: `aria-label="Deload this week"` on
+  `frontend/src/components/programs/DeloadThisWeekButton.tsx`. Confirm sheet has
+  `role="dialog"` with `aria-label="Confirm deload"`.
+- Settings → Health: `SETTINGS_SECTIONS` entry `{ label: 'Health', to:
+  '/settings/health', ownerWave: 'W2' }`; route `settings/health` in `App.tsx`
+  renders `frontend/src/pages/SettingsHealthPage.tsx`.
+
+### G7 status for W2
+
+Six surfaces reachable inside the 3-click budget (onboarding + PAR-Q are
+0-click modals on `/`; the rest 1–3 clicks). **G7 ✓ for W2.**
+
+> Note: the three Playwright e2e specs the W2 plan lists
+> (`tests/e2e/w2-onboarding-flow.spec.ts`, `…-par-q-reprompt`,
+> `…-deload-this-week`) require a running app + CF-Access-bypassed session +
+> Playwright browsers, which are out of the `npm run validate` gate. Component-
+> level coverage of every click path above ships in vitest
+> (`OnboardingOverlay.test.tsx`, `ParQGate.test.tsx`,
+> `DeloadThisWeekButton.test.tsx`, `SettingsHealthPage.test.tsx`); the e2e specs
+> are tracked for the CI Playwright lane.

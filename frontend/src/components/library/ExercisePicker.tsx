@@ -15,7 +15,7 @@ const GROUP_TO_SLUGS: Record<string, string[]> = {
   shoulders: ['front_delt', 'side_delt', 'rear_delt'],
   arms: ['biceps', 'triceps'],
   legs: ['quads', 'hamstrings', 'glutes', 'calves'],
-  core: [], // no core muscles in v1 catalog
+  core: ['core'],   // W2.4: core muscle is now first-class
 };
 
 export function ExercisePicker({ onPick, defaultEquipmentToggle = true }: PickerProps) {

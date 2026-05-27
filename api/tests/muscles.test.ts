@@ -7,18 +7,18 @@ let app: App;
 
 beforeAll(async () => { app = await buildApp(); });
 
-describe('muscles seed (migration 008)', () => {
-  it('has exactly 12 rows after migration', async () => {
+describe('muscles seed (migration 008 + W2.4 core)', () => {
+  it('has exactly 13 rows (12 v1 + core via migration 038)', async () => {
     const { rows } = await db.query('SELECT COUNT(*)::int AS n FROM muscles');
-    expect(rows[0].n).toBe(12);
+    expect(rows[0].n).toBe(13);
   });
 
-  it('every group_name resolves to a known group', async () => {
+  it('every group_name resolves to a known group (incl. core from W2.4)', async () => {
     const { rows } = await db.query(
       `SELECT DISTINCT group_name FROM muscles ORDER BY group_name`
     );
     const groups = rows.map(r => r.group_name);
-    expect(groups).toEqual(['arms','back','chest','legs','shoulders']);
+    expect(groups).toEqual(['arms','back','chest','core','legs','shoulders']);
   });
 
   it('rejects a duplicate slug', async () => {
@@ -37,13 +37,14 @@ describe('muscles seed (migration 008)', () => {
 });
 
 describe('GET /api/muscles', () => {
-  it('returns all 12 muscles ordered by display_order', async () => {
+  it('returns all 13 muscles ordered by display_order (core last, W2.4)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/muscles' });
     expect(res.statusCode).toBe(200);
     const body = res.json<{ muscles: any[] }>();
-    expect(body.muscles).toHaveLength(12);
+    expect(body.muscles).toHaveLength(13);
     expect(body.muscles[0].slug).toBe('chest');
     expect(body.muscles[11].slug).toBe('calves');
+    expect(body.muscles[12].slug).toBe('core');
   });
 
   it('sets cache header', async () => {

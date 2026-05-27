@@ -4,11 +4,13 @@ import { RequiredEquipment } from './predicate.js';
 const MUSCLE_SLUGS = [
   'chest','lats','upper_back','front_delt','side_delt','rear_delt',
   'biceps','triceps','quads','hamstrings','glutes','calves',
+  'core',  // W2.4 — core/abs taxonomy
 ] as const;
 
 const MOVEMENT_PATTERNS = [
   'push_horizontal','push_vertical','pull_horizontal','pull_vertical',
   'squat','hinge','lunge','carry','rotation','anti_rotation','gait',
+  'spinal_flexion','anti_extension',  // W2.4 — core exercises (migration 040)
 ] as const;
 
 const PEAK_TENSION = ['short','mid','long','lengthened_partial_capable'] as const;

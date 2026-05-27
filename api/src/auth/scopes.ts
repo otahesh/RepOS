@@ -9,6 +9,7 @@ export const VALID_SCOPES = [
   'health:injuries:read',
   'health:injuries:write',
   'health:recovery:read', // [FIX-28] gates the existing /api/recovery-flags routes
+  'account:write',        // W2: PAR-Q POST, onboarding-complete POST, deload-now POST + /undo
 ] as const;
 
 export type Scope = typeof VALID_SCOPES[number];

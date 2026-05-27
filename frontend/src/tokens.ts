@@ -23,6 +23,15 @@ export const TOKENS = {
   heat3: '#3166AB',
   heat4: '#4D8DFF',
   heat5: '#7FB0FF',
+  // W2 (panel C-Z) — explicit modal z-index stack. Every overlay references
+  // a token here, NEVER an inline zIndex literal. Auth tier is highest because
+  // a session-expired prompt must obscure even onboarding.
+  zModal: {
+    zSheet: 100,    // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
+    zBanner: 1000,  // LogBufferRecovery
+    zOverlay: 1500, // OnboardingOverlay, ParQGate
+    zAuth: 2000,    // SessionExpiredBanner
+  },
 } as const;
 
 export const FONTS = {
