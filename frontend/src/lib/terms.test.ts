@@ -7,6 +7,8 @@ const ALL_KEYS: TermKey[] = [
   'push_vertical','pull_vertical','hinge','squat','lunge','carry','rotation',
   'anti_rotation','compound','isolation','accumulation','working_set',
   'PAT','bearer_token','session','IANA_timezone','truncated_ip_24',
+  // W2 additions
+  'PAR_Q','core','intro_week','soft_gate','manual_deload','advisory_mode',
 ];
 
 describe('TERMS dictionary', () => {
@@ -32,6 +34,14 @@ describe('TERMS dictionary', () => {
 
 describe('W6 term additions', () => {
   it.each(['PAT','bearer_token','session','IANA_timezone','truncated_ip_24'] as const)('has TERMS entry for %s', (k) => {
+    expect(TERMS[k as keyof typeof TERMS]).toBeDefined();
+    expect(TERMS[k as keyof typeof TERMS].short.length).toBeGreaterThan(0);
+    expect(TERMS[k as keyof typeof TERMS].plain.length).toBeGreaterThan(0);
+  });
+});
+
+describe('W2 term additions', () => {
+  it.each(['PAR_Q','core','intro_week','soft_gate','manual_deload','advisory_mode'] as const)('has TERMS entry for %s', (k) => {
     expect(TERMS[k as keyof typeof TERMS]).toBeDefined();
     expect(TERMS[k as keyof typeof TERMS].short.length).toBeGreaterThan(0);
     expect(TERMS[k as keyof typeof TERMS].plain.length).toBeGreaterThan(0);
