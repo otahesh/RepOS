@@ -88,9 +88,18 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
   );
 
   // Determine the run's weeks even if some are empty (e.g. all cardio).
-  const { rows: [{ weeks: nWeeks }] } = await db.query<{ weeks: number }>(
-    `SELECT weeks FROM mesocycle_runs WHERE id=$1`, [runId],
+  // [C-LANDMARKS-ACTIVE-RUN] ALSO read landmarks_snapshot — the run's
+  // MEV/MAV/MRV thresholds must come from the snapshot captured at materialize
+  // time, NOT the global MUSCLE_LANDMARKS constant. Otherwise a per-user
+  // override would drive planned volume (Task 6) while the displayed threshold
+  // line stayed at the default — and a mid-run PATCH could silently shift the
+  // threshold the user is training against. Legacy runs (snapshot NULL —
+  // materialized before migration 042) fall back to MUSCLE_LANDMARKS.
+  const { rows: [runMeta] } = await db.query<{ weeks: number; landmarks_snapshot: Record<string, { mev: number; mav: number; mrv: number }> | null }>(
+    `SELECT weeks, landmarks_snapshot FROM mesocycle_runs WHERE id=$1`, [runId],
   );
+  const nWeeks = runMeta.weeks;
+  const snapshot = runMeta.landmarks_snapshot;
 
   // Index planned sets the same way for the union below. The merge unions
   // muscle keys from both setRows AND performedRows per week so a logged
@@ -111,7 +120,9 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
     const muscles: MuscleVolume[] = Array.from(musclesInWeek)
       .sort()
       .map(slug => {
-        let lm = MUSCLE_LANDMARKS[slug];
+        // [C-LANDMARKS-ACTIVE-RUN] Prefer the run's snapshot; fall back to the
+        // global default for legacy runs (snapshot NULL).
+        let lm = snapshot?.[slug] ?? MUSCLE_LANDMARKS[slug];
         if (!lm) {
           console.warn(`[volumeRollup] muscle '${slug}' has no landmarks; emitting zeros`);
           lm = { mev: 0, mav: 0, mrv: 0 };
