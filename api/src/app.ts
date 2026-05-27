@@ -11,6 +11,7 @@ import { exerciseRoutes } from './routes/exercises.js';
 import { equipmentRoutes } from './routes/equipment.js';
 import { programRoutes } from './routes/programs.js';
 import { userProgramRoutes } from './routes/userPrograms.js';
+import { userLandmarksRoutes } from './routes/userLandmarks.js';
 import { mesocycleRoutes } from './routes/mesocycles.js';
 import { plannedSetRoutes } from './routes/plannedSets.js';
 import { recoveryFlagRoutes } from './routes/recoveryFlags.js';
@@ -45,6 +46,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(equipmentRoutes, { prefix: '/api' });
   await app.register(programRoutes, { prefix: '/api' });
   await app.register(userProgramRoutes, { prefix: '/api' });
+  await app.register(userLandmarksRoutes, { prefix: '/api' });
   await app.register(mesocycleRoutes, { prefix: '/api' });
   await app.register(plannedSetRoutes, { prefix: '/api' });
   await app.register(recoveryFlagRoutes, { prefix: '/api' });
