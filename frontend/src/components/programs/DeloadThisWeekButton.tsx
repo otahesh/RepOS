@@ -5,6 +5,7 @@
 // TodayPage overflow menu (mobile).
 import { useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
+import { Term } from '../Term';
 import { DeloadThisWeekSheet } from './DeloadThisWeekSheet';
 
 export function DeloadThisWeekButton({
@@ -31,7 +32,7 @@ export function DeloadThisWeekButton({
         onClick={() => setOpen(true)}
         style={baseStyle}
       >
-        Deload this week
+        <Term k="manual_deload" variant="abbr">Deload</Term> this week
       </button>
       {open && (
         <DeloadThisWeekSheet

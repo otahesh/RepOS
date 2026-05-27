@@ -44,7 +44,7 @@ export default function SettingsHealthPage(): JSX.Element {
     <main style={{ padding: 16, color: TOKENS.text, fontFamily: FONTS.ui, maxWidth: 720 }}>
       <h1 style={{ fontSize: 22, marginBottom: 8 }}>Health</h1>
       <p style={{ color: TOKENS.textDim, fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-        Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status. The PAR-Q
+        Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status. It
         is a <Term k="soft_gate" /> — answering "yes" never blocks training, it just keeps your program
         conservative until a clinician clears you.
       </p>
@@ -52,7 +52,7 @@ export default function SettingsHealthPage(): JSX.Element {
       {status && (
         <section style={card}>
           <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.2, color: TOKENS.accent, marginBottom: 8 }}>
-            PAR-Q STATUS
+            READINESS SCREEN
           </div>
           <div style={{ fontSize: 14, color: TOKENS.text, marginBottom: 4 }}>
             Current version: <strong>{status.current_version}</strong>
@@ -67,7 +67,7 @@ export default function SettingsHealthPage(): JSX.Element {
             )}
           </div>
           <button type="button" onClick={() => setReviewing(true)} style={secondaryBtn}>
-            Re-review PAR-Q
+            Re-review questionnaire
           </button>
         </section>
       )}
@@ -75,7 +75,7 @@ export default function SettingsHealthPage(): JSX.Element {
       {status?.advisory_active && (
         <section style={{ ...card, borderColor: TOKENS.warn, background: 'rgba(245,181,68,0.08)' }}>
           <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.2, color: TOKENS.warn, marginBottom: 8 }}>
-            ADVISORY MODE ACTIVE
+            ADVISORY ACTIVE
           </div>
           <p style={{ fontSize: 14, color: TOKENS.text, lineHeight: 1.6, margin: '0 0 16px' }}>
             You're in <Term k="advisory_mode" /> (volume capped at <Term k="MEV" /> with <Term k="RIR" /> 3).

@@ -15,8 +15,8 @@ describe('<SettingsHealthPage>', () => {
       questions: [], advisory_active: false,
     });
     render(<SettingsHealthPage />);
-    expect(await screen.findByText('PAR-Q STATUS')).toBeInTheDocument();
-    expect(screen.getByText(/Re-review PAR-Q/)).toBeInTheDocument();
+    expect(await screen.findByText('READINESS SCREEN')).toBeInTheDocument();
+    expect(screen.getByText(/Re-review questionnaire/)).toBeInTheDocument();
   });
 
   it('shows the Mark cleared affordance only when advisory_active', async () => {
@@ -25,7 +25,7 @@ describe('<SettingsHealthPage>', () => {
       questions: [], advisory_active: true,
     });
     render(<SettingsHealthPage />);
-    expect(await screen.findByText('ADVISORY MODE ACTIVE')).toBeInTheDocument();
+    expect(await screen.findByText('ADVISORY ACTIVE')).toBeInTheDocument();
     expect(screen.getByText('Mark cleared')).toBeInTheDocument();
   });
 
@@ -38,7 +38,7 @@ describe('<SettingsHealthPage>', () => {
     fireEvent.click(await screen.findByText('Mark cleared'));
     await waitFor(() => expect(clear).toHaveBeenCalled());
     await waitFor(() => expect(getStatus).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText('ADVISORY MODE ACTIVE')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('ADVISORY ACTIVE')).not.toBeInTheDocument());
   });
 
   it('Re-review opens the ParQGate in forceReview mode', async () => {
@@ -47,7 +47,7 @@ describe('<SettingsHealthPage>', () => {
       questions: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'], advisory_active: false,
     });
     render(<SettingsHealthPage />);
-    fireEvent.click(await screen.findByText('Re-review PAR-Q'));
+    fireEvent.click(await screen.findByText('Re-review questionnaire'));
     // Even though needs_prompt=false, forceReview renders the question list.
     expect(await screen.findByTestId('parq-questions')).toBeInTheDocument();
   });
