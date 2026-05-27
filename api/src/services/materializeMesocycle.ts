@@ -92,7 +92,11 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     }
 
     // Step 6: day_workouts (UNNEST bulk insert).
-    const dayRows: { week_idx: number; day_idx: number; scheduled_date: string; kind: string; name: string }[] = [];
+    // W2.5: is_deload = (w === weeks) — the canonical RP deload week is the
+    // final week. The stalledPrEvaluator reads this per-row flag (replacing the
+    // interim `current_week >= weeks` heuristic). W4's full deload-meso will
+    // also flip these rows when mesocycle_runs.is_deload=true.
+    const dayRows: { week_idx: number; day_idx: number; scheduled_date: string; kind: string; name: string; is_deload: boolean }[] = [];
     for (let w = 1; w <= weeks; w++) {
       for (const d of structure.days) {
         const offset = (w - 1) * 7 + d.day_offset;
@@ -100,16 +104,17 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
           week_idx: w, day_idx: d.idx,
           scheduled_date: addDaysISO(input.startDate, offset),
           kind: d.kind, name: d.name,
+          is_deload: w === weeks,
         });
       }
     }
     const dayIdMap = new Map<string, string>(); // (week_idx,day_idx) → day_workout_id
     if (dayRows.length > 0) {
       const { rows: dwInserted } = await client.query<{ id: string; week_idx: number; day_idx: number }>(
-        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
-         SELECT $1, w, d, sd::date, k, n
-         FROM unnest($2::int[], $3::int[], $4::text[], $5::day_workout_kind[], $6::text[])
-              AS t(w, d, sd, k, n)
+        `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, is_deload)
+         SELECT $1, w, d, sd::date, k, n, dl
+         FROM unnest($2::int[], $3::int[], $4::text[], $5::day_workout_kind[], $6::text[], $7::bool[])
+              AS t(w, d, sd, k, n, dl)
          RETURNING id, week_idx, day_idx`,
         [
           runId,
@@ -118,6 +123,7 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
           dayRows.map(r => r.scheduled_date),
           dayRows.map(r => r.kind),
           dayRows.map(r => r.name),
+          dayRows.map(r => r.is_deload),
         ],
       );
       for (const r of dwInserted) dayIdMap.set(`${r.week_idx}|${r.day_idx}`, r.id);

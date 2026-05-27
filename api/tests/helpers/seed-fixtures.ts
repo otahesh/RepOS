@@ -505,6 +505,92 @@ export async function seedOverreachingPartial(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// W2 program/mesocycle fixtures.
+//
+// seedUserProgram        — user + a real multi-week template + user_program
+//                          (status 'active'), but does NOT materialize. The
+//                          caller invokes materializeMesocycle() itself (used
+//                          by the day-workouts-is-deload test).
+// seedFullMesocycleForUser — materialize a full run for an EXISTING user;
+//                          returns the run_id (used by deload contamination).
+// seedUserWithFullMesocycle — user + materialized run, returns a SeedHandle.
+//                          Supports {weeks, currentWeek, status,
+//                          blockMuscleMavOverrides}.
+//
+// The template uses real seeded exercise slugs so materializeMesocycle's
+// muscle-landmark ramp resolves. A 2-day-per-week strength shape keeps the
+// fixture small while still spanning multiple weeks.
+// ---------------------------------------------------------------------------
+
+// Default fixture template: 2 strength days/week, well-known seeded slugs.
+// barbell-bench-press → chest; dumbbell-curl → biceps. Both primary muscles
+// have seeded MUSCLE_LANDMARKS so the ramp + distributor resolve.
+function fixtureTemplateStructure(): unknown {
+  return {
+    _v: 1,
+    days: [
+      {
+        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        blocks: [
+          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
+        ],
+      },
+      {
+        idx: 1, day_offset: 2, kind: 'strength', name: 'Day B',
+        blocks: [
+          { exercise_slug: 'dumbbell-curl', mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 12, target_rir: 2, rest_sec: 90 },
+        ],
+      },
+    ],
+  };
+}
+
+async function mkFixtureTemplate(opts: {
+  weeks: number;
+  version?: number;
+  structure?: unknown;
+}): Promise<{ id: string }> {
+  const slug = `w2-fixture-tpl-${randomUUID()}`;
+  const { rows: [tpl] } = await db.query<{ id: string }>(
+    `INSERT INTO program_templates
+       (slug, name, weeks, days_per_week, structure, version, created_by)
+     VALUES ($1, $2, $3, 2, $4::jsonb, $5, 'system')
+     RETURNING id`,
+    [slug, `W2 Fixture ${slug}`, opts.weeks, JSON.stringify(opts.structure ?? fixtureTemplateStructure()), opts.version ?? 1],
+  );
+  return tpl;
+}
+
+export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<SeedHandle> {
+  const weeks = opts.weeks ?? 5;
+  const userTag = randomUUID();
+  const { rows: [u] } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
+    [`w2-userprogram.${userTag}@repos.test`],
+  );
+  const userId = u.id;
+  const { bearer } = await mintBearer({
+    userId,
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+  });
+  const tpl = await mkFixtureTemplate({ weeks });
+  const { rows: [up] } = await db.query<{ id: string }>(
+    `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
+     VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
+    [userId, tpl.id, `W2 Program ${userTag}`],
+  );
+  return {
+    userId,
+    bearer,
+    userProgramId: up.id,
+    mesocycleRunId: '',
+    dayWorkoutId: '',
+    plannedSetId: '',
+    exerciseId: '',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // mkUserPair / cleanupUserPair — the W8.2 contamination fixture (G2). Two
 // fully-independent users, each with its OWN bearer token minted with the
 // account:write scope (so the PAR-Q / onboarding / deload routes accept
