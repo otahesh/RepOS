@@ -6,7 +6,8 @@ async function stubBootstrap(page: import('@playwright/test').Page): Promise<voi
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ id: 'u1', email: 'a@b', display_name: 'X', timezone: 'UTC' }),
+      // onboarding_completed_at set so the W2 OnboardingOverlay (z-1500) stays down.
+      body: JSON.stringify({ id: 'u1', email: 'a@b', display_name: 'X', timezone: 'UTC', onboarding_completed_at: '2026-01-01T00:00:00Z' }),
     }),
   );
   await page.route('**/api/equipment/profile', async (route) =>

@@ -41,7 +41,7 @@ export interface SeedOptions {
   /** Logical day metadata. Default Week 1 / Day 1 "Push". */
   day?: SeedDay;
   /** User shape returned by /api/me. */
-  user?: { id: string; email: string; display_name: string | null; timezone: string };
+  user?: { id: string; email: string; display_name: string | null; timezone: string; onboarding_completed_at?: string | null };
 }
 
 export interface CapturedPost {
@@ -84,6 +84,9 @@ const DEFAULT_USER = {
   email: 'tester@example.com',
   display_name: 'Tester',
   timezone: 'America/New_York',
+  // Past timestamp so AppShell.useOnboardingGate does NOT mount the full-viewport
+  // OnboardingOverlay (z-1500) over the logger — added when the W2 gate landed.
+  onboarding_completed_at: '2026-01-01T00:00:00Z',
 };
 
 const DEFAULT_DAY: SeedDay = {
@@ -164,6 +167,12 @@ async function installOfflineHatch(page: Page): Promise<void> {
  */
 export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise<MockServer> {
   await installOfflineHatch(page);
+
+  // The live logger is mobile-only: TodayLoggerMobileGate redirects desktop
+  // widths to /today, so set-row-0 never mounts. useIsMobile keys on
+  // (max-width: 767px) and Playwright's default Desktop Chrome is 1280px — set
+  // a phone viewport BEFORE navigation so the logger actually renders.
+  await page.setViewportSize({ width: 390, height: 844 });
 
   const user = opts.user ?? DEFAULT_USER;
   const day = opts.day ?? DEFAULT_DAY;
