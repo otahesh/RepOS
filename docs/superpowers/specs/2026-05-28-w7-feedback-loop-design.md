@@ -10,7 +10,7 @@
 
 Close the user → engineering signal loop for Beta. A logged-in user can send free-text feedback from anywhere in the app; it lands durably in a `feedback` table within 5s, forwards to a Discord-compatible webhook (confirmed by durable delivery state), and the sole admin (jmeyer) can pull + triage it via a JSON endpoint and a minimal admin page.
 
-This wave **closes G12 entirely** and **contributes to G14** (the in-app channel is the documented Beta contact path; G14 fully closes at cutover).
+This wave **drives G12 to closure** — the engineering portion (table-insert ≤5s, webhook delivery, triage runbook) lands at W7 merge; the gate's prod pre-cutover smoke clause flips it fully green in the W8 cutover window — and **contributes to G14** (the in-app channel is the documented Beta contact path; G14 fully closes at cutover).
 
 ## Locked decisions (from the brainstorming pass)
 
@@ -25,6 +25,7 @@ Each is binding for the implementation plan; deviations require re-opening this 
 | Q5 | **Durable webhook-delivery state.** `feedback.webhook_delivered_at` + `webhook_attempts` columns; async delivery updates them. | Turns G12's "webhook delivers within 5s" into assertable durable state instead of a test side-channel; lets the admin page show delivery status; satisfies CLAUDE.md API-reliability (retry on 429/5xx, no false negatives). |
 | Q6 | **`app_sha` is server-stamped** from `process.env.APP_SHA` (wired via a Docker build ARG→ENV), falling back to `'dev'`. The client never supplies it. | Server and bundle ship from the same monolithic image, so the server's SHA is authoritative for the bundle the user is running. Avoids a `VITE_` define and a spoofable client field. |
 | Q7 | **No `category` field.** Single textarea, per the master plan W7.2 wording. | YAGNI. A taxonomy adds UI + a column with no Beta-scale payoff; the engineer reads free text from N≤10 users directly. |
+| Q8 | **Email-to-Discord is an accepted, documented PII flow.** The webhook embed's "From" field carries the submitter's account email; this is documented in `docs/runbooks/beta-triage.md` (Privacy note) and the channel is kept operator-private. | Reviewer-flagged (security). Acceptable for N≤10 trusted testers on the operator's own Discord; the same identity already crosses Cloudflare's trust boundary via CF Access, and the email is already retained server-side (precedent: `account_events.user_email_at_event`). Revisit a pseudonymous identifier at GA. |
 
 ## Architecture
 
@@ -155,7 +156,7 @@ Source-of-truth selectors pinned: `Topbar.tsx` button `aria-label="Send feedback
 
 ## Gates closed / advanced
 
-- **G12 — closed.** Submission lands ≤5s (integration + smoke); webhook delivery confirmed (durable `webhook_delivered_at` + smoke); triage cadence documented in a new `docs/runbooks/beta-triage.md` (severity tiers + review cadence + how to pull `GET /api/admin/feedback`).
+- **G12 — engineering-satisfied; prod pre-cutover smoke PENDING (W8 window).** Submission lands ≤5s (integration + smoke); webhook delivery confirmed (durable `webhook_delivered_at` + integration); triage cadence documented in a new `docs/runbooks/beta-triage.md`. The binary gate's *Run against prod in pre-cutover window* clause is satisfied by the Task-17 runbook smoke during the W8 cutover window — so G12 is marked `[~]` at W7 merge and flips `[x]` only after that prod run lands a real row + confirmed Discord delivery (mirrors G3/G9, which share the same prod-window dependency).
 - **G2 — advanced.** +2 routes in the contamination matrix.
 - **G7 — advanced.** All three W7 surfaces ≤3 clicks; logged in `beta-reachability.md`.
 - **G14 — contributes.** In-app feedback is the documented contact path artifact; G14 fully closes at cutover.

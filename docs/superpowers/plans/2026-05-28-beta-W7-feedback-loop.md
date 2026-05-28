@@ -812,7 +812,9 @@ cd /Users/jasonmeyer.ict/Projects/RepOS && \
 describe('admin feedback routes', () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
   let jwks: TestJwksHandle;
-  let feedbackId: string;
+  let feedbackId: string;       // a newer untriaged row (also exercised by the triage test)
+  let olderUntriagedId: string; // an older untriaged row
+  let triagedId: string;        // an already-triaged row
   const savedAdminEmails = process.env.REPOS_ADMIN_EMAILS;
   const savedAdminKey = process.env.ADMIN_API_KEY;
 
@@ -821,26 +823,40 @@ describe('admin feedback routes', () => {
     process.env.REPOS_ADMIN_EMAILS = 'boss@repos.test';
     process.env.ADMIN_API_KEY = 'w7-admin-key'; // force the gate closed for non-admins
     app = await buildApp();
-    const { rows } = await db.query<{ id: string }>(
-      `INSERT INTO feedback (body, user_email_at_submit, route) VALUES ('triage me','t@repos.test','/today') RETURNING id`,
+    // Seed THREE rows so the list test can prove the spec-mandated ordering
+    // (triaged_at NULLS FIRST, created_at DESC) — not just presence: two
+    // untriaged at different times + one already-triaged.
+    const ins = await db.query<{ id: string }>(
+      `INSERT INTO feedback (body, user_email_at_submit, route, created_at, triaged_at) VALUES
+         ('older untriaged','t@repos.test','/today', now() - interval '2 hours', NULL),
+         ('newer untriaged','t@repos.test','/today', now() - interval '1 hour', NULL),
+         ('already triaged','t@repos.test','/today', now(),                      now())
+       RETURNING id`,
     );
-    feedbackId = rows[0].id;
+    olderUntriagedId = ins.rows[0].id;
+    feedbackId = ins.rows[1].id; // newer untriaged
+    triagedId = ins.rows[2].id;
   });
 
   afterAll(async () => {
     await jwks.teardown();
     if (savedAdminEmails === undefined) delete process.env.REPOS_ADMIN_EMAILS; else process.env.REPOS_ADMIN_EMAILS = savedAdminEmails;
     if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY; else process.env.ADMIN_API_KEY = savedAdminKey;
-    await db.query(`DELETE FROM feedback WHERE id=$1`, [feedbackId]);
+    await db.query(`DELETE FROM feedback WHERE id = ANY($1::bigint[])`, [[feedbackId, olderUntriagedId, triagedId]]);
     await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
     await app.close();
   });
 
-  it('lists feedback for an admin (X-Admin-Key path)', async () => {
+  it('lists untriaged-first, newest-first within untriaged (X-Admin-Key path)', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/admin/feedback', headers: { 'x-admin-key': 'w7-admin-key' } });
     expect(r.statusCode).toBe(200);
-    const items = r.json<{ items: { id: string }[] }>().items;
-    expect(items.some((i) => i.id === feedbackId)).toBe(true);
+    const ids = r.json<{ items: { id: string }[] }>().items.map((i) => i.id);
+    const iNewer = ids.indexOf(feedbackId);
+    const iOlder = ids.indexOf(olderUntriagedId);
+    const iTriaged = ids.indexOf(triagedId);
+    expect(iNewer).toBeGreaterThanOrEqual(0); // present (if -1, reset the test DB — shared-DB cruft)
+    expect(iNewer).toBeLessThan(iOlder);      // newer untriaged before older untriaged (created_at DESC)
+    expect(iOlder).toBeLessThan(iTriaged);    // both untriaged before the triaged row (NULLS FIRST)
   });
 
   it('403s a non-admin CF Access email', async () => {
@@ -968,7 +984,13 @@ describe('feedback contamination — G2', () => {
   const savedAdminKey = process.env.ADMIN_API_KEY;
 
   beforeAll(async () => {
-    process.env.ADMIN_API_KEY = 'w7-cont-key'; // close the admin gate to bearers
+    // Mint the bearer FIRST, while the admin gate is still OPEN (ADMIN_API_KEY
+    // unset → open-admin bypass in requireAdminKeyOrCfAccess; the gate reads the
+    // env at request time). THEN set ADMIN_API_KEY so the "regular bearer can't
+    // read the admin list" assertion gets a real 401/403 instead of the open
+    // path. (Precedent: account-sessions-delete-contamination.test.ts mints
+    // with ADMIN_API_KEY unset for exactly this reason.)
+    delete process.env.ADMIN_API_KEY;
     app = await buildApp();
     const a = await mkUser({ prefix: 'vitest.w7-cont-a' });
     userA = a.id;
@@ -977,6 +999,7 @@ describe('feedback contamination — G2', () => {
       body: { user_id: userA, label: 'A', scopes: ['health:weight:write'] },
     });
     tokenA = mint.json<{ token: string }>().token;
+    process.env.ADMIN_API_KEY = 'w7-cont-key'; // now close the gate for the admin-list assertion
   });
 
   afterAll(async () => {
@@ -1092,11 +1115,16 @@ cd /Users/jasonmeyer.ict/Projects/RepOS && \
 - Modify: `docker/Dockerfile`
 - Modify: `.github/workflows/docker.yml`
 
-- [ ] **Step 1: Add the ARG/ENV to the runtime stage** (`docker/Dockerfile`, immediately after `FROM lscr.io/linuxserver/baseimage-alpine:3.21` on line 22)
+- [ ] **Step 1: Add the ARG/ENV LATE in the runtime stage** (`docker/Dockerfile`, immediately **before** `EXPOSE 80` on line 84 — NOT right after `FROM`)
 
 ```dockerfile
 # W7 — the running API stamps feedback.app_sha from this. CI passes the commit
-# SHA as a build-arg; falls back to "dev" for local builds.
+# SHA as a build-arg; falls back to "dev" for local builds. Placed late in the
+# stage on purpose: APP_SHA changes every commit, so a BuildKit layer that
+# consumes it must sit AFTER the stable, expensive `apk add` + binary-check +
+# mkdir layers — otherwise every push to main busts the postgres/node/nginx
+# install cache. APP_SHA is read only at node startup, so a late ENV layer is
+# functionally identical.
 ARG APP_SHA=dev
 ENV APP_SHA=$APP_SHA
 ```
@@ -1108,10 +1136,19 @@ ENV APP_SHA=$APP_SHA
             APP_SHA=${{ github.sha }}
 ```
 
-- [ ] **Step 3: Verify the Dockerfile still parses (lint, no full build needed)**
+- [ ] **Step 3: Verify the Dockerfile change (honest about what's actually checked)**
 
-Run: `cd /Users/jasonmeyer.ict/Projects/RepOS && docker build --check -f docker/Dockerfile . 2>&1 | head -20 || echo "(docker not available — skip; CI validates)"`
-Expected: no syntax error reported (or the skip line if Docker isn't installed locally).
+The edit is two trivial lines (an `ARG`/`ENV` pair) plus one YAML `build-args:` line — near-zero syntax risk. There is **no pre-merge Docker CI**: `.github/workflows/docker.yml` runs a real `docker/build-push-action` build only on push to `main` (post-merge), and `test.yml` never builds the image. So do an explicit local check if Docker is present, and DON'T mask a real failure as success:
+
+```bash
+cd /Users/jasonmeyer.ict/Projects/RepOS && \
+  if command -v docker >/dev/null 2>&1; then \
+    docker build --check -f docker/Dockerfile . && echo "CHECK OK" || echo "CHECK FAILED — fix the Dockerfile"; \
+  else \
+    echo "docker not installed — visually confirm the ARG/ENV lines + build-args YAML; docker.yml will build on merge to main"; \
+  fi
+```
+Expected: `CHECK OK`, or the "docker not installed" line (Docker is absent on this workstation, so the visual-confirm branch is expected here). `docker build --check` needs Buildx ≥0.15 / Engine 27; if it errors as an unknown flag, fall back to visual confirmation — do not treat the error as a pass.
 
 - [ ] **Step 4: Commit**
 
@@ -1570,6 +1607,15 @@ Replace the `settings/feedback` route (lines 60–62) with:
             <Route path="settings/feedback" element={<SettingsFeedbackPage />} />
 ```
 
+**Then remove the now-dead `ComingSoonPlaceholder`** — W7 was its last consumer, and leaving it breaks `npm run validate` two ways (verified): keeping the import fails `tsc` with `TS6133 'ComingSoonPlaceholder' is declared but its value is never read` (frontend `tsconfig.json` has `noUnusedLocals:true`); removing the import but keeping the file fails `check-page-reachability.mjs` with a 1-orphan error (the file is under `src/components/**` and isn't in `KNOWN_PENDING`). Both deletions are required:
+- Delete the import line in `App.tsx` (currently line 21): `import { ComingSoonPlaceholder } from './components/common/ComingSoonPlaceholder'`
+- Delete the file `frontend/src/components/common/ComingSoonPlaceholder.tsx`.
+- Verify nothing else references it:
+```bash
+cd /Users/jasonmeyer.ict/Projects/RepOS && grep -rn "ComingSoonPlaceholder" frontend/src && echo "REMAINING REFS — fix before commit" || echo "clean: zero references"
+```
+Expected: `clean: zero references`.
+
 - [ ] **Step 7: Run test + reachability gate**
 
 Run: `cd /Users/jasonmeyer.ict/Projects/RepOS/frontend && npm test -- SettingsFeedbackPage && node scripts/check-page-reachability.mjs`
@@ -1579,8 +1625,9 @@ Expected: page tests PASS; `page-reachability: OK` (Feedback slot now non-disabl
 
 ```bash
 cd /Users/jasonmeyer.ict/Projects/RepOS && \
+  git rm frontend/src/components/common/ComingSoonPlaceholder.tsx && \
   git add frontend/src/pages/SettingsFeedbackPage.tsx frontend/src/pages/SettingsFeedbackPage.test.tsx frontend/src/components/settings/SettingsSidebar.tsx frontend/src/App.tsx frontend/src/auth.tsx && \
-  git commit -m "feat(w7): Settings -> Feedback page + slot flip + is_admin type"
+  git commit -m "feat(w7): Settings -> Feedback page + slot flip + is_admin type; drop dead ComingSoonPlaceholder"
 ```
 
 ---
@@ -1751,7 +1798,16 @@ cd /Users/jasonmeyer.ict/Projects/RepOS && \
 // webhook-delivery assertions live in the api integration tests.
 import { test, expect, type BrowserContext, type Route } from '@playwright/test';
 
-const USER = { id: 'user-1', email: 'tester@example.com', display_name: 'Tester', timezone: 'UTC', is_admin: false };
+// onboarding_completed_at MUST be a past timestamp: AppShell.useOnboardingGate
+// mounts a full-viewport OnboardingOverlay (role=dialog, zIndex 1500) whenever
+// it is falsy, which would cover the Topbar feedback button and fail the click.
+// par_q fields included so the PAR-Q gate also stays down. (No /api/me/par-q
+// route mock needed — refreshParQ catches a miss and leaves the gate closed.)
+const USER = {
+  id: 'user-1', email: 'tester@example.com', display_name: 'Tester', timezone: 'UTC',
+  is_admin: false, onboarding_completed_at: '2026-01-01T00:00:00Z',
+  par_q_version: 1, par_q_advisory_active: false,
+};
 
 test('W7: user submits feedback from the Topbar button', async ({ browser }) => {
   const posted: Array<Record<string, unknown>> = [];
@@ -1838,6 +1894,21 @@ G7 status: ✓ — all three W7 surfaces ≤3 clicks.
 In-app feedback (W7) → `feedback` table → Discord webhook (`FEEDBACK_WEBHOOK_URL`).
 This is the documented Beta contact path (contributes to G14).
 
+## Privacy note
+The Discord payload's "From" field carries the submitter's **account email** (the
+CF-Access identity). The webhook channel therefore contains tester PII — keep it
+private to the engineering operator. The full email is also retained in the
+`feedback` table (read via `GET /api/admin/feedback` over CF Access). This is an
+accepted Beta decision (N≤10 trusted testers, operator's own Discord); revisit a
+pseudonymous identifier at GA.
+
+## Delivery is advisory — the table row is the source of truth
+The webhook is fired fire-and-forget after the row is committed; it is NOT the
+durable record. If the process restarts between insert and send, or all retries
+fail (Discord outage), `webhook_delivered_at` stays NULL and there is no
+auto-resend. The admin page's "not delivered" indicator is the manual backstop —
+see the daily-review step below.
+
 ## Severity tiers + target time-to-acknowledge
 - **Sev-1** (data loss, can't log a set, auth lockout): ack ≤ 1h, cross-ref `docs/runbooks/bug-triage.md`.
 - **Sev-2** (feature broken, no data loss): ack ≤ 1 business day.
@@ -1846,6 +1917,9 @@ This is the documented Beta contact path (contributes to G14).
 ## Cadence
 Review `GET /api/admin/feedback` (or `/admin/feedback` page) **daily** during Beta.
 Mark each row triaged once routed to a fix/issue/won't-do.
+Also scan for rows showing **"not delivered"** (NULL `webhook_delivered_at`) — those
+never reached Discord (restart or exhausted retries). The DB row is intact, so just
+triage them from the admin page directly; no signal is lost.
 
 ## Pull via API (engineer)
 ```bash
@@ -1909,7 +1983,7 @@ Per `docs/superpowers/goals/beta.md` Step 4 — do NOT merge until:
 3. Re-run `tsc --noEmit` + tests on both sides.
 4. Present "W7 Complete" summary → user approves merge.
 5. Merge to `main`, push, delete branch.
-6. Update `docs/superpowers/goals/beta.md`: flip W7 `[ ]`→`[x]`, flip **G12** `[ ]`→`[x]`, advance G2/G7 rows, refresh **Next dispatch** to W8, bump **Last updated**.
+6. Update `docs/superpowers/goals/beta.md`: flip W7 `[ ]`→`[x]`; mark **G12 `[~]`** — *engineering-satisfied (table-insert ≤5s + webhook-delivery + triage runbook all proven in test), prod pre-cutover smoke PENDING (W8 cutover window)*. Do **NOT** flip G12 `[x]` at merge: the binary gate's predicate requires the against-prod CF-Access run (Task 17 runbook), and this plan has no prod-redeploy step — so it cannot have happened at merge. G12 flips green only after that runbook smoke lands a real row + confirmed Discord delivery in the pre-cutover window. This mirrors how G3/G9 (same prod-window dependency) stay `[~]`/`[ ]`. Advance G2 (+2 routes) / G7 (reachability doc) rows, refresh **Next dispatch** to W8, bump **Last updated**.
 
 ## Spec coverage map
 
