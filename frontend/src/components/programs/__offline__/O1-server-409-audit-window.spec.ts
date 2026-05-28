@@ -32,8 +32,9 @@ test('O1: 409 audit_window_expired surfaces banner + rejected status; row preser
   expect(rows[0].rejection_reason).toBe('audit_window_expired');
 
   // LogBufferRecovery banner surfaces rejected count; useIdbQueueCounts polls
-  // at 1000ms so allow up to the poll window plus a tick.
-  await expect(page.getByRole('button', { name: /1 sets? rejected/i })).toBeVisible({
+  // at 1000ms so allow up to the poll window plus a tick. The clickable banner
+  // renders as a <Link> (role=link), not a button — a11y change in the component.
+  await expect(page.getByRole('link', { name: /1 sets? rejected/i })).toBeVisible({
     timeout: 2000,
   });
 

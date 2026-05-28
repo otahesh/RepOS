@@ -416,23 +416,44 @@ export async function inspectQueue(page: Page): Promise<PendingSetLogRow[]> {
 
 /**
  * Pre-seed a row into the chromium IDB queue without going through the UI.
- * Used by O7 (7-day abandoned queue) and O8 (orphan planned_set) where the
- * starting state must include a row that wasn't enqueued via the logger.
+ * Used by O7 (7-day abandoned queue) where the starting state must include a
+ * row that wasn't enqueued via the logger.
  *
- * Uses Vite's dev-server module URL to import idbQueue directly, ensuring the
- * Dexie schema (indexes on status + created_at) matches what production uses.
- * Calling raw indexedDB.open() in this helper would race against Dexie's own
- * schema migration and create a divergent v1.
+ * Writes the row via raw indexedDB (same access pattern as inspectQueue) rather
+ * than a dynamic `import('/src/lib/idbQueue.ts')` — that source URL only exists
+ * under the Vite dev server, NOT the production `vite preview` build the suite
+ * runs against (it 404s with "Failed to fetch dynamically imported module").
+ *
+ * To avoid the schema race the previous implementation guarded against, this
+ * WAITS for the app's Dexie instance to create `RepOSLogQueue` (v2, with the
+ * `pendingSetLogs` store) before opening it with no explicit version — so we
+ * inherit the app's schema rather than creating a divergent v1. The caller must
+ * therefore navigate to a banner-bearing route (e.g. `/`) first so
+ * useIdbQueueCounts opens the DB.
  */
 export async function seedQueueRow(page: Page, row: PendingSetLogRow): Promise<void> {
   await page.evaluate(async (r) => {
-    // Vite serves source modules at /src/* URLs during dev. The dynamic
-    // import is resolved at runtime, not by TypeScript — hence the
-    // ts-expect-error pragma. The expected shape is `typeof
-    // import('../../../lib/idbQueue')`.
-    // @ts-expect-error — Vite dev-server URL, not a static module path
-    const mod = await import('/src/lib/idbQueue.ts');
-    await (mod as { idbQueue: { enqueue: (row: unknown) => Promise<void> } }).idbQueue.enqueue(r);
+    const deadline = Date.now() + 5000;
+    const dbExists = async (): Promise<boolean> => {
+      const dbs = (await indexedDB.databases?.().catch(() => [])) ?? [];
+      return dbs.some((d) => d.name === 'RepOSLogQueue');
+    };
+    while (!(await dbExists()) && Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('RepOSLogQueue'); // no version → inherit app's schema
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('pendingSetLogs', 'readwrite');
+      tx.objectStore('pendingSetLogs').put(r);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
   }, row);
 }
 
@@ -468,7 +489,10 @@ export async function logSet(
   const row = page.getByTestId(`set-row-${setIdx}`);
   await row.getByLabel(new RegExp(`Set ${setIdx + 1} weight`, 'i')).fill(String(values.weight));
   await row.getByLabel(new RegExp(`Set ${setIdx + 1} reps`, 'i')).fill(String(values.reps));
-  await row.getByRole('button', { name: /^Log$/ }).click();
+  // The button label is "Log" online and "Log (offline)" when navigator.onLine
+  // is false (TodayLoggerMobile SetRow) — match both, but NOT the "Logged"
+  // locked state. O2 logs while offline, so an exact /^Log$/ would miss it.
+  await row.getByRole('button', { name: /^Log( \(offline\))?$/ }).click();
 }
 
 /**
