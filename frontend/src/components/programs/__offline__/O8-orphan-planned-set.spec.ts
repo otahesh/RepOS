@@ -31,8 +31,9 @@ test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; b
   expect(rows).toHaveLength(1);
   expect(rows[0].rejection_reason).toBe('planned_set_deleted');
 
-  // Banner surfaces the rejection.
-  await expect(page.getByRole('button', { name: /1 sets? rejected/i })).toBeVisible({
+  // Banner surfaces the rejection. The clickable banner renders as a <Link>
+  // (role=link), not a button.
+  await expect(page.getByRole('link', { name: /1 sets? rejected/i })).toBeVisible({
     timeout: 2000,
   });
 

@@ -51,8 +51,8 @@ test('O7: pending row aged 8 days surfaces staleness banner with day count + cli
     page.getByText(/1 set queued · 8 days old · flush or clear/i),
   ).toBeVisible({ timeout: 2500 });
 
-  // Banner is clickable (role=button) — surfaces user choice via navigation.
-  const banner = page.getByRole('button', { name: /1 set queued · 8 days old · flush or clear/i });
+  // Banner is clickable — renders as a <Link> (role=link) to /settings/storage.
+  const banner = page.getByRole('link', { name: /1 set queued · 8 days old · flush or clear/i });
   await expect(banner).toBeVisible();
 
   // Row is still in the queue — staleness DOES NOT auto-purge.

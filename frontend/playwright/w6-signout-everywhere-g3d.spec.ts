@@ -38,11 +38,21 @@
 
 import { test, expect, type BrowserContext, type Route } from '@playwright/test';
 
+// onboarding_completed_at MUST be a past timestamp: after the W2 onboarding gate
+// landed (integrated via PR #16, AFTER this spec was written), AppShell.useOnboardingGate
+// mounts a full-viewport OnboardingOverlay (role=dialog, zIndex 1500) whenever it is
+// falsy — which covers the "Sign out everywhere" button and fails the .click()
+// with an "intercepts pointer events" actionability error. par_q fields keep the
+// PAR-Q gate down too (refreshParQ's .catch already disables it if /api/me/par-q
+// is unmocked, so no extra route mock is needed).
 const USER = {
   id: 'user-1',
   email: 'tester@example.com',
   display_name: 'Tester',
   timezone: 'UTC',
+  onboarding_completed_at: '2026-01-01T00:00:00Z',
+  par_q_version: 1,
+  par_q_advisory_active: false,
 };
 const TOKEN_A = 'aaaaaaaaaaaaaaaa.' + 'a'.repeat(64);
 const TOKEN_B = 'bbbbbbbbbbbbbbbb.' + 'b'.repeat(64);
