@@ -4,6 +4,10 @@ export default defineConfig({
   testDir: './',
   testMatch: ['playwright/**/*.spec.ts', 'src/components/programs/__offline__/*.spec.ts'],
   timeout: 30_000,
+  // Retry in CI only — e2e timing (IDB polls, backoff windows, the build+preview
+  // boot) is variance-prone on shared runners; a real regression fails all
+  // attempts, while a transient hiccup recovers. trace is captured on retry.
+  retries: process.env.CI ? 2 : 0,
   use: { baseURL: 'http://localhost:4173', trace: 'on-first-retry' },
   // Run e2e against the PRODUCTION build (vite preview), not the dev server.
   //
