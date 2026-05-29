@@ -28,6 +28,7 @@ import { registerMaintenanceGate } from './middleware/maintenance.js';
 import { backupRoutes } from './routes/backups.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { feedbackRoutes } from './routes/feedback.js';
+import { adminFeedbackRoutes } from './routes/adminFeedback.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
   const app = Fastify({
@@ -75,6 +76,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(onboardingRoutes, { prefix: '/api' });
   await app.register(mesocyclesDeloadRoutes, { prefix: '/api' });
   await app.register(feedbackRoutes, { prefix: '/api' });
+  await app.register(adminFeedbackRoutes, { prefix: '/api' });
 
   // Whoami: returns the CF-Access-derived identity. 503 when the feature
   // flag is off (deployable transition state); 401 with WWW-Authenticate
