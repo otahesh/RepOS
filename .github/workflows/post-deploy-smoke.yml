@@ -1,0 +1,64 @@
+name: post-deploy-smoke
+
+# G13 — external post-deploy smoke. Manual trigger: run AFTER recreating the
+# container on Unraid (deployment is manual — CI only builds/pushes to GHCR).
+# Pass the SHA you deployed; the job rebuilds that SHA's frontend to compute the
+# expected bundle fingerprint, then probes repos.jpmtech.com from outside the
+# tunnel. See docs/runbooks/beta-cutover-checklist.md for where this fits.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'Commit SHA that was deployed to prod (defaults to this ref)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend (derive expected bundle fingerprint)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Compute expected bundle fingerprint
+        id: fp
+        run: |
+          fp="$(grep -oE '/assets/[A-Za-z0-9._-]+' frontend/dist/index.html | sort -u)"
+          if [ -z "$fp" ]; then
+            echo "no /assets/* references in built index.html — build is broken" >&2
+            exit 1
+          fi
+          {
+            echo 'value<<FP_EOF'
+            echo "$fp"
+            echo 'FP_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run external post-deploy smoke
+        env:
+          BASE_URL: https://repos.jpmtech.com
+          EXPECTED_FINGERPRINT: ${{ steps.fp.outputs.value }}
+          CF_ACCESS_SVC_CLIENT_ID: ${{ secrets.CF_ACCESS_SVC_CLIENT_ID }}
+          CF_ACCESS_SVC_CLIENT_SECRET: ${{ secrets.CF_ACCESS_SVC_CLIENT_SECRET }}
+        run: bash scripts/post-deploy-smoke.sh
