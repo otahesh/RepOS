@@ -45,9 +45,9 @@ Run these IN ORDER. Each is a binary gate — do not proceed past a RED.
       (`docs/runbooks/beta-triage.md` §G12).
 
 ## W8.5 — Branch protection on `main`
-- [ ] Require the 6 status checks (typecheck-api, build-frontend,
-      validate-frontend, e2e-frontend, api-unit, api-integration) + PR review +
-      linear history.
+- [ ] Require all 8 status checks (typecheck-api, placeholder-guard,
+      build-frontend, validate-frontend, e2e-frontend, api-unit,
+      api-integration, migration-gate) + PR review + linear history.
 - [ ] G1 proof: open a deliberately-broken PR; confirm the gate blocks merge.
 
 ## G14 — Cohort + comms
