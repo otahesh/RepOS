@@ -150,3 +150,25 @@ export const UserProgramStartResponseSchema = z.object({
 });
 
 export type UserProgramStartResponse = z.infer<typeof UserProgramStartResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// GET /api/user-programs/:id/mesocycles — list this program's runs (newest
+// first) for the prior-mesocycle-recap entry point (WS6 / D6 / G7).
+// ---------------------------------------------------------------------------
+
+export const ProgramMesocycleSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(USER_PROGRAM_STATUSES),
+  start_date: z.string(),            // YYYY-MM-DD
+  finished_at: z.string().nullable(),
+  is_deload: z.boolean(),
+  weeks: z.number().int().min(1),
+});
+
+export type ProgramMesocycle = z.infer<typeof ProgramMesocycleSchema>;
+
+export const ProgramMesocyclesResponseSchema = z.object({
+  mesocycles: z.array(ProgramMesocycleSchema),
+});
+
+export type ProgramMesocyclesResponse = z.infer<typeof ProgramMesocyclesResponseSchema>;
