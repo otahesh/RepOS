@@ -23,12 +23,12 @@ W8's task surface (master plan W8.1–W8.9) divides cleanly by **where the work 
 
 ## 3. Current-state audit (do not rebuild what exists)
 
-Verified 2026-05-29 against the repo:
+Verified 2026-05-29 against the repo. **Re-verified 2026-05-29 (fresh-context fan-out audit); corrections folded in — see ⚠ rows:**
 
 | Area | Already present | Gap |
 |---|---|---|
 | CI (`.github/workflows/test.yml`) | `typecheck-api`, `build-frontend`, `validate-frontend`, `e2e-frontend` | **No** `api-unit` / `api-integration` jobs; no `postgres` service |
-| Contamination matrix | `mkUserPair()` fixture (`api/tests/helpers/seed-fixtures.ts`); **15** `*-contamination.test.ts` files | Completeness audit vs ~37-route target; fill uncovered routes |
+| Contamination matrix | `mkUserPair()` fixture (`api/tests/helpers/seed-fixtures.ts`:698); **16** `*-contamination.test.ts` files | ⚠ **Re-audit:** ~26 per-user routes total, **~16 currently untested** (enumerated list captured for plan task WS2.1). The "~37-route" figure was imprecise — there are ~26 per-user + ~8 admin auth-gated routes, not 37. Fill the untested ones. |
 | Runbooks (`docs/runbooks/`) | `cf-access-aud-drift.md`, `secret-rotation.md`, `dr-dry-fire.md`, `daemon-json-log-rotation.md`, `healthchecks-setup.md`, `beta-triage.md` (W7) | **`bug-triage.md`** (G10), **`beta-exit-criteria.md`** (G15), **`beta-cutover-checklist.md`** |
 | DR scripts (`tests/dr/`) | `restore-into-ephemeral.sh`, `integrity-check.test.sh`, `check-cadence.sh` | — (G5 is W5-owned) |
 | Rollback tooling | — | **`docker/scripts/rollback.sh`** absent; `docker/scripts/` dir absent |
@@ -36,7 +36,7 @@ Verified 2026-05-29 against the repo:
 | Perf | — | **`tests/perf/`** absent |
 | Post-deploy smoke | `docker.yml`, `test.yml` | **`post-deploy-smoke.yml`** absent |
 | Reachability | `docs/qa/beta-reachability.md` (W3/W6/W7 sections) | Full audit + prior-mesocycle recap (D6) check |
-| Placeholder hygiene | — | **No ESLint config anywhere**; **no runtime `PLACEHOLDER_USER_ID` guard in `api/src`** |
+| Placeholder hygiene | ⚠ `api/src/bootstrap-runtime.ts` **already exists**: `validatePlaceholderPurge()` defines `PLACEHOLDER_UUID` (lines 15/31/35) and **boot-time** rejects the placeholder user existing in `production` | **No ESLint config anywhere** (confirmed); **no _insert-time_ guard** yet (existing guard is boot-time existence-only). Grep guard must **allowlist `bootstrap-runtime.ts`** (it legitimately names the UUID). |
 | Security checklist | `docs/superpowers/specs/beta/08-qa.md` §"Pre-Beta security review checklist" | Close open Critical+Important with PR links |
 | Hot endpoint | `/api/mesocycles/:id/recap-stats` (`mesocycles.ts:73`) | k6 target; p95 budgets in `08-qa.md` |
 
@@ -56,9 +56,9 @@ Add two jobs to `.github/workflows/test.yml`:
 **Acceptance:** both jobs run on PR + push to main and pass on current `main`; integration job green against the service container within budget.
 
 ### WS2 — Contamination matrix completeness → **G2**
-Enumerate every per-user and admin route in `api/src/routes/`. For each, confirm a contamination test asserts 404/403 (never 200-with-another-user's-data) when user B touches user A's resource — using the existing `mkUserPair()` fixture (~5 lines each). Target ≥37 routes covered.
+Enumerate every per-user and admin route in `api/src/routes/`. For each, confirm a contamination test asserts 404/403 (never 200-with-another-user's-data) when user B touches user A's resource — using the existing `mkUserPair()` fixture (~5 lines each). **Target: every auth-gated route.** Authoritative count produced by the plan's first enumeration task (WS2.1); current re-audit estimate ≈26 per-user routes (≈16 untested — list captured) + ≈8 admin routes. (The earlier "≥37" was imprecise.)
 
-**Acceptance:** documented route→test map; zero uncovered per-user routes; matrix count ≥37; `npm run test:integration` green.
+**Acceptance:** documented route→test map; **zero uncovered per-user or admin auth-gated routes**; `npm run test:integration` green.
 
 ### WS3 — k6 perf scripts (full) → **G9** (authoring; run is cutover)
 Create `tests/perf/`:
@@ -91,12 +91,16 @@ Fails the deploy on any mismatch.
 **Acceptance:** workflow lints (actionlint) and its assertion logic is unit-checkable; wiring into the deploy path documented. (Live firing is observed at the next real deploy / cutover.)
 
 ### WS6 — Reachability audit → **G7**
-Human ≤3-click walk of every Beta surface from `/`; finalize `docs/qa/beta-reachability.md` (consolidated table across W2–W7). Confirm the **prior-mesocycle recap is reachable from MyProgramPage** (D6). **If a gap exists, ship a ~30-LOC "past mesocycles" list** on MyProgramPage (the only feature-ish code W8 may add, and only conditionally).
+Human ≤3-click walk of every Beta surface from `/`; finalize `docs/qa/beta-reachability.md` (consolidated table across W2–W7). Confirm the **prior-mesocycle recap is reachable from MyProgramPage** (D6).
 
-**Acceptance:** every surface ≤3 clicks documented with selectors; recap reachable (or the list shipped + a Playwright/vitest assertion for it); `npm run validate` (page-reachability) green.
+⚠ **Re-audit: the D6 gap is CONFIRMED.** MyProgramPage mounts `MesocycleRecap` (49 LOC, 3 static choices) for the *current* completed run only; there is **no** UI path to prior recaps, **no** frontend API fn to list prior runs, and **no** backend endpoint listing `mesocycle_runs` by `user_program_id` (only single-run fetch at `/mesocycles/:id`). So the conditional **fires** — and it is **larger than ~30 LOC**: it needs a minimal *list* capability, not just a component.
+
+**Plan discipline (YAGNI):** WS6.1 first checks whether an existing endpoint can already surface prior runs (e.g. does `GET /user-programs/:id` return its runs?). Only if none can, add a **minimal** backend list (prefer extending an existing endpoint over inventing a new one) **with its own ownership + contamination test** (feeds WS2), plus a frontend entry point on MyProgramPage. This is the only product-ish code W8 ships, and it ships to close a Beta entry gate (G7).
+
+**Acceptance:** every surface ≤3 clicks documented with selectors; **prior-mesocycle recap reachable** (list shipped + a Playwright/vitest assertion for it, and a contamination test on any new endpoint); `npm run validate` (page-reachability) green.
 
 ### WS7 — Pre-Beta security re-review (full) → **G8 / G11**
-- **G8 — placeholder hygiene:** `PLACEHOLDER_USER_ID` grep-clean in non-test code; a **reintroduction guard** + a **runtime guard** rejecting placeholder-UUID inserts in non-test envs.
+- **G8 — placeholder hygiene:** `PLACEHOLDER_USER_ID` grep-clean in non-test code (⚠ the one legitimate occurrence is the guard itself in `api/src/bootstrap-runtime.ts` — allowlist it); a **reintroduction guard** (grep, allowlisting `bootstrap-runtime.ts`) + an **insert-time runtime guard** rejecting placeholder-UUID writes in non-test envs. ⚠ **Build on the existing `bootstrap-runtime.ts` boot-time existence guard — do not assume greenfield;** the insert-time guard is the new piece.
 - **G11 — security audit:** AuthN/AuthZ audit + IDOR audit across all routes; close every Critical + Important in `08-qa.md` §"Pre-Beta security review checklist" with PR links; **zero deferred to "v1.5"** (`feedback_ship_clean`); any accept-residual-risk gets written sign-off.
 
 **Acceptance:** grep clean; the reintroduction guard fails CI on a synthetic reintroduction; runtime guard has a unit test; every checklist item marked closed-with-PR-link or signed-off; audit findings (if any) fixed.
@@ -112,8 +116,8 @@ Authored as `docs/runbooks/beta-cutover-checklist.md`. Ordered passes that close
 - **G15** — `docs/runbooks/beta-exit-criteria.md` (exit conditions per D13) + weekly Beta review cadence.
 
 ## 6. Open implementation decisions (resolved here; plan executes)
-1. **ESLint absent → use a grep-based CI guard, not a new linter.** No ESLint config exists in `api/` or `frontend/`. Standing up ESLint solely for one `no-PLACEHOLDER_USER_ID` rule is disproportionate. Decision: add a small CI script (e.g. `scripts/check-no-placeholder.sh`) wired into CI that greps non-test source and fails on reintroduction. (Revisit a full linter post-Beta if desired.)
-2. **Runtime placeholder guard not found in `api/src` → implement it.** The plan adds a startup/insert-path guard that throws on placeholder-UUID writes when `NODE_ENV !== 'test'`, with a unit test. The plan first re-confirms it doesn't exist under other naming.
+1. **ESLint absent → use a grep-based CI guard, not a new linter.** No ESLint config exists in `api/` or `frontend/`. Standing up ESLint solely for one `no-PLACEHOLDER_USER_ID` rule is disproportionate. Decision: add a small CI script (e.g. `scripts/check-no-placeholder.sh`) wired into CI that greps non-test source and fails on reintroduction. **The script must allowlist `api/src/bootstrap-runtime.ts`** (the enforcement file legitimately references the placeholder UUID). (Revisit a full linter post-Beta if desired.)
+2. **Re-confirmed: a _boot-time_ placeholder guard already exists** (`api/src/bootstrap-runtime.ts` → `validatePlaceholderPurge()`, which rejects the placeholder user *existing* in `production` at startup). **No _insert-time_ guard exists.** The plan adds the insert-path guard that throws on placeholder-UUID writes when `NODE_ENV !== 'test'`, with a unit test — **extending/coexisting with `bootstrap-runtime.ts`, not replacing it.**
 3. **WS2 matrix gap count → enumerate in the plan's first task.** Produce the route→test map; size the fill work from it.
 
 ## 7. Out of scope
