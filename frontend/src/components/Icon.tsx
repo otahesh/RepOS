@@ -12,7 +12,7 @@ export type IconName =
   | 'arrowUp' | 'arrowRight' | 'flame' | 'timer' | 'dots'
   | 'bars' | 'menu' | 'close' | 'swap' | 'minus' | 'heart' | 'walk' | 'trend'
   | 'calendar' | 'dumbbell' | 'sparkline' | 'info' | 'clock'
-  | 'pause' | 'play' | 'settings' | 'key' | 'trash' | 'copy' | 'eye' | 'eyeOff'
+  | 'pause' | 'play' | 'settings' | 'key' | 'trash' | 'copy' | 'eye' | 'eyeOff' | 'feedback'
 
 export default function Icon({ name, size = 16, color = 'currentColor', strokeWidth = 1.5 }: IconProps) {
   const p = {
@@ -55,6 +55,7 @@ export default function Icon({ name, size = 16, color = 'currentColor', strokeWi
     copy: <g {...p}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></g>,
     eye: <g {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>,
     eyeOff: <g {...p}><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></g>,
+    feedback: <g {...p}><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></g>,
   }
 
   return (

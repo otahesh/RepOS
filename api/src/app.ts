@@ -23,10 +23,12 @@ import { authSignoutRoutes } from './routes/authSignout.js';
 import { parQRoutes } from './routes/parQ.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { mesocyclesDeloadRoutes } from './routes/mesocyclesDeload.js';
-import { requireCfAccess } from './middleware/cfAccess.js';
+import { requireCfAccess, isAdminEmail } from './middleware/cfAccess.js';
 import { registerMaintenanceGate } from './middleware/maintenance.js';
 import { backupRoutes } from './routes/backups.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
+import { feedbackRoutes } from './routes/feedback.js';
+import { adminFeedbackRoutes } from './routes/adminFeedback.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}) {
   const app = Fastify({
@@ -73,6 +75,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(parQRoutes, { prefix: '/api' });
   await app.register(onboardingRoutes, { prefix: '/api' });
   await app.register(mesocyclesDeloadRoutes, { prefix: '/api' });
+  await app.register(feedbackRoutes, { prefix: '/api' });
+  await app.register(adminFeedbackRoutes, { prefix: '/api' });
 
   // Whoami: returns the CF-Access-derived identity. 503 when the feature
   // flag is off (deployable transition state); 401 with WWW-Authenticate
@@ -105,6 +109,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       onboarding_completed_at: u?.onboarding_completed_at ?? null,
       par_q_version: u?.par_q_version ?? 0,
       par_q_advisory_active: u?.par_q_advisory_active ?? false,
+      is_admin: isAdminEmail((req as { userEmail?: string }).userEmail),
     };
   });
 

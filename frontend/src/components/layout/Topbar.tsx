@@ -3,6 +3,7 @@ import { TOKENS, FONTS } from '../../tokens'
 import { apiFetch } from '../../auth'
 import { useIsMobile } from '../../lib/useIsMobile'
 import Icon from '../Icon'
+import { FeedbackSheet } from '../feedback/FeedbackSheet'
 
 interface SyncStatus {
   source: string
@@ -39,6 +40,7 @@ export default function Topbar({ onToggleSidebar, mobileOpen = false, triggerRef
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [error, setError] = useState(false)
   const isMobile = useIsMobile()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   const fetchSync = useCallback(async () => {
     try {
@@ -132,6 +134,18 @@ export default function Topbar({ onToggleSidebar, mobileOpen = false, triggerRef
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          aria-label="Send feedback"
+          style={{
+            width: 36, height: 36, flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 8, border: `1px solid ${TOKENS.line}`,
+            background: TOKENS.surface, color: TOKENS.text, cursor: 'pointer', padding: 0,
+          }}>
+          <Icon name="feedback" size={18} color={TOKENS.text} />
+        </button>
         {/* Sync status pill — compact on mobile */}
         <div style={{
           height: 36,
@@ -183,6 +197,8 @@ export default function Topbar({ onToggleSidebar, mobileOpen = false, triggerRef
         </div>
 
       </div>
+
+      <FeedbackSheet open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </header>
   )
 }

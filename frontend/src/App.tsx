@@ -17,8 +17,9 @@ import SettingsInjuriesPage from './pages/SettingsInjuriesPage'
 import SettingsHealthPage from './pages/SettingsHealthPage'
 import SettingsProgramPrefsPage from './pages/SettingsProgramPrefsPage'
 import SettingsBackupsPage from './pages/SettingsBackupsPage'
+import SettingsFeedbackPage from './pages/SettingsFeedbackPage'
+import AdminFeedbackPage from './pages/AdminFeedbackPage'
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
-import { ComingSoonPlaceholder } from './components/common/ComingSoonPlaceholder'
 import { useIsMobile } from './lib/useIsMobile'
 
 // TodayLoggerMobile is intentionally mobile-only (per project memory
@@ -57,9 +58,8 @@ function AppInner() {
             <Route path="settings/injuries" element={<SettingsInjuriesPage />} />
             <Route path="settings/program-prefs" element={<SettingsProgramPrefsPage />} />
             <Route path="settings/backups" element={<SettingsBackupsPage />} />
-            <Route path="settings/feedback" element={
-              <ComingSoonPlaceholder title="Feedback" wave="W7" blurb="In-app feedback capture lands in W7." />
-            } />
+            <Route path="settings/feedback" element={<SettingsFeedbackPage />} />
+            <Route path="admin/feedback" element={<AdminFeedbackPage />} />
             {import.meta.env.DEV && <Route path="dev/picker" element={<ExercisePickerDemo />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

@@ -184,3 +184,21 @@ of force-reloading (C-MOBILE-MAINTENANCE).
 
 Both surfaces are reachable inside the 3-click budget (2 clicks desktop).
 **G7 ✓ for W5.**
+
+---
+
+## W7 — Feedback
+
+| Surface | Path from `/` | Clicks |
+|---|---|---|
+| Send feedback (FeedbackSheet) | `/` → Topbar "Send feedback" button | 1 ✓ |
+| Feedback page (`/settings/feedback`) | `/` → Settings → Feedback | 2 ✓ |
+| Admin triage (`/admin/feedback`, admins only) | `/` → Settings → Feedback → "VIEW ALL FEEDBACK →" | 3 ✓ |
+
+Source-of-truth selectors:
+- Topbar button: `frontend/src/components/layout/Topbar.tsx` `aria-label="Send feedback"`.
+- Settings slot: `frontend/src/components/settings/SettingsSidebar.tsx::SETTINGS_SECTIONS` Feedback entry (`disabled:false`); route `settings/feedback` → `SettingsFeedbackPage` in `App.tsx`.
+- Admin link: rendered only when `useCurrentUser().user.is_admin`; route `admin/feedback` → `AdminFeedbackPage`.
+- Playwright: `frontend/playwright/w7-feedback-smoke.spec.ts`.
+
+G7 status: ✓ — all three W7 surfaces ≤3 clicks.

@@ -35,6 +35,8 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
+          build-args: |
+            APP_SHA=${{ github.sha }}
           platforms: linux/amd64
           push: true
           tags: |
