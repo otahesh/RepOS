@@ -193,7 +193,7 @@ Both surfaces are reachable inside the 3-click budget (2 clicks desktop).
 |---|---|---|
 | Send feedback (FeedbackSheet) | `/` → Topbar "Send feedback" button | 1 ✓ |
 | Feedback page (`/settings/feedback`) | `/` → Settings → Feedback | 2 ✓ |
-| Admin triage (`/admin/feedback`, admins only) | `/` → Settings → Feedback → "View all feedback" | 3 ✓ |
+| Admin triage (`/admin/feedback`, admins only) | `/` → Settings → Feedback → "VIEW ALL FEEDBACK →" | 3 ✓ |
 
 Source-of-truth selectors:
 - Topbar button: `frontend/src/components/layout/Topbar.tsx` `aria-label="Send feedback"`.

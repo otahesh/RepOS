@@ -20,7 +20,7 @@ auto-resend. The admin page's "not delivered" indicator is the manual backstop �
 see the daily-review step below.
 
 ## Severity tiers + target time-to-acknowledge
-- **Sev-1** (data loss, can't log a set, auth lockout): ack ≤ 1h, cross-ref `docs/runbooks/bug-triage.md`.
+- **Sev-1** (data loss, can't log a set, auth lockout): ack ≤ 1h; escalate per the W8.6/G10 incident runbook + rollback procedure (`docker/scripts/rollback.sh <sha>`) once that lands.
 - **Sev-2** (feature broken, no data loss): ack ≤ 1 business day.
 - **Sev-3** (cosmetic / idea): ack ≤ 1 week.
 
