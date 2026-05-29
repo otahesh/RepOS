@@ -18,6 +18,7 @@ import SettingsHealthPage from './pages/SettingsHealthPage'
 import SettingsProgramPrefsPage from './pages/SettingsProgramPrefsPage'
 import SettingsBackupsPage from './pages/SettingsBackupsPage'
 import SettingsFeedbackPage from './pages/SettingsFeedbackPage'
+import AdminFeedbackPage from './pages/AdminFeedbackPage'
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile'
 import { useIsMobile } from './lib/useIsMobile'
 
@@ -58,6 +59,7 @@ function AppInner() {
             <Route path="settings/program-prefs" element={<SettingsProgramPrefsPage />} />
             <Route path="settings/backups" element={<SettingsBackupsPage />} />
             <Route path="settings/feedback" element={<SettingsFeedbackPage />} />
+            <Route path="admin/feedback" element={<AdminFeedbackPage />} />
             {import.meta.env.DEV && <Route path="dev/picker" element={<ExercisePickerDemo />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
