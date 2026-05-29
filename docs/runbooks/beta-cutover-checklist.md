@@ -50,6 +50,30 @@ Run these IN ORDER. Each is a binary gate — do not proceed past a RED.
       api-integration, migration-gate) + PR review + linear history.
 - [ ] G1 proof: open a deliberately-broken PR; confirm the gate blocks merge.
 
+## W8.7 — Post-deploy smoke (G13)
+
+### Post-deploy smoke (G13) — run after every prod deploy
+
+Deployment is manual: `docker.yml` only builds + pushes the image to GHCR; a
+human recreates the container on Unraid (see `reference_unraid_redeploy`). So the
+smoke is a **manual `workflow_dispatch`**, run immediately after recreate:
+
+1. Recreate the container to `ghcr.io/otahesh/repos:sha-<short>` on Unraid.
+2. In GitHub → Actions → **post-deploy-smoke** → Run workflow. Set
+   **expected_sha** to the full SHA you just deployed.
+3. The job rebuilds that SHA's frontend, derives the expected `/assets/*`
+   fingerprint, then from outside the tunnel asserts:
+   - logged-out `GET /` → **302** (CF Access whole-host gate),
+   - public `GET /api/health/sync/status` → **401** (edge-bypassed, origin bearer gate),
+   - deployed `index.html` fingerprint (fetched with the CF Access **service
+     token**) **==** the rebuilt artifact's fingerprint.
+4. **Any red ⇒ the deploy is bad.** Roll back: `docker/scripts/rollback.sh <previous-sha>`.
+
+**Prerequisite (one-time infra):** repo secrets `CF_ACCESS_SVC_CLIENT_ID` /
+`CF_ACCESS_SVC_CLIENT_SECRET` must hold a CF Access **service token**, and the
+whole-host `RepOS` Access app must include a service-auth policy admitting it,
+or check (c) will see the 302 challenge and fail with an empty fingerprint.
+
 ## G14 — Cohort + comms
 - [ ] Cohort capped at ≤ 10.
 - [ ] Each user signed PAR-Q-lite; documented contact path
