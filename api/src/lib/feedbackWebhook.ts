@@ -4,6 +4,8 @@
 // submit on a webhook error (per CLAUDE.md: webhook is a notification, not the
 // source of truth).
 
+import { db } from '../db/client.js';
+
 export interface FeedbackRow {
   id: string;
   body: string;
@@ -87,4 +89,30 @@ export async function postWithRetry(
     if (i < maxAttempts - 1) await sleep(250 * 2 ** i);
   }
   return { ok: false, attempts };
+}
+
+// Reads the row, posts it to FEEDBACK_WEBHOOK_URL with retry, and persists the
+// outcome (attempts + delivered timestamp). No-op when the URL is unset.
+export async function deliverFeedbackWebhook(
+  feedbackId: string,
+  opts: Pick<PostOpts, 'fetchImpl' | 'sleep'> = {},
+): Promise<void> {
+  const url = process.env.FEEDBACK_WEBHOOK_URL;
+  if (!url) return; // disabled (info-logged at boot in bootstrap-guards)
+
+  const { rows } = await db.query<FeedbackRow>(
+    `SELECT id, body, route, app_sha, user_email_at_submit FROM feedback WHERE id=$1`,
+    [feedbackId],
+  );
+  const row = rows[0];
+  if (!row) return;
+
+  const { ok, attempts } = await postWithRetry(url, buildDiscordPayload(row), opts);
+  await db.query(
+    `UPDATE feedback
+       SET webhook_attempts = $2,
+           webhook_delivered_at = CASE WHEN $3 THEN now() ELSE webhook_delivered_at END
+     WHERE id = $1`,
+    [feedbackId, attempts, ok],
+  );
 }
