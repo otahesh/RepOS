@@ -170,22 +170,29 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
   return requireCfAccess(req, reply);
 }
 
+// True iff `email` is in the comma-separated REPOS_ADMIN_EMAILS allow-list.
+// Fail-closed: unset env or empty email → false (never accidentally admin).
+export function isAdminEmail(email: string | undefined | null): boolean {
+  const adminEmails = process.env.REPOS_ADMIN_EMAILS;
+  if (!adminEmails || !email) return false;
+  return adminEmails
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email.toLowerCase());
+}
+
 // Shared helper: enforce that the CF-Access-authenticated user's email is in
 // REPOS_ADMIN_EMAILS. Fail closed if env unset (per D10). Returns true if the
 // reply was already sent (caller must short-circuit).
 function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolean {
-  const adminEmails = process.env.REPOS_ADMIN_EMAILS;
-  if (!adminEmails) {
+  if (!process.env.REPOS_ADMIN_EMAILS) {
     req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
     reply.code(403).send({ error: 'admin_check_misconfigured' });
     return true;
   }
-  const allowed = adminEmails
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const userEmail = ((req as any).userEmail as string | undefined) ?? '';
-  if (!allowed.includes(userEmail)) {
+  const userEmail = (req as { userEmail?: string }).userEmail;
+  if (!isAdminEmail(userEmail)) {
     req.log.warn({ userEmail }, 'admin_check_rejected');
     reply.code(403).send({ error: 'not_an_admin' });
     return true;
