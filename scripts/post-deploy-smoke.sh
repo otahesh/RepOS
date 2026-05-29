@@ -76,12 +76,15 @@ main() {
 
   echo "→ (a) logged-out GET ${BASE_URL}/ — expect 302 to CF Access"
   local root_code
-  root_code="$(curl -s -o /dev/null -w '%{http_code}' --max-redirs 0 "${BASE_URL}/")"
+  # `|| true`: keep the assert_* helpers the single failure-reporting surface.
+  # Under `set -euo pipefail` a transport-level curl failure would otherwise
+  # abort main before assert_root_redirect emits its actionable diagnostic.
+  root_code="$(curl -s -o /dev/null -w '%{http_code}' --max-redirs 0 "${BASE_URL}/" || true)"
   assert_root_redirect "$root_code" || fail=1
 
   echo "→ (b) public GET ${BASE_URL}/api/health/sync/status — expect 401"
   local sync_code
-  sync_code="$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/health/sync/status")"
+  sync_code="$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/api/health/sync/status" || true)"
   assert_sync_unauthorized "$sync_code" || fail=1
 
   echo "→ (c) deployed bundle fingerprint == build artifact"
@@ -89,8 +92,12 @@ main() {
   deployed_html="$(curl -s \
     -H "CF-Access-Client-Id: ${CF_ACCESS_SVC_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_SVC_CLIENT_SECRET}" \
-    "${BASE_URL}/index.html")"
-  deployed_fp="$(extract_bundle_fingerprint "$deployed_html")"
+    "${BASE_URL}/index.html" || true)"
+  # `|| true`: extract_bundle_fingerprint's grep exits non-zero when no
+  # /assets/* match (CF Access challenge page or wrong path). Without this,
+  # pipefail aborts main here and assert_bundle_match's empty-fingerprint
+  # diagnostic — the exact production failure mode — never runs.
+  deployed_fp="$(extract_bundle_fingerprint "$deployed_html" || true)"
   assert_bundle_match "$EXPECTED_FINGERPRINT" "$deployed_fp" || fail=1
 
   if [ "$fail" -ne 0 ]; then
