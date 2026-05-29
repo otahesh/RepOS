@@ -175,3 +175,20 @@ jobs:
       - name: Integration suite
         working-directory: api
         run: npm run test:integration
+
+  migration-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Self-test the gate
+        run: bash tests/dr/check-migration-dryrun.test.sh
+      - name: Enforce D10 two-step migration gate
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          git fetch origin "${{ github.base_ref || 'main' }}" --depth=1 || true
+          bash scripts/check-migration-dryrun.sh
