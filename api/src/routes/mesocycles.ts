@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { getTodayWorkout } from '../services/getTodayWorkout.js';
 import { computeVolumeRollup } from '../services/volumeRollup.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 import type {
   MesocycleDetailResponse,
   MesocycleAbandonResponse,
@@ -25,6 +26,10 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const { rows: [run] } = await db.query(
         `SELECT id, user_program_id, user_id,
@@ -55,6 +60,10 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/volume-rollup',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const { rows } = await db.query(
         `SELECT id FROM mesocycle_runs WHERE id=$1 AND user_id=$2`,
@@ -73,6 +82,10 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/recap-stats',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
 
       // Ownership + existence check; grab weeks while we're at it.
@@ -152,6 +165,10 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/abandon',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const client = await db.connect();
       try {

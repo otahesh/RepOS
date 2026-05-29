@@ -13,6 +13,7 @@ import {
   validateCardioScheduling,
 } from '../services/scheduleRules.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 import {
   UserProgramStartRequestSchema,
   UserProgramStartIntentQuerySchema,
@@ -60,6 +61,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
     '/user-programs/:id',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const resolved = await resolveUserProgramStructure(req.params.id, userId);
       if (!resolved) {
@@ -75,6 +80,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
     '/user-programs/:id',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const parsed = UserProgramPatchSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -300,6 +309,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
     '/user-programs/:id/warnings',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const resolved = await resolveUserProgramStructure(req.params.id, userId);
       if (!resolved) {
@@ -320,6 +333,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
     '/user-programs/:id/start',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       // [C-RUN-IT-BACK-ROUTE] Parse the ?intent= query guard FIRST so
       // `?intent=garbage` is a clean 400 before any body work.
