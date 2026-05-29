@@ -95,3 +95,26 @@ Note (equipment): equipment routes are identity-scoped on `req.userId` exactly l
 | POST | /api/program-templates/:slug (fork → user_program) | bearer/CF — creates own user_program; ownership proven by userPrograms list/detail (WS2.2) |
 
 Status legend: every per-user / admin auth-gated route above is `COVERED` (or `N/A`). Zero `GAP` rows remain. G2 is closed when all `*-contamination.test.ts` files pass under `npm run test:integration`.
+
+## WS2.10 reconciliation (G2 closure)
+
+Reconciled the table against the 66-handler `grep` enumeration of `src/routes/`: every
+per-user / admin auth-gated route is `COVERED` or `N/A` — no `GAP` rows remain.
+
+Full integration suite verified green:
+
+```
+$ npm run test:integration
+ Test Files  80 passed (80)
+      Tests  302 passed | 7 skipped (309)
+   Duration  28.82s   # within the WS1 90s CI budget; no sharding needed
+```
+
+All seven new + two extended `*-contamination.test.ts` files
+(`userPrograms`, `mesocycles`, `setLogs`, `workouts`, `recoveryFlags`,
+`plannedSets`, `weight` + extended `parQ`, plus the prior `userInjuries`/
+`manualDeload`/account/landmark/onboarding/signout suites) pass.
+No real IDOR was discovered: one expected RED in WS2.5 (set-logs POST) was a
+test-payload defect (Zod v4 rejected a non-RFC-4122 `client_request_id`
+literal), not a route vulnerability — fixed by minting a valid UUID; the route's
+3-join ownership 404 path was then exercised and held.
