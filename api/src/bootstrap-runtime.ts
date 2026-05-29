@@ -13,7 +13,9 @@ import {
 import { db } from './db/client.js';
 
 const PLACEHOLDER_UUID = '00000000-0000-0000-0000-000000000001';
-// Re-export under the spec name (08-qa.md §PLACEHOLDER) for the insert-time guard.
+// Re-export under the spec name (08-qa.md §PLACEHOLDER) for the insert-time guard
+// and unit tests. Do NOT import this constant into production source — the grep
+// guard (scripts/check-no-placeholder.sh) only catches the literal UUID string.
 export const PLACEHOLDER_USER_ID = PLACEHOLDER_UUID;
 const DEFAULT_MAINTENANCE_FLAG_PATH = '/config/maintenance.flag';
 const DEFAULT_RESTORE_STATE_PATH = '/config/restore-state.json';

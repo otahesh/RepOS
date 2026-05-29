@@ -31,4 +31,15 @@ else
   echo "FAIL: allowlist for bootstrap-runtime.ts is not working"; fail=1
 fi
 
+# Case 4: a similarly-named, non-allowlisted file must NOT be allowlisted (anchor)
+TMP2="$ROOT/api/src/bootstrap-runtime-extended.ts"
+trap 'rm -f "$TMP2"' EXIT
+printf 'const x = "00000000-0000-0000-0000-000000000001";\n' > "$TMP2"
+if bash "$GUARD" >/dev/null 2>&1; then
+  echo "FAIL: similarly-named file slipped past the allowlist anchor"; fail=1
+else
+  echo "PASS: allowlist anchor rejects similarly-named files"
+fi
+rm -f "$TMP2"; trap - EXIT
+
 exit "$fail"

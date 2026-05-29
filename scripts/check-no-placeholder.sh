@@ -9,6 +9,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PLACEHOLDER='00000000-0000-0000-0000-000000000001'
 ALLOWLIST='api/src/bootstrap-runtime.ts'
+# NOTE: this catches the literal UUID string, not the exported PLACEHOLDER_USER_ID
+# constant NAME. Importing that constant into prod source would not trip this grep
+# — but the insert-time guard (assertNotPlaceholderUserId) would fire at runtime.
+# Keep the constant test/guard-internal.
 
 # Search production source only: api/src + frontend/src. Exclude tests,
 # __tests__, *.test.*, *.spec.*, and the allowlisted enforcement file.
@@ -18,7 +22,7 @@ hits="$(grep -rIn --include='*.ts' --include='*.tsx' \
           --exclude='*.spec.ts' --exclude='*.spec.tsx' \
           "$PLACEHOLDER" \
           "$ROOT/api/src" "$ROOT/frontend/src" 2>/dev/null \
-        | grep -v "/$ALLOWLIST" || true)"
+        | grep -vF "/$ALLOWLIST:" || true)"
 
 if [[ -n "$hits" ]]; then
   echo "FAIL: placeholder user UUID ($PLACEHOLDER) found outside the allowlist:" >&2
