@@ -25,6 +25,13 @@ jobs:
       - working-directory: api
         run: npx tsc --noEmit
 
+  placeholder-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-no-placeholder.sh
+
   build-frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 5
