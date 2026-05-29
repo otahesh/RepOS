@@ -28,6 +28,9 @@ export interface User {
   onboarding_completed_at?: string | null
   par_q_version?: number
   par_q_advisory_active?: boolean
+  // W7: admin flag from /api/me; gates the client-side feedback triage link.
+  // The admin API enforces authorization server-side regardless of this flag.
+  is_admin?: boolean
 }
 
 export type AuthStatus = 'loading' | 'authenticated' | 'error'

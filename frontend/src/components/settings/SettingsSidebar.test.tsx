@@ -15,17 +15,19 @@ describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
     expect(health?.to).toBe('/settings/health');
   });
 
-  it('marks only W7 slots disabled (W2 Health + W4 Program prefs + W5 Backups all landed)', () => {
+  it('marks zero slots disabled (W2 Health + W4 Program prefs + W5 Backups + W7 Feedback all landed)', () => {
     const byLabel = new Map(SETTINGS_SECTIONS.map((s) => [s.label, s]));
-    // W4.3 + W5 have landed — Program prefs and Backups are both navigable.
+    // W4.3 + W5 + W7 have landed — every settings slot is now navigable.
     expect(byLabel.get('Program prefs')?.disabled).toBe(false);
     expect(byLabel.get('Backups')?.disabled).toBe(false);
-    expect(byLabel.get('Feedback')?.disabled).toBe(true);
+    expect(byLabel.get('Feedback')?.disabled).toBe(false);
     expect(byLabel.get('Account')?.disabled).toBe(false);
     expect(byLabel.get('Equipment')?.disabled).toBe(false);
     expect(byLabel.get('Integrations')?.disabled).toBe(false);
     expect(byLabel.get('Storage')?.disabled).toBe(false);
     expect(byLabel.get('Injuries')?.disabled).toBe(false);
+    // No remaining disabled slots once W7 lands.
+    expect(SETTINGS_SECTIONS.every((s) => s.disabled === false)).toBe(true);
   });
 
   it('every entry has a route under /settings/', () => {
