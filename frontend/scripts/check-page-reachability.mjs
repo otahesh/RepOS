@@ -286,10 +286,6 @@ async function main() {
     // (which together pull in common/ConfirmDialog). Those entries are removed
     // from this set; they are reachable from main.tsx via the routed
     // SettingsAccount page.
-    // W7 Task 12 landed the shared feedback form ahead of its mount points.
-    // It becomes reachable once Task 13 (Topbar FeedbackSheet) and Task 14
-    // (/settings/feedback page) import it. Remove when those tasks land.
-    'feedback/FeedbackForm.tsx',
   ]);
 
   // 1. Orphan components.
