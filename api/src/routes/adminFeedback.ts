@@ -30,7 +30,13 @@ export async function adminFeedbackRoutes(app: FastifyInstance) {
     { preHandler: [requireAdminKeyOrCfAccess(), csrfOrigin] },
     async (req, reply) => {
       const { id } = req.params;
-      if (!/^\d+$/.test(id)) return reply.code(404).send({ error: 'not_found' });
+      // Numeric AND within PG bigint range. An over-range numeric (e.g. 10^23)
+      // passes the digit regex but throws 22003 on the BIGSERIAL UPDATE, which
+      // would surface as a 500 leaking the raw DB error. Anything that cannot be
+      // a valid row id is a clean 404.
+      if (!/^\d+$/.test(id) || BigInt(id) < 1n || BigInt(id) > 9223372036854775807n) {
+        return reply.code(404).send({ error: 'not_found' });
+      }
       const { rows } = await db.query(
         `UPDATE feedback SET triaged_at = COALESCE(triaged_at, now()) WHERE id=$1 RETURNING ${SELECT_COLS}`,
         [id],

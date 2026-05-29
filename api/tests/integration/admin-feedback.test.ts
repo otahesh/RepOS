@@ -106,4 +106,10 @@ describe('admin feedback routes', () => {
     const r = await app.inject({ method: 'PATCH', url: `/api/admin/feedback/99999999/triage`, headers: { 'x-admin-key': 'w7-admin-key' } });
     expect(r.statusCode).toBe(404);
   });
+
+  it('404s (not 500) a triage on an out-of-bigint-range numeric id', async () => {
+    // Purely numeric but > PG bigint max — must not reach the UPDATE (22003).
+    const r = await app.inject({ method: 'PATCH', url: `/api/admin/feedback/99999999999999999999999/triage`, headers: { 'x-admin-key': 'w7-admin-key' } });
+    expect(r.statusCode).toBe(404);
+  });
 });
