@@ -122,3 +122,46 @@ jobs:
       - name: Unit suite
         working-directory: api
         run: npm test
+
+  # api-integration — full Fastify app vs a real Postgres. vitest.integration.config.ts
+  # forces singleFork + fileParallelism:false (suites share global tables and clean up
+  # with DELETE FROM, not BEGIN/ROLLBACK), so the suite is inherently serial. Budget:
+  # <90s on CI (local baseline ~25s for 72 files). If it exceeds budget, shard by
+  # passing a path arg (see WS1.3).
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: repos
+          POSTGRES_PASSWORD: repos_dev_pw
+          POSTGRES_DB: repos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repos -d repos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      - working-directory: api
+        run: npm ci
+      - name: Apply migrations
+        working-directory: api
+        run: npm run migrate
+      - name: Seed reference data
+        working-directory: api
+        run: npm run seed
+      - name: Integration suite
+        working-directory: api
+        run: npm run test:integration
