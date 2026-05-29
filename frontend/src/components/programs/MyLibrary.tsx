@@ -2,7 +2,7 @@
 // My Programs library — active view + Past toggle for abandoned/completed.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listMyPrograms } from '../../lib/api/userPrograms';
+import { listMyPrograms, listProgramMesocycles } from '../../lib/api/userPrograms';
 import type { UserProgramRecord } from '../../lib/api/programs';
 import { TOKENS, FONTS } from '../../tokens';
 import { Term } from '../Term';
@@ -31,11 +31,13 @@ function ProgramCard({
   program,
   onResume,
   onOpen,
+  onViewRecap,
   faded,
 }: {
   program: UserProgramRecord;
   onResume?: (id: string) => void;
   onOpen?: (id: string) => void;
+  onViewRecap?: (id: string) => void;
   faded: boolean;
 }) {
   return (
@@ -120,6 +122,24 @@ function ProgramCard({
             Restart
           </button>
         )}
+        {onViewRecap && (
+          <button
+            onClick={() => onViewRecap(program.id)}
+            style={{
+              padding: '8px 14px',
+              background: TOKENS.surface3,
+              border: `1px solid ${TOKENS.lineStrong}`,
+              borderRadius: 6,
+              color: TOKENS.text,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            View recap
+          </button>
+        )}
       </div>
     </article>
   );
@@ -151,6 +171,19 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlu
   function handleOpen(_id: string) {
     // Active program → live workout page.
     navigate('/today');
+  }
+
+  async function handleViewRecap(id: string) {
+    try {
+      const runs = await listProgramMesocycles(id);
+      // Endpoint returns newest-first; the first completed run is the most
+      // recent recap. (A completed program always has at least one.)
+      const target = runs.find((r) => r.status === 'completed') ?? runs[0];
+      if (target) navigate(`/my-programs/${target.id}`);
+      else setErr('No mesocycle runs found for this program.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -210,6 +243,9 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlu
               onOpen={tab === 'active' ? handleOpen : undefined}
               onResume={tab === 'past' && p.template_slug
                 ? () => onRestartProgram(p.template_slug!)
+                : undefined}
+              onViewRecap={tab === 'past' && p.status === 'completed'
+                ? (id) => void handleViewRecap(id)
                 : undefined}
             />
           ))}

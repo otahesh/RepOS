@@ -37,6 +37,19 @@ const ABANDONED_PROGRAM = {
   updated_at: '2026-04-15T10:00:00Z',
 };
 
+const COMPLETED_PROGRAM = {
+  id: 'up-done',
+  name: 'Finished Block',
+  status: 'completed' as const,
+  user_id: 'u1',
+  template_id: 't1',
+  template_slug: 'full-body-3x',
+  template_version: 1,
+  customizations: {},
+  created_at: '2026-02-01T10:00:00Z',
+  updated_at: '2026-03-15T10:00:00Z',
+};
+
 function renderLibrary(onRestartProgram = vi.fn()) {
   return render(
     <MemoryRouter>
@@ -177,5 +190,58 @@ describe('<MyLibrary>', () => {
     await screen.findByText('Old Program');
 
     expect(screen.getByText('Abandoned')).toBeInTheDocument();
+  });
+});
+
+describe('<MyLibrary> — prior-mesocycle recap entry (WS6 / D6 / G7)', () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+  });
+
+  it('Past tab shows a "View recap" action on a completed program', async () => {
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([COMPLETED_PROGRAM]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Past$/i }));
+    await screen.findByText('Finished Block');
+
+    expect(await screen.findByRole('button', { name: /view recap/i })).toBeInTheDocument();
+  });
+
+  it('clicking "View recap" navigates to the latest completed run recap', async () => {
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([COMPLETED_PROGRAM]);
+    const listSpy = vi.spyOn(api, 'listProgramMesocycles').mockResolvedValue([
+      { id: 'run-latest', status: 'completed', start_date: '2026-03-01', finished_at: '2026-04-01T00:00:00Z', is_deload: false, weeks: 4 },
+      { id: 'run-old', status: 'completed', start_date: '2026-01-01', finished_at: '2026-02-01T00:00:00Z', is_deload: false, weeks: 4 },
+    ]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Past$/i }));
+    await screen.findByText('Finished Block');
+
+    fireEvent.click(await screen.findByRole('button', { name: /view recap/i }));
+
+    // Endpoint returns newest-first; the first completed run is the target.
+    await waitFor(() => expect(listSpy).toHaveBeenCalledWith('up-done'));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-programs/run-latest'));
+  });
+
+  it('does not show "View recap" on an abandoned program', async () => {
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([ABANDONED_PROGRAM]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Past$/i }));
+    await screen.findByText('Old Program');
+
+    expect(screen.queryByRole('button', { name: /view recap/i })).not.toBeInTheDocument();
   });
 });

@@ -70,3 +70,21 @@ export async function getUserProgramWarnings(id: string): Promise<ScheduleWarnin
   const data = await jsonOrThrow<{ warnings: ScheduleWarning[] }>(res);
   return data.warnings;
 }
+
+// Mirror of api/src/schemas/userPrograms.ts ProgramMesocycle. Lists a
+// program's mesocycle runs newest-first so the Past tab can link a completed
+// program to its recap (WS6 / D6 / G7).
+export type ProgramMesocycle = {
+  id: string;
+  status: UserProgramRecord['status'];
+  start_date: string;
+  finished_at: string | null;
+  is_deload: boolean;
+  weeks: number;
+};
+
+export async function listProgramMesocycles(id: string): Promise<ProgramMesocycle[]> {
+  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}/mesocycles`, { credentials: 'same-origin' });
+  const data = await jsonOrThrow<{ mesocycles: ProgramMesocycle[] }>(res);
+  return data.mesocycles;
+}
