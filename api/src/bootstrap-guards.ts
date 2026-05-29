@@ -51,5 +51,11 @@ export function validateStartupEnv(env: NodeJS.ProcessEnv): StartupGuardResult {
     info.push({ msg: 'HEALTHCHECKS_HEALTH_UUID unset — health-ping alerting disabled' });
   }
 
+  // W7 — FEEDBACK_WEBHOOK_URL is optional. Feedback still persists without it;
+  // only the async Discord webhook delivery is disabled. Advisory, not fatal.
+  if (!env.FEEDBACK_WEBHOOK_URL) {
+    info.push({ msg: 'FEEDBACK_WEBHOOK_URL unset — feedback webhook delivery disabled' });
+  }
+
   return { fatal, info };
 }
