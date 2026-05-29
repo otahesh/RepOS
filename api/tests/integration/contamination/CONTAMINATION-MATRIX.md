@@ -27,7 +27,7 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | GET    | /api/mesocycles/:id/recap-stats | bearer/CF | 404 not-yours | mesocycles-contamination.test.ts | COVERED (WS2.4) |
 | POST   | /api/mesocycles/:id/abandon | bearer/CF | 404 not-yours | mesocycles-contamination.test.ts | COVERED (WS2.4) |
 | POST   | /api/mesocycles/:id/deload-now | account:write | 404 not-yours | manualDeload-contamination.test.ts | COVERED |
-| POST   | /api/mesocycles/:id/deload-preview | account:write | 404 not-yours | manualDeload-contamination.test.ts | COVERED |
+| POST   | /api/mesocycles/:id/deload-now/undo | account:write | 404 not-yours (no existence oracle) | manualDeload-contamination.test.ts | COVERED |
 | POST   | /api/set-logs | set_logs:write | 404 foreign planned_set | setLogs-contamination.test.ts | COVERED (WS2.5) |
 | PATCH  | /api/set-logs/:id | set_logs:write | 404 not-yours | setLogs-contamination.test.ts | COVERED (WS2.5) |
 | DELETE | /api/set-logs/:id | set_logs:write | 404 not-yours | setLogs-contamination.test.ts | COVERED (WS2.5) |
