@@ -49,7 +49,7 @@ Add two jobs to `.github/workflows/test.yml`:
 - `api-unit` — `npm test` (vitest unit, excludes integration).
 - `api-integration` — `npm run test:integration` against a `services: postgres:16-alpine` container, with migrations applied at job start.
 
-**Isolation strategy:** per-test `BEGIN`/`ROLLBACK` (`beforeEach`/`afterEach`); tests needing committed cross-connection state opt into a serial fixture. **Budget: integration suite <90s on CI**; if exceeded, shard by file. Net CI surface: 6 jobs (`typecheck-api`, `build-frontend`, `validate-frontend`, `e2e-frontend`, `api-unit`, `api-integration`).
+**Isolation strategy:** ⚠ **Corrected during planning** — the suites already isolate via `vitest` `singleFork` serial execution + `DELETE FROM` cleanup (NOT per-test BEGIN/ROLLBACK; introducing that would mean refactoring ~72 test files for no benefit at the measured ~25s runtime). Also ⚠ `api-unit` is **not** DB-less — 37/63 non-integration files run real SQL, so **both** jobs need the postgres service + `migrate` + `seed`. **Budget: integration suite <90s on CI**; if exceeded, shard by file. Net CI surface grows to **8 jobs** across W8 (WS1 adds `api-unit` + `api-integration`; WS4 adds `migration-gate`; WS7 adds `placeholder-guard`) — see the plan's "Cross-workstream coordination" section for the authoritative inventory.
 
 > Note: making these *required* checks + branch protection is **W8.5** → cutover checklist (GitHub settings). The G1 proof (deliberately-broken PR blocks merge) is performed at that step.
 
