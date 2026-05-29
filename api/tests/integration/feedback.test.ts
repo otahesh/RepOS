@@ -38,7 +38,7 @@ describe('deliverFeedbackWebhook', () => {
     await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
   });
 
-  it('delivers the payload and stamps webhook_delivered_at within 5s', async () => {
+  it('delivers the payload and stamps webhook_delivered_at', async () => {
     const { rows } = await db.query<{ id: string }>(
       `INSERT INTO feedback (user_id, user_email_at_submit, body, route, app_sha)
        VALUES ($1,'tester@repos.test','hello from test','/today','abc123') RETURNING id`,
@@ -131,5 +131,76 @@ describe('POST /api/feedback (bearer path)', () => {
   it('rejects unauthenticated requests with 401', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/feedback', body: { body: 'hi' } });
     expect(r.statusCode).toBe(401);
+  });
+});
+
+// G12 end-to-end: proves the ROUTE actually wires the async delivery loop —
+// POST → row committed (201) → fire-and-forget deliverFeedbackWebhook →
+// webhook_delivered_at stamped, all within the spec's 5s budget. The isolated
+// tests above cover the pieces; only this asserts the wiring through POST.
+describe('POST /api/feedback → async webhook delivery (G12 end-to-end)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let server: Server;
+  const received: unknown[] = [];
+  let userId: string;
+  let token: string;
+  const savedUrl = process.env.FEEDBACK_WEBHOOK_URL;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', () => {
+        received.push(JSON.parse(raw || '{}'));
+        res.writeHead(204).end();
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    process.env.FEEDBACK_WEBHOOK_URL = `http://127.0.0.1:${port}/hook`;
+    app = await buildApp();
+    const u = await mkUser({ prefix: 'vitest.w7-e2e' });
+    userId = u.id;
+    const mint = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      body: { user_id: userId, label: 'w7e2e', scopes: ['health:weight:write'] },
+    });
+    token = mint.json<{ token: string }>().token;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    if (savedUrl === undefined) delete process.env.FEEDBACK_WEBHOOK_URL;
+    else process.env.FEEDBACK_WEBHOOK_URL = savedUrl;
+    await db.query(`DELETE FROM feedback WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM device_tokens WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
+    await app.close();
+  });
+
+  it('POST commits the row, then the async webhook stamps webhook_delivered_at ≤5s', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { authorization: `Bearer ${token}`, 'x-repos-csrf': '1' },
+      body: { body: 'end-to-end webhook delivery', route: '/today' },
+    });
+    expect(r.statusCode).toBe(201);
+    const id = r.json<{ id: string }>().id;
+
+    // Fire-and-forget: poll for the durable proof the loop ran end-to-end.
+    await expect
+      .poll(
+        async () => {
+          const { rows } = await db.query<{ webhook_delivered_at: Date | null }>(
+            `SELECT webhook_delivered_at FROM feedback WHERE id=$1`,
+            [id],
+          );
+          return rows[0]?.webhook_delivered_at !== null && received.length >= 1;
+        },
+        { timeout: 5000, interval: 100 },
+      )
+      .toBe(true);
   });
 });
