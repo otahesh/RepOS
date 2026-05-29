@@ -80,3 +80,45 @@ jobs:
           name: playwright-traces
           path: frontend/test-results/
           retention-days: 7
+
+  # api-unit — vitest non-integration suite. NOT a no-DB suite: 37/63 of these
+  # test files import src/db/client.ts and run real SQL against seeded tables
+  # (e.g. tests/weight.test.ts INSERTs users; many read seeded muscles/exercises).
+  # So it needs the same postgres service + migrate + seed as api-integration.
+  api-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: repos
+          POSTGRES_PASSWORD: repos_dev_pw
+          POSTGRES_DB: repos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repos -d repos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      - working-directory: api
+        run: npm ci
+      - name: Apply migrations
+        working-directory: api
+        run: npm run migrate
+      - name: Seed reference data
+        working-directory: api
+        run: npm run seed
+      - name: Unit suite
+        working-directory: api
+        run: npm test
