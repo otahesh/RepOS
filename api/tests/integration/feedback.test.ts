@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { db } from '../../src/db/client.js';
 import { deliverFeedbackWebhook } from '../../src/lib/feedbackWebhook.js';
+import { buildApp } from '../../src/app.js';
+import { mkUser } from '../helpers/program-fixtures.js';
 
 describe('deliverFeedbackWebhook', () => {
   let server: Server;
@@ -67,5 +69,67 @@ describe('deliverFeedbackWebhook', () => {
       [rows[0].id],
     );
     expect(after[0].webhook_attempts).toBe(0);
+  });
+});
+
+describe('POST /api/feedback (bearer path)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>;
+  let userId: string;
+  let token: string;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    const u = await mkUser({ prefix: 'vitest.w7-post' });
+    userId = u.id;
+    const mint = await app.inject({
+      method: 'POST',
+      url: '/api/tokens',
+      body: { user_id: userId, label: 'w7', scopes: ['health:weight:write'] },
+    });
+    token = mint.json<{ token: string }>().token;
+  });
+
+  afterAll(async () => {
+    await db.query(`DELETE FROM feedback WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM device_tokens WHERE user_id=$1`, [userId]);
+    await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
+    await app.close();
+  });
+
+  it('inserts a row stamped with the authenticated user + server context', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { authorization: `Bearer ${token}`, 'x-repos-csrf': '1', 'user-agent': 'vitest-UA' },
+      body: { body: '  the deload button needs a tooltip  ', route: '/settings/health' },
+    });
+    expect(r.statusCode).toBe(201);
+    const id = r.json<{ id: string }>().id;
+
+    const { rows } = await db.query(
+      `SELECT user_id, user_email_at_submit, body, route, user_agent, app_sha FROM feedback WHERE id=$1`,
+      [id],
+    );
+    expect(rows[0].user_id).toBe(userId);
+    expect(rows[0].body).toBe('the deload button needs a tooltip'); // trimmed
+    expect(rows[0].route).toBe('/settings/health');
+    expect(rows[0].user_agent).toBe('vitest-UA');
+    expect(rows[0].user_email_at_submit).toContain('@repos.test');
+    expect(rows[0].app_sha).toBe('dev'); // APP_SHA unset in test → 'dev'
+  });
+
+  it('rejects an empty body with 400', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/feedback',
+      headers: { authorization: `Bearer ${token}`, 'x-repos-csrf': '1' },
+      body: { body: '   ' },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('rejects unauthenticated requests with 401', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/feedback', body: { body: 'hi' } });
+    expect(r.statusCode).toBe(401);
   });
 });
