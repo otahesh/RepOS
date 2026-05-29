@@ -81,6 +81,16 @@ RUN mkdir -p /etc/cont-init.d && \
       > /etc/cont-init.d/99-postgres-perms && \
     chmod +x /etc/cont-init.d/99-postgres-perms
 
+# W7 — the running API stamps feedback.app_sha from this. CI passes the commit
+# SHA as a build-arg; falls back to "dev" for local builds. Placed late in the
+# stage on purpose: APP_SHA changes every commit, so a BuildKit layer that
+# consumes it must sit AFTER the stable, expensive `apk add` + binary-check +
+# mkdir layers — otherwise every push to main busts the postgres/node/nginx
+# install cache. APP_SHA is read only at node startup, so a late ENV layer is
+# functionally identical.
+ARG APP_SHA=dev
+ENV APP_SHA=$APP_SHA
+
 EXPOSE 80
 
 # Healthcheck: nginx → /health (proxied to API)
