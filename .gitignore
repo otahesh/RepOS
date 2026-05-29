@@ -28,3 +28,6 @@ npm-debug.log*
 
 # Claude Code session-local state (scheduled tasks, etc.)
 .claude/
+
+# Local agent-guidance mirror (Codex); not shared via the repo
+AGENTS.md
