@@ -9,22 +9,30 @@ import { pushToast } from '../components/common/ToastHost';
 export default function AdminFeedbackPage() {
   const [items, setItems] = useState<AdminFeedbackItem[] | null>(null);
   const [denied, setDenied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function load(): void {
+    setError(null);
+    setItems(null);
     listAdminFeedback()
       .then((r) => setItems(r.items))
       .catch((err: { status?: number }) => {
         if (err?.status === 403 || err?.status === 401) setDenied(true);
-        else pushToast({ severity: 'error', body: 'Could not load feedback.' });
+        // Anything else (5xx, network, parse) must surface an actionable,
+        // retryable error — never a spinner that never resolves.
+        else setError(`Could not load feedback — GET /api/admin/feedback${err?.status ? ` returned HTTP ${err.status}` : ' failed (network)'}.`);
       });
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   async function handleTriage(id: string): Promise<void> {
     try {
       const updated = await triageFeedback(id);
       setItems((prev) => prev?.map((i) => (i.id === id ? updated : i)) ?? null);
-    } catch {
-      pushToast({ severity: 'error', body: 'Triage failed.' });
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      pushToast({ severity: 'error', body: `Triage failed${status ? ` — HTTP ${status}` : ''}. Try again.` });
     }
   }
 
@@ -35,7 +43,14 @@ export default function AdminFeedbackPage() {
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
       <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>Feedback triage</h1>
-      {items === null && <div style={{ color: TOKENS.textMute, fontFamily: FONTS.mono, fontSize: 12 }}>Loading…</div>}
+      {error && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, color: TOKENS.danger, fontFamily: FONTS.mono, fontSize: 12 }}>
+          <span>{error}</span>
+          <button type="button" onClick={load}
+            style={{ padding: '6px 12px', borderRadius: 6, border: `1px solid ${TOKENS.line}`, background: TOKENS.bg, color: TOKENS.text, fontFamily: FONTS.ui, fontSize: 12, cursor: 'pointer' }}>Retry</button>
+        </div>
+      )}
+      {!error && items === null && <div style={{ color: TOKENS.textMute, fontFamily: FONTS.mono, fontSize: 12 }}>Loading…</div>}
       {items?.length === 0 && <div style={{ color: TOKENS.textMute }}>No feedback yet.</div>}
       {items?.map((i) => (
         <div key={i.id} style={{
