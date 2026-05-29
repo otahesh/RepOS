@@ -16,6 +16,7 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | GET    | /api/user-programs/:id | bearer/CF | 404 not-yours | userPrograms-contamination.test.ts | COVERED (WS2.2) |
 | PATCH  | /api/user-programs/:id (rename) | bearer/CF | 404 not-yours | userPrograms-contamination.test.ts | COVERED (WS2.2) |
 | GET    | /api/user-programs/:id/warnings | bearer/CF | 404 not-yours | userPrograms-contamination.test.ts | COVERED (WS2.2) |
+| GET    | /api/user-programs/:id/mesocycles | bearer/CF | 404 not-yours | userProgramsMesocyclesList-contamination.test.ts | COVERED (WS6.2) |
 | POST   | /api/user-programs/:id/start | bearer/CF | 404 not-yours | userProgramStart-contamination.test.ts | COVERED |
 | PATCH  | /api/user-programs/:id (swap_all) | bearer/CF | 404 not-yours | userProgramsEveryOccurrence-contamination.test.ts | COVERED |
 | GET    | /api/me/par-q | account:write | own only | parQ-contamination.test.ts | COVERED |
