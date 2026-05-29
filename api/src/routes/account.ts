@@ -33,6 +33,7 @@ import {
   CONFIRM_DELETE_ACCOUNT_PHRASE,
 } from '../schemas/account.js';
 import { IANA_TIMEZONES } from '../lib/timezones.js'; // static fallback per I-IANA-TIMEZONES
+import { isValidBigintId } from '../schemas/idParams.js';
 
 const VALID_TZ = new Set(IANA_TIMEZONES);
 
@@ -259,6 +260,11 @@ export async function accountRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      // device_tokens.id is bigint — a non-numeric or over-range :id would throw
+      // 22003 on the UPDATE → 500 leaking raw DB text. Treat as a clean 404 (G11).
+      if (!isValidBigintId(req.params.id)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
 
       const { rowCount } = await db.query(
         `UPDATE device_tokens

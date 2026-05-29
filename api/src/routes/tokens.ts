@@ -4,6 +4,7 @@ import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 import { isValidScope } from '../auth/scopes.js';
+import { isValidBigintId } from '../schemas/idParams.js';
 import type {
   TokenMintResponse,
   TokenListResponse,
@@ -118,6 +119,11 @@ export async function tokenRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = userIdFromReq(req, req.query.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
+      // device_tokens.id is bigint — a non-numeric or over-range :id would throw
+      // 22003 on the UPDATE → 500 leaking raw DB text. Treat as a clean 404 (G11).
+      if (!isValidBigintId(req.params.id)) {
+        return reply.code(404).send({ error: 'not found' });
+      }
       // The user_id+id pair guards against a leaked admin key revoking a
       // different user's tokens — the UPDATE only fires when both match.
       const { rowCount } = await db.query(
