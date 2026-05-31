@@ -6,7 +6,7 @@ GAP = filled by WS2.2–WS2.9.
 N/A (public) = unauthenticated catalog/health route; cross-user isolation does not apply.
 N/A (admin) = `X-Admin-Key` / CF-Access gated operational route (no per-user ownership; gate-tested elsewhere).
 
-Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (66 handlers).
+Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (67 handlers). The inline `GET /api/me` lives in `api/src/app.ts` (not under `src/routes/`) and is enumerated separately in the per-user table below, so the per-user table total is consistent with the route-file grep plus that one inline handler.
 
 ## Per-user routes (ownership-scoped)
 
@@ -45,7 +45,7 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | POST   | /api/health/weight | health:weight:write | own only (identity-scoped) | weight-contamination.test.ts | COVERED (WS2.9) |
 | POST   | /api/health/weight/backfill | health:weight:write | own only (identity-scoped) | weight-contamination.test.ts | COVERED (WS2.9) |
 | GET    | /api/health/weight | bearer/CF | own only (identity-scoped) | weight-contamination.test.ts | COVERED (WS2.9) |
-| GET    | /api/sync/status | bearer/CF | own only (identity-scoped) | weight-contamination.test.ts | COVERED (WS2.9) |
+| GET    | /api/health/sync/status | bearer/CF | own only (identity-scoped) | weight-contamination.test.ts | COVERED (WS2.9) |
 | PATCH  | /api/account/profile | bearer/CF | own only | account-profile-contamination.test.ts | COVERED |
 | GET    | /api/me (account) | bearer/CF | own only | account-profile-contamination.test.ts | COVERED |
 | GET    | /api/account/events | bearer/CF | own only | account-events-contamination.test.ts | COVERED |
@@ -60,7 +60,7 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | POST   | /api/feedback | bearer/CF + CSRF | stamps token owner | feedback-contamination.test.ts | COVERED |
 | GET    | /api/equipment/profile | bearer/CF | own only | (identity-scoped read; see note) | COVERED (weight pattern) |
 | PUT    | /api/equipment/profile | bearer/CF | own only | (identity-scoped write; see note) | COVERED (weight pattern) |
-| POST   | /api/equipment/profile/items/:name | bearer/CF | own only | (identity-scoped write; see note) | COVERED (weight pattern) |
+| POST   | /api/equipment/profile/preset/:name | bearer/CF | own only | (identity-scoped write; see note) | COVERED (weight pattern) |
 
 Note (equipment): equipment routes are identity-scoped on `req.userId` exactly like weight/workouts — no `:id` resource, every row keyed on the token owner. The identity-scoping guarantee is structurally identical to and proven by `weight-contamination.test.ts` (WS2.9) and `workouts-contamination.test.ts` (WS2.6); no separate equipment cross-user oracle exists to exploit.
 
@@ -99,7 +99,8 @@ Status legend: every per-user / admin auth-gated route above is `COVERED` (or `N
 
 ## WS2.10 reconciliation (G2 closure)
 
-Reconciled the table against the 66-handler `grep` enumeration of `src/routes/`: every
+Reconciled the table against the 67-handler `grep` enumeration of `src/routes/` (plus
+the inline `GET /api/me` in `api/src/app.ts`, enumerated separately): every
 per-user / admin auth-gated route is `COVERED` or `N/A` — no `GAP` rows remain.
 
 Full integration suite verified green:

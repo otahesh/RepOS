@@ -60,4 +60,33 @@ describe('W8.2 contamination — weight (bearer health:weight:write)', () => {
       `SELECT 1 FROM health_weight_samples WHERE user_id=$1`, [pair.userA.userId]);
     expect(aRows.length).toBe(0);
   });
+
+  it('GET /sync/status returns B own default; never A sync state', async () => {
+    const app = await build();
+    const pair = await mkUserPair();
+    handles.push(pair);
+    const { bearer: tokenB } = await mintBearer({ userId: pair.userB.userId, scopes: ['health:weight:write'], label: 'w-b3' });
+
+    // A has a real, FRESH sync row with a distinctive source. B has none.
+    await db.query(
+      `INSERT INTO health_sync_status
+         (user_id, source, last_fired_at, last_success_at, consecutive_failures)
+       VALUES ($1, 'Withings', now(), now(), 0)`,
+      [pair.userA.userId],
+    );
+
+    // The route is registered under prefix '/api/health' (app.ts), so the
+    // full path is /api/health/sync/status.
+    const getB = await app.inject({
+      method: 'GET', url: '/api/health/sync/status',
+      headers: { authorization: `Bearer ${tokenB}` },
+    });
+    expect(getB.statusCode).toBe(200);
+    const body = getB.json<{ source: string | null; last_success_at: string | null; state: string }>();
+    // B sees its OWN empty default — never A's row.
+    expect(body.source).toBeNull();
+    expect(body.last_success_at).toBeNull();
+    expect(body.state).toBe('broken');
+    expect(body.source).not.toBe('Withings');
+  });
 });
