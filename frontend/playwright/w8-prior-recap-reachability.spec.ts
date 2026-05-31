@@ -31,8 +31,12 @@ test('W8/G7: completed-program recap is reachable from / in <=3 clicks', async (
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ _v: 1, barbell: { available: true } }) }));
     await ctx.route('**/api/health/sync/status', (r: Route) =>
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ source: 'Apple Health', last_success_at: null, state: 'stale' }) }));
-    // Past tab fetches include=past; return the completed program either way.
-    await ctx.route('**/api/user-programs?**', (r: Route) =>
+    // Both the bare active-tab load (GET /api/user-programs) and the Past-tab
+    // fetch (?include=past) must be mocked. Playwright treats `?` as a literal,
+    // so `**/api/user-programs?**` MISSES the bare path; `*` (no slash) covers
+    // both the bare list and the optional query string. The more-specific
+    // `/api/user-programs/up-done...` routes are registered later and so win.
+    await ctx.route('**/api/user-programs*', (r: Route) =>
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ programs: [COMPLETED_PROGRAM] }) }));
     await ctx.route('**/api/user-programs/up-done/mesocycles', (r: Route) =>
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mesocycles: [

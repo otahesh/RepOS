@@ -150,11 +150,16 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlu
   const [tab, setTab] = useState<ViewTab>('active');
   const [programs, setPrograms] = useState<UserProgramRecord[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Dedicated recap-lookup error surface (mirrors MyProgramPage's recapErr) so
+  // a failed "View recap" navigation isn't misattributed as a programs-load
+  // failure. Cleared on tab switch alongside the programs reload.
+  const [recapErr, setRecapErr] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
     setPrograms(null);
     setErr(null);
+    setRecapErr(null);
     listMyPrograms({ includePast: tab === 'past' })
       .then((rows) => { if (!ignore) setPrograms(rows); })
       .catch((e) => { if (!ignore) setErr(e instanceof Error ? e.message : String(e)); });
@@ -174,15 +179,16 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlu
   }
 
   async function handleViewRecap(id: string) {
+    setRecapErr(null);
     try {
       const runs = await listProgramMesocycles(id);
       // Endpoint returns newest-first; the first completed run is the most
       // recent recap. (A completed program always has at least one.)
       const target = runs.find((r) => r.status === 'completed') ?? runs[0];
       if (target) navigate(`/my-programs/${target.id}`);
-      else setErr('No mesocycle runs found for this program.');
+      else setRecapErr('No completed mesocycle for this program yet.');
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setRecapErr(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -218,6 +224,12 @@ export function MyLibrary({ onRestartProgram }: { onRestartProgram: (templateSlu
       {err && (
         <div style={{ color: TOKENS.danger, fontSize: 13, padding: '8px 0' }}>
           Couldn't load programs: {err}
+        </div>
+      )}
+
+      {recapErr && (
+        <div style={{ color: TOKENS.danger, fontSize: 13, padding: '8px 0' }}>
+          Couldn't load recap stats: {recapErr}
         </div>
       )}
 

@@ -232,6 +232,42 @@ describe('<MyLibrary> — prior-mesocycle recap entry (WS6 / D6 / G7)', () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-programs/run-latest'));
   });
 
+  it('surfaces a recap-specific error (not "Couldn\'t load programs") when the run lookup fails', async () => {
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([COMPLETED_PROGRAM]);
+    vi.spyOn(api, 'listProgramMesocycles').mockRejectedValue(new Error('boom'));
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Past$/i }));
+    await screen.findByText('Finished Block');
+
+    fireEvent.click(await screen.findByRole('button', { name: /view recap/i }));
+
+    // The failure is attributed to the recap lookup, not the programs load.
+    expect(await screen.findByText(/Couldn't load recap stats: boom/)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't load programs/)).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows an actionable empty-runs message when a completed program has no runs', async () => {
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([COMPLETED_PROGRAM]);
+    vi.spyOn(api, 'listProgramMesocycles').mockResolvedValue([]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Past$/i }));
+    await screen.findByText('Finished Block');
+
+    fireEvent.click(await screen.findByRole('button', { name: /view recap/i }));
+
+    expect(await screen.findByText(/No completed mesocycle for this program yet\./)).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('does not show "View recap" on an abandoned program', async () => {
     vi.spyOn(api, 'listMyPrograms')
       .mockResolvedValueOnce([ACTIVE_PROGRAM])
