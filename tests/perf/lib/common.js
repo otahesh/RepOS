@@ -1,6 +1,14 @@
 import http from 'k6/http';
 import { check } from 'k6';
 
+// Treat only true server/network failures as failures for `http_req_failed`.
+// k6's default counts EVERY status >=400 as failed, which would false-fail the
+// burst `rate==0` threshold on by-design 409s (weight rate-limit, already-
+// started, non-substitutable). Re-scoping the "expected" band to 200-499 makes
+// `http_req_failed` count only 5xx/network errors, so `rate==0` is the literal
+// "zero 5xx" contract the burst threshold documents.
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 499 }));
+
 // --- Config from env (README documents these) -----------------------------
 // BASE_URL   e.g. http://127.0.0.1:3001  (local)  | https://repos.jpmtech.com (prod)
 // TOKEN      opaque bearer "<16hex>.<64hex>" minted via POST /api/tokens
@@ -69,10 +77,14 @@ export function burstScenario(tag) {
 
 // Thresholds builder: encodes the p95 budget on the steady scenario and the
 // burst contract (zero 5xx + p99 < 2x budget) on the burst scenario.
+// The module-init `http.setResponseCallback(...200-499...)` above makes
+// `http_req_failed` count ONLY true 5xx/network failures (not by-design 409s),
+// so the burst `rate==0` line below is the literal "zero 5xx" contract.
 export function thresholdsFor(tag, p95Budget) {
   return {
     [`http_req_duration{scenario:${tag}_steady}`]: [`p(95)<${p95Budget}`],
     [`http_req_duration{scenario:${tag}_burst}`]: [`p(99)<${p95Budget * 2}`],
+    // zero 5xx: response callback excludes 2xx-4xx, so this is 5xx/network only.
     [`http_req_failed{scenario:${tag}_burst}`]: ['rate==0'],
   };
 }

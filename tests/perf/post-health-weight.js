@@ -1,4 +1,5 @@
 import http from 'k6/http';
+import exec from 'k6/execution';
 import {
   BASE_URL, authHeaders, expectOk,
   steadyScenario, burstScenario, thresholdsFor, makeHandleSummary,
@@ -7,10 +8,17 @@ import { BUDGETS } from './lib/budgets.js';
 
 // Rate-limit: >5 writes per (user, date) -> 409 (api/src/routes/weight.ts:54).
 // Dedupe: same (user, date, source) within 0.05 lb -> 200 deduped:true.
-// To measure the true insert path we give every iteration a UNIQUE date keyed
-// off __VU/__ITER, walking backwards from today, so no (user,date) sees >1
-// write. 'source' stays 'Apple Health'. Requires the health:weight:write scope
-// on the token (the only scope-gated endpoint).
+// To measure the true insert path we give iterations a near-unique date keyed
+// off exec.scenario.iterationInTest (globally unique per iteration WITHIN a
+// scenario) plus a per-scenario base offset so steady and burst never overlap
+// on the shared user. This eliminates the prior `(__VU*100000+__ITER)%9000`
+// bug, which collapsed to only 9 residues (100000%9000==1000) and so mapped 50
+// burst VUs onto ~9 dates, self-inflicting 409s. Under sustained single-user
+// burst some dates may still repeat once the per-scenario 4500-day window
+// wraps; those yield EXPECTED 409s, which are now excluded from the 5xx failure
+// metric (see common.js response callback) and tolerated by the expectOk(409)
+// check below. 'source' stays 'Apple Health'. Requires the health:weight:write
+// scope on the token (the only scope-gated endpoint).
 const KEY = 'POST /api/health/weight';
 const BUDGET = BUDGETS[KEY].p95;
 const TAG = 'weightpost';
@@ -20,9 +28,12 @@ export const options = {
   thresholds: thresholdsFor(TAG, BUDGET),
 };
 function uniqueDate() {
-  // Distinct (VU,ITER) -> distinct day offset; clamp to the last ~25 years so
-  // the date stays valid and never collides across the run.
-  const offset = (__VU * 100000 + __ITER) % 9000;
+  // Key the day-offset on exec.scenario.iterationInTest (unique per iteration
+  // within a scenario), plus a per-scenario base so steady (0..) and burst
+  // (4500..) walk disjoint windows on the shared user. Clamp to ~24 years so
+  // the date stays valid; see header for the collision/409 contract.
+  const base = exec.scenario.name.indexOf('burst') >= 0 ? 4500 : 0;
+  const offset = (base + exec.scenario.iterationInTest) % 9000;
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - offset);
   return d.toISOString().slice(0, 10);
