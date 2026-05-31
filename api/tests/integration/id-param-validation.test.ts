@@ -22,6 +22,7 @@ const UUID_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH'; url: string }> = [
   { method: 'GET',   url: '/api/user-programs/not-a-uuid' },
   { method: 'PATCH', url: '/api/user-programs/not-a-uuid' },
   { method: 'GET',   url: '/api/user-programs/not-a-uuid/warnings' },
+  { method: 'GET',   url: '/api/user-programs/not-a-uuid/mesocycles' },
   { method: 'POST',  url: '/api/user-programs/not-a-uuid/start' },
 ];
 
