@@ -72,10 +72,14 @@ post-deploy smoke (`.github/workflows/post-deploy-smoke.yml`, WS5) or curl
 `https://repos.jpmtech.com/health`.
 
 **Resource caps (`--memory=2g --cpus=2`)** are the pathological-query guardrail.
-They are baked into `rollback.sh` and MUST also be present on the standard
-forward-deploy recipe — see `docs/superpowers/plans/2026-05-03-repos-monolithic-container.md`
-(~line 1216) and the `reference_unraid_redeploy` memory recipe. A redeploy that
-omits them leaves prod uncapped.
+Today they live ONLY in `docker/scripts/rollback.sh` (the `docker run` line),
+so a rollback is always capped — but the canonical forward-deploy recipe and the
+`reference_unraid_redeploy` memory do NOT yet apply them, meaning a normal
+forward redeploy currently leaves prod uncapped. RECOMMENDED FOLLOW-UP: add the
+same `--memory=2g --cpus=2` flags to the forward-deploy recipe in
+`docs/superpowers/plans/2026-05-03-repos-monolithic-container.md` and to the
+`reference_unraid_redeploy` memory so every deploy path is capped, not just
+rollback.
 
 ## After mitigation
 

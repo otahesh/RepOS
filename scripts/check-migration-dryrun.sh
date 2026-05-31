@@ -8,7 +8,8 @@
 # rejects Step-2 migrations without it.
 #
 # "Destructive" = a migration file NEW vs origin/main containing any of:
-#   DROP TABLE | DROP COLUMN | DROP CONSTRAINT | ALTER TABLE ... DROP | DROP INDEX
+#   DROP TABLE | DROP COLUMN | DROP CONSTRAINT | DROP INDEX
+#   | ALTER ... DROP DEFAULT | ALTER ... DROP NOT NULL  (column demotions)
 # A "dry-run link" = a PR-body line matching:  Dry-run: <http...>
 #
 # In CI, set PR_BODY="${{ github.event.pull_request.body }}". The set of changed
@@ -20,9 +21,14 @@ MIGRATIONS_DIR="${MIGRATIONS_DIR:-api/src/db/migrations}"
 BASE_REF="${BASE_REF:-origin/main}"
 PR_BODY="${PR_BODY:-}"
 
-# Destructive-verb pattern. ALTER ... DROP covers DROP COLUMN/CONSTRAINT too,
-# but we list them explicitly for clarity and to catch standalone DROP TABLE/INDEX.
-DESTRUCTIVE_RE='DROP[[:space:]]+TABLE|DROP[[:space:]]+COLUMN|DROP[[:space:]]+CONSTRAINT|DROP[[:space:]]+INDEX|ALTER[[:space:]]+TABLE.*DROP'
+# Destructive-verb pattern. Each branch anchors on `DROP <object>` so it cannot
+# false-positive on the substring "drop" inside an identifier (e.g. an ADDITIVE
+# `ALTER TABLE plans ADD COLUMN drop_set_enabled BOOLEAN`). The prior broad
+# `ALTER[[:space:]]+TABLE.*DROP` branch did exactly that and is removed; DROP
+# COLUMN/CONSTRAINT are covered explicitly below. The two ALTER ... DROP DEFAULT
+# / DROP NOT NULL branches catch column demotions (also anchored on a keyword
+# after DROP, so they don't trip on identifiers either).
+DESTRUCTIVE_RE='DROP[[:space:]]+TABLE|DROP[[:space:]]+COLUMN|DROP[[:space:]]+CONSTRAINT|DROP[[:space:]]+INDEX|DROP[[:space:]]+DEFAULT|DROP[[:space:]]+NOT[[:space:]]+NULL'
 DRYRUN_RE='[Dd]ry-run:[[:space:]]*https?://'
 
 if [ -n "${CHANGED_FILES:-}" ]; then

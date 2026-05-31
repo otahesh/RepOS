@@ -25,6 +25,12 @@ cat > "$MIG/101_drop_col.sql" <<'SQL'
 ALTER TABLE users DROP COLUMN IF EXISTS legacy_field;
 SQL
 
+# Additive migration whose NEW COLUMN NAME contains the substring "drop"
+# (regression: the old `ALTER TABLE ... DROP` branch false-flagged this).
+cat > "$MIG/102_add_dropset_col.sql" <<'SQL'
+ALTER TABLE plans ADD COLUMN drop_set_enabled BOOLEAN NOT NULL DEFAULT false;
+SQL
+
 run() { MIGRATIONS_DIR="$MIG" "$SCRIPT"; }
 
 # (a) No migration files changed → PASS.
@@ -39,6 +45,15 @@ if CHANGED_FILES="api/src/db/migrations/100_add_col.sql" PR_BODY="just adds a co
   echo "✓ additive-only migration passes"
 else
   echo "FAIL: additive-only migration should pass"; exit 1
+fi
+
+# (b2) Additive migration adding a column NAMED `drop_set_enabled` → PASS.
+# Regression guard: the substring "drop" in the identifier must NOT be treated
+# as a destructive ALTER ... DROP.
+if CHANGED_FILES="api/src/db/migrations/102_add_dropset_col.sql" PR_BODY="adds drop_set_enabled flag" run >/dev/null 2>&1; then
+  echo "✓ additive ADD COLUMN drop_set_enabled passes (no false destructive flag)"
+else
+  echo "FAIL: additive ADD COLUMN drop_set_enabled should pass"; exit 1
 fi
 
 # (c) Step-2 destructive migration WITHOUT a dry-run link → FAIL.

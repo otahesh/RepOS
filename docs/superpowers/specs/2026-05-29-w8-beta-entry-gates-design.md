@@ -111,7 +111,7 @@ Authored as `docs/runbooks/beta-cutover-checklist.md`. Ordered passes that close
 - **G9** — k6 run against prod (steady + burst); record `beta-baseline-<date>.json`; apply the recap-stats contingency if the cliff appears.
 - **G10** — Sev-1 dry-fire <10 min, PASSDOWN timestamps.
 - **G12** — feedback prod smoke (W7 carryover): CF-Access non-admin submits → row ≤5s + Discord delivery confirmed.
-- **W8.5** — branch protection on `main`: require the 6 status checks + PR review + linear history; then the G1 deliberately-broken-PR proof.
+- **W8.5** — branch protection on `main`: require the 8 status checks + PR review + linear history; then the G1 deliberately-broken-PR proof.
 - **G14** — cohort ≤10; each signed PAR-Q-lite; documented contact path; first-run Beta disclaimer.
 - **G15** — `docs/runbooks/beta-exit-criteria.md` (exit conditions per D13) + weekly Beta review cadence.
 
