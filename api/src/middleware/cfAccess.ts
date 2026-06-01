@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
+import { assertNotPlaceholderUserId } from '../bootstrap-runtime.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
@@ -133,6 +134,11 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
       [rawEmail, displayNameClaim],
     );
     userId = ins.rows[0].id as string;
+    // Post-insert canary: gen_random_uuid() can never return the placeholder, so
+    // this never fires in normal flow. If it ever did, the row is already written
+    // — the throw surfaces a 500 and stops the sentinel id reaching a live session
+    // (defense-in-depth alongside the boot-time validatePlaceholderPurge).
+    assertNotPlaceholderUserId(userId, process.env);
     userDisplayName = ins.rows[0].display_name as string | null;
     userTz = ins.rows[0].timezone as string;
   } else {

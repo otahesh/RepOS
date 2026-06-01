@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 import {
   applyManualDeload,
   undoManualDeload,
@@ -18,6 +19,10 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
     '/mesocycles/:id/deload-now',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'not_found' };
+      }
       const userId = (req as any).userId as string;
       try {
         const r = await applyManualDeload(userId, req.params.id);
@@ -35,6 +40,10 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
     '/mesocycles/:id/deload-now/undo',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'not_found' };
+      }
       const userId = (req as any).userId as string;
       try {
         await undoManualDeload(userId, req.params.id);

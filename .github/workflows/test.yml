@@ -25,6 +25,14 @@ jobs:
       - working-directory: api
         run: npx tsc --noEmit
 
+  placeholder-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-no-placeholder.sh
+      - run: bash scripts/check-no-placeholder.test.sh
+
   build-frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -80,3 +88,107 @@ jobs:
           name: playwright-traces
           path: frontend/test-results/
           retention-days: 7
+
+  # api-unit — vitest non-integration suite. NOT a no-DB suite: 37/63 of these
+  # test files import src/db/client.ts and run real SQL against seeded tables
+  # (e.g. tests/weight.test.ts INSERTs users; many read seeded muscles/exercises).
+  # So it needs the same postgres service + migrate + seed as api-integration.
+  api-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: repos
+          POSTGRES_PASSWORD: repos_dev_pw
+          POSTGRES_DB: repos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repos -d repos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+      - name: Apply migrations
+        working-directory: api
+        run: npm run migrate
+      - name: Seed reference data
+        working-directory: api
+        run: npm run seed
+      - name: Unit suite
+        working-directory: api
+        run: npm test
+
+  # api-integration — full Fastify app vs a real Postgres. vitest.integration.config.ts
+  # forces singleFork + fileParallelism:false (suites share global tables and clean up
+  # with DELETE FROM, not BEGIN/ROLLBACK), so the suite is inherently serial. Budget:
+  # <90s on CI (local baseline ~25s for 72 files). If it exceeds budget, shard by
+  # passing a path arg (see WS1.3).
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: repos
+          POSTGRES_PASSWORD: repos_dev_pw
+          POSTGRES_DB: repos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repos -d repos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+      - name: Apply migrations
+        working-directory: api
+        run: npm run migrate
+      - name: Seed reference data
+        working-directory: api
+        run: npm run seed
+      - name: Integration suite
+        working-directory: api
+        run: npm run test:integration
+
+  migration-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Self-test the gate
+        run: bash tests/dr/check-migration-dryrun.test.sh
+      - name: Enforce D10 two-step migration gate
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          git fetch origin "${{ github.base_ref || 'main' }}" --depth=1 || true
+          bash scripts/check-migration-dryrun.sh

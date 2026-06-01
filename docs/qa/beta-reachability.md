@@ -202,3 +202,34 @@ Source-of-truth selectors:
 - Playwright: `frontend/playwright/w7-feedback-smoke.spec.ts`.
 
 G7 status: ✓ — all three W7 surfaces ≤3 clicks.
+
+---
+
+## W8 — Prior-mesocycle recap (D6 / G7 closure)
+
+| Surface | Path from `/` | Clicks |
+|---|---|---|
+| Prior-mesocycle recap (`MesocycleRecap` on `MyProgramPage`, completed run) | `/` → "Programs" nav → "Past" tab → "View recap" on a completed card | 3 ✓ |
+
+**Gap closed:** before W8 the only route to a recap was `/my-programs/:runId` for a `completed` run (`frontend/src/pages/MyProgramPage.tsx` completed branch), and the Past tab of `MyLibrary` offered only "Restart". A completed run's recap was therefore unreachable from `/`. W8 adds:
+- backend `GET /api/user-programs/:id/mesocycles` (ownership-checked list, newest-first) — `api/src/routes/userPrograms.ts`; schema `ProgramMesocyclesResponseSchema` in `api/src/schemas/userPrograms.ts`; contamination guard `api/tests/integration/contamination/userProgramsMesocyclesList-contamination.test.ts`.
+- frontend `listProgramMesocycles` — `frontend/src/lib/api/userPrograms.ts`.
+- "View recap" entry on completed Past-tab cards — `frontend/src/components/programs/MyLibrary.tsx` (`handleViewRecap` resolves the latest completed run and navigates to `/my-programs/:runId`).
+
+### Source-of-truth selectors
+- "Programs" nav: `frontend/src/components/layout/Sidebar.tsx` (`NAV_ITEMS` Programs → `/programs`, `matchPrefixes: ['/programs','/my-programs']`).
+- "Past" tab + "View recap" button: `frontend/src/components/programs/MyLibrary.tsx` (tab `button` text `Past`; `ProgramCard` `onViewRecap` button text `View recap`, rendered only for `status === 'completed'` on the Past tab).
+- Recap surface: `frontend/src/components/programs/MesocycleRecap.tsx` (header copy `Solid block.`), mounted by `frontend/src/pages/MyProgramPage.tsx` for a `completed` run; route `my-programs/:id` in `frontend/src/App.tsx`.
+- Playwright: `frontend/playwright/w8-prior-recap-reachability.spec.ts`.
+
+### Mobile
+Per `project_device_split`, program planning is desktop-primary; the Past tab + "View recap" render on the same `/programs` route on mobile (responsive grid), so the recap stays ≤3 clicks (hamburger → Programs → Past → View recap is 4 actions on mobile, but the hamburger exposes the nav and is not a destination — consistent with how W6's Injuries/Storage are counted).
+
+### G7 status for W8
+Prior-mesocycle recap reachable in 3 clicks; list endpoint shipped with ownership + contamination coverage. **G7 ✓ for W8 (D6 closed).**
+
+---
+
+## Consolidated G7 sign-off
+
+Every Beta-new surface (W2–W8 sections above) is reachable from `/` within the ≤3-click budget, each with pinned role/accessible-name selectors and a Playwright or vitest assertion. The last remaining D6 gap (prior-mesocycle recap) is closed by W8. **G7 ✓.**

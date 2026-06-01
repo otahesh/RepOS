@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { computeUserLocalDate } from '../services/userLocalDate.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 import {
   PlannedSetPatchRequestSchema,
   PlannedSetSubstituteRequestSchema,
@@ -15,6 +16,10 @@ export async function plannedSetRoutes(app: FastifyInstance) {
     '/planned-sets/:id',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'planned_set not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const parsed = PlannedSetPatchRequestSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -125,6 +130,10 @@ export async function plannedSetRoutes(app: FastifyInstance) {
     '/planned-sets/:id/substitute',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'planned_set not found', field: 'id' };
+      }
       const userId = (req as any).userId as string;
       const parsed = PlannedSetSubstituteRequestSchema.safeParse(req.body);
       if (!parsed.success) {

@@ -50,4 +50,28 @@ describe('W8.2 contamination — PAR-Q', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].user_id).toBe(pair.userA.userId);
   });
+
+  it('POST /me/par-q/mark-cleared by A does not clear B advisory flag', async () => {
+    const app = await build();
+    const pair = await mkUserPair();
+    handles.push(pair);
+
+    // Put B into advisory-active state directly.
+    await db.query(
+      `UPDATE users SET par_q_advisory_active = true WHERE id=$1`,
+      [pair.userB.userId],
+    );
+
+    const res = await app.inject({
+      method: 'POST', url: '/api/me/par-q/mark-cleared',
+      headers: { authorization: `Bearer ${pair.userA.bearer}` },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // B's flag must be untouched.
+    const { rows } = await db.query<{ par_q_advisory_active: boolean }>(
+      `SELECT par_q_advisory_active FROM users WHERE id=$1`, [pair.userB.userId],
+    );
+    expect(rows[0].par_q_advisory_active).toBe(true);
+  });
 });

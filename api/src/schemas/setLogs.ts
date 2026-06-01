@@ -63,12 +63,10 @@ export const SetLogListQuerySchema = z.object({
 });
 export type SetLogListQuery = z.infer<typeof SetLogListQuerySchema>;
 
-// :id param schema — shared by PATCH and DELETE. GET uses
-// SetLogListQuerySchema for the planned_set_id query param.
-export const IdParamSchema = z.object({
-  id: z.string().uuid(),
-});
-export type IdParam = z.infer<typeof IdParamSchema>;
+// :id param schema — re-exported from the shared module so there is one
+// canonical UUID-param validator. GET uses SetLogListQuerySchema instead.
+export { UuidParamSchema as IdParamSchema } from './idParams.js';
+export type { UuidParam as IdParam } from './idParams.js';
 
 // ---------------------------------------------------------------------------
 // Shape returned to clients. The numeric(5,1) `performed_load_lbs` column is
