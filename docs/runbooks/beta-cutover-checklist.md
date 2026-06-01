@@ -44,11 +44,17 @@ Run these IN ORDER. Each is a binary gate — do not proceed past a RED.
       `GET /api/admin/feedback` within 5s AND Discord delivery
       (`docs/runbooks/beta-triage.md` §G12).
 
-## W8.5 — Branch protection on `main`
-- [ ] Require all 8 status checks (typecheck-api, placeholder-guard,
+## W8.5 — Branch protection on `main` — ✅ DONE (cutover-prep, 2026-05-31)
+- [x] All 8 status checks required (typecheck-api, placeholder-guard,
       build-frontend, validate-frontend, e2e-frontend, api-unit,
-      api-integration, migration-gate) + PR review + linear history.
-- [ ] G1 proof: open a deliberately-broken PR; confirm the gate blocks merge.
+      api-integration, migration-gate) — strict + linear history + `enforce_admins`.
+      **PR review set to 0 approvals**: a solo-owner repo can't self-approve, so
+      requiring ≥1 would lock out every own-PR merge; CI gates + `enforce_admins`
+      are the real protection. Bump to 1 once collaborators are added.
+- [x] G1 proof: deliberate-break PR #23 (failing `api-unit`) was merge-blocked —
+      API merge returned `405 Required status check "api-unit" is failing` — then
+      closed + branch deleted. `enforce_admins: true` ⇒ the block applies to the
+      owner too. Re-verify anytime: `gh api repos/otahesh/RepOS/branches/main/protection`.
 
 ## W8.7 — Post-deploy smoke (G13)
 
