@@ -13,7 +13,10 @@ type ItemDef =
   | { key: string; label: string; kind: 'boolean' }
   | { key: string; label: string; kind: 'load_range' }
   | { key: string; label: string; kind: 'adjustable_bench' }
-  | { key: string; label: string; kind: 'machines' };
+  | { key: string; label: string; kind: 'machines' }
+  // A checkbox that persists as an object the backend schema requires (it is
+  // NOT a plain boolean server-side). `whenOn` is the value sent when checked.
+  | { key: string; label: string; kind: 'object_toggle'; whenOn: Record<string, unknown> };
 
 const SECTIONS: Section[] = [
   {
@@ -48,9 +51,21 @@ const SECTIONS: Section[] = [
     items: [
       { key: 'treadmill', label: 'Treadmill', kind: 'boolean' },
       { key: 'stationary_bike', label: 'Stationary Bike', kind: 'boolean' },
-      { key: 'recumbent_bike', label: 'Recumbent Bike', kind: 'boolean' },
+      // Object-kind in the schema/registry (resistance_levels / loop_mi). Sent
+      // as objects, not `true`, or the PUT 400s. Defaults match presets.
+      {
+        key: 'recumbent_bike',
+        label: 'Recumbent Bike',
+        kind: 'object_toggle',
+        whenOn: { resistance_levels: 16 },
+      },
       { key: 'rowing_erg', label: 'Rowing Erg', kind: 'boolean' },
-      { key: 'outdoor_walking', label: 'Outdoor Walking', kind: 'boolean' },
+      {
+        key: 'outdoor_walking',
+        label: 'Outdoor Walking',
+        kind: 'object_toggle',
+        whenOn: { loop_mi: 0 },
+      },
       { key: 'outdoor_cycling', label: 'Outdoor Cycling', kind: 'boolean' },
     ],
   },
@@ -92,6 +107,14 @@ export function EquipmentEditor() {
     setSaving(true);
     try {
       setProfile(await putEquipmentProfile(draft));
+      pushToast({ severity: 'success', body: 'Equipment saved.' });
+    } catch (e) {
+      // Never swallow: a rejected PUT (e.g. a 400 from a bad payload) must be
+      // surfaced with actionable detail, not vanish silently.
+      pushToast({
+        severity: 'error',
+        body: `Save failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
     } finally {
       setSaving(false);
     }
@@ -246,6 +269,27 @@ function ItemRow({
           type="checkbox"
           checked={!!value}
           onChange={(e) => onChange(e.target.checked || undefined)}
+        />
+        {def.label}
+      </label>
+    );
+  }
+  if (def.kind === 'object_toggle') {
+    return (
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '8px 0',
+          color: '#fff',
+          fontSize: 14,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={!!value && typeof value === 'object'}
+          onChange={(e) => onChange(e.target.checked ? def.whenOn : undefined)}
         />
         {def.label}
       </label>
