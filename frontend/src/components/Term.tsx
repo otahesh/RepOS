@@ -1,6 +1,7 @@
 import { type ReactNode, useState, useId, useCallback, useRef } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { TERMS, type TermKey } from '../lib/terms';
+import { TOKENS } from '../tokens';
 
 // Shared popover body — used by both variants so content stays consistent.
 // role is NOT a prop here — it's set on the outer Popover.Content wrapper.
@@ -49,7 +50,8 @@ const popoverContentStyle: React.CSSProperties = {
   fontSize: 13,
   lineHeight: 1.4,
   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-  zIndex: 100,
+  // Portals to <body>; must out-rank any modal hosting the trigger (see tokens).
+  zIndex: TOKENS.zModal.zPopover,
 };
 
 /**

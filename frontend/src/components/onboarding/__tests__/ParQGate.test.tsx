@@ -139,7 +139,11 @@ describe('<ParQGate>', () => {
     render(<ParQGate onComplete={vi.fn()} />);
     await screen.findByTestId('parq-questions');
     const dialog = screen.getByRole('dialog');
-    const focusables = dialog.querySelectorAll<HTMLElement>('button:not([disabled])');
+    // Mirror the component's own trap selector — the inline help terms render as
+    // focusable <abbr tabindex="0"> and are part of the trap boundary.
+    const focusables = dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
     first.focus();

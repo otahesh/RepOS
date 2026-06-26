@@ -67,11 +67,14 @@ export function ParQGate({
     };
   }, []);
 
-  // Re-focus the first question once the async question list arrives.
+  // Re-focus the first question once the async question list arrives. Scope to
+  // the questions list so focus lands on the first answer control — NOT on the
+  // inline help terms (PAR-Q / soft gate), which precede it in the DOM and would
+  // otherwise grab initial focus and auto-open their hover tooltip on mount.
   useEffect(() => {
     if (!status || !dialogRef.current) return;
     const first = dialogRef.current.querySelector<HTMLElement>(
-      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      '[data-testid="parq-questions"] button:not([disabled])',
     );
     first?.focus();
   }, [status]);
@@ -222,11 +225,11 @@ export function ParQGate({
         HEALTH SCREEN
       </div>
       <h2 id="parq-title" style={titleStyle}>
-        Quick <Term k="PAR_Q" /> before we start
+        Quick <Term k="PAR_Q" variant="abbr" /> before we start
       </h2>
       <p style={{ color: TOKENS.textDim, fontSize: 13, lineHeight: 1.6, margin: '0 0 16px' }}>
-        Answer honestly. A "yes" is a <Term k="soft_gate" /> — it never locks you out, it just keeps
-        your program conservative until a clinician clears you.
+        Answer honestly. A "yes" is a <Term k="soft_gate" variant="abbr" /> — it never locks you
+        out, it just keeps your program conservative until a clinician clears you.
       </p>
       <ol
         data-testid="parq-questions"
