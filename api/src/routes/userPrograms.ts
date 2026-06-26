@@ -16,6 +16,7 @@ import type { UserProgramCustomizations } from '../schemas/userProgramCustomizat
 import {
   UserProgramStartRequestSchema,
   UserProgramStartIntentQuerySchema,
+  UserProgramListQuerySchema,
   type UserProgramListResponse,
   type UserProgramDetailResponse,
   type UserProgramPatchResponse,
@@ -31,13 +32,22 @@ export async function userProgramRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { include?: string } }>(
     '/user-programs',
     { preHandler: requireBearerOrCfAccess },
-    async (req, _reply) => {
+    async (req, reply) => {
       const userId = requireUserId(req);
-      const include = req.query.include;
+      const q = UserProgramListQuerySchema.safeParse(req.query);
+      if (!q.success) {
+        reply.code(400);
+        return zodToFieldError(q.error);
+      }
+      const include = q.data.include;
       // LEFT JOIN program_templates to carry template_slug through to the client
       // so the fork-wizard "Restart" action can navigate to /programs/:slug.
       const cols = `up.id, up.template_id, pt.slug AS template_slug, up.template_version,
-                    up.name, up.customizations, up.status, up.created_at, up.updated_at`;
+                    up.name, up.customizations, up.status, up.created_at, up.updated_at,
+                    EXISTS (
+                      SELECT 1 FROM mesocycle_runs mr
+                      WHERE mr.user_program_id = up.id AND mr.status IN ('active','paused')
+                    ) AS has_live_run`;
       let where: string;
       if (include === 'archived') {
         where = `up.user_id=$1 AND up.archived_at IS NOT NULL`;
@@ -113,13 +123,13 @@ export async function userProgramRoutes(app: FastifyInstance) {
         // customizations. Protects BOTH swap_exercise and swap_exercise_all
         // (and every other reducer op that read-modify-writes customizations).
         const { rows } = await client.query(
-          `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
+          `SELECT customizations, status, template_id, archived_at FROM user_programs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
           [req.params.id, userId],
         );
         if (rows.length === 0) {
           notFound = true;
           await client.query('ROLLBACK');
-        } else if (rows[0].status === 'archived') {
+        } else if (rows[0].archived_at !== null) {
           archived = true;
           await client.query('ROLLBACK');
         } else {
