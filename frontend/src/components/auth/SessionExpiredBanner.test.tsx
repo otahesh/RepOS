@@ -62,6 +62,57 @@ async function fireExpired() {
   });
 }
 
+// Force window.localStorage.setItem to throw (Safari private-mode / quota path).
+//
+// Replace `window.localStorage` WHOLESALE rather than overriding `setItem` on
+// the existing Storage object. Two different backings are in play depending on
+// the runtime:
+//   - Node 26 (local dev): src/test/setup.ts installs a plain MemoryStorage
+//     polyfill (Node's global localStorage is undefined without
+//     --localstorage-file), so an own-property override works.
+//   - Node 22 (CI): jsdom's own Proxy-backed Storage is used; its get-trap
+//     returns the prototype method and IGNORES an own `setItem` override — so
+//     overriding the property ON the Storage object silently no-ops (this is
+//     what turned these 5 tests red on CI while passing locally).
+// The component resolves `window.localStorage` first, then `.setItem`, so
+// swapping the whole property is immune to either backing.
+let localStorageOverridden = false;
+let savedLocalStorageDescriptor: PropertyDescriptor | undefined;
+
+function makeLocalStorageThrow(): void {
+  if (!localStorageOverridden) {
+    savedLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    localStorageOverridden = true;
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as Storage,
+  });
+}
+
+// Restore the original window.localStorage — but ONLY if this test overrode it.
+// (Unconditional restore would delete the real localStorage in tests that never
+// called makeLocalStorageThrow, breaking the next test's localStorage.clear().)
+function restoreLocalStorage(): void {
+  if (!localStorageOverridden) return;
+  if (savedLocalStorageDescriptor) {
+    Object.defineProperty(window, 'localStorage', savedLocalStorageDescriptor);
+  } else {
+    delete (window as { localStorage?: unknown }).localStorage;
+  }
+  savedLocalStorageDescriptor = undefined;
+  localStorageOverridden = false;
+}
+
 describe('<SessionExpiredBanner>', () => {
   let assignSpy: ReturnType<typeof vi.fn>;
   let originalLocation: Location;
@@ -84,6 +135,7 @@ describe('<SessionExpiredBanner>', () => {
   });
 
   afterEach(() => {
+    restoreLocalStorage();
     Object.defineProperty(window, 'location', {
       configurable: true,
       writable: true,
@@ -168,13 +220,11 @@ describe('<SessionExpiredBanner>', () => {
   });
 
   // ── W1.3.7.2 — Safari private mode: localStorage.setItem throws ──────────
-  // Spy on Storage.prototype (not the localStorage instance): vi.spyOn on the
-  // instance is a silent no-op against jsdom's native Storage in vitest@2.1.
+  // See makeLocalStorageThrow(): swaps window.localStorage wholesale so it works
+  // across both the MemoryStorage polyfill (local) and jsdom Proxy Storage (CI).
   it('renders blocking modal (does NOT auto-redirect) when localStorage.setItem throws', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    makeLocalStorageThrow();
 
     render(
       <MemoryRouter>
@@ -192,9 +242,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('Safari private modal pluralises correctly for a single set', async () => {
     setCounts({ pending: 1 });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    makeLocalStorageThrow();
 
     render(
       <MemoryRouter>
@@ -209,9 +257,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('Safari modal Sign-in CTA redirects to CF Access login', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    makeLocalStorageThrow();
     const user = userEvent.setup();
 
     render(
@@ -231,9 +277,7 @@ describe('<SessionExpiredBanner>', () => {
 
   it('counts pending + syncing + rejected together in the modal copy (unflushed = anything not yet synced)', async () => {
     setCounts({ pending: 1, syncing: 2, rejected: 1 });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    makeLocalStorageThrow();
 
     render(
       <MemoryRouter>
@@ -249,9 +293,7 @@ describe('<SessionExpiredBanner>', () => {
   // ── W1.3.7.3 — wired into AppShell ────────────────────────────────────────
   it('is mounted inside AppShell — Safari-fallback modal surfaces on cf-access-expired event', async () => {
     setCounts({ pending: 2 });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError');
-    });
+    makeLocalStorageThrow();
 
     render(
       <MemoryRouter initialEntries={['/today/run-1/log']}>

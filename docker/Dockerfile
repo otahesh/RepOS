@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.6
 
 # ─── Stage 1: frontend builder ──────────────────────────────────
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -10,7 +10,7 @@ RUN npm run build
 # Output: /build/frontend/dist
 
 # ─── Stage 2: api builder ───────────────────────────────────────
-FROM node:20-alpine AS api-builder
+FROM node:22-alpine AS api-builder
 WORKDIR /build/api
 COPY api/package.json api/package-lock.json ./
 RUN npm ci
