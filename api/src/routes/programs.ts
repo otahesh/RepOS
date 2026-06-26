@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import type {
@@ -42,7 +43,7 @@ export async function programRoutes(app: FastifyInstance) {
     '/program-templates/:slug/fork',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const {
         rows: [tmpl],
       } = await db.query(

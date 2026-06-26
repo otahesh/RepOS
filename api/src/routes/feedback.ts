@@ -23,7 +23,7 @@ export async function feedbackRoutes(app: FastifyInstance) {
 
       // The bearer path doesn't populate userEmail; re-read it (same precedent as
       // account.ts) so the row + Discord embed carry a human identifier.
-      let email = (req as { userEmail?: string }).userEmail;
+      let email = req.userEmail;
       if (!email) {
         const { rows } = await db.query<{ email: string }>(`SELECT email FROM users WHERE id=$1`, [
           userId,

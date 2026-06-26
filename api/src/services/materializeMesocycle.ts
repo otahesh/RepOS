@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
 import { addDaysISO } from './_dateUtil.js';
 import { resolveUserLandmarksWith } from './resolveUserLandmarks.js';
+import type { UserProgramCustomizations } from '../schemas/userProgramCustomizations.js';
 
 export { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
 
@@ -79,7 +80,7 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       user_id: string;
       template_id: string | null;
       template_version: number | null;
-      customizations: any;
+      customizations: UserProgramCustomizations | null;
     }>(
       `SELECT user_id, template_id, template_version, customizations
        FROM user_programs WHERE id=$1 FOR UPDATE`,

@@ -89,7 +89,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
             sentinel.status === 'ok' ? 'ok' : 'failed',
             sentinel.source_filename,
             sentinel.error_message ?? null,
-            (req as any).userId ?? sentinel.admin_user_id ?? null,
+            req.userId ?? sentinel.admin_user_id ?? null,
             sentinel.started_at,
           ],
         );
@@ -119,7 +119,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const { kickOffRestore } = await import('../services/restoreRunner.js');
       const filename = sourcePath.split('/').pop()!;
       const result = await kickOffRestore(filename, {
-        adminUserId: (req as any).userId ?? null,
+        adminUserId: req.userId ?? null,
         sourceIp: clientIp(req),
       });
       return reply.code(202).send({ restore_id: result.restore_id, source: filename });

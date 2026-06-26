@@ -7,7 +7,7 @@ import { deriveInjuryConstraints } from '../services/deriveInjuryConstraints.js'
 
 export async function userLandmarksRoutes(app: FastifyInstance) {
   app.get('/users/me/landmarks', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const userId = (req as any).userId as string | undefined;
+    const userId = req.userId;
     if (!userId) {
       reply.code(500);
       return { error: 'auth_state_missing' };
@@ -37,7 +37,7 @@ export async function userLandmarksRoutes(app: FastifyInstance) {
     '/users/me/landmarks',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string | undefined;
+      const userId = req.userId;
       if (!userId) {
         reply.code(500);
         return { error: 'auth_state_missing' };

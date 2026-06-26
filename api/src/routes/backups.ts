@@ -110,7 +110,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/backups', { preHandler: requireAdminKeyOrCfAccess() }, async (req, reply) => {
     const result = await runManualBackup({
-      adminUserId: (req as any).userId ?? null, // C-ADMIN-USER-ID
+      adminUserId: req.userId ?? null, // C-ADMIN-USER-ID
       sourceIp: clientIp(req),
     });
     return reply.code(201).send({

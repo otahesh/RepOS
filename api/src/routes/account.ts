@@ -49,7 +49,7 @@ export function truncateIpTo24(ip: string | null): string | null {
 // non-typed cast; bearer path doesn't set it at all). Centralize the cast so
 // callers don't pepper `as { userEmail?: string }` through the file.
 function getUserEmail(req: FastifyRequest): string | undefined {
-  return (req as { userEmail?: string }).userEmail;
+  return req.userEmail;
 }
 
 export async function accountRoutes(app: FastifyInstance) {
@@ -287,7 +287,7 @@ export async function accountRoutes(app: FastifyInstance) {
   // (per I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
   app.delete('/me', { preHandler: [requireCfAccessOnly, csrfOrigin] }, async (req, reply) => {
     const userId = (req as { userId?: string }).userId;
-    const userEmail = (req as { userEmail?: string }).userEmail;
+    const userEmail = req.userEmail;
     if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const parsed = DeleteMeRequestSchema.safeParse(req.body);

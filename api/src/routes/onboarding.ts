@@ -11,6 +11,7 @@
 // Auth-missing handling: empty UPDATE...RETURNING → 500 auth_state_missing
 // (panel I-AUTH-MISSING).
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
@@ -27,7 +28,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
     '/me/onboarding/complete',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const ip = clientIp(req) ?? '';
       const parsed = OnboardingCompleteRequestSchema.safeParse(req.body);
       if (!parsed.success) {
