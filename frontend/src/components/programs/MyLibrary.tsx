@@ -8,6 +8,7 @@ import {
   deleteUserProgram,
   archiveUserProgram,
   unarchiveUserProgram,
+  ApiError,
 } from '../../lib/api/userPrograms';
 import type { UserProgramRecord } from '../../lib/api/programs';
 import { TOKENS, FONTS } from '../../tokens';
@@ -16,6 +17,16 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
 import { pushToast } from '../common/ToastHost';
 
 type ViewTab = 'active' | 'past' | 'archived';
+
+// ApiError carries the server's parsed JSON on `.body` ({ error: "<sentence>" }).
+// Surface that human sentence in toasts instead of the raw `HTTP 409: {...}` message.
+function errMsg(e: unknown): string {
+  if (e instanceof ApiError) {
+    const b = e.body as { error?: string } | undefined;
+    if (b?.error) return b.error;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft',
@@ -50,6 +61,7 @@ function ProgramCard({
   onRestore,
   onDelete,
   faded,
+  busy = false,
 }: {
   program: UserProgramRecord;
   onResume?: (id: string) => void;
@@ -59,7 +71,14 @@ function ProgramCard({
   onRestore?: (id: string) => void;
   onDelete?: (id: string) => void;
   faded: boolean;
+  busy?: boolean;
 }) {
+  // A live run means the program is active even though its row status stays
+  // 'draft' — read it as Active, not Draft.
+  const badgeLabel = program.has_live_run
+    ? 'Active'
+    : (STATUS_LABEL[program.status] ?? program.status);
+  const badgeColor = program.has_live_run ? TOKENS.good : statusColor(program.status);
   return (
     <article
       style={{
@@ -101,15 +120,15 @@ function ProgramCard({
             fontSize: 10,
             letterSpacing: 0.8,
             textTransform: 'uppercase',
-            color: statusColor(program.status),
-            border: `1px solid ${statusColor(program.status)}`,
+            color: badgeColor,
+            border: `1px solid ${badgeColor}`,
             borderRadius: 4,
             padding: '2px 6px',
             whiteSpace: 'nowrap',
             flexShrink: 0,
           }}
         >
-          {STATUS_LABEL[program.status] ?? program.status}
+          {badgeLabel}
         </span>
       </header>
 
@@ -182,6 +201,7 @@ function ProgramCard({
         {onRestore && (
           <button
             onClick={() => onRestore(program.id)}
+            disabled={busy}
             style={{
               padding: '8px 14px',
               background: TOKENS.accentGlow,
@@ -191,7 +211,8 @@ function ProgramCard({
               fontFamily: FONTS.ui,
               fontSize: 12,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.6 : 1,
               letterSpacing: 0.5,
             }}
           >
@@ -201,6 +222,7 @@ function ProgramCard({
         {onArchive && (
           <button
             onClick={() => onArchive(program.id)}
+            disabled={busy}
             style={{
               padding: '8px 14px',
               background: TOKENS.surface3,
@@ -210,7 +232,8 @@ function ProgramCard({
               fontFamily: FONTS.ui,
               fontSize: 12,
               fontWeight: 500,
-              cursor: 'pointer',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.6 : 1,
             }}
           >
             Archive
@@ -252,6 +275,8 @@ export function MyLibrary({
   const [pendingDelete, setPendingDelete] = useState<UserProgramRecord | null>(null);
   // Bumped after a mutation to force the current tab to refetch.
   const [reloadKey, setReloadKey] = useState(0);
+  // The program id with an archive/restore in flight — guards double-fire.
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -281,6 +306,8 @@ export function MyLibrary({
     }) ?? null;
 
   async function handleArchive(id: string) {
+    if (busyId !== null) return;
+    setBusyId(id);
     try {
       await archiveUserProgram(id);
       pushToast({ severity: 'success', body: 'Program archived.' });
@@ -288,12 +315,16 @@ export function MyLibrary({
     } catch (e) {
       pushToast({
         severity: 'error',
-        body: `Archive failed — ${e instanceof Error ? e.message : String(e)}.`,
+        body: `Archive failed — ${errMsg(e)}.`,
       });
+    } finally {
+      setBusyId(null);
     }
   }
 
   async function handleRestore(id: string) {
+    if (busyId !== null) return;
+    setBusyId(id);
     try {
       await unarchiveUserProgram(id);
       pushToast({ severity: 'success', body: 'Program restored.' });
@@ -301,8 +332,10 @@ export function MyLibrary({
     } catch (e) {
       pushToast({
         severity: 'error',
-        body: `Restore failed — ${e instanceof Error ? e.message : String(e)}.`,
+        body: `Restore failed — ${errMsg(e)}.`,
       });
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -317,7 +350,7 @@ export function MyLibrary({
     } catch (e) {
       pushToast({
         severity: 'error',
-        body: `Delete failed — ${e instanceof Error ? e.message : String(e)}.`,
+        body: `Delete failed — ${errMsg(e)}.`,
       });
     }
   }
@@ -438,6 +471,7 @@ export function MyLibrary({
               key={p.id}
               program={p}
               faded={tab !== 'active'}
+              busy={busyId === p.id}
               onOpen={tab === 'active' ? handleOpen : undefined}
               onResume={
                 tab === 'past' && p.template_slug
@@ -450,9 +484,7 @@ export function MyLibrary({
                   : undefined
               }
               onArchive={
-                tab !== 'archived' && p.status !== 'active' && p.status !== 'paused'
-                  ? (id) => void handleArchive(id)
-                  : undefined
+                tab !== 'archived' && !p.has_live_run ? (id) => void handleArchive(id) : undefined
               }
               onRestore={tab === 'archived' ? (id) => void handleRestore(id) : undefined}
               onDelete={(id) => setPendingDelete(programs?.find((x) => x.id === id) ?? null)}
@@ -468,7 +500,11 @@ export function MyLibrary({
         title="Delete this program?"
         body={
           pendingDelete
-            ? `This permanently deletes "${pendingDelete.name}" and all of its logged sets and mesocycle history. This cannot be undone.`
+            ? `This permanently deletes "${pendingDelete.name}" and all of its logged sets and mesocycle history. This cannot be undone.${
+                pendingDelete.has_live_run
+                  ? ' This program has an in-progress mesocycle that will be ended.'
+                  : ''
+              }`
             : ''
         }
         requireTyped={pendingDelete?.name ?? ''}
