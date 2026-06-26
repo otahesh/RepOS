@@ -15,6 +15,11 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // restoreMocks restores vi.spyOn spies; clearMocks resets call history on
+    // ALL mocks (incl. vi.mock auto-mocks) between tests. vitest 4 no longer
+    // clears auto-mock call history via restoreMocks alone, so both are needed
+    // to keep cross-test "not.toHaveBeenCalled()" assertions isolated.
+    clearMocks: true,
     restoreMocks: true,
     // Playwright specs live under playwright/ and src/components/programs/__offline__/.
     // Both import from @playwright/test which is not available under jsdom; exclude
