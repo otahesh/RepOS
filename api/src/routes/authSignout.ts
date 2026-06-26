@@ -29,7 +29,7 @@ export async function authSignoutRoutes(app: FastifyInstance) {
     '/auth/signout-everywhere',
     { preHandler: [requireCfAccessOnly, csrfOrigin] },
     async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
+      const userId = req.userId;
       const userEmail = req.userEmail;
       if (!userId || !userEmail) {
         return reply.code(500).send({ error: 'auth_state_missing' });

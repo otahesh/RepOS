@@ -286,7 +286,7 @@ export async function accountRoutes(app: FastifyInstance) {
   // on any error inside the txn. The structured log fires AFTER the COMMIT
   // (per I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
   app.delete('/me', { preHandler: [requireCfAccessOnly, csrfOrigin] }, async (req, reply) => {
-    const userId = (req as { userId?: string }).userId;
+    const userId = req.userId;
     const userEmail = req.userEmail;
     if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
 

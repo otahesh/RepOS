@@ -13,7 +13,7 @@ export async function feedbackRoutes(app: FastifyInstance) {
     '/feedback',
     { preHandler: [requireBearerOrCfAccess, csrfOrigin] },
     async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
+      const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
       const parsed = FeedbackCreateSchema.safeParse(req.body);

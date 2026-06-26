@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { requireUserId } from './utils/requestIdentity.js';
+import { requireUserId, requireUserEmail } from './utils/requestIdentity.js';
 import sensible from '@fastify/sensible';
 import helmet from '@fastify/helmet';
 import { db } from './db/client.js';
@@ -109,8 +109,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     );
     return {
       id: userId,
-      email: req.userEmail as string,
-      display_name: (req.userDisplayName as string | null) ?? null,
+      email: requireUserEmail(req),
+      display_name: req.userDisplayName ?? null,
       timezone: req.userTimezone as string,
       onboarding_completed_at: u?.onboarding_completed_at ?? null,
       par_q_version: u?.par_q_version ?? 0,
