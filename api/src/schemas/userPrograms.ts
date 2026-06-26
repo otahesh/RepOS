@@ -23,6 +23,7 @@ export const UserProgramRecordSchema = z.object({
   status: z.enum(USER_PROGRAM_STATUSES),
   created_at: z.string(),
   updated_at: z.string(),
+  has_live_run: z.boolean().optional(),
 });
 
 export type UserProgramRecord = z.infer<typeof UserProgramRecordSchema>;

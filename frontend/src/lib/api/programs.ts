@@ -48,6 +48,8 @@ export type UserProgramRecord = {
   status: 'draft' | 'active' | 'paused' | 'completed' | 'abandoned' | 'archived';
   created_at: string;
   updated_at: string;
+  /** true when the program has an active/paused mesocycle run; present on list responses. */
+  has_live_run?: boolean;
 };
 
 export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
