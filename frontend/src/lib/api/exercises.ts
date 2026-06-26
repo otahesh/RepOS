@@ -3,6 +3,8 @@
  * Manually kept in sync with api/src/schemas/exercises.ts.
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
+import { apiFetch } from '../../auth';
+import { jsonOrThrow } from './_http';
 
 export type Exercise = {
   id: string;
@@ -20,9 +22,7 @@ export type Exercise = {
 };
 
 export async function listExercises(): Promise<Exercise[]> {
-  const r = await fetch('/api/exercises', { credentials: 'include' });
-  if (!r.ok) throw new Error(`listExercises: ${r.status}`);
-  const body = await r.json();
+  const body = await jsonOrThrow<{ exercises: Exercise[] }>(await apiFetch('/api/exercises'));
   return body.exercises;
 }
 
@@ -61,7 +61,5 @@ export type SubResult = {
 };
 
 export async function getSubstitutions(slug: string): Promise<SubResult> {
-  const r = await fetch(`/api/exercises/${slug}/substitutions`, { credentials: 'include' });
-  if (!r.ok) throw new Error(`getSubstitutions: ${r.status}`);
-  return r.json();
+  return jsonOrThrow<SubResult>(await apiFetch(`/api/exercises/${slug}/substitutions`));
 }
