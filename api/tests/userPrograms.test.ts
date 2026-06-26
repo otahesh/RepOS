@@ -139,8 +139,8 @@ describe('GET /api/user-programs', () => {
     const {
       rows: [archivedUp],
     } = await db.query<{ id: string }>(
-      `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
-       VALUES ($1, $2, $3, $4, 'archived') RETURNING id`,
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, status, archived_at)
+       VALUES ($1, $2, $3, $4, 'archived', now()) RETURNING id`,
       [userId, tmpl.id, tmpl.version, tmpl.name],
     );
 
@@ -159,6 +159,41 @@ describe('GET /api/user-programs', () => {
   it('401 without auth', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/user-programs' });
     expect(r.statusCode).toBe(401);
+  });
+});
+
+describe('GET /api/user-programs — archived filter', () => {
+  it('archived programs appear only under include=archived', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+
+    // Archive it directly in the DB (archive endpoint lands in Task 4).
+    await db.query(`UPDATE user_programs SET archived_at=now() WHERE id=$1`, [upId]);
+
+    const def = await app.inject({ method: 'GET', url: '/api/user-programs', headers: auth() });
+    expect(def.json<{ programs: { id: string }[] }>().programs.map((p) => p.id)).not.toContain(
+      upId,
+    );
+
+    const past = await app.inject({
+      method: 'GET',
+      url: '/api/user-programs?include=past',
+      headers: auth(),
+    });
+    expect(past.json<{ programs: { id: string }[] }>().programs.map((p) => p.id)).not.toContain(
+      upId,
+    );
+
+    const arc = await app.inject({
+      method: 'GET',
+      url: '/api/user-programs?include=archived',
+      headers: auth(),
+    });
+    expect(arc.json<{ programs: { id: string }[] }>().programs.map((p) => p.id)).toContain(upId);
   });
 });
 

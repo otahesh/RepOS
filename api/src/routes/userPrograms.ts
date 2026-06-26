@@ -25,31 +25,33 @@ import {
 } from '../schemas/userPrograms.js';
 
 export async function userProgramRoutes(app: FastifyInstance) {
-  // ?include=past  → returns active + abandoned + completed (excludes only 'archived')
-  // default        → returns active programs only (status IN ('draft','active','paused'))
+  // default          → active programs only: archived_at IS NULL AND status IN (draft,active,paused)
+  // ?include=past     → all non-archived (client filters to completed/abandoned)
+  // ?include=archived → archived programs only (archived_at IS NOT NULL)
   app.get<{ Querystring: { include?: string } }>(
     '/user-programs',
     { preHandler: requireBearerOrCfAccess },
     async (req, _reply) => {
       const userId = requireUserId(req);
-      const includePast = req.query.include === 'past';
+      const include = req.query.include;
       // LEFT JOIN program_templates to carry template_slug through to the client
-      // so the fork-wizard "Restart" action can navigate to /programs/:slug
-      // without a second round-trip.
+      // so the fork-wizard "Restart" action can navigate to /programs/:slug.
+      const cols = `up.id, up.template_id, pt.slug AS template_slug, up.template_version,
+                    up.name, up.customizations, up.status, up.created_at, up.updated_at`;
+      let where: string;
+      if (include === 'archived') {
+        where = `up.user_id=$1 AND up.archived_at IS NOT NULL`;
+      } else if (include === 'past') {
+        where = `up.user_id=$1 AND up.archived_at IS NULL`;
+      } else {
+        where = `up.user_id=$1 AND up.archived_at IS NULL AND up.status IN ('draft','active','paused')`;
+      }
       const { rows } = await db.query(
-        includePast
-          ? `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
-                    up.name, up.customizations, up.status, up.created_at, up.updated_at
-             FROM user_programs up
-             LEFT JOIN program_templates pt ON pt.id = up.template_id
-             WHERE up.user_id=$1 AND up.status <> 'archived'
-             ORDER BY up.created_at DESC`
-          : `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
-                    up.name, up.customizations, up.status, up.created_at, up.updated_at
-             FROM user_programs up
-             LEFT JOIN program_templates pt ON pt.id = up.template_id
-             WHERE up.user_id=$1 AND up.status IN ('draft','active','paused')
-             ORDER BY up.created_at DESC`,
+        `SELECT ${cols}
+         FROM user_programs up
+         LEFT JOIN program_templates pt ON pt.id = up.template_id
+         WHERE ${where}
+         ORDER BY up.created_at DESC`,
         [userId],
       );
       const listResp: UserProgramListResponse = { programs: rows };

@@ -32,7 +32,7 @@ export type UserProgramRecord = z.infer<typeof UserProgramRecordSchema>;
 // ---------------------------------------------------------------------------
 
 export const UserProgramListQuerySchema = z.object({
-  include: z.enum(['past']).optional(),
+  include: z.enum(['past', 'archived']).optional(),
 });
 
 export type UserProgramListQuery = z.infer<typeof UserProgramListQuerySchema>;
