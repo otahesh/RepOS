@@ -258,8 +258,7 @@ export function MyLibrary({
     setPrograms(null);
     setErr(null);
     setRecapErr(null);
-    const opts =
-      tab === 'archived' ? { includeArchived: true } : { includePast: tab === 'past' };
+    const opts = tab === 'archived' ? { includeArchived: true } : { includePast: tab === 'past' };
     listMyPrograms(opts)
       .then((rows) => {
         if (!ignore) setPrograms(rows);
