@@ -9,7 +9,10 @@ import * as lmApi from '../../lib/api/userLandmarks';
 // const re-export needs no restore).
 vi.mock('../../lib/api/userLandmarks');
 vi.mock('../../lib/muscleLandmarksSeed', () => ({
-  MUSCLE_LANDMARKS_SEED: { chest: { mev: 10, mav: 14, mrv: 22 }, quads: { mev: 8, mav: 14, mrv: 20 } },
+  MUSCLE_LANDMARKS_SEED: {
+    chest: { mev: 10, mav: 14, mrv: 22 },
+    quads: { mev: 8, mav: 14, mrv: 20 },
+  },
 }));
 
 const defaultGetResponse = {
@@ -40,7 +43,8 @@ describe('<LandmarksEditor>', () => {
     render(<LandmarksEditor />);
     await waitFor(() => expect(screen.getByLabelText('chest mev')).toBeInTheDocument());
     const mev = screen.getByLabelText('chest mev');
-    await user.clear(mev); await user.type(mev, '1'); // below floor max(2, 10*0.5)=5
+    await user.clear(mev);
+    await user.type(mev, '1'); // below floor max(2, 10*0.5)=5
     await user.click(screen.getByRole('button', { name: /save landmarks/i }));
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.some((a) => /MEV below clinical floor/.test(a.textContent ?? ''))).toBe(true);
@@ -50,8 +54,10 @@ describe('<LandmarksEditor>', () => {
     const user = userEvent.setup();
     render(<LandmarksEditor />);
     await waitFor(() => expect(screen.getByLabelText('chest mev')).toBeInTheDocument());
-    await user.clear(screen.getByLabelText('chest mev')); await user.type(screen.getByLabelText('chest mev'), '1');
-    await user.clear(screen.getByLabelText('quads mrv')); await user.type(screen.getByLabelText('quads mrv'), '60');
+    await user.clear(screen.getByLabelText('chest mev'));
+    await user.type(screen.getByLabelText('chest mev'), '1');
+    await user.clear(screen.getByLabelText('quads mrv'));
+    await user.type(screen.getByLabelText('quads mrv'), '60');
     await user.click(screen.getByRole('button', { name: /save landmarks/i }));
     const chestRow = screen.getByText(/chest/i).closest('tr');
     const quadsRow = screen.getByText(/quads/i).closest('tr');
@@ -70,19 +76,28 @@ describe('<LandmarksEditor>', () => {
   });
 
   it('shows PAR-Q advisory banner when par_q_advisory_active=true [D2]', async () => {
-    vi.mocked(lmApi.getLandmarks).mockResolvedValueOnce({ ...defaultGetResponse, par_q_advisory_active: true } as any);
+    vi.mocked(lmApi.getLandmarks).mockResolvedValueOnce({
+      ...defaultGetResponse,
+      par_q_advisory_active: true,
+    } as any);
     render(<LandmarksEditor />);
-    await waitFor(() => expect(screen.getByRole('note')).toHaveTextContent(/PAR-Q advisory active/i));
+    await waitFor(() =>
+      expect(screen.getByRole('note')).toHaveTextContent(/PAR-Q advisory active/i),
+    );
     expect(screen.getByText(/talk to a clinician/i)).toBeInTheDocument();
   });
 
   it('soft-caps MAV at 80% when PAR-Q active; "Override anyway?" lifts the cap [D2 + I-INJURY-OVERRIDE-CONFIRM]', async () => {
-    vi.mocked(lmApi.getLandmarks).mockResolvedValueOnce({ ...defaultGetResponse, par_q_advisory_active: true } as any);
+    vi.mocked(lmApi.getLandmarks).mockResolvedValueOnce({
+      ...defaultGetResponse,
+      par_q_advisory_active: true,
+    } as any);
     const user = userEvent.setup();
     render(<LandmarksEditor />);
     await waitFor(() => expect(screen.getByLabelText('chest mev')).toBeInTheDocument());
     // chest.mav default 14 → soft cap floor(14*0.8)=11; type 12 → should error on save.
-    await user.clear(screen.getByLabelText('chest mav')); await user.type(screen.getByLabelText('chest mav'), '12');
+    await user.clear(screen.getByLabelText('chest mav'));
+    await user.type(screen.getByLabelText('chest mav'), '12');
     await user.click(screen.getByRole('button', { name: /save landmarks/i }));
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.some((a) => /MAV above soft-cap/i.test(a.textContent ?? ''))).toBe(true);
@@ -94,8 +109,10 @@ describe('<LandmarksEditor>', () => {
     const user = userEvent.setup();
     render(<LandmarksEditor />);
     await waitFor(() => expect(screen.getByLabelText('chest mev')).toBeInTheDocument());
-    await user.clear(screen.getByLabelText('chest mev')); await user.type(screen.getByLabelText('chest mev'), '12');
-    await user.clear(screen.getByLabelText('chest mav')); await user.type(screen.getByLabelText('chest mav'), '16');
+    await user.clear(screen.getByLabelText('chest mev'));
+    await user.type(screen.getByLabelText('chest mev'), '12');
+    await user.clear(screen.getByLabelText('chest mav'));
+    await user.type(screen.getByLabelText('chest mav'), '16');
     await user.click(screen.getByRole('button', { name: /save landmarks/i }));
     await waitFor(() => expect(lmApi.patchLandmarks).toHaveBeenCalled());
     expect(await screen.findByText(/applies to your next mesocycle/i)).toBeInTheDocument();

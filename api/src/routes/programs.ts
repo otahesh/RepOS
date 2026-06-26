@@ -33,7 +33,8 @@ export async function programRoutes(app: FastifyInstance) {
       return { error: 'template not found', field: 'slug' };
     }
     reply.header('cache-control', 'public, max-age=300');
-    const detail: ProgramTemplateDetailResponse = rows[0] as unknown as ProgramTemplateDetailResponse;
+    const detail: ProgramTemplateDetailResponse =
+      rows[0] as unknown as ProgramTemplateDetailResponse;
     return detail;
   });
 
@@ -42,7 +43,9 @@ export async function programRoutes(app: FastifyInstance) {
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const { rows: [tmpl] } = await db.query(
+      const {
+        rows: [tmpl],
+      } = await db.query(
         `SELECT id, version, name FROM program_templates
          WHERE slug=$1 AND archived_at IS NULL`,
         [req.params.slug],
@@ -51,7 +54,9 @@ export async function programRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'template not found', field: 'slug' };
       }
-      const { rows: [up] } = await db.query(
+      const {
+        rows: [up],
+      } = await db.query(
         `INSERT INTO user_programs
          (user_id, template_id, template_version, name, customizations, status)
          VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')

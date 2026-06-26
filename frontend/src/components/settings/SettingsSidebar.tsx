@@ -14,14 +14,14 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { label: 'Account',       to: '/settings/account',       disabled: false, ownerWave: 'W6' },
-  { label: 'Health',        to: '/settings/health',        disabled: false, ownerWave: 'W2' },
-  { label: 'Equipment',     to: '/settings/equipment',     disabled: false, ownerWave: 'W1' },
-  { label: 'Integrations',  to: '/settings/integrations',  disabled: false, ownerWave: 'W1' },
+  { label: 'Account', to: '/settings/account', disabled: false, ownerWave: 'W6' },
+  { label: 'Health', to: '/settings/health', disabled: false, ownerWave: 'W2' },
+  { label: 'Equipment', to: '/settings/equipment', disabled: false, ownerWave: 'W1' },
+  { label: 'Integrations', to: '/settings/integrations', disabled: false, ownerWave: 'W1' },
   { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed
-  { label: 'Backups',       to: '/settings/backups',       disabled: false, ownerWave: 'W5' }, // W5 landed
-  { label: 'Feedback',      to: '/settings/feedback',      disabled: false, ownerWave: 'W7' }, // W7 landed
+  { label: 'Backups', to: '/settings/backups', disabled: false, ownerWave: 'W5' }, // W5 landed
+  { label: 'Feedback', to: '/settings/feedback', disabled: false, ownerWave: 'W7' }, // W7 landed
   // D7: Storage + Injuries stay top-level.
-  { label: 'Storage',       to: '/settings/storage',       disabled: false, ownerWave: 'W1' },
-  { label: 'Injuries',      to: '/settings/injuries',      disabled: false, ownerWave: 'W3' },
+  { label: 'Storage', to: '/settings/storage', disabled: false, ownerWave: 'W1' },
+  { label: 'Injuries', to: '/settings/injuries', disabled: false, ownerWave: 'W3' },
 ] as const;

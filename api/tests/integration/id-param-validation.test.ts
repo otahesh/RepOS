@@ -5,25 +5,29 @@ import { mkUserPair, cleanupUserPair, type UserPairHandle } from '../helpers/see
 import { db } from '../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 // G11 — a malformed :id must be a clean 404, never a 500 that leaks a raw
 // Postgres "invalid input syntax for type uuid" error in the response body.
 const UUID_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH'; url: string }> = [
-  { method: 'GET',   url: '/api/mesocycles/not-a-uuid' },
-  { method: 'GET',   url: '/api/mesocycles/not-a-uuid/volume-rollup' },
-  { method: 'GET',   url: '/api/mesocycles/not-a-uuid/recap-stats' },
-  { method: 'POST',  url: '/api/mesocycles/not-a-uuid/abandon' },
-  { method: 'POST',  url: '/api/mesocycles/not-a-uuid/deload-now' },
-  { method: 'POST',  url: '/api/mesocycles/not-a-uuid/deload-now/undo' },
+  { method: 'GET', url: '/api/mesocycles/not-a-uuid' },
+  { method: 'GET', url: '/api/mesocycles/not-a-uuid/volume-rollup' },
+  { method: 'GET', url: '/api/mesocycles/not-a-uuid/recap-stats' },
+  { method: 'POST', url: '/api/mesocycles/not-a-uuid/abandon' },
+  { method: 'POST', url: '/api/mesocycles/not-a-uuid/deload-now' },
+  { method: 'POST', url: '/api/mesocycles/not-a-uuid/deload-now/undo' },
   { method: 'PATCH', url: '/api/planned-sets/not-a-uuid' },
-  { method: 'POST',  url: '/api/planned-sets/not-a-uuid/substitute' },
-  { method: 'GET',   url: '/api/user-programs/not-a-uuid' },
+  { method: 'POST', url: '/api/planned-sets/not-a-uuid/substitute' },
+  { method: 'GET', url: '/api/user-programs/not-a-uuid' },
   { method: 'PATCH', url: '/api/user-programs/not-a-uuid' },
-  { method: 'GET',   url: '/api/user-programs/not-a-uuid/warnings' },
-  { method: 'GET',   url: '/api/user-programs/not-a-uuid/mesocycles' },
-  { method: 'POST',  url: '/api/user-programs/not-a-uuid/start' },
+  { method: 'GET', url: '/api/user-programs/not-a-uuid/warnings' },
+  { method: 'GET', url: '/api/user-programs/not-a-uuid/mesocycles' },
+  { method: 'POST', url: '/api/user-programs/not-a-uuid/start' },
 ];
 
 describe('G11 — malformed :id is a clean 404, not a 500', () => {
@@ -38,7 +42,10 @@ describe('G11 — malformed :id is a clean 404, not a 500', () => {
         headers: { authorization: `Bearer ${pair.userA.bearer}` },
         payload: route.method === 'GET' ? undefined : {},
       });
-      expect(res.statusCode, `expected clean 404, got ${res.statusCode}: ${res.body.slice(0, 200)}`).toBe(404);
+      expect(
+        res.statusCode,
+        `expected clean 404, got ${res.statusCode}: ${res.body.slice(0, 200)}`,
+      ).toBe(404);
       expect(res.body).not.toMatch(/invalid input syntax/i);
     });
   }

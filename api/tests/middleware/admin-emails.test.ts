@@ -40,15 +40,12 @@ afterAll(async () => {
   if (savedAdminEmails === undefined) delete process.env.REPOS_ADMIN_EMAILS;
   else process.env.REPOS_ADMIN_EMAILS = savedAdminEmails;
   // Clear users auto-provisioned by CF Access path.
-  await db.query(
-    `DELETE FROM users WHERE email IN ($1, $2, $3, $4)`,
-    [
-      'd10.allowed@repos.test',
-      'd10.denied@repos.test',
-      'd10.misconf@repos.test',
-      'd10.mixedcase@repos.test',
-    ],
-  );
+  await db.query(`DELETE FROM users WHERE email IN ($1, $2, $3, $4)`, [
+    'd10.allowed@repos.test',
+    'd10.denied@repos.test',
+    'd10.misconf@repos.test',
+    'd10.mixedcase@repos.test',
+  ]);
   await db.end();
 });
 

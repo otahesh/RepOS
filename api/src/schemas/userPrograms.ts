@@ -5,7 +5,12 @@ import { z } from 'zod';
 // ---------------------------------------------------------------------------
 
 export const USER_PROGRAM_STATUSES = [
-  'draft', 'active', 'paused', 'completed', 'abandoned', 'archived',
+  'draft',
+  'active',
+  'paused',
+  'completed',
+  'abandoned',
+  'archived',
 ] as const;
 export type UserProgramStatus = (typeof USER_PROGRAM_STATUSES)[number];
 
@@ -46,22 +51,26 @@ export type UserProgramListResponse = z.infer<typeof UserProgramListResponseSche
 // These types are intentionally looser than the full ProgramTemplateSchema
 // because the resolver stamps additional fields (set_count_delta,
 // target_rir_override) onto blocks at runtime.
-const EffectiveBlockSchema = z.object({
-  exercise_slug: z.string(),
-  mev: z.number().int().min(0).optional(),
-  mav: z.number().int().min(0).optional(),
-  target_reps_low: z.number().int().min(1).optional(),
-  target_reps_high: z.number().int().min(1).optional(),
-  target_rir: z.number().int().min(1).optional(),
-  rest_sec: z.number().int().min(0).optional(),
-  set_count_delta: z.number().int().optional(),
-  target_rir_override: z.number().int().min(1).optional(),
-  cardio: z.object({
-    target_duration_sec: z.number().int().optional(),
-    target_distance_m: z.number().int().optional(),
-    target_zone: z.number().int().min(1).max(5).optional(),
-  }).optional(),
-}).passthrough();
+const EffectiveBlockSchema = z
+  .object({
+    exercise_slug: z.string(),
+    mev: z.number().int().min(0).optional(),
+    mav: z.number().int().min(0).optional(),
+    target_reps_low: z.number().int().min(1).optional(),
+    target_reps_high: z.number().int().min(1).optional(),
+    target_rir: z.number().int().min(1).optional(),
+    rest_sec: z.number().int().min(0).optional(),
+    set_count_delta: z.number().int().optional(),
+    target_rir_override: z.number().int().min(1).optional(),
+    cardio: z
+      .object({
+        target_duration_sec: z.number().int().optional(),
+        target_distance_m: z.number().int().optional(),
+        target_zone: z.number().int().min(1).max(5).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
 
 const EffectiveDaySchema = z.object({
   idx: z.number().int().min(0),
@@ -159,7 +168,7 @@ export type UserProgramStartResponse = z.infer<typeof UserProgramStartResponseSc
 export const ProgramMesocycleSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(USER_PROGRAM_STATUSES),
-  start_date: z.string(),            // YYYY-MM-DD
+  start_date: z.string(), // YYYY-MM-DD
   finished_at: z.string().nullable(),
   is_deload: z.boolean(),
   weeks: z.number().int().min(1),

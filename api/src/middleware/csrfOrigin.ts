@@ -35,7 +35,5 @@ export async function csrfOrigin(req: FastifyRequest, reply: FastifyReply): Prom
   if (csrfHeader === '1') return;
 
   req.log.warn({ origin, hasCsrfHeader: !!csrfHeader }, 'csrf_origin_rejected');
-  return reply
-    .code(403)
-    .send({ error: 'csrf_origin_required', expected_origin: allowedOrigin });
+  return reply.code(403).send({ error: 'csrf_origin_required', expected_origin: allowedOrigin });
 }

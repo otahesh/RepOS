@@ -58,11 +58,16 @@ export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
 }
 
 export async function getProgramTemplate(slug: string): Promise<ProgramTemplate> {
-  const res = await fetch(`/api/program-templates/${encodeURIComponent(slug)}`, { credentials: 'same-origin' });
+  const res = await fetch(`/api/program-templates/${encodeURIComponent(slug)}`, {
+    credentials: 'same-origin',
+  });
   return jsonOrThrow<ProgramTemplate>(res);
 }
 
-export async function forkProgramTemplate(slug: string, body: { name: string }): Promise<UserProgramRecord> {
+export async function forkProgramTemplate(
+  slug: string,
+  body: { name: string },
+): Promise<UserProgramRecord> {
   const res = await fetch(`/api/program-templates/${encodeURIComponent(slug)}/fork`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

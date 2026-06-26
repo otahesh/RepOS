@@ -22,16 +22,23 @@ export default function SettingsHealthPage(): JSX.Element {
   const [clearing, setClearing] = useState(false);
 
   const load = useCallback(() => {
-    getParQStatus().then(setStatus).catch(() => setStatus(null));
+    getParQStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   async function markCleared() {
     setClearing(true);
     try {
       await markPARQCleared();
-      pushToast({ severity: 'success', body: 'Advisory cleared. Your program resumes normal progression.' });
+      pushToast({
+        severity: 'success',
+        body: 'Advisory cleared. Your program resumes normal progression.',
+      });
       load();
     } catch {
       pushToast({ severity: 'error', body: "Couldn't clear advisory mode. Try again." });
@@ -44,14 +51,22 @@ export default function SettingsHealthPage(): JSX.Element {
     <main style={{ padding: 16, color: TOKENS.text, fontFamily: FONTS.ui, maxWidth: 720 }}>
       <h1 style={{ fontSize: 22, marginBottom: 8 }}>Health</h1>
       <p style={{ color: TOKENS.textDim, fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-        Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status. It
-        is a <Term k="soft_gate" /> — answering "yes" never blocks training, it just keeps your program
+        Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status. It is
+        a <Term k="soft_gate" /> — answering "yes" never blocks training, it just keeps your program
         conservative until a clinician clears you.
       </p>
 
       {status && (
         <section style={card}>
-          <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.2, color: TOKENS.accent, marginBottom: 8 }}>
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              letterSpacing: 1.2,
+              color: TOKENS.accent,
+              marginBottom: 8,
+            }}
+          >
             READINESS SCREEN
           </div>
           <div style={{ fontSize: 14, color: TOKENS.text, marginBottom: 4 }}>
@@ -74,15 +89,28 @@ export default function SettingsHealthPage(): JSX.Element {
 
       {status?.advisory_active && (
         <section style={{ ...card, borderColor: TOKENS.warn, background: 'rgba(245,181,68,0.08)' }}>
-          <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.2, color: TOKENS.warn, marginBottom: 8 }}>
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              letterSpacing: 1.2,
+              color: TOKENS.warn,
+              marginBottom: 8,
+            }}
+          >
             ADVISORY ACTIVE
           </div>
           <p style={{ fontSize: 14, color: TOKENS.text, lineHeight: 1.6, margin: '0 0 16px' }}>
-            You're in <Term k="advisory_mode" /> (volume capped at <Term k="MEV" /> with <Term k="RIR" /> 3).
-            If you've spoken with a clinician and they've cleared you, mark yourself cleared to resume
-            normal progression.
+            You're in <Term k="advisory_mode" /> (volume capped at <Term k="MEV" /> with{' '}
+            <Term k="RIR" /> 3). If you've spoken with a clinician and they've cleared you, mark
+            yourself cleared to resume normal progression.
           </p>
-          <button type="button" onClick={markCleared} disabled={clearing} style={{ ...primaryBtn, opacity: clearing ? 0.6 : 1 }}>
+          <button
+            type="button"
+            onClick={markCleared}
+            disabled={clearing}
+            style={{ ...primaryBtn, opacity: clearing ? 0.6 : 1 }}
+          >
             {clearing ? 'CLEARING…' : 'Mark cleared'}
           </button>
         </section>
@@ -91,8 +119,14 @@ export default function SettingsHealthPage(): JSX.Element {
       {reviewing && (
         <ParQGate
           forceReview
-          onClose={() => { setReviewing(false); load(); }}
-          onComplete={() => { setReviewing(false); load(); }}
+          onClose={() => {
+            setReviewing(false);
+            load();
+          }}
+          onComplete={() => {
+            setReviewing(false);
+            load();
+          }}
         />
       )}
     </main>
@@ -100,14 +134,31 @@ export default function SettingsHealthPage(): JSX.Element {
 }
 
 const card: React.CSSProperties = {
-  border: `1px solid ${TOKENS.line}`, borderRadius: 14, padding: '18px 20px',
-  marginBottom: 16, background: TOKENS.surface,
+  border: `1px solid ${TOKENS.line}`,
+  borderRadius: 14,
+  padding: '18px 20px',
+  marginBottom: 16,
+  background: TOKENS.surface,
 };
 const primaryBtn: React.CSSProperties = {
-  background: TOKENS.warn, color: '#0A0D12', border: 'none', borderRadius: 10,
-  padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: FONTS.ui,
+  background: TOKENS.warn,
+  color: '#0A0D12',
+  border: 'none',
+  borderRadius: 10,
+  padding: '10px 18px',
+  fontWeight: 700,
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
 };
 const secondaryBtn: React.CSSProperties = {
-  background: 'transparent', color: TOKENS.accent, border: `1px solid ${TOKENS.accent}`,
-  borderRadius: 10, padding: '10px 18px', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: FONTS.ui,
+  background: 'transparent',
+  color: TOKENS.accent,
+  border: `1px solid ${TOKENS.accent}`,
+  borderRadius: 10,
+  padding: '10px 18px',
+  fontWeight: 600,
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
 };

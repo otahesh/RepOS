@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
-import Sidebar from './Sidebar'
-import Topbar from './Topbar'
-import { RouteErrorBoundary } from './RouteErrorBoundary'
-import { useIsMobile } from '../../lib/useIsMobile'
-import { LogBufferRecovery } from '../programs/LogBufferRecovery'
-import { SessionExpiredBanner } from '../auth/SessionExpiredBanner'
-import { ToastHost } from '../common/ToastHost'
-import { MaintenanceBanner } from '../maintenance/MaintenanceBanner'
-import { logBuffer } from '../../lib/logBuffer'
-import { useCurrentUser } from '../../auth'
-import { OnboardingOverlay } from '../onboarding/OnboardingOverlay'
-import { ParQGate } from '../onboarding/ParQGate'
-import { getParQStatus } from '../../lib/api/parQ'
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import Sidebar from './Sidebar';
+import Topbar from './Topbar';
+import { RouteErrorBoundary } from './RouteErrorBoundary';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { LogBufferRecovery } from '../programs/LogBufferRecovery';
+import { SessionExpiredBanner } from '../auth/SessionExpiredBanner';
+import { ToastHost } from '../common/ToastHost';
+import { MaintenanceBanner } from '../maintenance/MaintenanceBanner';
+import { logBuffer } from '../../lib/logBuffer';
+import { useCurrentUser } from '../../auth';
+import { OnboardingOverlay } from '../onboarding/OnboardingOverlay';
+import { ParQGate } from '../onboarding/ParQGate';
+import { getParQStatus } from '../../lib/api/parQ';
 
 // W2 (panel C-MOUNT) — derived state machine that mounts ONE of the two
 // AppShell overlays (or neither) as a sibling of <Outlet>. Onboarding always
@@ -24,41 +24,46 @@ import { getParQStatus } from '../../lib/api/parQ'
 // Each overlay's onComplete advances the local gate state without a full
 // /api/me re-bootstrap.
 function useOnboardingGate(): React.ReactNode {
-  const { user } = useCurrentUser()
-  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null)
-  const [parQNeedsPrompt, setParQNeedsPrompt] = useState<boolean | null>(null)
+  const { user } = useCurrentUser();
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+  const [parQNeedsPrompt, setParQNeedsPrompt] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!user) return
-    setOnboardingDone(!!user.onboarding_completed_at)
-  }, [user])
+    if (!user) return;
+    setOnboardingDone(!!user.onboarding_completed_at);
+  }, [user]);
 
   const refreshParQ = useCallback(() => {
     getParQStatus()
       .then((s) => setParQNeedsPrompt(s.needs_prompt))
-      .catch(() => setParQNeedsPrompt(false))
-  }, [])
+      .catch(() => setParQNeedsPrompt(false));
+  }, []);
 
   useEffect(() => {
     // PAR-Q follows onboarding — only check it once onboarding is complete.
-    if (onboardingDone) refreshParQ()
-  }, [onboardingDone, refreshParQ])
+    if (onboardingDone) refreshParQ();
+  }, [onboardingDone, refreshParQ]);
 
-  const reloadOnboarding = useCallback(() => { setOnboardingDone(true) }, [])
-  const reloadParQ = useCallback(() => { setParQNeedsPrompt(false); refreshParQ() }, [refreshParQ])
+  const reloadOnboarding = useCallback(() => {
+    setOnboardingDone(true);
+  }, []);
+  const reloadParQ = useCallback(() => {
+    setParQNeedsPrompt(false);
+    refreshParQ();
+  }, [refreshParQ]);
 
-  if (!user) return null
-  if (onboardingDone === false) return <OnboardingOverlay onComplete={reloadOnboarding} />
-  if (onboardingDone && parQNeedsPrompt) return <ParQGate onComplete={reloadParQ} />
-  return null
+  if (!user) return null;
+  if (onboardingDone === false) return <OnboardingOverlay onComplete={reloadOnboarding} />;
+  if (onboardingDone && parQNeedsPrompt) return <ParQGate onComplete={reloadParQ} />;
+  return null;
 }
 
 export default function AppShell() {
-  const isMobile = useIsMobile()
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const location = useLocation()
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const onboardingOverlay = useOnboardingGate()
+  const isMobile = useIsMobile();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const onboardingOverlay = useOnboardingGate();
 
   // Wire offline-queue flush at the app shell level. Without this nothing in
   // production code drains the IDB queue on offline→online or retries stalled
@@ -74,50 +79,54 @@ export default function AppShell() {
     // or 'online' event drives the recovery, so swallowing here is safe.
     const safeFlush = (): void => {
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        logBuffer.flush().catch(() => undefined)
+        logBuffer.flush().catch(() => undefined);
       }
-    }
-    safeFlush()
-    const off = logBuffer.onReconnect()
-    const tick = window.setInterval(safeFlush, 2000)
+    };
+    safeFlush();
+    const off = logBuffer.onReconnect();
+    const tick = window.setInterval(safeFlush, 2000);
     return () => {
-      off()
-      window.clearInterval(tick)
-    }
-  }, [])
+      off();
+      window.clearInterval(tick);
+    };
+  }, []);
 
-  const closeDrawer = useCallback(() => setMobileOpen(false), [])
-  const toggleDrawer = useCallback(() => setMobileOpen(o => !o), [])
+  const closeDrawer = useCallback(() => setMobileOpen(false), []);
+  const toggleDrawer = useCallback(() => setMobileOpen((o) => !o), []);
 
   // Close drawer on route change.
   useEffect(() => {
-    setMobileOpen(false)
-  }, [location.pathname])
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   // If we cross the breakpoint into desktop while drawer is open, drop the open state.
   useEffect(() => {
-    if (!isMobile && mobileOpen) setMobileOpen(false)
-  }, [isMobile, mobileOpen])
+    if (!isMobile && mobileOpen) setMobileOpen(false);
+  }, [isMobile, mobileOpen]);
 
   if (isMobile) {
     return (
-      <div style={{
-        position: 'relative',
-        height: '100vh',
-        overflow: 'hidden',
-        background: 'var(--color-bg)',
-        display: 'grid',
-        gridTemplateRows: '72px 1fr',
-        minHeight: 0,
-      }}>
+      <div
+        style={{
+          position: 'relative',
+          height: '100vh',
+          overflow: 'hidden',
+          background: 'var(--color-bg)',
+          display: 'grid',
+          gridTemplateRows: '72px 1fr',
+          minHeight: 0,
+        }}
+      >
         <Topbar onToggleSidebar={toggleDrawer} mobileOpen={mobileOpen} triggerRef={triggerRef} />
         <MaintenanceBanner />
         <LogBufferRecovery />
         <SessionExpiredBanner />
-        <main style={{
-          overflow: 'auto',
-          minHeight: 0,
-        }}>
+        <main
+          style={{
+            overflow: 'auto',
+            minHeight: 0,
+          }}
+        >
           {/* keyed by pathname so the boundary resets on navigation */}
           <RouteErrorBoundary key={location.pathname}>
             <Outlet />
@@ -145,32 +154,38 @@ export default function AppShell() {
 
         <Sidebar mobileOpen={mobileOpen} onClose={closeDrawer} />
       </div>
-    )
+    );
   }
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '232px 1fr',
-      height: '100vh',
-      overflow: 'hidden',
-      background: 'var(--color-bg)',
-    }}>
-      <Sidebar />
-      <div style={{
+    <div
+      style={{
         display: 'grid',
-        gridTemplateRows: '72px 1fr',
-        minHeight: 0,
+        gridTemplateColumns: '232px 1fr',
+        height: '100vh',
         overflow: 'hidden',
-      }}>
+        background: 'var(--color-bg)',
+      }}
+    >
+      <Sidebar />
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateRows: '72px 1fr',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         <Topbar />
         <MaintenanceBanner />
         <LogBufferRecovery />
         <SessionExpiredBanner />
-        <main style={{
-          overflow: 'auto',
-          minHeight: 0,
-        }}>
+        <main
+          style={{
+            overflow: 'auto',
+            minHeight: 0,
+          }}
+        >
           <RouteErrorBoundary key={location.pathname}>
             <Outlet />
           </RouteErrorBoundary>
@@ -179,5 +194,5 @@ export default function AppShell() {
       </div>
       {onboardingOverlay}
     </div>
-  )
+  );
 }

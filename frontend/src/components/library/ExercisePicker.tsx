@@ -6,7 +6,7 @@ import { allPredicatesSatisfied, type PredicateT } from '../../lib/api/predicate
 export type PickerProps = {
   onPick: (e: Exercise) => void;
   defaultEquipmentToggle?: boolean;
-  source?: 'catalog' | 'mine';   // reserved for v3; UI hides until then
+  source?: 'catalog' | 'mine'; // reserved for v3; UI hides until then
   // [W4.1 C-DESKTOPSWAPSHEET-A11Y (e)] Optional loading callback so a wrapping
   // dialog (DesktopSwapSheet) can move focus to the first candidate once the
   // exercise list resolves. Backward-compatible: default no-op.
@@ -19,10 +19,14 @@ const GROUP_TO_SLUGS: Record<string, string[]> = {
   shoulders: ['front_delt', 'side_delt', 'rear_delt'],
   arms: ['biceps', 'triceps'],
   legs: ['quads', 'hamstrings', 'glutes', 'calves'],
-  core: ['core'],   // W2.4: core muscle is now first-class
+  core: ['core'], // W2.4: core muscle is now first-class
 };
 
-export function ExercisePicker({ onPick, defaultEquipmentToggle = true, onLoadingChange }: PickerProps) {
+export function ExercisePicker({
+  onPick,
+  defaultEquipmentToggle = true,
+  onLoadingChange,
+}: PickerProps) {
   const [all, setAll] = useState<Exercise[]>([]);
   const [q, setQ] = useState('');
   const [muscles, setMuscles] = useState<Set<string>>(new Set());
@@ -41,13 +45,20 @@ export function ExercisePicker({ onPick, defaultEquipmentToggle = true, onLoadin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    getEquipmentProfile().then(setProfile).catch(() => setProfile({ _v: 1 }));
+    getEquipmentProfile()
+      .then(setProfile)
+      .catch(() => setProfile({ _v: 1 }));
   }, []);
 
   const filtered = useMemo(() => {
-    return all.filter(e => {
-      if (q && !e.name.toLowerCase().includes(q.toLowerCase()) && !e.slug.includes(q.toLowerCase())) return false;
-      if (muscles.size > 0 && ![...muscles].some(g => GROUP_TO_SLUGS[g]?.includes(e.primary_muscle))) return false;
+    return all.filter((e) => {
+      if (q && !e.name.toLowerCase().includes(q.toLowerCase()) && !e.slug.includes(q.toLowerCase()))
+        return false;
+      if (
+        muscles.size > 0 &&
+        ![...muscles].some((g) => GROUP_TO_SLUGS[g]?.includes(e.primary_muscle))
+      )
+        return false;
       if (equipOnly && profile) {
         const reqs = (e.required_equipment?.requires ?? []) as PredicateT[];
         if (!allPredicatesSatisfied(reqs, profile)) return false;
@@ -57,49 +68,98 @@ export function ExercisePicker({ onPick, defaultEquipmentToggle = true, onLoadin
   }, [all, q, muscles, equipOnly, profile]);
 
   return (
-    <div style={{ background: '#10141C', borderRadius: 12, padding: 16, fontFamily: 'Inter Tight' }}>
+    <div
+      style={{ background: '#10141C', borderRadius: 12, padding: 16, fontFamily: 'Inter Tight' }}
+    >
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
-          type="text" placeholder="Search exercises…"
-          value={q} onChange={e => setQ(e.target.value)}
-          style={{ flex: 1, padding: '8px 12px', borderRadius: 6,
-                   border: '1px solid rgba(255,255,255,0.1)', background: '#0A0D12', color: '#fff' }}
+          type="text"
+          placeholder="Search exercises…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: '#0A0D12',
+            color: '#fff',
+          }}
         />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
-          <input type="checkbox" checked={equipOnly} onChange={e => setEquipOnly(e.target.checked)} />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12,
+            color: 'rgba(255,255,255,0.7)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={equipOnly}
+            onChange={(e) => setEquipOnly(e.target.checked)}
+          />
           Available only
         </label>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-        {['chest', 'back', 'shoulders', 'arms', 'legs', 'core'].map(g => {
+        {['chest', 'back', 'shoulders', 'arms', 'legs', 'core'].map((g) => {
           const active = muscles.has(g);
           return (
-            <button key={g}
+            <button
+              key={g}
               onClick={() => {
                 const next = new Set(muscles);
-                active ? next.delete(g) : next.add(g);
+                if (active) next.delete(g);
+                else next.add(g);
                 setMuscles(next);
               }}
               style={{
-                padding: '4px 10px', borderRadius: 100, fontSize: 11, fontFamily: 'JetBrains Mono', letterSpacing: 1,
+                padding: '4px 10px',
+                borderRadius: 100,
+                fontSize: 11,
+                fontFamily: 'JetBrains Mono',
+                letterSpacing: 1,
                 border: `1px solid ${active ? '#4D8DFF' : 'rgba(255,255,255,0.08)'}`,
                 background: active ? 'rgba(77,141,255,0.15)' : 'transparent',
                 color: active ? '#4D8DFF' : 'rgba(255,255,255,0.6)',
                 cursor: 'pointer',
-              }}>{g.toUpperCase()}</button>
+              }}
+            >
+              {g.toUpperCase()}
+            </button>
           );
         })}
       </div>
-      <div style={{ maxHeight: 400, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {filtered.map(e => (
-          <button key={e.slug} onClick={() => onPick(e)}
+      <div
+        style={{
+          maxHeight: 400,
+          overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        {filtered.map((e) => (
+          <button
+            key={e.slug}
+            onClick={() => onPick(e)}
             style={{
-              textAlign: 'left', padding: '10px 12px', borderRadius: 6,
-              border: '1px solid rgba(255,255,255,0.06)', background: '#0A0D12', color: '#fff',
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
+              textAlign: 'left',
+              padding: '10px 12px',
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.06)',
+              background: '#0A0D12',
+              color: '#fff',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
             <div style={{ fontSize: 13, fontWeight: 600 }}>{e.name}</div>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
+            <div
+              style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}
+            >
               {e.primary_muscle_name} · {e.movement_pattern}
             </div>
           </button>

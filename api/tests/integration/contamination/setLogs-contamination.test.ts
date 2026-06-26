@@ -2,15 +2,26 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 // Resolve a planned_set id on A's run + insert a fresh (in-window) set_log on it.
-async function seedAPlannedSetAndLog(userId: string): Promise<{ plannedSetId: string; setLogId: string; exerciseId: string }> {
+async function seedAPlannedSetAndLog(
+  userId: string,
+): Promise<{ plannedSetId: string; setLogId: string; exerciseId: string }> {
   const runId = await seedFullMesocycleForUser(userId, { weeks: 4 });
   const { rows: psRows } = await db.query<{ id: string; exercise_id: string }>(
     `SELECT ps.id, ps.exercise_id
@@ -41,14 +52,17 @@ describe('W8.2 contamination — set-logs', () => {
     const { plannedSetId } = await seedAPlannedSetAndLog(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'POST', url: '/api/set-logs',
+      method: 'POST',
+      url: '/api/set-logs',
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       payload: {
         planned_set_id: plannedSetId,
         // RFC-4122-valid UUID — Zod v4's .uuid() rejects the all-1s literal
         // (variant nibble must be 8/9/a/b), so mint a real one here.
         client_request_id: randomUUID(),
-        weight_lbs: 100, reps: 5, rir: 2,
+        weight_lbs: 100,
+        reps: 5,
+        rir: 2,
         performed_at: new Date().toISOString(),
       },
     });
@@ -62,13 +76,15 @@ describe('W8.2 contamination — set-logs', () => {
     const { setLogId } = await seedAPlannedSetAndLog(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'PATCH', url: `/api/set-logs/${setLogId}`,
+      method: 'PATCH',
+      url: `/api/set-logs/${setLogId}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       payload: { weight_lbs: 999 },
     });
     expect(res.statusCode).toBe(404);
     const { rows } = await db.query<{ performed_load_lbs: string }>(
-      `SELECT performed_load_lbs FROM set_logs WHERE id=$1`, [setLogId],
+      `SELECT performed_load_lbs FROM set_logs WHERE id=$1`,
+      [setLogId],
     );
     expect(Number(rows[0].performed_load_lbs)).toBe(200);
   });
@@ -80,7 +96,8 @@ describe('W8.2 contamination — set-logs', () => {
     const { setLogId } = await seedAPlannedSetAndLog(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'DELETE', url: `/api/set-logs/${setLogId}`,
+      method: 'DELETE',
+      url: `/api/set-logs/${setLogId}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
@@ -95,7 +112,8 @@ describe('W8.2 contamination — set-logs', () => {
     const { plannedSetId } = await seedAPlannedSetAndLog(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'GET', url: `/api/set-logs?planned_set_id=${plannedSetId}`,
+      method: 'GET',
+      url: `/api/set-logs?planned_set_id=${plannedSetId}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(200);

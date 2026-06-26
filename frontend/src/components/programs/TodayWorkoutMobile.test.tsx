@@ -22,11 +22,30 @@ function renderTWM(props: { onStart?: (runId: string, dayId: string) => void } =
 }
 
 const BASE_WORKOUT = {
-  state: 'workout' as const, run_id: 'mr-1',
+  state: 'workout' as const,
+  run_id: 'mr-1',
   day: { id: 'dw-1', kind: 'strength' as const, name: 'Upper Heavy', week_idx: 1, day_idx: 0 },
   sets: [
-    { id: 'ps-1', exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' }, block_idx: 0, set_idx: 0, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
-    { id: 'ps-2', exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' }, block_idx: 0, set_idx: 1, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
+    {
+      id: 'ps-1',
+      exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' },
+      block_idx: 0,
+      set_idx: 0,
+      target_reps_low: 6,
+      target_reps_high: 8,
+      target_rir: 2,
+      rest_sec: 180,
+    },
+    {
+      id: 'ps-2',
+      exercise: { id: 'e-1', slug: 'barbell-bench-press', name: 'Barbell Bench Press' },
+      block_idx: 0,
+      set_idx: 1,
+      target_reps_low: 6,
+      target_reps_high: 8,
+      target_rir: 2,
+      rest_sec: 180,
+    },
   ],
   cardio: [],
 };
@@ -114,7 +133,13 @@ describe('<TodayWorkoutMobile>', () => {
     vi.spyOn(exApi, 'getSubstitutions').mockResolvedValue({
       from: { slug: 'barbell-bench-press', name: 'Barbell Bench Press' },
       subs: [
-        { id: 'sub-1', slug: 'incline-db-bench', name: 'Incline DB Bench', score: 500, reason: 'Same pattern' },
+        {
+          id: 'sub-1',
+          slug: 'incline-db-bench',
+          name: 'Incline DB Bench',
+          score: 500,
+          reason: 'Same pattern',
+        },
       ],
       truncated: false,
     });

@@ -21,8 +21,12 @@ describe('<DeloadThisWeekButton>', () => {
 
   it('two-step confirm: trigger → sheet → Confirm posts deload + toast + onChanged', async () => {
     const trigger2 = vi.spyOn(deloadApi, 'triggerManualDeload').mockResolvedValue({
-      run_id: 'run-1', removed_planned_sets: 4, affected_planned_sets: 8,
-      affected_day_workouts: 6, affected_week_idxs: [2, 3, 4, 5], triggered_at: 't',
+      run_id: 'run-1',
+      removed_planned_sets: 4,
+      affected_planned_sets: 8,
+      affected_day_workouts: 6,
+      affected_week_idxs: [2, 3, 4, 5],
+      triggered_at: 't',
     });
     const onChanged = vi.fn();
     render(<DeloadThisWeekButton runId="run-1" onChanged={onChanged} />);
@@ -35,7 +39,9 @@ describe('<DeloadThisWeekButton>', () => {
       expect.objectContaining({ severity: 'success', actionLabel: 'Undo' }),
     );
     // Sheet closed.
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Confirm deload' })).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Confirm deload' })).not.toBeInTheDocument(),
+    );
   });
 
   it('Cancel closes the sheet without posting', () => {
@@ -49,8 +55,12 @@ describe('<DeloadThisWeekButton>', () => {
 
   it('the toast Undo action calls undoManualDeload', async () => {
     vi.spyOn(deloadApi, 'triggerManualDeload').mockResolvedValue({
-      run_id: 'run-1', removed_planned_sets: 0, affected_planned_sets: 0,
-      affected_day_workouts: 0, affected_week_idxs: [], triggered_at: 't',
+      run_id: 'run-1',
+      removed_planned_sets: 0,
+      affected_planned_sets: 0,
+      affected_day_workouts: 0,
+      affected_week_idxs: [],
+      triggered_at: 't',
     });
     const undo = vi.spyOn(deloadApi, 'undoManualDeload').mockResolvedValue({ reversed_at: 't' });
     // Capture the toast's onAction.

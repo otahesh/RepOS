@@ -6,11 +6,18 @@ import {
   cleanupSeeded,
   type SeedHandle,
 } from '../helpers/seed-fixtures.js';
-import { materializeMesocycle, TemplateOutdatedError } from '../../src/services/materializeMesocycle.js';
+import {
+  materializeMesocycle,
+  TemplateOutdatedError,
+} from '../../src/services/materializeMesocycle.js';
 
 const handles: SeedHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — curated programs include core blocks (new version) but old forks untouched', () => {
   it('latest program_templates version has at least one block with primary_muscle=core', async () => {
@@ -27,14 +34,15 @@ describe('W2 — curated programs include core blocks (new version) but old fork
     // Walk structure.days[].blocks[].exercise_slug; cross-reference exercises table.
     for (const tpl of templates) {
       const slugs: string[] = [];
-      for (const d of tpl.structure?.days ?? []) for (const b of d.blocks ?? []) slugs.push(b.exercise_slug);
+      for (const d of tpl.structure?.days ?? [])
+        for (const b of d.blocks ?? []) slugs.push(b.exercise_slug);
       const { rows: ex } = await db.query<{ slug: string; muscle: string }>(
         `SELECT e.slug, m.slug AS muscle FROM exercises e
          JOIN muscles m ON m.id = e.primary_muscle_id
          WHERE e.slug = ANY($1::text[])`,
         [slugs],
       );
-      const hasCore = ex.some(r => r.muscle === 'core');
+      const hasCore = ex.some((r) => r.muscle === 'core');
       expect(hasCore, `template ${tpl.slug} should contain a core block`).toBe(true);
     }
   });

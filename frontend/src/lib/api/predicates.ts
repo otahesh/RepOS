@@ -8,8 +8,17 @@ export type PredicateT =
   | { type: 'machine'; name: string }
   | { type: 'recumbent_bike' }
   | { type: 'outdoor_walking' }
-  | { type: 'barbell' | 'flat_bench' | 'squat_rack' | 'pullup_bar'
-      | 'dip_station' | 'cable_stack' | 'rowing_erg' | 'treadmill' };
+  | {
+      type:
+        | 'barbell'
+        | 'flat_bench'
+        | 'squat_rack'
+        | 'pullup_bar'
+        | 'dip_station'
+        | 'cable_stack'
+        | 'rowing_erg'
+        | 'treadmill';
+    };
 
 export function allPredicatesSatisfied(
   predicates: PredicateT[],
@@ -27,8 +36,12 @@ function satisfies(p: PredicateT, prof: Record<string, unknown>): boolean {
       const dp = prof['dumbbells'];
       if (!dp || dp === false || typeof dp !== 'object') return false;
       const o = dp as { min_lb?: number; max_lb?: number };
-      return typeof o.min_lb === 'number' && typeof o.max_lb === 'number'
-        && o.min_lb <= p.min_pair_lb && o.max_lb >= p.min_pair_lb;
+      return (
+        typeof o.min_lb === 'number' &&
+        typeof o.max_lb === 'number' &&
+        o.min_lb <= p.min_pair_lb &&
+        o.max_lb >= p.min_pair_lb
+      );
     }
     case 'adjustable_bench': {
       const ab = prof['adjustable_bench'];

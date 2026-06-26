@@ -16,27 +16,33 @@ beforeAll(async () => {
   vi.setSystemTime(new Date('2026-05-04T15:00:00.000Z'));
 
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.meso.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.meso.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
-  const { rows: [u2] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.meso.other.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u2],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.meso.other.${Date.now()}@repos.test`,
+  ]);
   otherUserId = u2.id;
   const mint = await app.inject({
-    method: 'POST', url: '/api/tokens', body: { user_id: userId, label: 'meso-test' }
+    method: 'POST',
+    url: '/api/tokens',
+    body: { user_id: userId, label: 'meso-test' },
   });
   token = mint.json<{ token: string }>().token;
   const f = await app.inject({
-    method: 'POST', url: '/api/program-templates/full-body-3-day/fork',
+    method: 'POST',
+    url: '/api/program-templates/full-body-3-day/fork',
     headers: { authorization: `Bearer ${token}` },
   });
   const upId = f.json<any>().id;
   const s = await app.inject({
-    method: 'POST', url: `/api/user-programs/${upId}/start`,
+    method: 'POST',
+    url: `/api/user-programs/${upId}/start`,
     headers: { authorization: `Bearer ${token}` },
     body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
   });
@@ -73,26 +79,37 @@ describe('GET /api/mesocycles/:id', () => {
   it("404 on someone else's run", async () => {
     // Use a fresh user per test so active-run partial-unique-index
     // collisions cannot occur across the 404 sub-tests.
-    const { rows: [u3] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.meso.other2.${Date.now()}@repos.test`],
-    );
+    const {
+      rows: [u3],
+    } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.meso.other2.${Date.now()}@repos.test`,
+    ]);
     const localOtherId = u3.id;
     try {
-      const { rows: [tmpl] } = await db.query(
-        `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+      const {
+        rows: [tmpl],
+      } = await db.query(
+        `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
       );
-      const { rows: [up2] } = await db.query(
+      const {
+        rows: [up2],
+      } = await db.query(
         `INSERT INTO user_programs (user_id, template_id, template_version, name)
          VALUES ($1, $2, $3, $4) RETURNING id`,
         [localOtherId, tmpl.id, tmpl.version, tmpl.name],
       );
-      const { rows: [other] } = await db.query(
+      const {
+        rows: [other],
+      } = await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
          VALUES ($1, $2, '2026-05-04', 'America/New_York', 5) RETURNING id`,
         [up2.id, localOtherId],
       );
-      const r = await app.inject({ method: 'GET', url: `/api/mesocycles/${other.id}`, headers: auth() });
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/mesocycles/${other.id}`,
+        headers: auth(),
+      });
       expect(r.statusCode).toBe(404);
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [localOtherId]);
@@ -153,7 +170,9 @@ describe('GET /api/mesocycles/today', () => {
 describe('GET /api/mesocycles/:id/volume-rollup', () => {
   it('returns sets-per-week per muscle + cardio minutes_by_modality + landmarks', async () => {
     const r = await app.inject({
-      method: 'GET', url: `/api/mesocycles/${runId}/volume-rollup`, headers: auth(),
+      method: 'GET',
+      url: `/api/mesocycles/${runId}/volume-rollup`,
+      headers: auth(),
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<any>();
@@ -176,21 +195,29 @@ describe('GET /api/mesocycles/:id/volume-rollup', () => {
   });
 
   it("404 on someone else's run", async () => {
-    const { rows: [tmpl] } = await db.query(
-      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+    const {
+      rows: [tmpl],
+    } = await db.query(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
     );
-    const { rows: [up2] } = await db.query(
+    const {
+      rows: [up2],
+    } = await db.query(
       `INSERT INTO user_programs (user_id, template_id, template_version, name)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [otherUserId, tmpl.id, tmpl.version, tmpl.name],
     );
-    const { rows: [other] } = await db.query(
+    const {
+      rows: [other],
+    } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
        VALUES ($1, $2, '2026-05-04', 'America/New_York', 5, 'completed') RETURNING id`,
       [up2.id, otherUserId],
     );
     const r = await app.inject({
-      method: 'GET', url: `/api/mesocycles/${other.id}/volume-rollup`, headers: auth(),
+      method: 'GET',
+      url: `/api/mesocycles/${other.id}/volume-rollup`,
+      headers: auth(),
     });
     expect(r.statusCode).toBe(404);
   });
@@ -210,29 +237,41 @@ describe('POST /api/mesocycles/:id/abandon', () => {
     // test above restores it, but be defensive).
     await db.query(`UPDATE mesocycle_runs SET status='active' WHERE id=$1`, [runId]);
     // Ensure the owning user_program is in a startable state before abandon.
-    const { rows: [runRow] } = await db.query<{ user_program_id: string }>(
-      `SELECT user_program_id FROM mesocycle_runs WHERE id=$1`, [runId],
+    const {
+      rows: [runRow],
+    } = await db.query<{ user_program_id: string }>(
+      `SELECT user_program_id FROM mesocycle_runs WHERE id=$1`,
+      [runId],
     );
-    await db.query(`UPDATE user_programs SET status='active' WHERE id=$1`, [runRow.user_program_id]);
+    await db.query(`UPDATE user_programs SET status='active' WHERE id=$1`, [
+      runRow.user_program_id,
+    ]);
 
     const r = await app.inject({
-      method: 'POST', url: `/api/mesocycles/${runId}/abandon`, headers: auth(),
+      method: 'POST',
+      url: `/api/mesocycles/${runId}/abandon`,
+      headers: auth(),
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<any>();
     expect(body.mesocycle_run_id).toBe(runId);
     expect(body.status).toBe('abandoned');
 
-    const { rows: [row] } = await db.query<{ status: string; finished_at: string }>(
-      `SELECT status, finished_at FROM mesocycle_runs WHERE id=$1`, [runId],
+    const {
+      rows: [row],
+    } = await db.query<{ status: string; finished_at: string }>(
+      `SELECT status, finished_at FROM mesocycle_runs WHERE id=$1`,
+      [runId],
     );
     expect(row.status).toBe('abandoned');
     expect(row.finished_at).not.toBeNull();
 
     // user_programs row must also flip to 'abandoned'
-    const { rows: [up] } = await db.query<{ status: string }>(
-      `SELECT status FROM user_programs WHERE id=$1`, [runRow.user_program_id],
-    );
+    const {
+      rows: [up],
+    } = await db.query<{ status: string }>(`SELECT status FROM user_programs WHERE id=$1`, [
+      runRow.user_program_id,
+    ]);
     expect(up.status).toBe('abandoned');
 
     const { rows: events } = await db.query<{ event_type: string }>(
@@ -243,11 +282,15 @@ describe('POST /api/mesocycles/:id/abandon', () => {
 
     // Partial unique index is freed: starting a new run for this user now succeeds.
     const f = await app.inject({
-      method: 'POST', url: '/api/program-templates/upper-lower-4-day/fork', headers: auth(),
+      method: 'POST',
+      url: '/api/program-templates/upper-lower-4-day/fork',
+      headers: auth(),
     });
     const upId2 = f.json<any>().id;
     const s = await app.inject({
-      method: 'POST', url: `/api/user-programs/${upId2}/start`, headers: auth(),
+      method: 'POST',
+      url: `/api/user-programs/${upId2}/start`,
+      headers: auth(),
       body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
     });
     expect(s.statusCode).toBe(201);
@@ -255,7 +298,9 @@ describe('POST /api/mesocycles/:id/abandon', () => {
     // Tidy: abandon the new run so subsequent tests start clean.
     const newRunId = s.json<any>().mesocycle_run_id;
     await app.inject({
-      method: 'POST', url: `/api/mesocycles/${newRunId}/abandon`, headers: auth(),
+      method: 'POST',
+      url: `/api/mesocycles/${newRunId}/abandon`,
+      headers: auth(),
     });
   });
 
@@ -264,7 +309,9 @@ describe('POST /api/mesocycles/:id/abandon', () => {
     // explicitly so this test passes in any execution order.
     await db.query(`UPDATE mesocycle_runs SET status='abandoned' WHERE id=$1`, [runId]);
     const r = await app.inject({
-      method: 'POST', url: `/api/mesocycles/${runId}/abandon`, headers: auth(),
+      method: 'POST',
+      url: `/api/mesocycles/${runId}/abandon`,
+      headers: auth(),
     });
     expect(r.statusCode).toBe(409);
     expect(r.json<any>().error).toBe('not_active');
@@ -274,33 +321,42 @@ describe('POST /api/mesocycles/:id/abandon', () => {
   it("404 on someone else's run (no leak)", async () => {
     // Use a fresh user per test so active-run partial-unique-index
     // collisions cannot occur across the 404 sub-tests.
-    const { rows: [u4] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.meso.other3.${Date.now()}@repos.test`],
-    );
+    const {
+      rows: [u4],
+    } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.meso.other3.${Date.now()}@repos.test`,
+    ]);
     const localOtherId = u4.id;
     try {
-      const { rows: [tmpl] } = await db.query(
-        `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`
+      const {
+        rows: [tmpl],
+      } = await db.query(
+        `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
       );
-      const { rows: [up2] } = await db.query(
+      const {
+        rows: [up2],
+      } = await db.query(
         `INSERT INTO user_programs (user_id, template_id, template_version, name)
          VALUES ($1, $2, $3, $4) RETURNING id`,
         [localOtherId, tmpl.id, tmpl.version, tmpl.name],
       );
-      const { rows: [other] } = await db.query(
+      const {
+        rows: [other],
+      } = await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
          VALUES ($1, $2, '2026-05-04', 'America/New_York', 5) RETURNING id`,
         [up2.id, localOtherId],
       );
       const r = await app.inject({
-        method: 'POST', url: `/api/mesocycles/${other.id}/abandon`, headers: auth(),
+        method: 'POST',
+        url: `/api/mesocycles/${other.id}/abandon`,
+        headers: auth(),
       });
       expect(r.statusCode).toBe(404);
       // and the other user's run is unchanged
-      const { rows: [row] } = await db.query(
-        `SELECT status FROM mesocycle_runs WHERE id=$1`, [other.id],
-      );
+      const {
+        rows: [row],
+      } = await db.query(`SELECT status FROM mesocycle_runs WHERE id=$1`, [other.id]);
       expect(row.status).toBe('active');
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [localOtherId]);

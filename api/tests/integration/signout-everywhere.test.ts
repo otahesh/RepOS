@@ -148,10 +148,9 @@ describe('POST /api/auth/signout-everywhere', () => {
       id: string;
       revoke_reason: string | null;
       revoked_at: Date | null;
-    }>(
-      `SELECT id::text, revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`,
-      [userId],
-    );
+    }>(`SELECT id::text, revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`, [
+      userId,
+    ]);
     expect(tokRows.length).toBe(2);
     for (const row of tokRows) {
       expect(row.revoke_reason).toBe('signout_everywhere');
@@ -163,10 +162,9 @@ describe('POST /api/auth/signout-everywhere', () => {
     const { rows: evRows } = await db.query<{
       kind: string;
       meta: { revoked_count?: number };
-    }>(
-      `SELECT kind, meta FROM account_events WHERE user_id = $1 AND kind = 'signout_everywhere'`,
-      [userId],
-    );
+    }>(`SELECT kind, meta FROM account_events WHERE user_id = $1 AND kind = 'signout_everywhere'`, [
+      userId,
+    ]);
     expect(evRows.length).toBe(1);
     expect(evRows[0].meta.revoked_count).toBe(2);
   });

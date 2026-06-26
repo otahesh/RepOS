@@ -41,7 +41,13 @@ export interface SeedOptions {
   /** Logical day metadata. Default Week 1 / Day 1 "Push". */
   day?: SeedDay;
   /** User shape returned by /api/me. */
-  user?: { id: string; email: string; display_name: string | null; timezone: string; onboarding_completed_at?: string | null };
+  user?: {
+    id: string;
+    email: string;
+    display_name: string | null;
+    timezone: string;
+    onboarding_completed_at?: string | null;
+  };
 }
 
 export interface CapturedPost {
@@ -66,7 +72,10 @@ export type SetLogResponse =
   | { kind: 'orphan' }
   | { kind: 'transient'; status?: number };
 
-export type SetLogResponder = (body: CapturedPost, context: { posted: CapturedPost[] }) => SetLogResponse;
+export type SetLogResponder = (
+  body: CapturedPost,
+  context: { posted: CapturedPost[] },
+) => SetLogResponse;
 
 export interface MockServer {
   /** All POSTs to /api/set-logs captured (including ones aborted by `offlinePost`). */
@@ -388,7 +397,7 @@ export async function inspectQueue(page: Page): Promise<PendingSetLogRow[]> {
   return page.evaluate(async () => {
     // Wait briefly for any in-flight Dexie open. If the DB doesn't exist yet,
     // resolve to [] so callers can assert "queue empty" cleanly.
-    const dbs = await indexedDB.databases?.().catch(() => []) ?? [];
+    const dbs = (await indexedDB.databases?.().catch(() => [])) ?? [];
     if (!dbs.some((d) => d.name === 'RepOSLogQueue')) return [] as unknown[];
 
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -530,7 +539,9 @@ export async function waitForPosts(
   const start = Date.now();
   while (server.posted.length < n) {
     if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitForPosts: expected ${n} POSTs, got ${server.posted.length} after ${timeoutMs}ms`);
+      throw new Error(
+        `waitForPosts: expected ${n} POSTs, got ${server.posted.length} after ${timeoutMs}ms`,
+      );
     }
     await page.waitForTimeout(50);
   }

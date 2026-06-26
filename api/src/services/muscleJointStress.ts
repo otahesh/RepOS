@@ -25,7 +25,7 @@ export async function computeMuscleJointRoots(): Promise<Record<string, string[]
   );
   const out: Record<string, Set<string>> = {};
   for (const r of rows) {
-    const set = out[r.slug] ??= new Set();
+    const set = (out[r.slug] ??= new Set());
     for (const [joint, level] of Object.entries(r.profile ?? {})) {
       if (joint === '_v') continue;
       if (level === 'mod' || level === 'high') {

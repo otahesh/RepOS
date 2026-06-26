@@ -10,9 +10,24 @@ import { applyPreset } from '../../../lib/api/equipment';
 
 type PresetId = 'home_minimal' | 'garage_gym' | 'commercial_gym';
 const PRESETS: { id: PresetId; title: string; subtitle: string; items: string[] }[] = [
-  { id: 'home_minimal', title: 'HOME · MINIMAL', subtitle: 'Bodyweight + walking', items: ['Walking track', 'Bodyweight only'] },
-  { id: 'garage_gym', title: 'HOME · GARAGE GYM', subtitle: 'DBs + bench + bar', items: ['Dumbbells 5–50 lb', 'Adjustable bench', 'Pullup bar'] },
-  { id: 'commercial_gym', title: 'COMMERCIAL GYM', subtitle: 'Full equipment access', items: ['Barbell + rack', 'Full DB rack', 'All machines', 'Cardio gear'] },
+  {
+    id: 'home_minimal',
+    title: 'HOME · MINIMAL',
+    subtitle: 'Bodyweight + walking',
+    items: ['Walking track', 'Bodyweight only'],
+  },
+  {
+    id: 'garage_gym',
+    title: 'HOME · GARAGE GYM',
+    subtitle: 'DBs + bench + bar',
+    items: ['Dumbbells 5–50 lb', 'Adjustable bench', 'Pullup bar'],
+  },
+  {
+    id: 'commercial_gym',
+    title: 'COMMERCIAL GYM',
+    subtitle: 'Full equipment access',
+    items: ['Barbell + rack', 'Full DB rack', 'All machines', 'Cardio gear'],
+  },
 ];
 
 export default function EquipmentStep({
@@ -39,7 +54,13 @@ export default function EquipmentStep({
         Pick the kit you train with. RepOS filters exercise suggestions to what you can actually do.
         You can edit this any time in Settings → Equipment.
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 12,
+        }}
+      >
         {PRESETS.map((p) => (
           <button
             key={p.id}
@@ -47,17 +68,42 @@ export default function EquipmentStep({
             onClick={() => pick(p.id)}
             disabled={busy}
             style={{
-              textAlign: 'left', padding: '18px 16px', borderRadius: 12,
-              border: `1px solid ${TOKENS.line}`, background: TOKENS.bg,
-              color: TOKENS.text, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+              textAlign: 'left',
+              padding: '18px 16px',
+              borderRadius: 12,
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.bg,
+              color: TOKENS.text,
+              cursor: busy ? 'wait' : 'pointer',
+              fontFamily: 'inherit',
             }}
           >
-            <div style={{ fontFamily: FONTS.mono, fontSize: 10, letterSpacing: 1.4, color: TOKENS.accent, marginBottom: 8 }}>
+            <div
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+                letterSpacing: 1.4,
+                color: TOKENS.accent,
+                marginBottom: 8,
+              }}
+            >
               {p.title}
             </div>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>{p.subtitle}</div>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, color: TOKENS.textDim }}>
-              {p.items.map((it) => <li key={it} style={{ marginBottom: 4 }}>· {it}</li>)}
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                fontSize: 12,
+                color: TOKENS.textDim,
+              }}
+            >
+              {p.items.map((it) => (
+                <li key={it} style={{ marginBottom: 4 }}>
+                  · {it}
+                </li>
+              ))}
             </ul>
           </button>
         ))}
@@ -70,7 +116,12 @@ export default function EquipmentStep({
 }
 
 const skipBtn: React.CSSProperties = {
-  background: 'transparent', color: TOKENS.textDim, border: 'none',
-  padding: '14px 0 0', fontSize: 13, cursor: 'pointer', fontFamily: FONTS.ui,
+  background: 'transparent',
+  color: TOKENS.textDim,
+  border: 'none',
+  padding: '14px 0 0',
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
   textDecoration: 'underline',
 };

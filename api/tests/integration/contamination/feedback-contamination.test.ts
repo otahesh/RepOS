@@ -25,7 +25,8 @@ describe('feedback contamination — G2', () => {
     const a = await mkUser({ prefix: 'vitest.w7-cont-a' });
     userA = a.id;
     const mint = await app.inject({
-      method: 'POST', url: '/api/tokens',
+      method: 'POST',
+      url: '/api/tokens',
       body: { user_id: userA, label: 'A', scopes: ['health:weight:write'] },
     });
     tokenA = mint.json<{ token: string }>().token;
@@ -33,7 +34,8 @@ describe('feedback contamination — G2', () => {
   });
 
   afterAll(async () => {
-    if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY; else process.env.ADMIN_API_KEY = savedAdminKey;
+    if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY;
+    else process.env.ADMIN_API_KEY = savedAdminKey;
     await db.query(`DELETE FROM feedback WHERE user_id=$1`, [userA]);
     await db.query(`DELETE FROM device_tokens WHERE user_id=$1`, [userA]);
     await db.query(`DELETE FROM users WHERE id=$1`, [userA]);
@@ -42,7 +44,8 @@ describe('feedback contamination — G2', () => {
 
   it('a body with a spoofed user_id is rejected (strict schema)', async () => {
     const r = await app.inject({
-      method: 'POST', url: '/api/feedback',
+      method: 'POST',
+      url: '/api/feedback',
       headers: { authorization: `Bearer ${tokenA}`, 'x-repos-csrf': '1' },
       body: { body: 'hi', user_id: '00000000-0000-0000-0000-000000000000' },
     });
@@ -51,18 +54,22 @@ describe('feedback contamination — G2', () => {
 
   it('a valid submit is stamped with the token owner, not a body value', async () => {
     const r = await app.inject({
-      method: 'POST', url: '/api/feedback',
+      method: 'POST',
+      url: '/api/feedback',
       headers: { authorization: `Bearer ${tokenA}`, 'x-repos-csrf': '1' },
       body: { body: 'legit feedback' },
     });
     expect(r.statusCode).toBe(201);
-    const { rows } = await db.query(`SELECT user_id FROM feedback WHERE id=$1`, [r.json<{ id: string }>().id]);
+    const { rows } = await db.query(`SELECT user_id FROM feedback WHERE id=$1`, [
+      r.json<{ id: string }>().id,
+    ]);
     expect(rows[0].user_id).toBe(userA);
   });
 
   it('a regular bearer cannot read the admin feedback list', async () => {
     const r = await app.inject({
-      method: 'GET', url: '/api/admin/feedback',
+      method: 'GET',
+      url: '/api/admin/feedback',
       headers: { authorization: `Bearer ${tokenA}` },
     });
     expect([401, 403]).toContain(r.statusCode); // never 200-with-data

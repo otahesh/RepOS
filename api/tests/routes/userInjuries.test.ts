@@ -75,11 +75,20 @@ describe('POST /api/user/injuries', () => {
       method: 'POST',
       url: '/api/user/injuries',
       headers: { authorization: `Bearer ${token}` },
-      payload: { joint: 'shoulder_left', severity: 'high', notes: 'impingement', onset_at: '2025-11-03' },
+      payload: {
+        joint: 'shoulder_left',
+        severity: 'high',
+        notes: 'impingement',
+        onset_at: '2025-11-03',
+      },
     });
     expect(resp.statusCode).toBe(201);
     const body = resp.json<{ injury: { joint: string; severity: string } }>();
-    expect(body.injury).toMatchObject({ joint: 'shoulder_left', severity: 'high', notes: 'impingement' });
+    expect(body.injury).toMatchObject({
+      joint: 'shoulder_left',
+      severity: 'high',
+      notes: 'impingement',
+    });
   });
 
   it('upserts on duplicate (user_id, joint) — 200 + updated row', async () => {
@@ -109,12 +118,14 @@ describe('POST /api/user/injuries', () => {
 describe('PATCH /api/user/injuries/:joint', () => {
   it('updates severity + notes; returns 200 with new shape', async () => {
     await app.inject({
-      method: 'POST', url: '/api/user/injuries',
+      method: 'POST',
+      url: '/api/user/injuries',
       headers: { authorization: `Bearer ${token}` },
       payload: { joint: 'elbow' },
     });
     const resp = await app.inject({
-      method: 'PATCH', url: '/api/user/injuries/elbow',
+      method: 'PATCH',
+      url: '/api/user/injuries/elbow',
       headers: { authorization: `Bearer ${token}` },
       payload: { severity: 'high', notes: 'tendonitis' },
     });
@@ -124,7 +135,8 @@ describe('PATCH /api/user/injuries/:joint', () => {
 
   it('404 when row does not exist', async () => {
     const resp = await app.inject({
-      method: 'PATCH', url: '/api/user/injuries/wrist',
+      method: 'PATCH',
+      url: '/api/user/injuries/wrist',
       headers: { authorization: `Bearer ${token}` },
       payload: { severity: 'low' },
     });
@@ -133,7 +145,8 @@ describe('PATCH /api/user/injuries/:joint', () => {
 
   it('400 on unknown :joint path param', async () => {
     const resp = await app.inject({
-      method: 'PATCH', url: '/api/user/injuries/ankle',
+      method: 'PATCH',
+      url: '/api/user/injuries/ankle',
       headers: { authorization: `Bearer ${token}` },
       payload: {},
     });
@@ -144,23 +157,28 @@ describe('PATCH /api/user/injuries/:joint', () => {
 describe('DELETE /api/user/injuries/:joint', () => {
   it('removes the row and returns 204', async () => {
     await app.inject({
-      method: 'POST', url: '/api/user/injuries',
+      method: 'POST',
+      url: '/api/user/injuries',
       headers: { authorization: `Bearer ${token}` },
       payload: { joint: 'wrist' },
     });
     const resp = await app.inject({
-      method: 'DELETE', url: '/api/user/injuries/wrist',
+      method: 'DELETE',
+      url: '/api/user/injuries/wrist',
       headers: { authorization: `Bearer ${token}` },
     });
     expect(resp.statusCode).toBe(204);
     const { rows } = await db.query(
-      `SELECT 1 FROM user_injuries WHERE user_id=$1 AND joint='wrist'`, [userId]);
+      `SELECT 1 FROM user_injuries WHERE user_id=$1 AND joint='wrist'`,
+      [userId],
+    );
     expect(rows.length).toBe(0);
   });
 
   it('204 idempotent on missing row', async () => {
     const resp = await app.inject({
-      method: 'DELETE', url: '/api/user/injuries/knee_right',
+      method: 'DELETE',
+      url: '/api/user/injuries/knee_right',
       headers: { authorization: `Bearer ${token}` },
     });
     expect(resp.statusCode).toBe(204);

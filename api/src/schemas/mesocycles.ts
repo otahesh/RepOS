@@ -5,7 +5,12 @@ import { z } from 'zod';
 // ---------------------------------------------------------------------------
 
 export const MESOCYCLE_STATUSES = [
-  'draft', 'active', 'paused', 'completed', 'archived', 'abandoned',
+  'draft',
+  'active',
+  'paused',
+  'completed',
+  'archived',
+  'abandoned',
 ] as const;
 export type MesocycleRunStatus = (typeof MESOCYCLE_STATUSES)[number];
 

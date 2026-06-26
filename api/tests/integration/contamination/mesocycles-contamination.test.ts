@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W8.2 contamination — mesocycles', () => {
   it('GET /mesocycles/today for B reflects B (no active run), not A run', async () => {
@@ -16,7 +25,8 @@ describe('W8.2 contamination — mesocycles', () => {
     await seedFullMesocycleForUser(pair.userA.userId, { weeks: 5, currentWeek: 2 });
 
     const res = await app.inject({
-      method: 'GET', url: '/api/mesocycles/today',
+      method: 'GET',
+      url: '/api/mesocycles/today',
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(200);
@@ -30,7 +40,8 @@ describe('W8.2 contamination — mesocycles', () => {
     const runId = await seedFullMesocycleForUser(pair.userA.userId, { weeks: 5 });
 
     const res = await app.inject({
-      method: 'GET', url: `/api/mesocycles/${runId}`,
+      method: 'GET',
+      url: `/api/mesocycles/${runId}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
@@ -43,7 +54,8 @@ describe('W8.2 contamination — mesocycles', () => {
     const runId = await seedFullMesocycleForUser(pair.userA.userId, { weeks: 5 });
 
     const res = await app.inject({
-      method: 'GET', url: `/api/mesocycles/${runId}/volume-rollup`,
+      method: 'GET',
+      url: `/api/mesocycles/${runId}/volume-rollup`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
@@ -56,7 +68,8 @@ describe('W8.2 contamination — mesocycles', () => {
     const runId = await seedFullMesocycleForUser(pair.userA.userId, { weeks: 5 });
 
     const res = await app.inject({
-      method: 'GET', url: `/api/mesocycles/${runId}/recap-stats`,
+      method: 'GET',
+      url: `/api/mesocycles/${runId}/recap-stats`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
@@ -69,12 +82,14 @@ describe('W8.2 contamination — mesocycles', () => {
     const runId = await seedFullMesocycleForUser(pair.userA.userId, { weeks: 5 });
 
     const res = await app.inject({
-      method: 'POST', url: `/api/mesocycles/${runId}/abandon`,
+      method: 'POST',
+      url: `/api/mesocycles/${runId}/abandon`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
     const { rows } = await db.query<{ status: string }>(
-      `SELECT status FROM mesocycle_runs WHERE id=$1`, [runId],
+      `SELECT status FROM mesocycle_runs WHERE id=$1`,
+      [runId],
     );
     expect(rows[0].status).toBe('active');
   });

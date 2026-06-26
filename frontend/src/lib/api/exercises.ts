@@ -40,9 +40,13 @@ export type SubstitutionCandidate = {
   reason: string;
   injury_advisory?: {
     joint:
-      | 'shoulder_left' | 'shoulder_right'
-      | 'low_back' | 'knee_left' | 'knee_right'
-      | 'elbow' | 'wrist';
+      | 'shoulder_left'
+      | 'shoulder_right'
+      | 'low_back'
+      | 'knee_left'
+      | 'knee_right'
+      | 'elbow'
+      | 'wrist';
     level: 'mod' | 'high';
   };
 };

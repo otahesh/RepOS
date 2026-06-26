@@ -28,8 +28,10 @@ export async function listRecoveryFlags(): Promise<{ flags: RecoveryFlag[] }> {
 
 export async function dismissRecoveryFlag(flag: RecoveryFlagKey): Promise<void> {
   const res = await fetch('/api/recovery-flags/dismiss', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify({ flag }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ flag }),
   });
   if (!res.ok && res.status !== 204) {
     await jsonOrThrow(res); // throws ApiError

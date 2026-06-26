@@ -8,5 +8,5 @@
 // a single named switch to consume; W4.3 should both flip the SETTINGS_SECTIONS
 // `disabled` flag AND set this to true (or migrate the Sidebar to read this).
 export const FEATURE_FLAGS = {
-  BETA_LANDMARKS_EDITOR: false,  // W4.3 flips to true
+  BETA_LANDMARKS_EDITOR: false, // W4.3 flips to true
 } as const;

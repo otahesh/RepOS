@@ -1,4 +1,3 @@
-import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import {
   ProgramTemplateSeedSchema,
@@ -12,7 +11,7 @@ function canonicalize(value: unknown): string {
   if (value && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
     const keys = Object.keys(obj).sort();
-    return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalize(obj[k])).join(',') + '}';
+    return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalize(obj[k])).join(',') + '}';
   }
   return JSON.stringify(value);
 }
@@ -21,12 +20,17 @@ export function makeProgramTemplateAdapter(
   knownExerciseSlugs: Set<string>,
   cardioExerciseSlugs: Set<string> = new Set(),
 ): SeedAdapter<ProgramTemplateSeed> {
-  const ProgramTemplateSeedArraySchema = z.array(ProgramTemplateSeedSchema)
+  const ProgramTemplateSeedArraySchema = z
+    .array(ProgramTemplateSeedSchema)
     .superRefine((arr, ctx) => {
       const seen = new Set<string>();
       arr.forEach((tpl, tplIdx) => {
         if (seen.has(tpl.slug)) {
-          ctx.addIssue({ code: 'custom', message: `duplicate slug: ${tpl.slug}`, path: [tplIdx, 'slug'] });
+          ctx.addIssue({
+            code: 'custom',
+            message: `duplicate slug: ${tpl.slug}`,
+            path: [tplIdx, 'slug'],
+          });
         }
         seen.add(tpl.slug);
         tpl.structure.days.forEach((day, dayIdx) => {
@@ -59,7 +63,8 @@ export function makeProgramTemplateAdapter(
 
     upsertOne: async (tx, e, generation) => {
       const { rows: existing } = await tx.query<{ structure: unknown; version: number }>(
-        `SELECT structure, version FROM program_templates WHERE slug=$1`, [e.slug]
+        `SELECT structure, version FROM program_templates WHERE slug=$1`,
+        [e.slug],
       );
       let nextVersion = 1;
       if (existing[0]) {
@@ -84,8 +89,17 @@ export function makeProgramTemplateAdapter(
            seed_generation=EXCLUDED.seed_generation,
            archived_at=NULL,
            updated_at=now()`,
-        [e.slug, e.name, e.description ?? '', e.weeks, e.days_per_week,
-         JSON.stringify(e.structure), nextVersion, 'program_templates', generation],
+        [
+          e.slug,
+          e.name,
+          e.description ?? '',
+          e.weeks,
+          e.days_per_week,
+          JSON.stringify(e.structure),
+          nextVersion,
+          'program_templates',
+          generation,
+        ],
       );
     },
 

@@ -23,18 +23,20 @@ export const JOINT_ROOT: Record<InjuryJoint, string> = {
   // See [[reference_w3_tuning_candidates]] memory for the future sided-stress
   // data exercise. DO NOT "fix" this by laterality-matching alone — back
   // squat (bilateral lift) would silently skip the penalty.
-  shoulder_left:  'shoulder',
+  shoulder_left: 'shoulder',
   shoulder_right: 'shoulder',
-  low_back:       'lumbar',
-  knee_left:      'knee',
-  knee_right:     'knee',
-  elbow:          'elbow',
-  wrist:          'wrist',
+  low_back: 'lumbar',
+  knee_left: 'knee',
+  knee_right: 'knee',
+  elbow: 'elbow',
+  wrist: 'wrist',
 };
 
 const STRESS_PENALTY = { mod: 150, high: 300 } as const;
 const SEVERITY_FACTOR: Record<InjurySeverity, number> = {
-  low: 0.5, mod: 1.0, high: 1.5,
+  low: 0.5,
+  mod: 1.0,
+  high: 1.5,
 };
 
 export function jointRoot(joint: InjuryJoint): string {
@@ -45,8 +47,11 @@ export type StressLevel = 'low' | 'mod' | 'high';
 export type JointStressProfile = { _v: number } & Partial<Record<string, StressLevel>>;
 
 export type RankerCandidate = {
-  id: string; slug: string; name: string;
-  score: number; reason: string;
+  id: string;
+  slug: string;
+  name: string;
+  score: number;
+  reason: string;
   joint_stress_profile: JointStressProfile;
   injury_advisory?: { joint: InjuryJoint; level: 'mod' | 'high' };
 };

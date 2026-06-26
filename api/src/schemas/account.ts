@@ -19,7 +19,7 @@ export const CONFIRM_DELETE_ACCOUNT_PHRASE = 'DELETE my account';
 // list (per I-IANA-TIMEZONES — Intl.supportedValuesOf is unreliable on
 // alpine small-icu).
 // Zero-width chars covered (U+200B..U+200D, U+FEFF — ZWSP, ZWNJ, ZWJ, BOM).
-const ZERO_WIDTH = /[​-‍﻿]/g;
+const ZERO_WIDTH = /[\u200B-\u200D\uFEFF]/g;
 
 const DisplayNameSchema = z
   .string()
@@ -83,9 +83,7 @@ export type AccountEventItem = z.infer<typeof AccountEventItemSchema>;
 export const AccountEventListResponseSchema = z.object({
   events: z.array(AccountEventItemSchema),
   // Keyset cursor for next page (per I-PAGINATION-KEYSET).
-  next_cursor: z
-    .object({ before_ts: z.string(), before_id: z.string() })
-    .nullable(),
+  next_cursor: z.object({ before_ts: z.string(), before_id: z.string() }).nullable(),
 });
 export type AccountEventListResponse = z.infer<typeof AccountEventListResponseSchema>;
 

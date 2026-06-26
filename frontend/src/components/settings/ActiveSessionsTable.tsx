@@ -20,11 +20,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
-import {
-  listSessions,
-  revokeSession,
-  type SessionRow,
-} from '../../lib/api/account';
+import { listSessions, revokeSession, type SessionRow } from '../../lib/api/account';
 import { pushToast } from '../common/ToastHost';
 import { Term } from '../Term';
 
@@ -82,9 +78,7 @@ export function ActiveSessionsTable(): JSX.Element {
     } catch (err) {
       pushToast({
         severity: 'error',
-        body:
-          'Revoke failed. ' +
-          (err instanceof Error ? err.message : 'Try again.'),
+        body: 'Revoke failed. ' + (err instanceof Error ? err.message : 'Try again.'),
       });
     } finally {
       setRevokingId(null);
@@ -114,10 +108,7 @@ export function ActiveSessionsTable(): JSX.Element {
       </h3>
 
       {loadErr ? (
-        <div
-          role="alert"
-          style={{ fontSize: 12, color: TOKENS.danger }}
-        >
+        <div role="alert" style={{ fontSize: 12, color: TOKENS.danger }}>
           {loadErr}
         </div>
       ) : null}
@@ -187,8 +178,7 @@ export function ActiveSessionsTable(): JSX.Element {
               >
                 <span>Last used: {formatDate(s.last_used_at)}</span>
                 <span>
-                  <Term k="truncated_ip_24">Last IP</Term>:{' '}
-                  {s.last_used_ip_24 ?? '—'}
+                  <Term k="truncated_ip_24">Last IP</Term>: {s.last_used_ip_24 ?? '—'}
                 </span>
                 <span>Created: {formatDate(s.created_at)}</span>
               </div>

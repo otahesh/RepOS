@@ -2,8 +2,13 @@ import { db } from '../db/client.js';
 import type { PoolClient } from 'pg';
 
 export type AccountEventKind =
-  | 'profile_changed' | 'token_minted' | 'token_revoked' | 'signout_everywhere' | 'delete_initiated'
-  | 'par_q_acknowledged' | 'onboarding_completed'
+  | 'profile_changed'
+  | 'token_minted'
+  | 'token_revoked'
+  | 'signout_everywhere'
+  | 'delete_initiated'
+  | 'par_q_acknowledged'
+  | 'onboarding_completed'
   | 'restore_replayed';
 
 export interface RecordAccountEventArgs {

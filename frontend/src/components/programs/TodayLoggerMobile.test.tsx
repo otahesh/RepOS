@@ -133,7 +133,11 @@ describe('<TodayLoggerMobile>', () => {
     expect(call[2]).toBe('user-1'); // queueOwnerUserId
 
     // Row affordance reflects the mocked queue status ('pending' → "Queued offline").
-    expect(await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(/queued offline/i)).toBeInTheDocument();
+    expect(
+      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
+        /queued offline/i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('shows "Logged · locked" with pointer to Settings when the queue status mock returns "synced"', async () => {
@@ -149,7 +153,9 @@ describe('<TodayLoggerMobile>', () => {
     // window exists but the inline edit UI ships later). Affordance now
     // surfaces the lock + points at the right surface.
     expect(
-      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(/logged · locked/i),
+      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
+        /logged · locked/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByTestId('set-row-0-status')).toHaveTextContent(/edit via settings/i);
   });
@@ -175,7 +181,9 @@ describe('<TodayLoggerMobile>', () => {
 
     // After the row transitions to 'logged' phase the button is also disabled
     // by canLog=false. End state: the button is disabled.
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(logBtn).toBeDisabled();
   });
 
@@ -219,7 +227,7 @@ describe('<TodayLoggerMobile>', () => {
     expect(status).toHaveAttribute('role', 'status');
   });
 
-  it('after a successful Log focus moves to the next set\'s weight input', async () => {
+  it("after a successful Log focus moves to the next set's weight input", async () => {
     const user = userEvent.setup();
     renderLogger();
     const row0 = within(screen.getByTestId('set-row-0'));
@@ -229,7 +237,7 @@ describe('<TodayLoggerMobile>', () => {
 
     // setTimeout 0 in the focus handler — wait a microtask for the focus shift.
     await act(async () => {
-      await new Promise(r => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
     });
     expect(document.activeElement).toBe(screen.getByLabelText(/Set 2 weight in pounds/i));
   });

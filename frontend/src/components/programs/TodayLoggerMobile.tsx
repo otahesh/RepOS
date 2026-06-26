@@ -57,22 +57,31 @@ const DEBOUNCE_MS = 500;
 // explicitly points users at the right surface.
 function affordanceText(status: QueueRowStatus): string {
   switch (status) {
-    case 'pending': return 'Queued offline';
-    case 'syncing': return 'Syncing…';
-    case 'synced':  return 'Logged · locked (24h). Edit via Settings.';
-    case 'rejected': return 'Rejected — review';
+    case 'pending':
+      return 'Queued offline';
+    case 'syncing':
+      return 'Syncing…';
+    case 'synced':
+      return 'Logged · locked (24h). Edit via Settings.';
+    case 'rejected':
+      return 'Rejected — review';
     case 'unknown':
-    default: return '';
+    default:
+      return '';
   }
 }
 
 function affordanceColor(status: QueueRowStatus): string {
   switch (status) {
-    case 'synced':   return TOKENS.good;
-    case 'rejected': return TOKENS.danger;
+    case 'synced':
+      return TOKENS.good;
+    case 'rejected':
+      return TOKENS.danger;
     case 'pending':
-    case 'syncing':  return TOKENS.warn;
-    default:         return TOKENS.textDim;
+    case 'syncing':
+      return TOKENS.warn;
+    default:
+      return TOKENS.textDim;
   }
 }
 
@@ -101,7 +110,9 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : 'Failed to load workout');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [preloaded]);
 
   if (loadError) {
@@ -110,7 +121,14 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
         {loadError}{' '}
         <button
           onClick={() => navigate('/')}
-          style={{ background: 'none', border: 'none', color: TOKENS.accent, textDecoration: 'underline', cursor: 'pointer', fontFamily: FONTS.ui }}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: TOKENS.accent,
+            textDecoration: 'underline',
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
+          }}
         >
           Back to Today
         </button>
@@ -162,17 +180,14 @@ function LoggerInner({
   }, [data.sets]);
 
   // Flat ordering used for "next set focus" jumps.
-  const flatOrder = useMemo(
-    () => blocks.flatMap(([, arr]) => arr.map(s => s.id)),
-    [blocks],
-  );
+  const flatOrder = useMemo(() => blocks.flatMap(([, arr]) => arr.map((s) => s.id)), [blocks]);
 
   // Per-row state machine + inputs, keyed by planned_set_id.
   const [rowStates, setRowStates] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(data.sets.map(s => [s.id, { phase: 'input' as const }])),
+    Object.fromEntries(data.sets.map((s) => [s.id, { phase: 'input' as const }])),
   );
   const [rowInputs, setRowInputs] = useState<Record<string, RowInputs>>(() =>
-    Object.fromEntries(data.sets.map(s => [s.id, { weight: '', reps: '', rir: s.target_rir }])),
+    Object.fromEntries(data.sets.map((s) => [s.id, { weight: '', reps: '', rir: s.target_rir }])),
   );
 
   // Most-recently-logged-at drives a single rest-timer instance at the bottom.
@@ -185,63 +200,69 @@ function LoggerInner({
   const weightRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const setRow = useCallback((id: string, next: RowState) => {
-    setRowStates(prev => ({ ...prev, [id]: next }));
+    setRowStates((prev) => ({ ...prev, [id]: next }));
   }, []);
 
   const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
-    setRowInputs(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    setRowInputs((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }, []);
 
-  const focusNext = useCallback((currentId: string) => {
-    const i = flatOrder.indexOf(currentId);
-    if (i < 0) return;
-    const nextId = flatOrder[i + 1];
-    if (!nextId) {
-      // End of workout — focus the complete CTA via id (rendered below).
-      const cta = document.getElementById('logger-complete-cta');
-      cta?.focus();
-      return;
-    }
-    weightRefs.current[nextId]?.focus();
-  }, [flatOrder]);
-
-  const handleLog = useCallback(async (set: TodaySet) => {
-    if (!currentUserId) return; // shouldn't happen — AuthGate blocks render
-    const inputs = rowInputs[set.id];
-    const weight = parseFloat(inputs.weight);
-    const reps = parseInt(inputs.reps, 10);
-    if (!Number.isFinite(weight) || !Number.isFinite(reps) || reps <= 0) {
-      // Validation gate — UI surfaces via the disabled CTA; nothing to do.
-      return;
-    }
-
-    setRow(set.id, { phase: 'logging', clientRequestId: null });
-    const performedAt = new Date().toISOString();
-    try {
-      const clientRequestId = await logBuffer.enqueue(
-        set.id,
-        { weight_lbs: weight, reps, rir: inputs.rir, performed_at: performedAt },
-        currentUserId,
-      );
-      const loggedAt = Date.now();
-      setRow(set.id, { phase: 'logged', clientRequestId, loggedAt });
-      setLastLoggedAt(loggedAt);
-      setActiveRestSec(set.rest_sec || 90);
-      // Defer focus shift so React commits the new affordance first; if the
-      // next input doesn't exist yet (rare), the document.getElementById
-      // path catches it.
-      setTimeout(() => focusNext(set.id), 0);
-    } catch (err: unknown) {
-      if (err instanceof QueueFullError) {
-        setQuotaError('Offline queue is full — logs cannot be saved until storage is freed.');
-        setRow(set.id, { phase: 'input' });
+  const focusNext = useCallback(
+    (currentId: string) => {
+      const i = flatOrder.indexOf(currentId);
+      if (i < 0) return;
+      const nextId = flatOrder[i + 1];
+      if (!nextId) {
+        // End of workout — focus the complete CTA via id (rendered below).
+        const cta = document.getElementById('logger-complete-cta');
+        cta?.focus();
         return;
       }
-      // Unknown error — surface but leave the user the ability to retry.
-      setRow(set.id, { phase: 'input' });
-      throw err;
-    }
-  }, [currentUserId, rowInputs, setRow, focusNext, setQuotaError]);
+      weightRefs.current[nextId]?.focus();
+    },
+    [flatOrder],
+  );
+
+  const handleLog = useCallback(
+    async (set: TodaySet) => {
+      if (!currentUserId) return; // shouldn't happen — AuthGate blocks render
+      const inputs = rowInputs[set.id];
+      const weight = parseFloat(inputs.weight);
+      const reps = parseInt(inputs.reps, 10);
+      if (!Number.isFinite(weight) || !Number.isFinite(reps) || reps <= 0) {
+        // Validation gate — UI surfaces via the disabled CTA; nothing to do.
+        return;
+      }
+
+      setRow(set.id, { phase: 'logging', clientRequestId: null });
+      const performedAt = new Date().toISOString();
+      try {
+        const clientRequestId = await logBuffer.enqueue(
+          set.id,
+          { weight_lbs: weight, reps, rir: inputs.rir, performed_at: performedAt },
+          currentUserId,
+        );
+        const loggedAt = Date.now();
+        setRow(set.id, { phase: 'logged', clientRequestId, loggedAt });
+        setLastLoggedAt(loggedAt);
+        setActiveRestSec(set.rest_sec || 90);
+        // Defer focus shift so React commits the new affordance first; if the
+        // next input doesn't exist yet (rare), the document.getElementById
+        // path catches it.
+        setTimeout(() => focusNext(set.id), 0);
+      } catch (err: unknown) {
+        if (err instanceof QueueFullError) {
+          setQuotaError('Offline queue is full — logs cannot be saved until storage is freed.');
+          setRow(set.id, { phase: 'input' });
+          return;
+        }
+        // Unknown error — surface but leave the user the ability to retry.
+        setRow(set.id, { phase: 'input' });
+        throw err;
+      }
+    },
+    [currentUserId, rowInputs, setRow, focusNext, setQuotaError],
+  );
 
   const restTimer = useRestTimer({ lastLoggedAt, targetRestSec: activeRestSec });
 
@@ -288,7 +309,16 @@ function LoggerInner({
         </div>
       ) : null}
 
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <ul
+        style={{
+          listStyle: 'none',
+          padding: 0,
+          margin: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
         {blocks.map(([blockIdx, sets]) => (
           <li
             key={blockIdx}
@@ -308,10 +338,11 @@ function LoggerInner({
                 marginTop: 4,
               }}
             >
-              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · <Term k="RIR" compact /> {sets[0].target_rir} · {sets[0].rest_sec}s rest
+              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · <Term k="RIR" compact />{' '}
+              {sets[0].target_rir} · {sets[0].rest_sec}s rest
             </div>
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sets.map(set => (
+              {sets.map((set) => (
                 <SetRow
                   key={set.id}
                   set={set}
@@ -320,7 +351,9 @@ function LoggerInner({
                   onInputChange={(patch) => setInput(set.id, patch)}
                   onLog={() => handleLog(set)}
                   onSkip={() => setRow(set.id, { phase: 'input' })}
-                  weightInputRef={(el) => { weightRefs.current[set.id] = el; }}
+                  weightInputRef={(el) => {
+                    weightRefs.current[set.id] = el;
+                  }}
                 />
               ))}
             </div>
@@ -427,9 +460,12 @@ function SetRow({
     onLog();
   };
 
-  const canLog = !debounced && !isLogged && !isLogging
-    && inputs.weight.trim() !== ''
-    && inputs.reps.trim() !== '';
+  const canLog =
+    !debounced &&
+    !isLogged &&
+    !isLogging &&
+    inputs.weight.trim() !== '' &&
+    inputs.reps.trim() !== '';
 
   const logLabel = (() => {
     if (isLogged) return 'Logged';
@@ -447,7 +483,14 @@ function SetRow({
         padding: 10,
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
         <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
           Set {set.set_idx + 1}
         </span>
@@ -566,7 +609,8 @@ function NumInput({
   return (
     <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-        {label}{unit ? ` (${unit})` : ''}
+        {label}
+        {unit ? ` (${unit})` : ''}
       </span>
       <input
         ref={inputRef}
@@ -608,18 +652,22 @@ function RirSlider({
 }) {
   const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
-    let next = value;
+    let next: number;
     switch (e.key) {
       case 'ArrowRight':
       case 'ArrowUp':
-        next = Math.min(5, value + 1); break;
+        next = Math.min(5, value + 1);
+        break;
       case 'ArrowLeft':
       case 'ArrowDown':
-        next = Math.max(0, value - 1); break;
+        next = Math.max(0, value - 1);
+        break;
       case 'Home':
-        next = 0; break;
+        next = 0;
+        break;
       case 'End':
-        next = 5; break;
+        next = 5;
+        break;
       default:
         return;
     }
@@ -633,9 +681,7 @@ function RirSlider({
         <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
           <Term k="RIR" compact />
         </span>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 14, color: TOKENS.text }}>
-          {value}
-        </span>
+        <span style={{ fontFamily: FONTS.mono, fontSize: 14, color: TOKENS.text }}>{value}</span>
       </div>
       <div
         role="slider"
@@ -653,7 +699,7 @@ function RirSlider({
           outline: 'none',
         }}
       >
-        {[0, 1, 2, 3, 4, 5].map(n => (
+        {[0, 1, 2, 3, 4, 5].map((n) => (
           <button
             key={n}
             type="button"

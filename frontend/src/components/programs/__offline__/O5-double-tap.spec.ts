@@ -14,7 +14,9 @@
 import { test, expect } from '@playwright/test';
 import { inspectQueue, seedMesocycle, waitForPosts } from './_helpers';
 
-test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never shows >1 queued', async ({ page }) => {
+test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never shows >1 queued', async ({
+  page,
+}) => {
   const server = await seedMesocycle(page);
 
   await page.goto('/today/run-1/log');

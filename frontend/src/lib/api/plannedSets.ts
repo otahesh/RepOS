@@ -40,21 +40,28 @@ export type PlannedSetSubstituteResponse = {
   overridden_at: string;
 };
 
-export async function patchPlannedSet(id: string, patch: PlannedSetPatch): Promise<PlannedSetPatchResponse> {
+export async function patchPlannedSet(
+  id: string,
+  patch: PlannedSetPatch,
+): Promise<PlannedSetPatchResponse> {
   const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify(patch),
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(patch),
   });
   return jsonOrThrow<PlannedSetPatchResponse>(res);
 }
 
 export async function substitutePlannedSet(
   id: string,
-  body: { to_exercise_id: string }
+  body: { to_exercise_id: string },
 ): Promise<PlannedSetSubstituteResponse> {
   const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}/substitute`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify(body),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
   });
   return jsonOrThrow<PlannedSetSubstituteResponse>(res);
 }

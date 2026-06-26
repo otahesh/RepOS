@@ -15,7 +15,14 @@ export type DesktopSwapSheetProps = {
   onApply: (result: { scope: SwapScope; toExerciseSlug: string }) => void;
 };
 
-export function DesktopSwapSheet({ open, context, fromSlug: _fromSlug, fromName, onClose, onApply }: DesktopSwapSheetProps) {
+export function DesktopSwapSheet({
+  open,
+  context,
+  fromSlug: _fromSlug,
+  fromName,
+  onClose,
+  onApply,
+}: DesktopSwapSheetProps) {
   // [Design NIT] program edit ⇒ "every occurrence" default; mid-session ⇒ "this block".
   const [scope, setScope] = useState<SwapScope>(context === 'program_edit' ? 'all' : 'this');
   const [picked, setPicked] = useState<Exercise | null>(null);
@@ -75,37 +82,79 @@ export function DesktopSwapSheet({ open, context, fromSlug: _fromSlug, fromName,
       }
     };
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('keydown', onKey); };
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
   }, [open, onClose]);
 
   if (!open) return null;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Swap exercise" style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-      display: 'flex', justifyContent: 'flex-end', zIndex: 100,
-    }}>
-      <div ref={dialogRef} style={{
-        width: 480, background: TOKENS.surface, color: TOKENS.text,
-        borderLeft: `1px solid ${TOKENS.line}`, padding: 24,
-        display: 'flex', flexDirection: 'column', gap: 16,
-        fontFamily: FONTS.ui, overflowY: 'auto',
-      }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Swap exercise"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.55)',
+        display: 'flex',
+        justifyContent: 'flex-end',
+        zIndex: 100,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        style={{
+          width: 480,
+          background: TOKENS.surface,
+          color: TOKENS.text,
+          borderLeft: `1px solid ${TOKENS.line}`,
+          padding: 24,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          fontFamily: FONTS.ui,
+          overflowY: 'auto',
+        }}
+      >
         <header>
-          <div style={{ fontFamily: FONTS.mono, fontSize: 10, letterSpacing: 1, color: TOKENS.textDim, textTransform: 'uppercase' }}>
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 10,
+              letterSpacing: 1,
+              color: TOKENS.textDim,
+              textTransform: 'uppercase',
+            }}
+          >
             Swap exercise
           </div>
           <h2 style={{ margin: '4px 0 0', fontSize: 18 }}>{fromName ?? 'Current exercise'}</h2>
         </header>
 
         <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-          <legend style={{ fontSize: 12, color: TOKENS.textDim, marginBottom: 6 }}>Apply to:</legend>
+          <legend style={{ fontSize: 12, color: TOKENS.textDim, marginBottom: 6 }}>
+            Apply to:
+          </legend>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input type="radio" name="scope" value="this" checked={scope === 'this'} onChange={() => setScope('this')} />
+            <input
+              type="radio"
+              name="scope"
+              value="this"
+              checked={scope === 'this'}
+              onChange={() => setScope('this')}
+            />
             This block only
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input type="radio" name="scope" value="all" checked={scope === 'all'} onChange={() => setScope('all')} />
+            <input
+              type="radio"
+              name="scope"
+              value="all"
+              checked={scope === 'all'}
+              onChange={() => setScope('all')}
+            />
             {/* [I-EVERY-OCCURRENCE-TERM] plain English UI copy, not a term-of-art — no <Term> wrap. */}
             Every occurrence in this program
           </label>
@@ -117,13 +166,17 @@ export function DesktopSwapSheet({ open, context, fromSlug: _fromSlug, fromName,
         />
 
         <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-          <button type="button" onClick={onClose} style={btn('ghost')}>Cancel</button>
+          <button type="button" onClick={onClose} style={btn('ghost')}>
+            Cancel
+          </button>
           <button
             type="button"
             disabled={!picked}
             onClick={() => picked && onApply({ scope, toExerciseSlug: picked.slug })}
             style={btn(picked ? 'primary' : 'disabled')}
-          >Apply</button>
+          >
+            Apply
+          </button>
         </div>
       </div>
     </div>
@@ -131,7 +184,32 @@ export function DesktopSwapSheet({ open, context, fromSlug: _fromSlug, fromName,
 }
 
 function btn(variant: 'primary' | 'ghost' | 'disabled'): React.CSSProperties {
-  if (variant === 'primary') return { padding: '10px 16px', background: TOKENS.accent, color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: FONTS.ui, fontWeight: 600 };
-  if (variant === 'disabled') return { padding: '10px 16px', background: TOKENS.surface2, color: TOKENS.textMute, border: `1px solid ${TOKENS.line}`, borderRadius: 8, cursor: 'not-allowed' };
-  return { padding: '10px 16px', background: 'transparent', color: TOKENS.text, border: `1px solid ${TOKENS.lineStrong}`, borderRadius: 8, cursor: 'pointer' };
+  if (variant === 'primary')
+    return {
+      padding: '10px 16px',
+      background: TOKENS.accent,
+      color: '#fff',
+      border: 'none',
+      borderRadius: 8,
+      cursor: 'pointer',
+      fontFamily: FONTS.ui,
+      fontWeight: 600,
+    };
+  if (variant === 'disabled')
+    return {
+      padding: '10px 16px',
+      background: TOKENS.surface2,
+      color: TOKENS.textMute,
+      border: `1px solid ${TOKENS.line}`,
+      borderRadius: 8,
+      cursor: 'not-allowed',
+    };
+  return {
+    padding: '10px 16px',
+    background: 'transparent',
+    color: TOKENS.text,
+    border: `1px solid ${TOKENS.lineStrong}`,
+    borderRadius: 8,
+    cursor: 'pointer',
+  };
 }

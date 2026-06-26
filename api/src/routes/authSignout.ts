@@ -36,7 +36,7 @@ export async function authSignoutRoutes(app: FastifyInstance) {
       }
 
       const client = await db.connect();
-      let rowCount = 0;
+      let rowCount: number;
       try {
         await client.query('BEGIN');
         const res = await client.query(

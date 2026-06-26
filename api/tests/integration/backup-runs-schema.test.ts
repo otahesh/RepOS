@@ -18,7 +18,11 @@ describe('backup_runs schema (migration 050+051)', () => {
       expect.arrayContaining([
         expect.objectContaining({ column_name: 'id', data_type: 'bigint', is_nullable: 'NO' }),
         expect.objectContaining({ column_name: 'trigger', data_type: 'text', is_nullable: 'NO' }),
-        expect.objectContaining({ column_name: 'event_kind', data_type: 'text', is_nullable: 'NO' }), // C-DOWNLOAD-AUDIT
+        expect.objectContaining({
+          column_name: 'event_kind',
+          data_type: 'text',
+          is_nullable: 'NO',
+        }), // C-DOWNLOAD-AUDIT
         expect.objectContaining({ column_name: 'status', data_type: 'text', is_nullable: 'NO' }),
         expect.objectContaining({ column_name: 'file_path', data_type: 'text' }),
         expect.objectContaining({ column_name: 'size_bytes', data_type: 'bigint' }),
@@ -31,7 +35,10 @@ describe('backup_runs schema (migration 050+051)', () => {
           data_type: 'timestamp with time zone',
           is_nullable: 'NO',
         }),
-        expect.objectContaining({ column_name: 'finished_at', data_type: 'timestamp with time zone' }),
+        expect.objectContaining({
+          column_name: 'finished_at',
+          data_type: 'timestamp with time zone',
+        }),
       ]),
     );
   });

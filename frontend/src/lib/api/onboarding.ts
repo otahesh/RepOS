@@ -5,7 +5,9 @@ import { apiFetch } from '../../auth';
 
 export type OnboardingGoal = 'cut' | 'maintain' | 'bulk';
 
-export async function completeOnboarding(goal: OnboardingGoal): Promise<{ onboarding_completed_at: string }> {
+export async function completeOnboarding(
+  goal: OnboardingGoal,
+): Promise<{ onboarding_completed_at: string }> {
   const res = await apiFetch('/api/me/onboarding/complete', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

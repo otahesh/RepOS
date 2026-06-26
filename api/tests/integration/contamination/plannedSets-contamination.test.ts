@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 async function aPlannedSet(userId: string): Promise<{ plannedSetId: string }> {
   const runId = await seedFullMesocycleForUser(userId, { weeks: 4 });
@@ -29,7 +38,8 @@ describe('W8.2 contamination — planned-sets (deep IDOR)', () => {
     const { plannedSetId } = await aPlannedSet(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${plannedSetId}`,
+      method: 'PATCH',
+      url: `/api/planned-sets/${plannedSetId}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       // PlannedSetPatchRequestSchema: target_rir min is 1, so use a VALID
       // minimal field (target_reps_low) — we want the ownership 404, not a
@@ -38,7 +48,8 @@ describe('W8.2 contamination — planned-sets (deep IDOR)', () => {
     });
     expect(res.statusCode).toBe(404);
     const { rows } = await db.query<{ overridden_at: Date | null }>(
-      `SELECT overridden_at FROM planned_sets WHERE id=$1`, [plannedSetId],
+      `SELECT overridden_at FROM planned_sets WHERE id=$1`,
+      [plannedSetId],
     );
     expect(rows[0].overridden_at).toBeNull();
   });
@@ -48,10 +59,13 @@ describe('W8.2 contamination — planned-sets (deep IDOR)', () => {
     const pair = await mkUserPair();
     handles.push(pair);
     const { plannedSetId } = await aPlannedSet(pair.userA.userId);
-    const { rows: ex } = await db.query<{ id: string }>(`SELECT id FROM exercises WHERE archived_at IS NULL LIMIT 1`);
+    const { rows: ex } = await db.query<{ id: string }>(
+      `SELECT id FROM exercises WHERE archived_at IS NULL LIMIT 1`,
+    );
 
     const res = await app.inject({
-      method: 'POST', url: `/api/planned-sets/${plannedSetId}/substitute`,
+      method: 'POST',
+      url: `/api/planned-sets/${plannedSetId}/substitute`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       payload: { to_exercise_id: ex[0].id },
     });

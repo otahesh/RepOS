@@ -13,22 +13,12 @@
  */
 
 import 'dotenv/config';
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { generateKeyPair, exportJWK, SignJWT, type KeyLike, type JWK } from 'jose';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { db } from '../../src/db/client.js';
-import {
-  requireCfAccess,
-  resetJwksCacheForTesting,
-} from '../../src/middleware/cfAccess.js';
+import { requireCfAccess, resetJwksCacheForTesting } from '../../src/middleware/cfAccess.js';
 
 const AUD = 'test-aud-beta-w0-6';
 const TEST_EMAIL = 'jwks-rotation-test@local';
@@ -101,54 +91,50 @@ async function signJwt(kid: string, privateKey: KeyLike): Promise<string> {
 }
 
 describe('CF Access JWKS rotation cache invalidation', () => {
-  it(
-    'accepts the rotated-in key within 60s and 401s the rotated-out key',
-    async () => {
-      // 1. Start with key-A.
-      const a = await makeJwk('kid-A');
-      activeJwk = a.jwk;
+  it('accepts the rotated-in key within 60s and 401s the rotated-out key', async () => {
+    // 1. Start with key-A.
+    const a = await makeJwk('kid-A');
+    activeJwk = a.jwk;
 
-      const app = await buildHarness();
-      const aJwt = await signJwt('kid-A', a.privateKey);
+    const app = await buildHarness();
+    const aJwt = await signJwt('kid-A', a.privateKey);
 
-      const r1 = await app.inject({
+    const r1 = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { 'cf-access-jwt-assertion': aJwt },
+    });
+    expect(r1.statusCode).toBe(200);
+
+    // 2. Rotate: server now serves key-B only. kid-A is gone from JWKS.
+    const b = await makeJwk('kid-B');
+    activeJwk = b.jwk;
+
+    const bJwt = await signJwt('kid-B', b.privateKey);
+
+    // 3. Poll: within 60s the cache must refresh and kid-B JWT must verify.
+    const t0 = Date.now();
+    let lastB = 401;
+    while (Date.now() - t0 < 60_000) {
+      const rB = await app.inject({
         method: 'GET',
         url: '/probe',
-        headers: { 'cf-access-jwt-assertion': aJwt },
+        headers: { 'cf-access-jwt-assertion': bJwt },
       });
-      expect(r1.statusCode).toBe(200);
+      lastB = rB.statusCode;
+      if (lastB === 200) break;
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    expect(lastB).toBe(200);
 
-      // 2. Rotate: server now serves key-B only. kid-A is gone from JWKS.
-      const b = await makeJwk('kid-B');
-      activeJwk = b.jwk;
+    // 4. After cache refresh, kid-A is no longer in JWKS → kid-A JWTs 401.
+    const rA2 = await app.inject({
+      method: 'GET',
+      url: '/probe',
+      headers: { 'cf-access-jwt-assertion': aJwt },
+    });
+    expect(rA2.statusCode).toBe(401);
 
-      const bJwt = await signJwt('kid-B', b.privateKey);
-
-      // 3. Poll: within 60s the cache must refresh and kid-B JWT must verify.
-      const t0 = Date.now();
-      let lastB = 401;
-      while (Date.now() - t0 < 60_000) {
-        const rB = await app.inject({
-          method: 'GET',
-          url: '/probe',
-          headers: { 'cf-access-jwt-assertion': bJwt },
-        });
-        lastB = rB.statusCode;
-        if (lastB === 200) break;
-        await new Promise((r) => setTimeout(r, 2_000));
-      }
-      expect(lastB).toBe(200);
-
-      // 4. After cache refresh, kid-A is no longer in JWKS → kid-A JWTs 401.
-      const rA2 = await app.inject({
-        method: 'GET',
-        url: '/probe',
-        headers: { 'cf-access-jwt-assertion': aJwt },
-      });
-      expect(rA2.statusCode).toBe(401);
-
-      await app.close();
-    },
-    90_000,
-  );
+    await app.close();
+  }, 90_000);
 });

@@ -21,22 +21,30 @@ describe('<InjuryChipsEditor>', () => {
   it('toggling an inactive chip calls upsertInjury', async () => {
     vi.mocked(api.listInjuries).mockResolvedValueOnce([]);
     vi.mocked(api.upsertInjury).mockResolvedValueOnce({
-      joint: 'knee_left', severity: 'mod', notes: '', onset_at: null,
-      created_at: '', updated_at: '',
+      joint: 'knee_left',
+      severity: 'mod',
+      notes: '',
+      onset_at: null,
+      created_at: '',
+      updated_at: '',
     });
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText('knee_left'));
     fireEvent.click(screen.getByRole('button', { name: /knee_left/i }));
-    await waitFor(() =>
-      expect(api.upsertInjury).toHaveBeenCalledWith({ joint: 'knee_left' }),
-    );
+    await waitFor(() => expect(api.upsertInjury).toHaveBeenCalledWith({ joint: 'knee_left' }));
   });
 
   it('clicking an active chip expands a panel with severity + notes + onset', async () => {
-    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
-      joint: 'knee_left', severity: 'mod', notes: 'meniscus', onset_at: '2026-02-15',
-      created_at: '', updated_at: '',
-    }]);
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([
+      {
+        joint: 'knee_left',
+        severity: 'mod',
+        notes: 'meniscus',
+        onset_at: '2026-02-15',
+        created_at: '',
+        updated_at: '',
+      },
+    ]);
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText(/knee_left/));
     fireEvent.click(screen.getByRole('button', { name: /knee_left/i }));
@@ -45,13 +53,23 @@ describe('<InjuryChipsEditor>', () => {
   });
 
   it('editing severity calls patchInjury', async () => {
-    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
-      joint: 'knee_left', severity: 'mod', notes: '', onset_at: null,
-      created_at: '', updated_at: '',
-    }]);
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([
+      {
+        joint: 'knee_left',
+        severity: 'mod',
+        notes: '',
+        onset_at: null,
+        created_at: '',
+        updated_at: '',
+      },
+    ]);
     vi.mocked(api.patchInjury).mockResolvedValueOnce({
-      joint: 'knee_left', severity: 'high', notes: '', onset_at: null,
-      created_at: '', updated_at: '',
+      joint: 'knee_left',
+      severity: 'high',
+      notes: '',
+      onset_at: null,
+      created_at: '',
+      updated_at: '',
     });
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText(/knee_left/));
@@ -65,10 +83,16 @@ describe('<InjuryChipsEditor>', () => {
 
   // [FIX-19] rollback path
   it('reverts chip state and surfaces error when PATCH fails', async () => {
-    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
-      joint: 'wrist', severity: 'mod', notes: '', onset_at: null,
-      created_at: '', updated_at: '',
-    }]);
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([
+      {
+        joint: 'wrist',
+        severity: 'mod',
+        notes: '',
+        onset_at: null,
+        created_at: '',
+        updated_at: '',
+      },
+    ]);
     vi.mocked(api.patchInjury).mockRejectedValueOnce(new Error('500 server'));
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText(/wrist/));
@@ -90,13 +114,23 @@ describe('<InjuryChipsEditor>', () => {
   });
 
   it('notes input only PATCHes on commit when the value actually changed', async () => {
-    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
-      joint: 'elbow', severity: 'mod', notes: 'tendonitis', onset_at: null,
-      created_at: '', updated_at: '',
-    }]);
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([
+      {
+        joint: 'elbow',
+        severity: 'mod',
+        notes: 'tendonitis',
+        onset_at: null,
+        created_at: '',
+        updated_at: '',
+      },
+    ]);
     vi.mocked(api.patchInjury).mockResolvedValueOnce({
-      joint: 'elbow', severity: 'mod', notes: 'tendonitis flaring up', onset_at: null,
-      created_at: '', updated_at: '',
+      joint: 'elbow',
+      severity: 'mod',
+      notes: 'tendonitis flaring up',
+      onset_at: null,
+      created_at: '',
+      updated_at: '',
     });
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText('elbow'));
@@ -114,10 +148,16 @@ describe('<InjuryChipsEditor>', () => {
   });
 
   it('Remove button inside expanded panel calls deleteInjury', async () => {
-    vi.mocked(api.listInjuries).mockResolvedValueOnce([{
-      joint: 'wrist', severity: 'mod', notes: '', onset_at: null,
-      created_at: '', updated_at: '',
-    }]);
+    vi.mocked(api.listInjuries).mockResolvedValueOnce([
+      {
+        joint: 'wrist',
+        severity: 'mod',
+        notes: '',
+        onset_at: null,
+        created_at: '',
+        updated_at: '',
+      },
+    ]);
     vi.mocked(api.deleteInjury).mockResolvedValueOnce();
     render(<InjuryChipsEditor />);
     await waitFor(() => screen.getByText(/wrist/));

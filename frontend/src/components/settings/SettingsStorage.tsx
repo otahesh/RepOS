@@ -124,27 +124,28 @@ export default function SettingsStorage(): JSX.Element {
     }
   };
 
-  const clearButton = rejected > 0 && !confirming ? (
-    <button
-      type="button"
-      onClick={() => setConfirming(true)}
-      style={{
-        background: 'transparent',
-        color: TOKENS.danger,
-        border: `1px solid ${TOKENS.danger}`,
-        padding: '6px 12px',
-        borderRadius: 6,
-        fontFamily: FONTS.ui,
-        fontSize: 12,
-        fontWeight: 600,
-        letterSpacing: 0.4,
-        textTransform: 'uppercase',
-        cursor: 'pointer',
-      }}
-    >
-      Clear rejected
-    </button>
-  ) : undefined;
+  const clearButton =
+    rejected > 0 && !confirming ? (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        style={{
+          background: 'transparent',
+          color: TOKENS.danger,
+          border: `1px solid ${TOKENS.danger}`,
+          padding: '6px 12px',
+          borderRadius: 6,
+          fontFamily: FONTS.ui,
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+          cursor: 'pointer',
+        }}
+      >
+        Clear rejected
+      </button>
+    ) : undefined;
 
   return (
     <div
@@ -188,12 +189,7 @@ export default function SettingsStorage(): JSX.Element {
           padding: '4px 22px 18px',
         }}
       >
-        <StorageRow
-          label="Pending"
-          count={pending}
-          testId="pending"
-          caption={pendingCaption}
-        />
+        <StorageRow label="Pending" count={pending} testId="pending" caption={pendingCaption} />
         <StorageRow
           label="Syncing"
           count={syncing}
@@ -224,8 +220,8 @@ export default function SettingsStorage(): JSX.Element {
           }}
         >
           <div style={{ fontSize: 14, color: TOKENS.text, lineHeight: 1.5 }}>
-            Are you sure? {rejected} rejected {rejected === 1 ? 'set' : 'sets'} will be removed
-            from this device. The server keeps no copy of these.
+            Are you sure? {rejected} rejected {rejected === 1 ? 'set' : 'sets'} will be removed from
+            this device. The server keeps no copy of these.
           </div>
           <label
             style={{
@@ -236,7 +232,9 @@ export default function SettingsStorage(): JSX.Element {
               color: TOKENS.textDim,
             }}
           >
-            Type <code style={{ fontFamily: FONTS.mono, color: TOKENS.danger }}>{CONFIRM_PHRASE}</code> to confirm
+            Type{' '}
+            <code style={{ fontFamily: FONTS.mono, color: TOKENS.danger }}>{CONFIRM_PHRASE}</code>{' '}
+            to confirm
             <input
               type="text"
               aria-label="Type CLEAR to confirm"
@@ -279,7 +277,9 @@ export default function SettingsStorage(): JSX.Element {
             </button>
             <button
               type="button"
-              onClick={() => { void onClear(); }}
+              onClick={() => {
+                void onClear();
+              }}
               disabled={clearing || confirmInput !== CONFIRM_PHRASE}
               style={{
                 background: confirmInput === CONFIRM_PHRASE ? TOKENS.danger : TOKENS.surface3,

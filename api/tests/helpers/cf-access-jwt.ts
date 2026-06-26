@@ -15,13 +15,7 @@
 // suites can use the helper without leaking state.
 
 import { createServer, type Server } from 'node:http';
-import {
-  generateKeyPair,
-  exportJWK,
-  SignJWT,
-  type KeyLike,
-  type JWK,
-} from 'jose';
+import { generateKeyPair, exportJWK, SignJWT, type KeyLike, type JWK } from 'jose';
 import { resetJwksCacheForTesting } from '../../src/middleware/cfAccess.js';
 
 export interface TestJwksHandle {
@@ -40,12 +34,14 @@ interface SavedEnv {
   CF_ACCESS_ALLOWED_EMAILS: string | undefined;
 }
 
-export async function setupTestJwks(opts: {
-  /** AUD value the issued JWTs claim; default unique per call to avoid bleed. */
-  aud?: string;
-  /** Comma-separated allowed email list; default empty (= allow all). */
-  allowedEmails?: string;
-} = {}): Promise<TestJwksHandle> {
+export async function setupTestJwks(
+  opts: {
+    /** AUD value the issued JWTs claim; default unique per call to avoid bleed. */
+    aud?: string;
+    /** Comma-separated allowed email list; default empty (= allow all). */
+    allowedEmails?: string;
+  } = {},
+): Promise<TestJwksHandle> {
   const aud = opts.aud ?? `test-aud-${Math.random().toString(36).slice(2, 10)}`;
 
   // 1. Generate an RS256 key pair and the matching public JWK.
@@ -68,9 +64,7 @@ export async function setupTestJwks(opts: {
     res.statusCode = 404;
     res.end();
   });
-  await new Promise<void>((resolve) =>
-    server.listen(0, '127.0.0.1', resolve),
-  );
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
   const teamDomain = `127.0.0.1:${port}`;
 

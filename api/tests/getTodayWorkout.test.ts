@@ -4,20 +4,55 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { getTodayWorkout } from '../src/services/getTodayWorkout.js';
 import { materializeMesocycle } from '../src/services/materializeMesocycle.js';
-import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from './helpers/program-fixtures.js';
+import {
+  mkUser,
+  mkTemplate,
+  mkUserProgram,
+  cleanupUser,
+  cleanupTemplate,
+} from './helpers/program-fixtures.js';
 
-let userId: string; let templateId: string; let userProgramId: string; let runId: string;
+let userId: string;
+let templateId: string;
+let userProgramId: string;
+let runId: string;
 
 const TEMPLATE = {
   _v: 1,
   days: [
     {
-      idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
-      blocks: [{ exercise_slug: 'barbell-bench-press', mev: 6, mav: 10, target_reps_low: 5, target_reps_high: 8, target_rir: 2, rest_sec: 180 }],
+      idx: 0,
+      day_offset: 0,
+      kind: 'strength',
+      name: 'Day A',
+      blocks: [
+        {
+          exercise_slug: 'barbell-bench-press',
+          mev: 6,
+          mav: 10,
+          target_reps_low: 5,
+          target_reps_high: 8,
+          target_rir: 2,
+          rest_sec: 180,
+        },
+      ],
     },
     {
-      idx: 1, day_offset: 2, kind: 'strength', name: 'Day B', // skips one day
-      blocks: [{ exercise_slug: 'barbell-back-squat', mev: 6, mav: 10, target_reps_low: 5, target_reps_high: 8, target_rir: 2, rest_sec: 180 }],
+      idx: 1,
+      day_offset: 2,
+      kind: 'strength',
+      name: 'Day B', // skips one day
+      blocks: [
+        {
+          exercise_slug: 'barbell-back-squat',
+          mev: 6,
+          mav: 10,
+          target_reps_low: 5,
+          target_reps_high: 8,
+          target_rir: 2,
+          rest_sec: 180,
+        },
+      ],
     },
   ],
 };
@@ -25,18 +60,30 @@ const TEMPLATE = {
 beforeAll(async () => {
   const u = await mkUser({
     prefix: 'vitest.today',
-    equipment_profile: { _v: 1, dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 }, adjustable_bench: { incline: true, decline: false } },
+    equipment_profile: {
+      _v: 1,
+      dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 },
+      adjustable_bench: { incline: true, decline: false },
+    },
   });
   userId = u.id;
   const t = await mkTemplate({
-    prefix: 'vitest-today', name: 'Vitest today', weeks: 5, daysPerWeek: 2, structure: TEMPLATE,
+    prefix: 'vitest-today',
+    name: 'Vitest today',
+    weeks: 5,
+    daysPerWeek: 2,
+    structure: TEMPLATE,
   });
   templateId = t.id;
   const up = await mkUserProgram({ userId, templateId, name: 'Vitest today run' });
   userProgramId = up.id;
 
   // Start a run with start_date = 2026-05-04 (a Monday) in NY tz.
-  const r = await materializeMesocycle({ userProgramId, startDate: '2026-05-04', startTz: 'America/New_York' });
+  const r = await materializeMesocycle({
+    userProgramId,
+    startDate: '2026-05-04',
+    startTz: 'America/New_York',
+  });
   runId = r.run_id;
 });
 
@@ -85,10 +132,14 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
     const u2 = await mkUser({ prefix: 'vitest.today.dst', equipment_profile: { _v: 1 } });
     try {
       const up2 = await mkUserProgram({ userId: u2.id, templateId, name: 'DST run' });
-      await materializeMesocycle({ userProgramId: up2.id, startDate: '2026-03-08', startTz: 'America/New_York' });
+      await materializeMesocycle({
+        userProgramId: up2.id,
+        startDate: '2026-03-08',
+        startTz: 'America/New_York',
+      });
 
       const before = await getTodayWorkout(u2.id, new Date('2026-03-08T06:00:00Z')); // 01:00 EST
-      const after  = await getTodayWorkout(u2.id, new Date('2026-03-08T08:00:00Z')); // 04:00 EDT
+      const after = await getTodayWorkout(u2.id, new Date('2026-03-08T08:00:00Z')); // 04:00 EDT
       expect(before.state === 'workout' || before.state === 'rest').toBe(true);
       expect(after.state).toBe(before.state);
       if (before.state === 'workout' && after.state === 'workout') {
@@ -111,12 +162,16 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
     const u3 = await mkUser({ prefix: 'vitest.today.leap', equipment_profile: { _v: 1 } });
     try {
       const up3 = await mkUserProgram({ userId: u3.id, templateId, name: 'Leap' });
-      await materializeMesocycle({ userProgramId: up3.id, startDate: '2028-02-29', startTz: 'UTC' });
+      await materializeMesocycle({
+        userProgramId: up3.id,
+        startDate: '2028-02-29',
+        startTz: 'UTC',
+      });
 
       const feb29 = await getTodayWorkout(u3.id, new Date('2028-02-29T12:00:00Z'));
-      const mar1  = await getTodayWorkout(u3.id, new Date('2028-03-01T12:00:00Z'));
+      const mar1 = await getTodayWorkout(u3.id, new Date('2028-03-01T12:00:00Z'));
       expect(feb29.state).toBe('workout'); // day_offset 0
-      expect(mar1.state).toBe('rest');     // day_offset 2 falls on 03-02
+      expect(mar1.state).toBe('rest'); // day_offset 2 falls on 03-02
     } finally {
       await cleanupUser(u3.id);
     }

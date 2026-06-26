@@ -18,14 +18,38 @@ function renderWizard(onStarted = vi.fn()) {
 describe('<ForkWizard>', () => {
   beforeEach(() => {
     vi.spyOn(upApi, 'getUserProgram').mockResolvedValue({
-      id: 'up-1', user_id: 'u-1', template_id: 't-1', template_version: 1, name: 'Full Body 3-Day Foundation',
+      id: 'up-1',
+      user_id: 'u-1',
+      template_id: 't-1',
+      template_version: 1,
+      name: 'Full Body 3-Day Foundation',
       effective_name: 'Full Body 3-Day Foundation',
-      customizations: {}, status: 'draft',
-      effective_structure: { _v: 1, days: [
-        { idx: 0, day_offset: 0, kind: 'strength', name: 'Full Body A', blocks: [{ exercise_slug: 'dumbbell-goblet-squat', mev: 8, mav: 14, target_reps_low: 8, target_reps_high: 10, target_rir: 2, rest_sec: 120 }] },
-        { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [] },
-        { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [] },
-      ]},
+      customizations: {},
+      status: 'draft',
+      effective_structure: {
+        _v: 1,
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'strength',
+            name: 'Full Body A',
+            blocks: [
+              {
+                exercise_slug: 'dumbbell-goblet-squat',
+                mev: 8,
+                mav: 14,
+                target_reps_low: 8,
+                target_reps_high: 10,
+                target_rir: 2,
+                rest_sec: 120,
+              },
+            ],
+          },
+          { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [] },
+          { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [] },
+        ],
+      },
     } as any);
     vi.spyOn(upApi, 'getUserProgramWarnings').mockResolvedValue([]);
     vi.spyOn(upApi, 'patchUserProgram').mockResolvedValue({ id: 'up-1' } as any);
@@ -33,7 +57,8 @@ describe('<ForkWizard>', () => {
     // Default: no active run anywhere — happy-path wizard.
     vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValue({ state: 'no_active_run' });
     vi.spyOn(msApi, 'abandonMesocycle').mockResolvedValue({
-      mesocycle_run_id: 'mr-9', status: 'abandoned',
+      mesocycle_run_id: 'mr-9',
+      status: 'abandoned',
       finished_at: '2026-05-07T15:00:00.000Z',
     });
   });
@@ -51,7 +76,10 @@ describe('<ForkWizard>', () => {
     await user.clear(input);
     await user.type(input, 'My FB Run');
     await user.click(screen.getByText(/save name/i));
-    expect(upApi.patchUserProgram).toHaveBeenCalledWith('up-1', { op: 'rename', name: 'My FB Run' });
+    expect(upApi.patchUserProgram).toHaveBeenCalledWith('up-1', {
+      op: 'rename',
+      name: 'My FB Run',
+    });
   });
   it('start materializes and calls onStarted with mesocycle id', async () => {
     const onStarted = vi.fn();
@@ -64,7 +92,9 @@ describe('<ForkWizard>', () => {
 
   it('shows conflict banner + disables Start when an active run exists elsewhere', async () => {
     vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValue({
-      state: 'rest', run_id: 'mr-existing', scheduled_date: '2026-05-05',
+      state: 'rest',
+      run_id: 'mr-existing',
+      scheduled_date: '2026-05-05',
     });
     renderWizard();
     expect(await screen.findByRole('alert')).toHaveTextContent(/already have an active/i);
@@ -76,7 +106,9 @@ describe('<ForkWizard>', () => {
 
   it('Abandon clears the conflict and re-enables Start', async () => {
     const today = vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValueOnce({
-      state: 'rest', run_id: 'mr-existing', scheduled_date: '2026-05-05',
+      state: 'rest',
+      run_id: 'mr-existing',
+      scheduled_date: '2026-05-05',
     });
     const user = userEvent.setup();
     renderWizard();
@@ -94,7 +126,8 @@ describe('<ForkWizard>', () => {
 
   it('handles 409 active_run_exists from Start by re-pulling today and showing the banner', async () => {
     // Pre-check is stale — first call says no run, second call (after 409) returns one.
-    const today = vi.spyOn(msApi, 'getTodayWorkout')
+    const today = vi
+      .spyOn(msApi, 'getTodayWorkout')
       .mockResolvedValueOnce({ state: 'no_active_run' });
     vi.spyOn(upApi, 'startUserProgram').mockRejectedValue(
       new ApiError(409, { error: 'active_run_exists' }, '{"error":"active_run_exists"}'),
@@ -103,7 +136,9 @@ describe('<ForkWizard>', () => {
     renderWizard();
     await screen.findByText(/Full Body A/);
     today.mockResolvedValueOnce({
-      state: 'rest', run_id: 'mr-race', scheduled_date: '2026-05-05',
+      state: 'rest',
+      run_id: 'mr-race',
+      scheduled_date: '2026-05-05',
     });
     await user.click(screen.getByRole('button', { name: /start mesocycle/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/already have an active/i);

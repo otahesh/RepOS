@@ -32,16 +32,11 @@ function jwks() {
   // ephemeral-port form like "127.0.0.1:54321" AND NODE_ENV=test. Prod always
   // resolves to https:// because real team domains start with team names.
   const proto =
-    process.env.NODE_ENV === 'test' && teamDomain.startsWith('127.0.0.1')
-      ? 'http'
-      : 'https';
-  cachedJwks = createRemoteJWKSet(
-    new URL(`${proto}://${teamDomain}/cdn-cgi/access/certs`),
-    {
-      cacheMaxAge: 30_000, // 30s soft refresh
-      cooldownDuration: 0, // immediate refresh on a kid miss
-    },
-  );
+    process.env.NODE_ENV === 'test' && teamDomain.startsWith('127.0.0.1') ? 'http' : 'https';
+  cachedJwks = createRemoteJWKSet(new URL(`${proto}://${teamDomain}/cdn-cgi/access/certs`), {
+    cacheMaxAge: 30_000, // 30s soft refresh
+    cooldownDuration: 0, // immediate refresh on a kid miss
+  });
   return cachedJwks;
 }
 
@@ -217,9 +212,7 @@ function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolea
 //     admin ops (restore) — REJECT the X-Admin-Key path, require CF Access JWT
 //     + admin email. The opaque bearer escape hatch is not enough for a
 //     restore that DROPs the database.
-export function requireAdminKeyOrCfAccess(
-  opts: { requireFreshCfAccess?: boolean } = {},
-) {
+export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean } = {}) {
   return async function adminGate(req: FastifyRequest, reply: FastifyReply) {
     if (opts.requireFreshCfAccess) {
       // Dev / test: ADMIN_API_KEY unset means open admin path — same bypass
@@ -289,10 +282,7 @@ export function requireAdminKeyOrCfAccess(
 // successful JWT validation we stamp `authMode='cf_access'` so the downstream
 // `csrfOrigin` preHandler enforces the Origin guard (per C-CSRF-ORIGIN) — a
 // stolen JWT replayed cross-origin must still be blocked.
-export async function requireCfAccessOnly(
-  req: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+export async function requireCfAccessOnly(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const auth = req.headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     req.log.warn({ path: req.url }, 'bearer_rejected_on_cf_access_only_route');

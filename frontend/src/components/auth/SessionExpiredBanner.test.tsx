@@ -3,7 +3,11 @@ import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
-import { SessionExpiredBanner, CF_ACCESS_LOGIN_URL, LOCAL_STORAGE_KEY } from './SessionExpiredBanner';
+import {
+  SessionExpiredBanner,
+  CF_ACCESS_LOGIN_URL,
+  LOCAL_STORAGE_KEY,
+} from './SessionExpiredBanner';
 import AppShell from '../layout/AppShell';
 
 // AppShell-integration tests mount Topbar + Sidebar through the shell, both of

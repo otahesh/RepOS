@@ -8,9 +8,7 @@
 // artifact onto an unexpected origin.
 
 if (import.meta.env.DEV) {
-  const isLocal =
-    location.hostname === 'localhost' ||
-    location.hostname === '127.0.0.1';
+  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   const token = isLocal ? localStorage.getItem('repos_dev_token') : null;
   if (token) {
     const orig = window.fetch.bind(window);
@@ -23,9 +21,7 @@ if (import.meta.env.DEV) {
       }
       if (typeof url === 'string' && url.includes('/api/')) {
         const headers = new Headers(
-          (init && init.headers) ||
-            (input instanceof Request ? input.headers : undefined) ||
-            {},
+          (init && init.headers) || (input instanceof Request ? input.headers : undefined) || {},
         );
         headers.set('Authorization', `Bearer ${token}`);
         init = { ...(init || {}), headers };

@@ -2,13 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { ProgramTemplateSchema } from '../../src/schemas/programTemplate.js';
 
 const baseDay = (extra: Partial<any> = {}) => ({
-  idx: 0, day_offset: 0, kind: 'strength' as const, name: 'Mon',
-  blocks: [{
-    exercise_slug: 'barbell-back-squat',
-    mev: 8, mav: 14,
-    target_reps_low: 5, target_reps_high: 8,
-    target_rir: 2, rest_sec: 180,
-  }],
+  idx: 0,
+  day_offset: 0,
+  kind: 'strength' as const,
+  name: 'Mon',
+  blocks: [
+    {
+      exercise_slug: 'barbell-back-squat',
+      mev: 8,
+      mav: 14,
+      target_reps_low: 5,
+      target_reps_high: 8,
+      target_rir: 2,
+      rest_sec: 180,
+    },
+  ],
   ...extra,
 });
 
@@ -99,12 +107,19 @@ describe('ProgramTemplateSchema', () => {
         _v: 1,
         days: [
           baseDay({
-            idx: 0, day_offset: 0,
-            blocks: [{
-              exercise_slug: 'x', mev: 14, mav: 8,
-              target_reps_low: 5, target_reps_high: 8,
-              target_rir: 2, rest_sec: 180,
-            }],
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 14,
+                mav: 8,
+                target_reps_low: 5,
+                target_reps_high: 8,
+                target_rir: 2,
+                rest_sec: 180,
+              },
+            ],
           }),
         ],
       },
@@ -122,14 +137,23 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [baseDay({
-          idx: 0, day_offset: 0,
-          blocks: [{
-            exercise_slug: 'x', mev: 8, mav: 14,
-            target_reps_low: 5, target_reps_high: 8,
-            target_rir: 0, rest_sec: 180,
-          }],
-        })],
+        days: [
+          baseDay({
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 8,
+                mav: 14,
+                target_reps_low: 5,
+                target_reps_high: 8,
+                target_rir: 0,
+                rest_sec: 180,
+              },
+            ],
+          }),
+        ],
       },
       days_per_week: 1,
     };
@@ -142,14 +166,23 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [baseDay({
-          idx: 0, day_offset: 0,
-          blocks: [{
-            exercise_slug: 'x', mev: 8, mav: 14,
-            target_reps_low: 12, target_reps_high: 5,
-            target_rir: 2, rest_sec: 180,
-          }],
-        })],
+        days: [
+          baseDay({
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 8,
+                mav: 14,
+                target_reps_low: 12,
+                target_reps_high: 5,
+                target_rir: 2,
+                rest_sec: 180,
+              },
+            ],
+          }),
+        ],
       },
       days_per_week: 1,
     };
@@ -162,13 +195,20 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [{
-          idx: 0, day_offset: 0, kind: 'cardio', name: 'Z2',
-          blocks: [{
-            exercise_slug: 'treadmill',
-            cardio: { target_zone: 2 },
-          }],
-        }],
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'cardio',
+            name: 'Z2',
+            blocks: [
+              {
+                exercise_slug: 'treadmill',
+                cardio: { target_zone: 2 },
+              },
+            ],
+          },
+        ],
       },
       days_per_week: 1,
     };
@@ -184,13 +224,20 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [{
-          idx: 0, day_offset: 0, kind: 'cardio', name: 'Z2',
-          blocks: [{
-            exercise_slug: 'treadmill',
-            cardio: { target_duration_sec: 1800, target_zone: 2 },
-          }],
-        }],
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'cardio',
+            name: 'Z2',
+            blocks: [
+              {
+                exercise_slug: 'treadmill',
+                cardio: { target_duration_sec: 1800, target_zone: 2 },
+              },
+            ],
+          },
+        ],
       },
       days_per_week: 1,
     };

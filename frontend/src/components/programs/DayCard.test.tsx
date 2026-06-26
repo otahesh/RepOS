@@ -3,9 +3,23 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DayCard } from './DayCard';
 
-const day = { idx: 0, day_offset: 0, kind: 'strength' as const, name: 'Upper', blocks: [
-  { exercise_slug: 'barbell-bench-press', mev: 8, mav: 14, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180 },
-]};
+const day = {
+  idx: 0,
+  day_offset: 0,
+  kind: 'strength' as const,
+  name: 'Upper',
+  blocks: [
+    {
+      exercise_slug: 'barbell-bench-press',
+      mev: 8,
+      mav: 14,
+      target_reps_low: 6,
+      target_reps_high: 8,
+      target_rir: 2,
+      rest_sec: 180,
+    },
+  ],
+};
 
 describe('<DayCard>', () => {
   it('add-set fires onAddSet', async () => {

@@ -10,7 +10,9 @@
 import { test, expect } from '@playwright/test';
 import { inspectQueue, logSet, seedMesocycle } from './_helpers';
 
-test('O1: 409 audit_window_expired surfaces banner + rejected status; row preserved', async ({ page }) => {
+test('O1: 409 audit_window_expired surfaces banner + rejected status; row preserved', async ({
+  page,
+}) => {
   const server = await seedMesocycle(page);
   server.setResponder(() => ({ kind: 'audit-expired' }));
 
@@ -21,10 +23,15 @@ test('O1: 409 audit_window_expired surfaces banner + rejected status; row preser
   await logSet(page, 0, { weight: 135, reps: 5 });
 
   // Wait for the POST to be intercepted and the row to flip to rejected.
-  await expect.poll(async () => {
-    const rows = await inspectQueue(page);
-    return rows[0]?.status ?? 'none';
-  }, { timeout: 5000 }).toBe('rejected');
+  await expect
+    .poll(
+      async () => {
+        const rows = await inspectQueue(page);
+        return rows[0]?.status ?? 'none';
+      },
+      { timeout: 5000 },
+    )
+    .toBe('rejected');
 
   const rows = await inspectQueue(page);
   expect(rows).toHaveLength(1); // row is preserved, NOT silently dropped

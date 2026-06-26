@@ -5,8 +5,15 @@ import { ParQGate } from '../ParQGate';
 import * as parQApi from '../../../lib/api/parQ';
 
 const QUESTIONS = [
-  'Q1 heart', 'Q2 chest pain activity', 'Q3 chest pain rest', 'Q4 balance',
-  'Q5 bone or joint problem', 'Q6 bp drugs', 'Q7 pregnant', 'Q8 chronic condition', 'Q9 other reason',
+  'Q1 heart',
+  'Q2 chest pain activity',
+  'Q3 chest pain rest',
+  'Q4 balance',
+  'Q5 bone or joint problem',
+  'Q6 bp drugs',
+  'Q7 pregnant',
+  'Q8 chronic condition',
+  'Q9 other reason',
 ];
 
 function mockStatus(over: Partial<parQApi.ParQStatus> = {}) {
@@ -33,7 +40,9 @@ describe('<ParQGate>', () => {
   });
 
   it('all-No → POST with q5_joints=[] → any_yes=false → onComplete, no banner', async () => {
-    const accept = vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({ any_yes: false, advisory_active: false, injuries_created: 0 });
+    const accept = vi
+      .spyOn(parQApi, 'acceptParQ')
+      .mockResolvedValue({ any_yes: false, advisory_active: false, injuries_created: 0 });
     const onComplete = vi.fn();
     render(<ParQGate onComplete={onComplete} />);
     await screen.findByTestId('parq-questions');
@@ -44,7 +53,11 @@ describe('<ParQGate>', () => {
   });
 
   it('one Yes (not Q5) → banner with MEV/RIR copy, click-through closes', async () => {
-    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({ any_yes: true, advisory_active: true, injuries_created: 0 });
+    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({
+      any_yes: true,
+      advisory_active: true,
+      injuries_created: 0,
+    });
     const onComplete = vi.fn();
     render(<ParQGate onComplete={onComplete} />);
     await screen.findByTestId('parq-questions');
@@ -60,7 +73,9 @@ describe('<ParQGate>', () => {
   });
 
   it('Q5=Yes reveals the joint picker; selected joints are sent', async () => {
-    const accept = vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({ any_yes: true, advisory_active: true, injuries_created: 2 });
+    const accept = vi
+      .spyOn(parQApi, 'acceptParQ')
+      .mockResolvedValue({ any_yes: true, advisory_active: true, injuries_created: 2 });
     render(<ParQGate onComplete={vi.fn()} />);
     await screen.findByTestId('parq-questions');
     const q5 = within(screen.getByTestId('parq-questions')).getAllByRole('listitem')[4];
@@ -70,20 +85,27 @@ describe('<ParQGate>', () => {
     fireEvent.click(screen.getByText('Right knee'));
     fireEvent.click(screen.getByText('CONFIRM'));
     await waitFor(() => {
-      const answers = new Array(9).fill(false); answers[4] = true;
+      const answers = new Array(9).fill(false);
+      answers[4] = true;
       expect(accept).toHaveBeenCalledWith(2, answers, ['low_back', 'knee_right']);
     });
   });
 
   it('Q8=Yes appends the chronic-condition clinician line in the banner', async () => {
-    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({ any_yes: true, advisory_active: true, injuries_created: 0 });
+    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({
+      any_yes: true,
+      advisory_active: true,
+      injuries_created: 0,
+    });
     render(<ParQGate onComplete={vi.fn()} />);
     await screen.findByTestId('parq-questions');
     const q8 = within(screen.getByTestId('parq-questions')).getAllByRole('listitem')[7];
     fireEvent.click(within(q8).getByText('Yes'));
     fireEvent.click(screen.getByText('CONFIRM'));
     const banner = await screen.findByRole('alert');
-    expect(banner.textContent).toMatch(/Discuss this with your clinician before increasing volume/i);
+    expect(banner.textContent).toMatch(
+      /Discuss this with your clinician before increasing volume/i,
+    );
   });
 
   it('needs_prompt=false (non-review) → renders nothing', async () => {
@@ -91,7 +113,9 @@ describe('<ParQGate>', () => {
     const { container } = render(<ParQGate onComplete={vi.fn()} />);
     // Wait a tick for the async status fetch to resolve.
     await waitFor(() => expect(parQApi.getParQStatus).toHaveBeenCalled());
-    await waitFor(() => expect(container.querySelector('[data-testid="parq-questions"]')).toBeNull());
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="parq-questions"]')).toBeNull(),
+    );
   });
 
   it('re-review mode: ESC closes via onClose', async () => {
@@ -131,7 +155,11 @@ describe('<ParQGate>', () => {
       const [open, setOpen] = useState(true);
       return open ? <ParQGate onComplete={() => setOpen(false)} /> : null;
     }
-    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({ any_yes: false, advisory_active: false, injuries_created: 0 });
+    vi.spyOn(parQApi, 'acceptParQ').mockResolvedValue({
+      any_yes: false,
+      advisory_active: false,
+      injuries_created: 0,
+    });
     render(<Harness />);
     await screen.findByTestId('parq-questions');
     fireEvent.click(screen.getByText('CONFIRM'));

@@ -10,13 +10,13 @@ Add a schema for every distinct request body, query-string shape, and response b
 
 Use `<Entity><Action>Schema` for I/O types:
 
-| Kind | Example |
-|---|---|
-| Request body — POST | `WeightSampleSchema` |
-| Request body — backfill | `WeightBackfillSchema` |
-| Query string | `WeightRangeQuerySchema` |
-| Response body | `WeightSampleResponseSchema`, `WeightRangeResponseSchema` |
-| Standalone response | `SyncStatusResponseSchema` |
+| Kind                    | Example                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| Request body — POST     | `WeightSampleSchema`                                      |
+| Request body — backfill | `WeightBackfillSchema`                                    |
+| Query string            | `WeightRangeQuerySchema`                                  |
+| Response body           | `WeightSampleResponseSchema`, `WeightRangeResponseSchema` |
+| Standalone response     | `SyncStatusResponseSchema`                                |
 
 Exported inferred types follow the same pattern without `Schema`: `WeightSampleResponse`, `WeightRangeQuery`, etc.
 
@@ -28,7 +28,9 @@ Route handlers import the schema and call `schema.safeParse()` or `schema.parse(
 import { WeightSampleSchema, type WeightSampleResponse } from '../schemas/healthWeight.js';
 
 const result = WeightSampleSchema.safeParse(req.body);
-if (!result.success) { /* translate to { error, field } */ }
+if (!result.success) {
+  /* translate to { error, field } */
+}
 const typed = result.data; // WeightSampleInput
 ```
 
@@ -52,4 +54,4 @@ If a route handler ever changes its response shape without updating the schema, 
 
 ## Migration of other routes
 
-This pattern is currently applied to the `health/weight` surface only as a proof-of-concept. Other route surfaces (mesocycles, user\_programs, programs, exercises, planned\_sets, etc.) are intentionally out of scope for this thread. The follow-up migration should add schemas to `api/src/schemas/` for each surface and wire them in exactly as done here — one surface at a time, with contract tests before merging.
+This pattern is currently applied to the `health/weight` surface only as a proof-of-concept. Other route surfaces (mesocycles, user_programs, programs, exercises, planned_sets, etc.) are intentionally out of scope for this thread. The follow-up migration should add schemas to `api/src/schemas/` for each surface and wire them in exactly as done here — one surface at a time, with contract tests before merging.

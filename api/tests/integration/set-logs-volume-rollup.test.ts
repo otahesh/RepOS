@@ -20,11 +20,7 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
-import {
-  seedUserWithMesocycle,
-  cleanupSeeded,
-  type SeedHandle,
-} from '../helpers/seed-fixtures.js';
+import { seedUserWithMesocycle, cleanupSeeded, type SeedHandle } from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 import { randomUUID } from 'node:crypto';
 
@@ -88,22 +84,18 @@ describe('W1.5.2 — set_logs → volume rollup', () => {
     const seed = await seedUserWithMesocycle();
     handles.push(seed);
 
-    const before = (await app.inject({
-      method: 'GET',
-      url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
-      headers: { authorization: `Bearer ${seed.bearer}` },
-    })).json() as { weeks: WeekEntry[] };
+    const before = (
+      await app.inject({
+        method: 'GET',
+        url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      })
+    ).json() as { weeks: WeekEntry[] };
 
     const beforeWeek = before.weeks.find((w) => w.week_idx === 1);
     expect(beforeWeek).toBeDefined();
-    const beforePerformed = beforeWeek!.muscles.reduce(
-      (acc, m) => acc + m.performed_sets,
-      0,
-    );
-    const beforePlanned = beforeWeek!.muscles.reduce(
-      (acc, m) => acc + m.sets,
-      0,
-    );
+    const beforePerformed = beforeWeek!.muscles.reduce((acc, m) => acc + m.performed_sets, 0);
+    const beforePlanned = beforeWeek!.muscles.reduce((acc, m) => acc + m.sets, 0);
 
     // Sanity: which muscles does the seeded exercise credit? We grab them up
     // front so we can target the ones that should grow.
@@ -132,17 +124,16 @@ describe('W1.5.2 — set_logs → volume rollup', () => {
     });
     expect(post.statusCode).toBe(201);
 
-    const after = (await app.inject({
-      method: 'GET',
-      url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
-      headers: { authorization: `Bearer ${seed.bearer}` },
-    })).json() as { weeks: WeekEntry[] };
+    const after = (
+      await app.inject({
+        method: 'GET',
+        url: `/api/mesocycles/${seed.mesocycleRunId}/volume-rollup`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      })
+    ).json() as { weeks: WeekEntry[] };
 
     const afterWeek = after.weeks.find((w) => w.week_idx === 1)!;
-    const afterPerformed = afterWeek.muscles.reduce(
-      (acc, m) => acc + m.performed_sets,
-      0,
-    );
+    const afterPerformed = afterWeek.muscles.reduce((acc, m) => acc + m.performed_sets, 0);
     const afterPlanned = afterWeek.muscles.reduce((acc, m) => acc + m.sets, 0);
 
     // Planned volume must not move — that's the program design, not user

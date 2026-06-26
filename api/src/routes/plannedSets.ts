@@ -48,7 +48,11 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       const todayLocal = computeUserLocalDate(setRow.start_tz);
       if (setRow.scheduled_date < todayLocal) {
         reply.code(409);
-        return { error: 'past_day_readonly', scheduled_date: setRow.scheduled_date, today_local: todayLocal };
+        return {
+          error: 'past_day_readonly',
+          scheduled_date: setRow.scheduled_date,
+          today_local: todayLocal,
+        };
       }
 
       const b = parsed.data;
@@ -106,12 +110,15 @@ export async function plannedSetRoutes(app: FastifyInstance) {
         await client.query(
           `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
            VALUES ($1, 'set_overridden', $2::jsonb)`,
-          [setRow.mesocycle_run_id, JSON.stringify({
-            kind: 'patch',
-            planned_set_id: req.params.id,
-            changes: b,
-            scheduled_date: setRow.scheduled_date,
-          })],
+          [
+            setRow.mesocycle_run_id,
+            JSON.stringify({
+              kind: 'patch',
+              planned_set_id: req.params.id,
+              changes: b,
+              scheduled_date: setRow.scheduled_date,
+            }),
+          ],
         );
 
         await client.query('COMMIT');
@@ -160,7 +167,11 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       const todayLocal = computeUserLocalDate(setRow.start_tz);
       if (setRow.scheduled_date < todayLocal) {
         reply.code(409);
-        return { error: 'past_day_readonly', scheduled_date: setRow.scheduled_date, today_local: todayLocal };
+        return {
+          error: 'past_day_readonly',
+          scheduled_date: setRow.scheduled_date,
+          today_local: todayLocal,
+        };
       }
 
       // Verify the target exercise is real + non-archived
@@ -177,7 +188,9 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       const client = await db.connect();
       try {
         await client.query('BEGIN');
-        const { rows: [updated] } = await client.query(
+        const {
+          rows: [updated],
+        } = await client.query(
           `UPDATE planned_sets SET
              exercise_id = $1,
              substituted_from_exercise_id = COALESCE(substituted_from_exercise_id, $2),
@@ -189,13 +202,16 @@ export async function plannedSetRoutes(app: FastifyInstance) {
         await client.query(
           `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
            VALUES ($1, 'set_overridden', $2::jsonb)`,
-          [setRow.mesocycle_run_id, JSON.stringify({
-            kind: 'substitute',
-            planned_set_id: req.params.id,
-            from_exercise_id: fromExerciseId,
-            to_exercise_id: parsed.data.to_exercise_id,
-            scheduled_date: setRow.scheduled_date,
-          })],
+          [
+            setRow.mesocycle_run_id,
+            JSON.stringify({
+              kind: 'substitute',
+              planned_set_id: req.params.id,
+              from_exercise_id: fromExerciseId,
+              to_exercise_id: parsed.data.to_exercise_id,
+              scheduled_date: setRow.scheduled_date,
+            }),
+          ],
         );
         await client.query('COMMIT');
         return updated as PlannedSetSubstituteResponse;

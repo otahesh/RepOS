@@ -4,40 +4,54 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../src/db/client.js';
 import { mkUser, mkUserProgram, cleanupUser } from './helpers/program-fixtures.js';
 
-afterAll(async () => { await db.end(); });
+afterAll(async () => {
+  await db.end();
+});
 
 describe('program enum types (migration 014)', () => {
   it('day_workout_kind enum has exactly strength, cardio, hybrid (no rest)', async () => {
     const { rows } = await db.query(
       `SELECT enumlabel FROM pg_enum
         WHERE enumtypid = 'day_workout_kind'::regtype
-        ORDER BY enumsortorder`
+        ORDER BY enumsortorder`,
     );
-    expect(rows.map(r => r.enumlabel)).toEqual(['strength','cardio','hybrid']);
+    expect(rows.map((r) => r.enumlabel)).toEqual(['strength', 'cardio', 'hybrid']);
   });
 
   it('program_status enum carries draft|active|paused|completed|archived|abandoned', async () => {
     const { rows } = await db.query(
       `SELECT enumlabel FROM pg_enum
         WHERE enumtypid = 'program_status'::regtype
-        ORDER BY enumsortorder`
+        ORDER BY enumsortorder`,
     );
-    expect(rows.map(r => r.enumlabel)).toEqual(
-      ['draft','active','paused','completed','archived','abandoned']
-    );
+    expect(rows.map((r) => r.enumlabel)).toEqual([
+      'draft',
+      'active',
+      'paused',
+      'completed',
+      'archived',
+      'abandoned',
+    ]);
   });
 
   it('mesocycle_run_event_type enum carries the 9 v1 events (+ W2 manual_deload pair)', async () => {
     const { rows } = await db.query(
       `SELECT enumlabel FROM pg_enum
         WHERE enumtypid = 'mesocycle_run_event_type'::regtype
-        ORDER BY enumsortorder`
+        ORDER BY enumsortorder`,
     );
-    const labels = rows.map(r => r.enumlabel);
+    const labels = rows.map((r) => r.enumlabel);
     // The 9 v1 events remain, in order, as the leading prefix.
     expect(labels.slice(0, 9)).toEqual([
-      'started','paused','resumed','day_overridden','set_overridden',
-      'day_skipped','customized','completed','abandoned',
+      'started',
+      'paused',
+      'resumed',
+      'day_overridden',
+      'set_overridden',
+      'day_skipped',
+      'customized',
+      'completed',
+      'abandoned',
     ]);
     // W2.5 (migration 037) appended the manual-deload audit pair.
     expect(labels).toContain('manual_deload');
@@ -50,8 +64,8 @@ describe('program_templates (migration 015)', () => {
     await expect(
       db.query(
         `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('Bad Slug','x',5,3,'{}'::jsonb)`
-      )
+         VALUES ('Bad Slug','x',5,3,'{}'::jsonb)`,
+      ),
     ).rejects.toThrow();
   });
 
@@ -59,8 +73,8 @@ describe('program_templates (migration 015)', () => {
     await expect(
       db.query(
         `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('test-too-many-weeks','x',17,3,'{}'::jsonb)`
-      )
+         VALUES ('test-too-many-weeks','x',17,3,'{}'::jsonb)`,
+      ),
     ).rejects.toThrow();
   });
 
@@ -68,8 +82,8 @@ describe('program_templates (migration 015)', () => {
     await expect(
       db.query(
         `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('test-too-many-days','x',5,8,'{}'::jsonb)`
-      )
+         VALUES ('test-too-many-days','x',5,8,'{}'::jsonb)`,
+      ),
     ).rejects.toThrow();
   });
 
@@ -77,24 +91,26 @@ describe('program_templates (migration 015)', () => {
     await expect(
       db.query(
         `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, created_by)
-         VALUES ('test-bad-author','x',5,3,'{}'::jsonb,'machine')`
-      )
+         VALUES ('test-bad-author','x',5,3,'{}'::jsonb,'machine')`,
+      ),
     ).rejects.toThrow();
   });
 
   it('seed_key partial index exists', async () => {
     const { rows } = await db.query(
       `SELECT indexdef FROM pg_indexes
-        WHERE tablename='program_templates' AND indexname='idx_program_templates_seed_key'`
+        WHERE tablename='program_templates' AND indexname='idx_program_templates_seed_key'`,
     );
     expect(rows[0]?.indexdef).toMatch(/WHERE \(seed_key IS NOT NULL\)/i);
   });
 
   it('inserts a valid row with default version=1, customizations defaults applied', async () => {
-    const { rows: [t] } = await db.query(
+    const {
+      rows: [t],
+    } = await db.query(
       `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
        VALUES ('test-valid-template','Valid', 5, 3, '{"_v":1,"days":[]}'::jsonb)
-       RETURNING version, created_by`
+       RETURNING version, created_by`,
     );
     expect(t.version).toBe(1);
     expect(t.created_by).toBe('system');
@@ -107,24 +123,26 @@ describe('user_programs (migration 016)', () => {
     const u = await mkUser({ prefix: 'vitest.up' });
     let templateId: string | undefined;
     try {
-      const { rows: [t] } = await db.query(
+      const {
+        rows: [t],
+      } = await db.query(
         `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
          VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb) RETURNING id`,
-        [`tpl-up-${randomUUID()}`]
+        [`tpl-up-${randomUUID()}`],
       );
       templateId = t.id;
-      const { rows: [up] } = await db.query(
+      const {
+        rows: [up],
+      } = await db.query(
         `INSERT INTO user_programs (user_id, template_id, template_version, name)
          VALUES ($1,$2,1,'mine') RETURNING id, customizations, status`,
-        [u.id, t.id]
+        [u.id, t.id],
       );
       expect(up.customizations).toEqual({});
       expect(up.status).toBe('draft');
 
       await cleanupUser(u.id);
-      const { rows } = await db.query(
-        `SELECT 1 FROM user_programs WHERE id=$1`, [up.id]
-      );
+      const { rows } = await db.query(`SELECT 1 FROM user_programs WHERE id=$1`, [up.id]);
       expect(rows.length).toBe(0);
     } finally {
       // user already deleted in body on success path; cleanupUser is idempotent.
@@ -140,8 +158,8 @@ describe('user_programs (migration 016)', () => {
         db.query(
           `INSERT INTO user_programs (user_id, name, status)
            VALUES ($1,'x','running'::program_status)`,
-          [u.id]
-        )
+          [u.id],
+        ),
       ).rejects.toThrow();
     } finally {
       await cleanupUser(u.id);
@@ -151,7 +169,7 @@ describe('user_programs (migration 016)', () => {
   it('partial index excludes archived rows', async () => {
     const { rows } = await db.query(
       `SELECT indexdef FROM pg_indexes
-        WHERE tablename='user_programs' AND indexname='idx_user_programs_user'`
+        WHERE tablename='user_programs' AND indexname='idx_user_programs_user'`,
     );
     expect(rows[0]?.indexdef).toMatch(/WHERE \(status <> 'archived'/i);
   });
@@ -170,12 +188,12 @@ describe('mesocycle_runs (migration 017)', () => {
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          VALUES ($1,$2,'2026-01-01','America/New_York',5,'completed')`,
-        [up_id, user_id]
+        [up_id, user_id],
       );
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          VALUES ($1,$2,'2026-02-01','America/New_York',5,'completed')`,
-        [up_id, user_id]
+        [up_id, user_id],
       );
     } finally {
       await cleanupUser(user_id);
@@ -188,12 +206,12 @@ describe('mesocycle_runs (migration 017)', () => {
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
-        [up_id, user_id]
+        [up_id, user_id],
       );
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          VALUES ($1,$2,'2026-02-01','UTC',5,'paused')`,
-        [up_id, user_id]
+        [up_id, user_id],
       );
     } finally {
       await cleanupUser(user_id);
@@ -206,16 +224,18 @@ describe('mesocycle_runs (migration 017)', () => {
       await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          VALUES ($1,$2,'2026-01-01','UTC',5,'active')`,
-        [up_id, user_id]
+        [up_id, user_id],
       );
       let code: string | undefined;
       try {
         await db.query(
           `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
            VALUES ($1,$2,'2026-02-01','UTC',5,'active')`,
-          [up_id, user_id]
+          [up_id, user_id],
         );
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23505');
     } finally {
       await cleanupUser(user_id);
@@ -229,8 +249,8 @@ describe('mesocycle_runs (migration 017)', () => {
         db.query(
           `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, weeks)
            VALUES ($1,$2,'2026-01-01',5)`,
-          [up_id, user_id]
-        )
+          [up_id, user_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await cleanupUser(user_id);
@@ -242,10 +262,12 @@ describe('day_workouts (migration 018)', () => {
   async function mkRun(): Promise<{ user_id: string; run_id: string }> {
     const u = await mkUser({ prefix: 'vitest.dw' });
     const up = await mkUserProgram({ userId: u.id, name: 'p' });
-    const { rows: [r] } = await db.query(
+    const {
+      rows: [r],
+    } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-      [up.id, u.id]
+      [up.id, u.id],
     );
     return { user_id: u.id, run_id: r.id };
   }
@@ -257,8 +279,8 @@ describe('day_workouts (migration 018)', () => {
         db.query(
           `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
            VALUES ($1,1,0,'2026-01-05','strength','Mon','running')`,
-          [run_id]
-        )
+          [run_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await cleanupUser(user_id);
@@ -271,16 +293,18 @@ describe('day_workouts (migration 018)', () => {
       await db.query(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
          VALUES ($1,1,0,'2026-01-05','strength','Mon')`,
-        [run_id]
+        [run_id],
       );
       let code: string | undefined;
       try {
         await db.query(
           `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
            VALUES ($1,1,0,'2026-01-06','strength','Mon dup')`,
-          [run_id]
+          [run_id],
         );
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23505');
     } finally {
       await cleanupUser(user_id);
@@ -293,14 +317,14 @@ describe('day_workouts (migration 018)', () => {
       await db.query(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
          VALUES ($1,1,0,'2026-01-05','cardio','Z2')`,
-        [run_id]
+        [run_id],
       );
       await expect(
         db.query(
           `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
            VALUES ($1,1,1,'2026-01-06','rest','Off')`,
-          [run_id]
-        )
+          [run_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await cleanupUser(user_id);
@@ -312,22 +336,28 @@ describe('planned_sets (migration 019)', () => {
   async function mkDay(): Promise<{ user_id: string; day_id: string; ex_id: string }> {
     const u = await mkUser({ prefix: 'vitest.ps' });
     const up = await mkUserProgram({ userId: u.id, name: 'p' });
-    const { rows: [r] } = await db.query(
+    const {
+      rows: [r],
+    } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-      [up.id, u.id]
+      [up.id, u.id],
     );
-    const { rows: [d] } = await db.query(
+    const {
+      rows: [d],
+    } = await db.query(
       `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
        VALUES ($1,1,0,'2026-01-05','strength','Mon') RETURNING id`,
-      [r.id]
+      [r.id],
     );
-    const { rows: [ex] } = await db.query(
+    const {
+      rows: [ex],
+    } = await db.query(
       `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
                               skill_complexity,loading_demand,systemic_fatigue)
        VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
                'push_horizontal','mid',3,3,3) RETURNING id`,
-      [`ps-test-ex-${randomUUID()}`]
+      [`ps-test-ex-${randomUUID()}`],
     );
     return { user_id: u.id, day_id: d.id, ex_id: ex.id };
   }
@@ -340,8 +370,8 @@ describe('planned_sets (migration 019)', () => {
           `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                       target_reps_low, target_reps_high, target_rir, rest_sec)
            VALUES ($1,0,0,$2,8,12,0,120)`,
-          [day_id, ex_id]
-        )
+          [day_id, ex_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -357,8 +387,8 @@ describe('planned_sets (migration 019)', () => {
           `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                       target_reps_low, target_reps_high, target_rir, rest_sec)
            VALUES ($1,0,0,$2,12,8,2,120)`,
-          [day_id, ex_id]
-        )
+          [day_id, ex_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -373,15 +403,17 @@ describe('planned_sets (migration 019)', () => {
         `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                     target_reps_low, target_reps_high, target_rir, rest_sec)
          VALUES ($1,0,0,$2,8,12,2,120)`,
-        [day_id, ex_id]
+        [day_id, ex_id],
       );
       let code: string | undefined;
       try {
         await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23503');
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);  // cascades to planned_sets
+      await db.query(`DELETE FROM users WHERE id=$1`, [user_id]); // cascades to planned_sets
       await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
     }
   });
@@ -393,7 +425,7 @@ describe('planned_sets (migration 019)', () => {
         `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                     target_reps_low, target_reps_high, target_rir, rest_sec)
          VALUES ($1,0,0,$2,8,12,2,120)`,
-        [day_id, ex_id]
+        [day_id, ex_id],
       );
       let code: string | undefined;
       try {
@@ -401,9 +433,11 @@ describe('planned_sets (migration 019)', () => {
           `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                       target_reps_low, target_reps_high, target_rir, rest_sec)
            VALUES ($1,0,0,$2,8,12,2,120)`,
-          [day_id, ex_id]
+          [day_id, ex_id],
         );
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23505');
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -416,22 +450,28 @@ describe('planned_cardio_blocks (migration 021)', () => {
   async function mkCardioDay(): Promise<{ user_id: string; day_id: string; ex_id: string }> {
     const u = await mkUser({ prefix: 'vitest.pcb' });
     const up = await mkUserProgram({ userId: u.id, name: 'p' });
-    const { rows: [r] } = await db.query(
+    const {
+      rows: [r],
+    } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-      [up.id, u.id]
+      [up.id, u.id],
     );
-    const { rows: [d] } = await db.query(
+    const {
+      rows: [d],
+    } = await db.query(
       `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
        VALUES ($1,1,0,'2026-01-05','cardio','Z2') RETURNING id`,
-      [r.id]
+      [r.id],
     );
-    const { rows: [ex] } = await db.query(
+    const {
+      rows: [ex],
+    } = await db.query(
       `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
                               skill_complexity,loading_demand,systemic_fatigue)
        VALUES ($1,'Treadmill',(SELECT id FROM muscles WHERE slug='quads'),
                'gait','mid',1,1,1) RETURNING id`,
-      [`pcb-test-ex-${randomUUID()}`]
+      [`pcb-test-ex-${randomUUID()}`],
     );
     return { user_id: u.id, day_id: d.id, ex_id: ex.id };
   }
@@ -443,8 +483,8 @@ describe('planned_cardio_blocks (migration 021)', () => {
         db.query(
           `INSERT INTO planned_cardio_blocks (day_workout_id, block_idx, exercise_id)
            VALUES ($1,0,$2)`,
-          [day_id, ex_id]
-        )
+          [day_id, ex_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -460,8 +500,8 @@ describe('planned_cardio_blocks (migration 021)', () => {
           `INSERT INTO planned_cardio_blocks (day_workout_id, block_idx, exercise_id,
                                                target_duration_sec, target_zone)
            VALUES ($1,0,$2,1800,6)`,
-          [day_id, ex_id]
-        )
+          [day_id, ex_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -476,15 +516,17 @@ describe('planned_cardio_blocks (migration 021)', () => {
         `INSERT INTO planned_cardio_blocks (day_workout_id, block_idx, exercise_id,
                                              target_duration_sec, target_zone)
          VALUES ($1,0,$2,1800,2)`,
-        [day_id, ex_id]
+        [day_id, ex_id],
       );
       let code: string | undefined;
       try {
         await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23503');
     } finally {
-      await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);  // cascades to planned_cardio_blocks
+      await db.query(`DELETE FROM users WHERE id=$1`, [user_id]); // cascades to planned_cardio_blocks
       await db.query(`DELETE FROM exercises WHERE id=$1`, [ex_id]);
     }
   });
@@ -496,7 +538,7 @@ describe('planned_cardio_blocks (migration 021)', () => {
         `INSERT INTO planned_cardio_blocks (day_workout_id, block_idx, exercise_id,
                                              target_distance_m)
          VALUES ($1,0,$2,5000)`,
-        [day_id, ex_id]
+        [day_id, ex_id],
       );
     } finally {
       await db.query(`DELETE FROM users WHERE id=$1`, [user_id]);
@@ -507,10 +549,12 @@ describe('planned_cardio_blocks (migration 021)', () => {
 
 describe('set_logs (migration 022)', () => {
   it('performed_load_lbs is NUMERIC(5,1) — accepts 405.5, rejects 1000.0', async () => {
-    const { rows: [c] } = await db.query(
+    const {
+      rows: [c],
+    } = await db.query(
       `SELECT column_name, data_type, numeric_precision, numeric_scale
          FROM information_schema.columns
-        WHERE table_name='set_logs' AND column_name='performed_load_lbs'`
+        WHERE table_name='set_logs' AND column_name='performed_load_lbs'`,
     );
     expect(c.data_type).toBe('numeric');
     expect(c.numeric_precision).toBe(5);
@@ -522,37 +566,47 @@ describe('set_logs (migration 022)', () => {
     let ex_id: string | undefined;
     try {
       const up = await mkUserProgram({ userId: u.id, name: 'p' });
-      const { rows: [r] } = await db.query(
+      const {
+        rows: [r],
+      } = await db.query(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
          VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-        [up.id, u.id]
+        [up.id, u.id],
       );
-      const { rows: [d] } = await db.query(
+      const {
+        rows: [d],
+      } = await db.query(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
          VALUES ($1,1,0,'2026-01-05','strength','Mon') RETURNING id`,
-        [r.id]
+        [r.id],
       );
-      const { rows: [ex] } = await db.query(
+      const {
+        rows: [ex],
+      } = await db.query(
         `INSERT INTO exercises (slug,name,primary_muscle_id,movement_pattern,peak_tension_length,
                                 skill_complexity,loading_demand,systemic_fatigue)
          VALUES ($1,'X',(SELECT id FROM muscles WHERE slug='chest'),
                  'push_horizontal','mid',3,3,3) RETURNING id`,
-        [`sl-test-ex-${randomUUID()}`]
+        [`sl-test-ex-${randomUUID()}`],
       );
       ex_id = ex.id;
-      const { rows: [ps] } = await db.query(
+      const {
+        rows: [ps],
+      } = await db.query(
         `INSERT INTO planned_sets (day_workout_id, block_idx, set_idx, exercise_id,
                                     target_reps_low, target_reps_high, target_rir, rest_sec)
          VALUES ($1,0,0,$2,8,12,2,120) RETURNING id`,
-        [d.id, ex.id]
+        [d.id, ex.id],
       );
       // set_logs Beta schema (migration 029) requires user_id + exercise_id +
       // client_request_id NOT NULL; the cascade-from-planned_set behaviour
       // tested here still applies via the original migration-022 FK.
-      const { rows: [sl] } = await db.query(
+      const {
+        rows: [sl],
+      } = await db.query(
         `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
          VALUES ($1,$2,$3, gen_random_uuid(), 10,225.5,2) RETURNING id`,
-        [ps.id, u.id, ex.id]
+        [ps.id, u.id, ex.id],
       );
       await db.query(`DELETE FROM planned_sets WHERE id=$1`, [ps.id]);
       const { rows } = await db.query(`SELECT 1 FROM set_logs WHERE id=$1`, [sl.id]);
@@ -571,16 +625,18 @@ describe('recovery_flag_dismissals (migration 024)', () => {
       await db.query(
         `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
          VALUES ($1, 'bodyweight_crash', '2026-05-04')`,
-        [u.id]
+        [u.id],
       );
       let code: string | undefined;
       try {
         await db.query(
           `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
            VALUES ($1, 'bodyweight_crash', '2026-05-04')`,
-          [u.id]
+          [u.id],
         );
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23505');
     } finally {
       await cleanupUser(u.id);
@@ -595,9 +651,11 @@ describe('recovery_flag_dismissals (migration 024)', () => {
         await db.query(
           `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
            VALUES ($1, 'made_up_flag', '2026-05-04')`,
-          [u.id]
+          [u.id],
         );
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23514');
     } finally {
       await cleanupUser(u.id);
@@ -609,10 +667,12 @@ describe('mesocycle_run_events (migration 023)', () => {
   async function mkRunForEvents(prefix: string): Promise<{ user_id: string; run_id: string }> {
     const u = await mkUser({ prefix });
     const up = await mkUserProgram({ userId: u.id, name: 'p' });
-    const { rows: [r] } = await db.query(
+    const {
+      rows: [r],
+    } = await db.query(
       `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks)
        VALUES ($1,$2,'2026-01-05','UTC',5) RETURNING id`,
-      [up.id, u.id]
+      [up.id, u.id],
     );
     return { user_id: u.id, run_id: r.id };
   }
@@ -620,16 +680,16 @@ describe('mesocycle_run_events (migration 023)', () => {
   it('cascades on mesocycle_run delete', async () => {
     const { user_id, run_id } = await mkRunForEvents('vitest.mre');
     try {
-      const { rows: [ev] } = await db.query(
+      const {
+        rows: [ev],
+      } = await db.query(
         `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
          VALUES ($1,'started','{"who":"test"}'::jsonb) RETURNING id`,
-        [run_id]
+        [run_id],
       );
       expect(Number(ev.id)).toBeGreaterThan(0); // BIGSERIAL — pg returns string for bigint, coerce
       await db.query(`DELETE FROM mesocycle_runs WHERE id=$1`, [run_id]);
-      const { rows } = await db.query(
-        `SELECT 1 FROM mesocycle_run_events WHERE id=$1`, [ev.id]
-      );
+      const { rows } = await db.query(`SELECT 1 FROM mesocycle_run_events WHERE id=$1`, [ev.id]);
       expect(rows.length).toBe(0);
     } finally {
       await cleanupUser(user_id);
@@ -643,8 +703,8 @@ describe('mesocycle_run_events (migration 023)', () => {
         db.query(
           `INSERT INTO mesocycle_run_events (run_id, event_type)
            VALUES ($1,'time_traveled')`,
-          [run_id]
-        )
+          [run_id],
+        ),
       ).rejects.toThrow();
     } finally {
       await cleanupUser(user_id);
@@ -654,10 +714,12 @@ describe('mesocycle_run_events (migration 023)', () => {
   it('payload defaults to empty object', async () => {
     const { user_id, run_id } = await mkRunForEvents('vitest.mre3');
     try {
-      const { rows: [ev] } = await db.query(
+      const {
+        rows: [ev],
+      } = await db.query(
         `INSERT INTO mesocycle_run_events (run_id, event_type)
          VALUES ($1,'started') RETURNING payload`,
-        [run_id]
+        [run_id],
       );
       expect(ev.payload).toEqual({});
     } finally {
@@ -668,9 +730,11 @@ describe('mesocycle_run_events (migration 023)', () => {
 
 describe('device_tokens scopes (migration 025)', () => {
   it('device_tokens.scopes is TEXT[]', async () => {
-    const { rows: [c] } = await db.query(
+    const {
+      rows: [c],
+    } = await db.query(
       `SELECT data_type, udt_name FROM information_schema.columns
-        WHERE table_name='device_tokens' AND column_name='scopes'`
+        WHERE table_name='device_tokens' AND column_name='scopes'`,
     );
     expect(c?.data_type).toBe('ARRAY');
     expect(c?.udt_name).toBe('_text');
@@ -679,7 +743,7 @@ describe('device_tokens scopes (migration 025)', () => {
   it('singular scope column is gone', async () => {
     const { rows } = await db.query(
       `SELECT column_name FROM information_schema.columns
-        WHERE table_name='device_tokens' AND column_name='scope'`
+        WHERE table_name='device_tokens' AND column_name='scope'`,
     );
     expect(rows.length).toBe(0);
   });
@@ -687,10 +751,12 @@ describe('device_tokens scopes (migration 025)', () => {
   it('default scopes is health:weight:write singleton', async () => {
     const u = await mkUser({ prefix: 'vitest.dts' });
     try {
-      const { rows: [t] } = await db.query(
+      const {
+        rows: [t],
+      } = await db.query(
         `INSERT INTO device_tokens (user_id, token_hash, label)
          VALUES ($1, $2, $3) RETURNING scopes`,
-        [u.id, `tok-${randomUUID()}:hash`, 'test']
+        [u.id, `tok-${randomUUID()}:hash`, 'test'],
       );
       expect(t.scopes).toEqual(['health:weight:write']);
     } finally {
@@ -704,12 +770,16 @@ describe('users.goal (migration 026)', () => {
     const u = await mkUser({ prefix: 'vitest.goal' });
     try {
       // mkUser doesn't return goal; fetch it.
-      const { rows: [row] } = await db.query<{ goal: string }>(`SELECT goal FROM users WHERE id=$1`, [u.id]);
+      const {
+        rows: [row],
+      } = await db.query<{ goal: string }>(`SELECT goal FROM users WHERE id=$1`, [u.id]);
       expect(row.goal).toBe('maintain');
       let code: string | undefined;
       try {
         await db.query(`UPDATE users SET goal = 'recomp' WHERE id = $1`, [u.id]);
-      } catch (e: any) { code = e.code; }
+      } catch (e: any) {
+        code = e.code;
+      }
       expect(code).toBe('23514');
     } finally {
       await cleanupUser(u.id);

@@ -39,18 +39,22 @@ export type ProgramTemplateStructure = {
 
 // ---------------------------------------------------------------------------
 
-export type ProgramStatus =
-  | 'draft' | 'active' | 'paused' | 'completed' | 'archived';
+export type ProgramStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived';
 
 export type DayWorkoutKind = 'strength' | 'cardio' | 'hybrid';
 
-export type DayWorkoutStatus =
-  | 'planned' | 'in_progress' | 'completed' | 'skipped';
+export type DayWorkoutStatus = 'planned' | 'in_progress' | 'completed' | 'skipped';
 
 export type MesocycleRunEventType =
-  | 'started' | 'paused' | 'resumed'
-  | 'day_overridden' | 'set_overridden'
-  | 'day_skipped' | 'customized' | 'completed' | 'abandoned';
+  | 'started'
+  | 'paused'
+  | 'resumed'
+  | 'day_overridden'
+  | 'set_overridden'
+  | 'day_skipped'
+  | 'customized'
+  | 'completed'
+  | 'abandoned';
 
 export interface ProgramTemplateRecord {
   id: string;
@@ -59,7 +63,7 @@ export interface ProgramTemplateRecord {
   description: string;
   weeks: number;
   days_per_week: number;
-  structure: unknown;            // validated app-side by ProgramTemplateSchema
+  structure: unknown; // validated app-side by ProgramTemplateSchema
   version: number;
   created_by: 'system' | 'user';
   seed_key: string | null;
@@ -85,8 +89,8 @@ export interface MesocycleRunRecord {
   id: string;
   user_program_id: string;
   user_id: string;
-  start_date: string;            // ISO date 'YYYY-MM-DD' (pg DATE → string)
-  start_tz: string;              // IANA TZ identifier
+  start_date: string; // ISO date 'YYYY-MM-DD' (pg DATE → string)
+  start_tz: string; // IANA TZ identifier
   weeks: number;
   current_week: number;
   status: ProgramStatus;
@@ -100,7 +104,7 @@ export interface DayWorkoutRecord {
   mesocycle_run_id: string;
   week_idx: number;
   day_idx: number;
-  scheduled_date: string;        // 'YYYY-MM-DD'
+  scheduled_date: string; // 'YYYY-MM-DD'
   kind: DayWorkoutKind;
   name: string;
   notes: string | null;
@@ -116,7 +120,7 @@ export interface PlannedSetRecord {
   exercise_id: string;
   target_reps_low: number;
   target_reps_high: number;
-  target_rir: number;            // CHECK >= 1 enforced at DB
+  target_rir: number; // CHECK >= 1 enforced at DB
   target_load_hint: string | null;
   rest_sec: number;
   overridden_at: Date | null;
@@ -131,7 +135,7 @@ export interface PlannedCardioBlockRecord {
   exercise_id: string;
   target_duration_sec: number | null;
   target_distance_m: number | null;
-  target_zone: number | null;    // 1..5
+  target_zone: number | null; // 1..5
   overridden_at: Date | null;
   override_reason: string | null;
 }
@@ -140,14 +144,14 @@ export interface SetLogRecord {
   id: string;
   planned_set_id: string;
   performed_reps: number | null;
-  performed_load_lbs: string | null;   // pg NUMERIC → string by default
+  performed_load_lbs: string | null; // pg NUMERIC → string by default
   performed_rir: number | null;
   performed_at: Date;
   notes: string | null;
 }
 
 export interface MesocycleRunEventRecord {
-  id: string;                    // BIGSERIAL → bigint string from pg
+  id: string; // BIGSERIAL → bigint string from pg
   run_id: string;
   event_type: MesocycleRunEventType;
   payload: Record<string, unknown>;

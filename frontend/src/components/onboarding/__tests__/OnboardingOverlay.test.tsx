@@ -16,10 +16,20 @@ function renderOverlay(onComplete = vi.fn()) {
 }
 
 beforeEach(() => {
-  vi.spyOn(onboardingApi, 'completeOnboarding').mockResolvedValue({ onboarding_completed_at: '2026-06-01T00:00:00.000Z' });
+  vi.spyOn(onboardingApi, 'completeOnboarding').mockResolvedValue({
+    onboarding_completed_at: '2026-06-01T00:00:00.000Z',
+  });
   vi.spyOn(equipmentApi, 'applyPreset').mockResolvedValue({ _v: 1 } as any);
   vi.spyOn(programsApi, 'listProgramTemplates').mockResolvedValue([
-    { id: '1', slug: 'full-body-3-day', name: 'Full Body 3-Day', description: 'x', weeks: 5, days_per_week: 3, version: 1 },
+    {
+      id: '1',
+      slug: 'full-body-3-day',
+      name: 'Full Body 3-Day',
+      description: 'x',
+      weeks: 5,
+      days_per_week: 3,
+      version: 1,
+    },
   ] as any);
 });
 
@@ -50,11 +60,11 @@ describe('<OnboardingOverlay>', () => {
   it('final Start calls completeOnboarding with the selected goal then onComplete', async () => {
     const onComplete = vi.fn();
     renderOverlay(onComplete);
-    fireEvent.click(screen.getByText('GET STARTED'));   // 1 → 2
-    fireEvent.click(screen.getByText('Skip for now'));  // 2 → 3
-    fireEvent.click(screen.getByText('BULK'));          // select goal
-    fireEvent.click(screen.getByText('NEXT'));          // 3 → 4
-    fireEvent.click(screen.getByText('Skip for now'));  // 4 → 5
+    fireEvent.click(screen.getByText('GET STARTED')); // 1 → 2
+    fireEvent.click(screen.getByText('Skip for now')); // 2 → 3
+    fireEvent.click(screen.getByText('BULK')); // select goal
+    fireEvent.click(screen.getByText('NEXT')); // 3 → 4
+    fireEvent.click(screen.getByText('Skip for now')); // 4 → 5
     fireEvent.click(screen.getByText('START TRAINING'));
     await waitFor(() => expect(onboardingApi.completeOnboarding).toHaveBeenCalledWith('bulk'));
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
@@ -83,7 +93,9 @@ describe('<OnboardingOverlay>', () => {
       const [open, setOpen] = useState(true);
       return (
         <MemoryRouter>
-          <button data-testid="trigger" onClick={() => setOpen(true)}>open</button>
+          <button data-testid="trigger" onClick={() => setOpen(true)}>
+            open
+          </button>
           {open && <OnboardingOverlay onComplete={() => setOpen(false)} />}
         </MemoryRouter>
       );

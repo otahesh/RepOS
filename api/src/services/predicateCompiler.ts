@@ -16,7 +16,7 @@ export function compilePredicates(
 ): { sql: string; params: never[] } {
   if (predicates.length === 0) return { sql: 'TRUE', params: [] };
 
-  const clauses = predicates.map(p => `(${compileOne(p, profileExpr)})`);
+  const clauses = predicates.map((p) => `(${compileOne(p, profileExpr)})`);
   return { sql: clauses.join(' AND '), params: [] };
 }
 
@@ -24,10 +24,12 @@ function compileOne(p: PredicateT, prof: string): string {
   switch (p.type) {
     case 'dumbbells':
       // Must own dumbbells covering min_pair_lb (max_lb >= N AND min_lb <= N)
-      return `(${prof}->'dumbbells') IS NOT NULL `
-        + `AND ${prof}->'dumbbells' <> 'false'::jsonb `
-        + `AND (${prof}->'dumbbells'->>'max_lb')::int >= ${p.min_pair_lb} `
-        + `AND (${prof}->'dumbbells'->>'min_lb')::int <= ${p.min_pair_lb}`;
+      return (
+        `(${prof}->'dumbbells') IS NOT NULL ` +
+        `AND ${prof}->'dumbbells' <> 'false'::jsonb ` +
+        `AND (${prof}->'dumbbells'->>'max_lb')::int >= ${p.min_pair_lb} ` +
+        `AND (${prof}->'dumbbells'->>'min_lb')::int <= ${p.min_pair_lb}`
+      );
     case 'adjustable_bench': {
       const parts: string[] = [
         `(${prof}->'adjustable_bench') IS NOT NULL`,
@@ -38,14 +40,19 @@ function compileOne(p: PredicateT, prof: string): string {
       return parts.join(' AND ');
     }
     case 'machine':
-      return `(${prof}->'machines') IS NOT NULL `
-        + `AND ${prof}->'machines'->>'${p.name}' = 'true'`;
+      return (
+        `(${prof}->'machines') IS NOT NULL ` + `AND ${prof}->'machines'->>'${p.name}' = 'true'`
+      );
     case 'recumbent_bike':
-      return `(${prof}->'recumbent_bike') IS NOT NULL `
-        + `AND ${prof}->'recumbent_bike' <> 'false'::jsonb`;
+      return (
+        `(${prof}->'recumbent_bike') IS NOT NULL ` +
+        `AND ${prof}->'recumbent_bike' <> 'false'::jsonb`
+      );
     case 'outdoor_walking':
-      return `(${prof}->'outdoor_walking') IS NOT NULL `
-        + `AND ${prof}->'outdoor_walking' <> 'false'::jsonb`;
+      return (
+        `(${prof}->'outdoor_walking') IS NOT NULL ` +
+        `AND ${prof}->'outdoor_walking' <> 'false'::jsonb`
+      );
     // Boolean-only predicates
     case 'barbell':
     case 'flat_bench':

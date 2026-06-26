@@ -9,9 +9,7 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import {
-  RecoveryFlagListResponseSchema,
-} from '../../src/schemas/recoveryFlags.js';
+import { RecoveryFlagListResponseSchema } from '../../src/schemas/recoveryFlags.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 
@@ -21,10 +19,11 @@ let token: string;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.recovery.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.recovery.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -56,7 +55,9 @@ describe('GET /api/recovery-flags contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = RecoveryFlagListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data.flags)).toBe(true);
     }

@@ -25,10 +25,18 @@ export default function ProgramStep({
   useEffect(() => {
     let cancelled = false;
     listProgramTemplates()
-      .then((t) => { if (!cancelled) setTemplates(t); })
-      .catch(() => { if (!cancelled) setTemplates([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .then((t) => {
+        if (!cancelled) setTemplates(t);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -46,9 +54,13 @@ export default function ProgramStep({
               key={t.id}
               to={`/programs/${t.slug}`}
               style={{
-                display: 'block', textDecoration: 'none', padding: '12px 14px',
-                borderRadius: 10, border: `1px solid ${TOKENS.line}`,
-                background: TOKENS.bg, color: TOKENS.text,
+                display: 'block',
+                textDecoration: 'none',
+                padding: '12px 14px',
+                borderRadius: 10,
+                border: `1px solid ${TOKENS.line}`,
+                background: TOKENS.bg,
+                color: TOKENS.text,
               }}
             >
               <div style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</div>
@@ -60,21 +72,39 @@ export default function ProgramStep({
         </div>
       )}
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 18 }}>
-        <Link to="/programs" style={{ ...primaryBtn, textDecoration: 'none', display: 'inline-block' }} onClick={onNext}>
+        <Link
+          to="/programs"
+          style={{ ...primaryBtn, textDecoration: 'none', display: 'inline-block' }}
+          onClick={onNext}
+        >
           BROWSE PROGRAMS
         </Link>
-        <button type="button" onClick={onSkip} style={skipBtn}>Skip for now</button>
+        <button type="button" onClick={onSkip} style={skipBtn}>
+          Skip for now
+        </button>
       </div>
     </div>
   );
 }
 
 const primaryBtn: React.CSSProperties = {
-  background: TOKENS.accent, color: '#0A0D12', border: 'none', borderRadius: 10,
-  padding: '12px 22px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-  fontFamily: FONTS.ui, letterSpacing: 0.4,
+  background: TOKENS.accent,
+  color: '#0A0D12',
+  border: 'none',
+  borderRadius: 10,
+  padding: '12px 22px',
+  fontWeight: 700,
+  fontSize: 14,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
+  letterSpacing: 0.4,
 };
 const skipBtn: React.CSSProperties = {
-  background: 'transparent', color: TOKENS.textDim, border: 'none',
-  fontSize: 13, cursor: 'pointer', fontFamily: FONTS.ui, textDecoration: 'underline',
+  background: 'transparent',
+  color: TOKENS.textDim,
+  border: 'none',
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
+  textDecoration: 'underline',
 };

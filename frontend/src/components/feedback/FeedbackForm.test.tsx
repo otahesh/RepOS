@@ -25,7 +25,9 @@ describe('FeedbackForm', () => {
     render(<FeedbackForm initialRoute="/today/x/log" onSubmitted={onSubmitted} />);
     await userEvent.type(screen.getByRole('textbox'), 'bug here');
     await userEvent.click(screen.getByRole('button', { name: /send/i }));
-    await waitFor(() => expect(submitFeedback).toHaveBeenCalledWith({ body: 'bug here', route: '/today/x/log' }));
+    await waitFor(() =>
+      expect(submitFeedback).toHaveBeenCalledWith({ body: 'bug here', route: '/today/x/log' }),
+    );
     expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' }));
     expect(onSubmitted).toHaveBeenCalled();
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
@@ -36,7 +38,9 @@ describe('FeedbackForm', () => {
     render(<FeedbackForm />);
     await userEvent.type(screen.getByRole('textbox'), 'keep me');
     await userEvent.click(screen.getByRole('button', { name: /send/i }));
-    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' })));
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' })),
+    );
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('keep me');
   });
 });

@@ -13,7 +13,9 @@ import { inspectQueue, seedMesocycle, seedQueueRow, type PendingSetLogRow } from
 
 const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
 
-test('O7: pending row aged 8 days surfaces staleness banner with day count + click target', async ({ page }) => {
+test('O7: pending row aged 8 days surfaces staleness banner with day count + click target', async ({
+  page,
+}) => {
   await seedMesocycle(page);
   await page.goto('/');
 
@@ -47,9 +49,9 @@ test('O7: pending row aged 8 days surfaces staleness banner with day count + cli
 
   // useIdbQueueCounts polls at 1000ms; allow up to 2500ms for the staleness
   // banner to render.
-  await expect(
-    page.getByText(/1 set queued · 8 days old · flush or clear/i),
-  ).toBeVisible({ timeout: 2500 });
+  await expect(page.getByText(/1 set queued · 8 days old · flush or clear/i)).toBeVisible({
+    timeout: 2500,
+  });
 
   // Banner is clickable — renders as a <Link> (role=link) to /settings/storage.
   const banner = page.getByRole('link', { name: /1 set queued · 8 days old · flush or clear/i });

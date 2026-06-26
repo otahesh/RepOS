@@ -17,8 +17,12 @@ describe('UuidParamSchema', () => {
 });
 
 describe('isValidBigintId', () => {
-  it('accepts a positive integer string', () => { expect(isValidBigintId('42')).toBe(true); });
-  it('rejects a non-numeric string', () => { expect(isValidBigintId('abc')).toBe(false); });
+  it('accepts a positive integer string', () => {
+    expect(isValidBigintId('42')).toBe(true);
+  });
+  it('rejects a non-numeric string', () => {
+    expect(isValidBigintId('abc')).toBe(false);
+  });
   it('rejects zero and negatives', () => {
     expect(isValidBigintId('0')).toBe(false);
     expect(isValidBigintId('-1')).toBe(false);

@@ -42,7 +42,9 @@ beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'repos-restore-'));
   // (Re)create the dedicated DB. The repos role has CREATEDB.
   const adminUrl = SHARED_URL.replace(/\/[^/?]+(\?|$)/, '/postgres$1');
-  sh(`psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${RESTORE_DB} WITH (FORCE)"`);
+  sh(
+    `psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${RESTORE_DB} WITH (FORCE)"`,
+  );
   sh(`psql "${adminUrl}" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${RESTORE_DB}"`);
   // A minimal schema is all this test needs (we test the revert invariant).
   pool = new pg.Pool({ connectionString: RESTORE_URL, max: 2 });

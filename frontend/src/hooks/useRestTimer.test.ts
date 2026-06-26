@@ -15,9 +15,7 @@ describe('useRestTimer', () => {
 
   it('returns zeroed elapsed and full remaining when lastLoggedAt is null; no interval started', () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
-    const { result } = renderHook(() =>
-      useRestTimer({ lastLoggedAt: null, targetRestSec: 90 }),
-    );
+    const { result } = renderHook(() => useRestTimer({ lastLoggedAt: null, targetRestSec: 90 }));
     expect(result.current).toEqual({
       elapsedSec: 0,
       remainingSec: 90,
@@ -47,9 +45,7 @@ describe('useRestTimer', () => {
 
   it('advances every 1s when fake timers progress', () => {
     const now = Date.now();
-    const { result } = renderHook(() =>
-      useRestTimer({ lastLoggedAt: now, targetRestSec: 60 }),
-    );
+    const { result } = renderHook(() => useRestTimer({ lastLoggedAt: now, targetRestSec: 60 }));
     expect(result.current.elapsedSec).toBe(0);
 
     act(() => {

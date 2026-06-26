@@ -2,12 +2,20 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
-import { seedUserWithFullMesocycle, cleanupSeeded, type FullMesocycleHandle } from '../helpers/seed-fixtures.js';
+import {
+  seedUserWithFullMesocycle,
+  cleanupSeeded,
+  type FullMesocycleHandle,
+} from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 
 const handles: FullMesocycleHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2.5 — manual deload undo', () => {
   it('undo within 24h restores planned_sets to pre-deload state', async () => {
@@ -20,8 +28,16 @@ describe('W2.5 — manual deload undo', () => {
       [seed.mesocycleRunId],
     );
     const auth = { authorization: `Bearer ${seed.bearer}` };
-    await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`, headers: auth });
-    const undoRes = await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`, headers: auth });
+    await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`,
+      headers: auth,
+    });
+    const undoRes = await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`,
+      headers: auth,
+    });
     expect(undoRes.statusCode).toBe(200);
 
     const { rows: post } = await db.query(
@@ -37,7 +53,7 @@ describe('W2.5 — manual deload undo', () => {
       [seed.mesocycleRunId],
     );
     for (const r of dwRows) {
-      expect(r.is_deload).toBe(r.week_idx === 5);  // weeks=5 → only week 5 stays deload
+      expect(r.is_deload).toBe(r.week_idx === 5); // weeks=5 → only week 5 stays deload
     }
   });
 
@@ -46,7 +62,11 @@ describe('W2.5 — manual deload undo', () => {
     const seed = await seedUserWithFullMesocycle({ weeks: 5, currentWeek: 2 });
     handles.push(seed);
     const auth = { authorization: `Bearer ${seed.bearer}` };
-    await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`, headers: auth });
+    await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`,
+      headers: auth,
+    });
 
     // Backdate the event by 25 hours.
     await db.query(
@@ -55,7 +75,11 @@ describe('W2.5 — manual deload undo', () => {
       [seed.mesocycleRunId],
     );
 
-    const undoRes = await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`, headers: auth });
+    const undoRes = await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`,
+      headers: auth,
+    });
     expect(undoRes.statusCode).toBe(409);
     expect(undoRes.json().error).toBe('undo_window_expired');
   });
@@ -65,7 +89,8 @@ describe('W2.5 — manual deload undo', () => {
     const seed = await seedUserWithFullMesocycle({ weeks: 5, currentWeek: 2 });
     handles.push(seed);
     const undoRes = await app.inject({
-      method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`,
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now/undo`,
       headers: { authorization: `Bearer ${seed.bearer}` },
     });
     expect(undoRes.statusCode).toBe(409);

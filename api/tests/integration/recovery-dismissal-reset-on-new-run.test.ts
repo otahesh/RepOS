@@ -30,13 +30,17 @@ afterEach(async () => {
     await db.query(`DELETE FROM recovery_flag_dismissals WHERE user_id=$1`, [s.userId]);
     await cleanupSeeded(s);
   }
-  if (app) { await app.close(); app = undefined; }
+  if (app) {
+    await app.close();
+    app = undefined;
+  }
 });
 
 describe('recovery_flag_events — dismissals reset on new week/run [I-MID-RUN-RECOVERY-RESET]', () => {
   it('a dismissal stored under a PRIOR ISO week does NOT suppress the flag this week', async () => {
     app = await buildApp();
-    const seed = await seedUserOverreaching(); seeds.push(seed);
+    const seed = await seedUserOverreaching();
+    seeds.push(seed);
 
     // Record a dismissal keyed to LAST week's Monday (a prior run/week).
     await db.query(
@@ -48,7 +52,8 @@ describe('recovery_flag_events — dismissals reset on new week/run [I-MID-RUN-R
     // The route consults isDismissed with the CURRENT week's Monday — the prior
     // week's dismissal must NOT match, so the flag is still surfaced.
     const r = await app.inject({
-      method: 'GET', url: '/api/recovery-flags',
+      method: 'GET',
+      url: '/api/recovery-flags',
       headers: { authorization: `Bearer ${seed.bearer}` },
     });
     expect(r.statusCode).toBe(200);
@@ -58,7 +63,8 @@ describe('recovery_flag_events — dismissals reset on new week/run [I-MID-RUN-R
 
   it('a dismissal stored under the CURRENT ISO week DOES suppress the flag (control)', async () => {
     app = await buildApp();
-    const seed = await seedUserOverreaching(); seeds.push(seed);
+    const seed = await seedUserOverreaching();
+    seeds.push(seed);
 
     await db.query(
       `INSERT INTO recovery_flag_dismissals (user_id, flag, week_start)
@@ -67,7 +73,8 @@ describe('recovery_flag_events — dismissals reset on new week/run [I-MID-RUN-R
     );
 
     const r = await app.inject({
-      method: 'GET', url: '/api/recovery-flags',
+      method: 'GET',
+      url: '/api/recovery-flags',
       headers: { authorization: `Bearer ${seed.bearer}` },
     });
     expect(r.statusCode).toBe(200);

@@ -7,7 +7,13 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from '../helpers/program-fixtures.js';
+import {
+  mkUser,
+  mkTemplate,
+  mkUserProgram,
+  cleanupUser,
+  cleanupTemplate,
+} from '../helpers/program-fixtures.js';
 import { recordDismissal } from '../../src/services/recoveryFlagDismissals.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
@@ -78,10 +84,10 @@ beforeAll(async () => {
   });
 
   // Set customizations.goal = 'cut'
-  await db.query(
-    `UPDATE user_programs SET customizations = $1::jsonb WHERE id = $2`,
-    [JSON.stringify({ goal: 'cut' }), up.id],
-  );
+  await db.query(`UPDATE user_programs SET customizations = $1::jsonb WHERE id = $2`, [
+    JSON.stringify({ goal: 'cut' }),
+    up.id,
+  ]);
 
   // Insert active mesocycle_run for cut user
   await db.query(
@@ -115,9 +121,11 @@ describe('GET /api/recovery-flags', () => {
       headers: auth(token),
     });
     expect(r.statusCode).toBe(200);
-    const body = r.json<{ flags: Array<{ flag: string; message: string; trend_7d_lbs?: number }> }>();
+    const body = r.json<{
+      flags: Array<{ flag: string; message: string; trend_7d_lbs?: number }>;
+    }>();
     expect(Array.isArray(body.flags)).toBe(true);
-    const crash = body.flags.find(f => f.flag === 'bodyweight_crash');
+    const crash = body.flags.find((f) => f.flag === 'bodyweight_crash');
     expect(crash).toBeDefined();
     expect(crash!.message).toMatch(/dropping/i);
     expect(typeof crash!.trend_7d_lbs).toBe('number');
@@ -126,7 +134,9 @@ describe('GET /api/recovery-flags', () => {
 
   it('filters out a dismissed flag for the current week', async () => {
     // Compute current ISO-week Monday as YYYY-MM-DD
-    const { rows: [{ week_start }] } = await db.query<{ week_start: string }>(
+    const {
+      rows: [{ week_start }],
+    } = await db.query<{ week_start: string }>(
       `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
     );
     await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: week_start });
@@ -138,7 +148,7 @@ describe('GET /api/recovery-flags', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<{ flags: Array<{ flag: string }> }>();
-    const crash = body.flags.find(f => f.flag === 'bodyweight_crash');
+    const crash = body.flags.find((f) => f.flag === 'bodyweight_crash');
     expect(crash).toBeUndefined();
   });
 
@@ -150,7 +160,7 @@ describe('GET /api/recovery-flags', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<{ flags: Array<{ flag: string }> }>();
-    const crash = body.flags.find(f => f.flag === 'bodyweight_crash');
+    const crash = body.flags.find((f) => f.flag === 'bodyweight_crash');
     expect(crash).toBeUndefined();
   });
 
@@ -194,7 +204,7 @@ describe('POST /api/recovery-flags/dismiss', () => {
     });
     expect(before.statusCode).toBe(200);
     const beforeBody = before.json<{ flags: Array<{ flag: string }> }>();
-    expect(beforeBody.flags.find(f => f.flag === 'bodyweight_crash')).toBeDefined();
+    expect(beforeBody.flags.find((f) => f.flag === 'bodyweight_crash')).toBeDefined();
 
     // Dismiss the flag
     const dismiss = await app.inject({
@@ -213,7 +223,7 @@ describe('POST /api/recovery-flags/dismiss', () => {
     });
     expect(after.statusCode).toBe(200);
     const afterBody = after.json<{ flags: Array<{ flag: string }> }>();
-    expect(afterBody.flags.find(f => f.flag === 'bodyweight_crash')).toBeUndefined();
+    expect(afterBody.flags.find((f) => f.flag === 'bodyweight_crash')).toBeUndefined();
   });
 
   it('re-fires after moving dismissal back 14 days (new ISO week)', async () => {
@@ -244,7 +254,7 @@ describe('POST /api/recovery-flags/dismiss', () => {
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<{ flags: Array<{ flag: string }> }>();
-    expect(body.flags.find(f => f.flag === 'bodyweight_crash')).toBeDefined();
+    expect(body.flags.find((f) => f.flag === 'bodyweight_crash')).toBeDefined();
   });
 
   it('is idempotent — repeat dismiss in same week returns 204', async () => {

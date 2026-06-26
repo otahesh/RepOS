@@ -124,9 +124,7 @@ async function expectNoContent(res: Response): Promise<void> {
  *
  * Per D6, `units` is intentionally NOT part of the surface.
  */
-export async function patchProfile(
-  patch: ProfilePatchRequest,
-): Promise<ProfileResponse> {
+export async function patchProfile(patch: ProfilePatchRequest): Promise<ProfileResponse> {
   const res = await apiFetch('/api/me/profile', {
     method: 'PATCH',
     headers: JSON_HEADERS,
@@ -145,9 +143,7 @@ export async function patchProfile(
  * Returns void on 204. The session is gone after this — the caller is
  * responsible for navigating away.
  */
-export async function deleteAccount(
-  confirm: typeof CONFIRM_DELETE_ACCOUNT_PHRASE,
-): Promise<void> {
+export async function deleteAccount(confirm: typeof CONFIRM_DELETE_ACCOUNT_PHRASE): Promise<void> {
   const res = await apiFetch('/api/me', {
     method: 'DELETE',
     headers: JSON_HEADERS,
@@ -200,13 +196,10 @@ export async function listSessions(): Promise<SessionRow[]> {
  * another user's token).
  */
 export async function revokeSession(id: string): Promise<void> {
-  const res = await apiFetch(
-    `/api/account/sessions/${encodeURIComponent(id)}`,
-    {
-      method: 'DELETE',
-      headers: CSRF_HEADER,
-    },
-  );
+  const res = await apiFetch(`/api/account/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: CSRF_HEADER,
+  });
   await expectNoContent(res);
 }
 
@@ -217,9 +210,7 @@ export async function revokeSession(id: string): Promise<void> {
  * `next_cursor` fields from a prior page to load the next slice; omit them
  * to load the first page.
  */
-export async function listEvents(
-  params: ListEventsParams = {},
-): Promise<AccountEventPage> {
+export async function listEvents(params: ListEventsParams = {}): Promise<AccountEventPage> {
   const qs = new URLSearchParams();
   if (params.before_ts) qs.set('before_ts', params.before_ts);
   if (params.before_id) qs.set('before_id', params.before_id);

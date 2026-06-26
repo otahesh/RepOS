@@ -46,9 +46,7 @@ afterEach(async () => {
 afterAll(async () => {
   if (jwks) await jwks.teardown();
   // Wipe any user the CF Access path auto-provisioned by email claim.
-  await db.query(`DELETE FROM users WHERE email = $1`, [
-    'scope-enforcement-cf@repos.test',
-  ]);
+  await db.query(`DELETE FROM users WHERE email = $1`, ['scope-enforcement-cf@repos.test']);
   await db.end();
 });
 

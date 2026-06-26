@@ -2,7 +2,9 @@ import 'dotenv/config';
 import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
-afterAll(async () => { await db.end(); });
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — core muscle seeded with 6+ exercises', () => {
   it('muscles row exists with slug=core', async () => {

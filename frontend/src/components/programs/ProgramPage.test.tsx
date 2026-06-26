@@ -6,17 +6,42 @@ import * as mesoApi from '../../lib/api/mesocycles';
 describe('<ProgramPage>', () => {
   beforeEach(() => {
     vi.spyOn(mesoApi, 'getMesocycle').mockResolvedValue({
-      id: 'mr-1', user_program_id: 'up-1', start_date: '2026-05-05', start_tz: 'America/Indiana/Indianapolis',
-      weeks: 5, current_week: 2, status: 'active',
+      id: 'mr-1',
+      user_program_id: 'up-1',
+      start_date: '2026-05-05',
+      start_tz: 'America/Indiana/Indianapolis',
+      weeks: 5,
+      current_week: 2,
+      status: 'active',
     });
     vi.spyOn(mesoApi, 'getVolumeRollup').mockResolvedValue({
       run_id: 'mr-1',
       weeks: [
-        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        {
+          week_idx: 1,
+          muscles: [{ muscle: 'chest', sets: 10, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 2,
+          muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 3,
+          muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 4,
+          muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 5,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
       ],
     });
   });
@@ -30,11 +55,31 @@ describe('<ProgramPage>', () => {
     vi.spyOn(mesoApi, 'getVolumeRollup').mockResolvedValue({
       run_id: 'mr-1',
       weeks: [
-        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 10, performed_sets: 4, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        {
+          week_idx: 1,
+          muscles: [{ muscle: 'chest', sets: 10, performed_sets: 4, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 2,
+          muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 3,
+          muscles: [{ muscle: 'chest', sets: 14, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 4,
+          muscles: [{ muscle: 'chest', sets: 16, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 5,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
       ],
     });
     render(<ProgramPage mesocycleRunId="mr-1" />);
@@ -54,12 +99,32 @@ describe('<ProgramPage>', () => {
       run_id: 'mr-1',
       weeks: [
         // sets=5 < mev=10 → below-MEV (muted) tier.
-        { week_idx: 1, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        {
+          week_idx: 1,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
         // sets=12 within [mev,mav] → good tier.
-        { week_idx: 2, muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 3, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 4, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
-        { week_idx: 5, muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }], minutes_by_modality: {} },
+        {
+          week_idx: 2,
+          muscles: [{ muscle: 'chest', sets: 12, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 3,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 4,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
+        {
+          week_idx: 5,
+          muscles: [{ muscle: 'chest', sets: 5, performed_sets: 0, mev: 10, mav: 14, mrv: 22 }],
+          minutes_by_modality: {},
+        },
       ],
     });
     render(<ProgramPage mesocycleRunId="mr-1" />);

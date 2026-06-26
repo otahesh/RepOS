@@ -39,8 +39,9 @@ export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFl
   for (const ev of REGISTRY.values()) {
     try {
       const r = await ev.evaluate(ctx);
-      if (r.triggered) out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
-      else             out.push({ key: ev.key, triggered: false });
+      if (r.triggered)
+        out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
+      else out.push({ key: ev.key, triggered: false });
     } catch (err) {
       // Fail-closed so one evaluator failure doesn't drop the others.
       console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
@@ -51,7 +52,9 @@ export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFl
 }
 
 // For tests: clear registry between scenarios.
-export function _resetRegistryForTest(): void { REGISTRY.clear(); }
+export function _resetRegistryForTest(): void {
+  REGISTRY.clear();
+}
 
 /**
  * Trigger when the 7-day weight trend is ≤ -2.0 lb AND the active program's
@@ -93,7 +96,9 @@ export const bodyweightCrashEvaluator: RecoveryFlagEvaluator = {
     if (trend === null || trend === undefined) return { triggered: false };
     if (trend > -2.0) return { triggered: false };
 
-    const { rows: [up] } = await db.query<{ goal: string | null }>(
+    const {
+      rows: [up],
+    } = await db.query<{ goal: string | null }>(
       `SELECT (up.customizations->>'goal')::text AS goal
        FROM mesocycle_runs mr
        JOIN user_programs up ON up.id=mr.user_program_id

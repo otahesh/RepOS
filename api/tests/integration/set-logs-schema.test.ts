@@ -29,8 +29,14 @@ describe('set_logs Beta schema (migration 029)', () => {
     expect(cols.exercise_id).toMatchObject({ data_type: 'uuid', is_nullable: 'NO' });
     expect(cols.rpe).toMatchObject({ data_type: 'smallint', is_nullable: 'YES' });
     expect(cols.client_request_id).toMatchObject({ data_type: 'uuid', is_nullable: 'NO' });
-    expect(cols.created_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
-    expect(cols.updated_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+    expect(cols.created_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
+    expect(cols.updated_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
   });
 
   it('enforces UNIQUE (user_id, client_request_id)', async () => {

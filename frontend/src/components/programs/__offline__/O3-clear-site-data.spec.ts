@@ -36,15 +36,42 @@ import {
 } from './_helpers';
 
 const THREE_SETS: SeedSet[] = [
-  { id: 'ps-1', block_idx: 0, set_idx: 0, exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
-    target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 90 },
-  { id: 'ps-2', block_idx: 0, set_idx: 1, exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
-    target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 90 },
-  { id: 'ps-3', block_idx: 0, set_idx: 2, exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
-    target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 90 },
+  {
+    id: 'ps-1',
+    block_idx: 0,
+    set_idx: 0,
+    exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
+    target_reps_low: 6,
+    target_reps_high: 8,
+    target_rir: 2,
+    rest_sec: 90,
+  },
+  {
+    id: 'ps-2',
+    block_idx: 0,
+    set_idx: 1,
+    exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
+    target_reps_low: 6,
+    target_reps_high: 8,
+    target_rir: 2,
+    rest_sec: 90,
+  },
+  {
+    id: 'ps-3',
+    block_idx: 0,
+    set_idx: 2,
+    exercise: { id: 'ex-bp', slug: 'bp', name: 'Bench' },
+    target_reps_low: 6,
+    target_reps_high: 8,
+    target_rir: 2,
+    rest_sec: 90,
+  },
 ];
 
-test('O3: clear site data mid-workout — minute-bucket dedupe prevents 4th from creating duplicate', async ({ page, context }) => {
+test('O3: clear site data mid-workout — minute-bucket dedupe prevents 4th from creating duplicate', async ({
+  page,
+  context,
+}) => {
   const server = await seedMesocycle(page, { sets: THREE_SETS });
   server.enableMinuteBucketDedupe(true);
 

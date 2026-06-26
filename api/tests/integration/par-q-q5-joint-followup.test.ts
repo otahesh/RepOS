@@ -7,8 +7,12 @@ import { db } from '../../src/db/client.js';
 import { PAR_Q_VERSION, PAR_Q_QUESTIONS, PAR_Q_Q5_INDEX } from '../../src/constants/parQ.js';
 
 const handles: SeedHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
   it('Q5=no → no user_injuries rows created', async () => {
@@ -17,11 +21,14 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
     handles.push(seed);
     const answers = new Array(PAR_Q_QUESTIONS.length).fill(false);
     await app.inject({
-      method: 'POST', url: '/api/me/par-q',
+      method: 'POST',
+      url: '/api/me/par-q',
       headers: { authorization: `Bearer ${seed.bearer}`, 'content-type': 'application/json' },
       payload: JSON.stringify({ version: PAR_Q_VERSION, answers, q5_joints: [] }),
     });
-    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [seed.userId]);
+    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [
+      seed.userId,
+    ]);
     expect(rows).toHaveLength(0);
   });
 
@@ -32,7 +39,8 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
     const answers = new Array(PAR_Q_QUESTIONS.length).fill(false);
     answers[PAR_Q_Q5_INDEX] = true;
     const res = await app.inject({
-      method: 'POST', url: '/api/me/par-q',
+      method: 'POST',
+      url: '/api/me/par-q',
       headers: { authorization: `Bearer ${seed.bearer}`, 'content-type': 'application/json' },
       payload: JSON.stringify({
         version: PAR_Q_VERSION,
@@ -40,7 +48,7 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
         q5_joints: ['low_back', 'knee_right'],
       }),
     });
-    expect(res.statusCode).toBe(201);  // first acceptance
+    expect(res.statusCode).toBe(201); // first acceptance
     expect(res.json().injuries_created).toBe(2);
 
     const { rows: injuries } = await db.query(
@@ -67,13 +75,16 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
     const answers = new Array(PAR_Q_QUESTIONS.length).fill(false);
     answers[PAR_Q_Q5_INDEX] = true;
     const res = await app.inject({
-      method: 'POST', url: '/api/me/par-q',
+      method: 'POST',
+      url: '/api/me/par-q',
       headers: { authorization: `Bearer ${seed.bearer}`, 'content-type': 'application/json' },
       payload: JSON.stringify({ version: PAR_Q_VERSION, answers, q5_joints: ['other'] }),
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().injuries_created).toBe(0);
-    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [seed.userId]);
+    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [
+      seed.userId,
+    ]);
     expect(rows).toHaveLength(0);
     // the 'other' selection is still preserved in the account_events meta.
     const { rows: ev } = await db.query(
@@ -89,7 +100,8 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
     handles.push(seed);
     const answers = new Array(PAR_Q_QUESTIONS.length).fill(false);
     const res = await app.inject({
-      method: 'POST', url: '/api/me/par-q',
+      method: 'POST',
+      url: '/api/me/par-q',
       headers: { authorization: `Bearer ${seed.bearer}`, 'content-type': 'application/json' },
       payload: JSON.stringify({ version: PAR_Q_VERSION, answers, q5_joints: ['low_back'] }),
     });
@@ -108,7 +120,9 @@ describe('W2 — PAR-Q Q5 joint follow-up writes user_injuries', () => {
     await app.inject({ method: 'POST', url: '/api/me/par-q', headers, payload });
     await app.inject({ method: 'POST', url: '/api/me/par-q', headers, payload });
 
-    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [seed.userId]);
+    const { rows } = await db.query(`SELECT joint FROM user_injuries WHERE user_id=$1`, [
+      seed.userId,
+    ]);
     expect(rows).toHaveLength(1);
   });
 });

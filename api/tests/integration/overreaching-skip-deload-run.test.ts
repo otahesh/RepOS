@@ -21,27 +21,39 @@ afterEach(async () => {
 
 describe('overreachingEvaluator — deload guard [I-OVERREACHING-DELOAD-GUARD]', () => {
   it('FIRES on a normal run when the AND-gate conditions hold (control)', async () => {
-    const seed = await seedUserOverreaching(); seeds.push(seed);
-    const r = await overreachingEvaluator.evaluate({ userId: seed.userId, runId: seed.mesocycleRunId });
+    const seed = await seedUserOverreaching();
+    seeds.push(seed);
+    const r = await overreachingEvaluator.evaluate({
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+    });
     expect(r.triggered).toBe(true);
   });
 
   it('does NOT fire on a deload mesocycle (run-level is_deload=true) even if signals would otherwise fire', async () => {
-    const seed = await seedUserOverreaching(); seeds.push(seed);
+    const seed = await seedUserOverreaching();
+    seeds.push(seed);
     await db.query(`UPDATE mesocycle_runs SET is_deload=true WHERE id=$1`, [seed.mesocycleRunId]);
-    const r = await overreachingEvaluator.evaluate({ userId: seed.userId, runId: seed.mesocycleRunId });
+    const r = await overreachingEvaluator.evaluate({
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+    });
     expect(r.triggered).toBe(false);
   });
 
   it('does NOT fire when day_workouts.is_deload=true for the current week (week-level guard)', async () => {
-    const seed = await seedUserOverreaching(); seeds.push(seed);
+    const seed = await seedUserOverreaching();
+    seeds.push(seed);
     // Run stays non-deload; mark the current week's day_workouts as a deload week.
     await db.query(
       `UPDATE day_workouts SET is_deload=true
        WHERE mesocycle_run_id=$1 AND week_idx=(SELECT current_week FROM mesocycle_runs WHERE id=$1)`,
       [seed.mesocycleRunId],
     );
-    const r = await overreachingEvaluator.evaluate({ userId: seed.userId, runId: seed.mesocycleRunId });
+    const r = await overreachingEvaluator.evaluate({
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+    });
     expect(r.triggered).toBe(false);
   });
 });

@@ -31,11 +31,27 @@ type TemplateStructure = {
 
 type Customizations = {
   name_override?: string;
-  swaps?: Array<{ week_idx: number; day_idx: number; block_idx: number; from_slug: string; to_slug: string }>;
-  set_count_overrides?: Array<{ week_idx: number; day_idx: number; block_idx: number; delta: number }>;
+  swaps?: Array<{
+    week_idx: number;
+    day_idx: number;
+    block_idx: number;
+    from_slug: string;
+    to_slug: string;
+  }>;
+  set_count_overrides?: Array<{
+    week_idx: number;
+    day_idx: number;
+    block_idx: number;
+    delta: number;
+  }>;
   day_offset_overrides?: Array<{ week_idx: number; day_idx: number; new_day_offset: number }>;
   skipped_days?: Array<{ week_idx: number; day_idx: number }>;
-  rir_overrides?: Array<{ week_idx: number; day_idx: number; block_idx: number; target_rir: number }>;
+  rir_overrides?: Array<{
+    week_idx: number;
+    day_idx: number;
+    block_idx: number;
+    target_rir: number;
+  }>;
   trim_last_n?: number;
 };
 
@@ -62,7 +78,9 @@ export async function resolveUserProgramStructure(
   // Load user_program, its template, and the most recent run in one pass.
   // The LEFT JOIN on program_templates covers the case where template_id IS NULL
   // (user-authored programs, future path). We return null in that case per spec §6.
-  const { rows: [row] } = await db.query<{
+  const {
+    rows: [row],
+  } = await db.query<{
     up_id: string;
     up_name: string;
     template_id: string | null;
@@ -119,14 +137,14 @@ export async function resolveUserProgramStructure(
   // 1. day_offset_overrides (week_idx === 1)
   for (const ov of cust.day_offset_overrides ?? []) {
     if (ov.week_idx !== 1) continue;
-    const day = structure.days.find(d => d.idx === ov.day_idx);
+    const day = structure.days.find((d) => d.idx === ov.day_idx);
     if (day) day.day_offset = ov.new_day_offset;
   }
 
   // 2. swaps (week_idx === 1) — only apply if from_slug matches current block
   for (const sw of cust.swaps ?? []) {
     if (sw.week_idx !== 1) continue;
-    const day = structure.days.find(d => d.idx === sw.day_idx);
+    const day = structure.days.find((d) => d.idx === sw.day_idx);
     if (!day) continue;
     const block = day.blocks[sw.block_idx];
     if (block && block.exercise_slug === sw.from_slug) {
@@ -137,7 +155,7 @@ export async function resolveUserProgramStructure(
   // 3. set_count_overrides: stamp delta onto matching blocks
   for (const ov of cust.set_count_overrides ?? []) {
     if (ov.week_idx !== 1) continue;
-    const day = structure.days.find(d => d.idx === ov.day_idx);
+    const day = structure.days.find((d) => d.idx === ov.day_idx);
     if (!day) continue;
     const block = day.blocks[ov.block_idx];
     if (block) {
@@ -161,12 +179,10 @@ export async function resolveUserProgramStructure(
   //    passed through unchanged in the customizations field but does NOT modify the
   //    single-week effective_structure blueprint.
   const skippedIdxs = new Set(
-    (cust.skipped_days ?? [])
-      .filter(sd => sd.week_idx === 1)
-      .map(sd => sd.day_idx),
+    (cust.skipped_days ?? []).filter((sd) => sd.week_idx === 1).map((sd) => sd.day_idx),
   );
   if (skippedIdxs.size > 0) {
-    structure.days = structure.days.filter(d => !skippedIdxs.has(d.idx));
+    structure.days = structure.days.filter((d) => !skippedIdxs.has(d.idx));
   }
 
   return {
@@ -174,7 +190,7 @@ export async function resolveUserProgramStructure(
     template_id: row.template_id,
     template_version: row.template_version,
     name: row.up_name,
-    effective_name: (cust.name_override ?? row.up_name),
+    effective_name: cust.name_override ?? row.up_name,
     customizations: row.customizations as Record<string, unknown>,
     status: row.status as ResolvedUserProgram['status'],
     effective_structure: structure,

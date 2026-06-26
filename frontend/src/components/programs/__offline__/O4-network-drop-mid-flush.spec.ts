@@ -26,7 +26,9 @@ const FIVE_SETS: SeedSet[] = Array.from({ length: 5 }, (_, i) => ({
   rest_sec: 90,
 }));
 
-test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recover when network returns', async ({ page }) => {
+test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recover when network returns', async ({
+  page,
+}) => {
   const server = await seedMesocycle(page, { sets: FIVE_SETS });
 
   // Responder: first 2 POSTs succeed, then transient failures until flipped.
@@ -57,12 +59,12 @@ test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recov
 
   // First snapshot: at this point 3 rows remain pending with attempt_count >= 1.
   const snap1 = await inspectQueue(page);
-  expect(snap1.filter(r => r.status === 'pending')).toHaveLength(3);
-  expect(snap1.some(r => r.attempt_count > 0)).toBe(true);
+  expect(snap1.filter((r) => r.status === 'pending')).toHaveLength(3);
+  expect(snap1.some((r) => r.attempt_count > 0)).toBe(true);
 
   // Pick one of the still-pending rows; capture its next_attempt_at.
-  const trackedCrid = snap1.find(r => r.status === 'pending')!.client_request_id;
-  const napBefore = snap1.find(r => r.client_request_id === trackedCrid)!.next_attempt_at;
+  const trackedCrid = snap1.find((r) => r.status === 'pending')!.client_request_id;
+  const napBefore = snap1.find((r) => r.client_request_id === trackedCrid)!.next_attempt_at;
 
   // Wait long enough for the AppShell 2s retry-tick to fire at least twice;
   // each retry bumps attempt_count and recomputes next_attempt_at with a
@@ -70,14 +72,14 @@ test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recov
   await page.waitForTimeout(3200);
 
   const snap2 = await inspectQueue(page);
-  const napAfter = snap2.find(r => r.client_request_id === trackedCrid)?.next_attempt_at ?? 0;
+  const napAfter = snap2.find((r) => r.client_request_id === trackedCrid)?.next_attempt_at ?? 0;
 
   // Geometric growth assertion: next_attempt_at moved forward by >1000ms.
   expect(napAfter - napBefore).toBeGreaterThan(1000);
 
   // Attempt count grew across the snapshots.
-  const acBefore = snap1.find(r => r.client_request_id === trackedCrid)!.attempt_count;
-  const acAfter = snap2.find(r => r.client_request_id === trackedCrid)?.attempt_count ?? 0;
+  const acBefore = snap1.find((r) => r.client_request_id === trackedCrid)!.attempt_count;
+  const acAfter = snap2.find((r) => r.client_request_id === trackedCrid)?.attempt_count ?? 0;
   expect(acAfter).toBeGreaterThan(acBefore);
 
   // "Go back online" — flip responder back to 'created'. The 2s tick will
@@ -87,8 +89,13 @@ test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recov
   server.setResponder(() => ({ kind: 'created' }));
 
   // All flush within 30s.
-  await expect.poll(async () => {
-    const rows = await inspectQueue(page);
-    return rows.filter(r => r.status === 'pending' || r.status === 'syncing').length;
-  }, { timeout: 30_000 }).toBe(0);
+  await expect
+    .poll(
+      async () => {
+        const rows = await inspectQueue(page);
+        return rows.filter((r) => r.status === 'pending' || r.status === 'syncing').length;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(0);
 });

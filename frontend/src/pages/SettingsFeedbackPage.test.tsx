@@ -15,7 +15,11 @@ function renderWith(is_admin: boolean) {
     user: { id: '1', email: 'a@b.c', display_name: null, timezone: 'UTC', is_admin },
     error: null,
   });
-  render(<MemoryRouter><SettingsFeedbackPage /></MemoryRouter>);
+  render(
+    <MemoryRouter>
+      <SettingsFeedbackPage />
+    </MemoryRouter>,
+  );
 }
 
 describe('SettingsFeedbackPage', () => {
@@ -25,7 +29,10 @@ describe('SettingsFeedbackPage', () => {
   });
   it('shows the admin link only for admins', () => {
     renderWith(true);
-    expect(screen.getByRole('link', { name: /view all feedback/i })).toHaveAttribute('href', '/admin/feedback');
+    expect(screen.getByRole('link', { name: /view all feedback/i })).toHaveAttribute(
+      'href',
+      '/admin/feedback',
+    );
   });
   it('hides the admin link for non-admins', () => {
     renderWith(false);

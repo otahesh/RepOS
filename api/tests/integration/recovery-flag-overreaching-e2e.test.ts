@@ -15,11 +15,7 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import {
-  seedUserOverreaching,
-  cleanupSeeded,
-  type SeedHandle,
-} from '../helpers/seed-fixtures.js';
+import { seedUserOverreaching, cleanupSeeded, type SeedHandle } from '../helpers/seed-fixtures.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;

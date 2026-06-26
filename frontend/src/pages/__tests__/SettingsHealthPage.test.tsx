@@ -11,8 +11,11 @@ beforeEach(() => {
 describe('<SettingsHealthPage>', () => {
   it('shows current vs acknowledged PAR-Q version', async () => {
     vi.spyOn(parQApi, 'getParQStatus').mockResolvedValue({
-      current_version: 2, acknowledged_version: 2, needs_prompt: false,
-      questions: [], advisory_active: false,
+      current_version: 2,
+      acknowledged_version: 2,
+      needs_prompt: false,
+      questions: [],
+      advisory_active: false,
     });
     render(<SettingsHealthPage />);
     expect(await screen.findByText('READINESS SCREEN')).toBeInTheDocument();
@@ -21,8 +24,11 @@ describe('<SettingsHealthPage>', () => {
 
   it('shows the Mark cleared affordance only when advisory_active', async () => {
     vi.spyOn(parQApi, 'getParQStatus').mockResolvedValue({
-      current_version: 2, acknowledged_version: 2, needs_prompt: false,
-      questions: [], advisory_active: true,
+      current_version: 2,
+      acknowledged_version: 2,
+      needs_prompt: false,
+      questions: [],
+      advisory_active: true,
     });
     render(<SettingsHealthPage />);
     expect(await screen.findByText('ADVISORY ACTIVE')).toBeInTheDocument();
@@ -30,10 +36,25 @@ describe('<SettingsHealthPage>', () => {
   });
 
   it('Mark cleared POSTs and reloads status', async () => {
-    const getStatus = vi.spyOn(parQApi, 'getParQStatus')
-      .mockResolvedValueOnce({ current_version: 2, acknowledged_version: 2, needs_prompt: false, questions: [], advisory_active: true })
-      .mockResolvedValue({ current_version: 2, acknowledged_version: 2, needs_prompt: false, questions: [], advisory_active: false });
-    const clear = vi.spyOn(parQApi, 'markPARQCleared').mockResolvedValue({ advisory_active: false });
+    const getStatus = vi
+      .spyOn(parQApi, 'getParQStatus')
+      .mockResolvedValueOnce({
+        current_version: 2,
+        acknowledged_version: 2,
+        needs_prompt: false,
+        questions: [],
+        advisory_active: true,
+      })
+      .mockResolvedValue({
+        current_version: 2,
+        acknowledged_version: 2,
+        needs_prompt: false,
+        questions: [],
+        advisory_active: false,
+      });
+    const clear = vi
+      .spyOn(parQApi, 'markPARQCleared')
+      .mockResolvedValue({ advisory_active: false });
     render(<SettingsHealthPage />);
     fireEvent.click(await screen.findByText('Mark cleared'));
     await waitFor(() => expect(clear).toHaveBeenCalled());
@@ -43,8 +64,11 @@ describe('<SettingsHealthPage>', () => {
 
   it('Re-review opens the ParQGate in forceReview mode', async () => {
     vi.spyOn(parQApi, 'getParQStatus').mockResolvedValue({
-      current_version: 2, acknowledged_version: 2, needs_prompt: false,
-      questions: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'], advisory_active: false,
+      current_version: 2,
+      acknowledged_version: 2,
+      needs_prompt: false,
+      questions: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'],
+      advisory_active: false,
     });
     render(<SettingsHealthPage />);
     fireEvent.click(await screen.findByText('Re-review questionnaire'));

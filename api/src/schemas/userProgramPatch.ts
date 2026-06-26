@@ -40,7 +40,7 @@ export const UserProgramPatchSchema = z.discriminatedUnion('op', [
     week_idx: z.number().int().min(1).max(16),
     day_idx: z.number().int().min(0).max(6),
     block_idx: z.number().int().min(0).max(20),
-    target_rir: z.number().int().min(1).max(5),    // RIR 0 banned (Q4)
+    target_rir: z.number().int().min(1).max(5), // RIR 0 banned (Q4)
   }),
   z.object({
     op: z.literal('shift_weekday'),

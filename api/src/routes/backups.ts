@@ -10,7 +10,14 @@
 // File-id contract: the filename IS the API id. Filenames are sortable
 // (ISO timestamp) + unique by-design via the timestamp; no separate UUID.
 import type { FastifyInstance } from 'fastify';
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, createReadStream } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  createReadStream,
+} from 'node:fs';
 import { join } from 'node:path';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';

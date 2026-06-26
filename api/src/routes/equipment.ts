@@ -9,9 +9,7 @@ import type { EquipmentProfileResponse } from '../schemas/equipment.js';
 export async function equipmentRoutes(app: FastifyInstance) {
   app.get('/equipment/profile', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
     const userId = (req as any).userId as string;
-    const { rows } = await db.query(
-      `SELECT equipment_profile FROM users WHERE id=$1`, [userId]
-    );
+    const { rows } = await db.query(`SELECT equipment_profile FROM users WHERE id=$1`, [userId]);
     reply.header('cache-control', 'no-store');
     return rows[0]?.equipment_profile ?? { _v: 1 };
   });
@@ -23,10 +21,10 @@ export async function equipmentRoutes(app: FastifyInstance) {
       reply.code(400);
       return zodToFieldError(parsed.error);
     }
-    await db.query(
-      `UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`,
-      [JSON.stringify(parsed.data), userId],
-    );
+    await db.query(`UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`, [
+      JSON.stringify(parsed.data),
+      userId,
+    ]);
     return parsed.data as EquipmentProfileResponse;
   });
 
@@ -40,10 +38,10 @@ export async function equipmentRoutes(app: FastifyInstance) {
         return { error: 'unknown preset', field: 'name' };
       }
       const profile = PRESETS[req.params.name];
-      await db.query(
-        `UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`,
-        [JSON.stringify(profile), userId],
-      );
+      await db.query(`UPDATE users SET equipment_profile=$1::jsonb WHERE id=$2`, [
+        JSON.stringify(profile),
+        userId,
+      ]);
       return profile as unknown as EquipmentProfileResponse;
     },
   );

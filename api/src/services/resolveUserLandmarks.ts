@@ -15,10 +15,16 @@ export async function resolveUserLandmarks(userId: string): Promise<ResolvedLand
   return resolveUserLandmarksWith(db, userId);
 }
 
-export async function resolveUserLandmarksWith(client: Queryable, userId: string): Promise<ResolvedLandmarks> {
-  const { rows } = await client.query<{ ml: { _v: number; overrides?: Record<string, { mev: number; mav: number; mrv: number; mv?: number }> } }>(
-    `SELECT muscle_landmarks AS ml FROM users WHERE id=$1`, [userId],
-  );
+export async function resolveUserLandmarksWith(
+  client: Queryable,
+  userId: string,
+): Promise<ResolvedLandmarks> {
+  const { rows } = await client.query<{
+    ml: {
+      _v: number;
+      overrides?: Record<string, { mev: number; mav: number; mrv: number; mv?: number }>;
+    };
+  }>(`SELECT muscle_landmarks AS ml FROM users WHERE id=$1`, [userId]);
   if (rows.length === 0) throw new Error('user not found');
   const overrides = rows[0].ml.overrides ?? {};
   // [I-LANDMARKS-UNKNOWN-SLUG] Log + skip unknown slugs on read. Write-side
@@ -28,7 +34,9 @@ export async function resolveUserLandmarksWith(client: Queryable, userId: string
   // keeps reads working while still flagging the drift in logs for ops.
   for (const slug of Object.keys(overrides)) {
     if (!VALID_SLUGS.has(slug)) {
-      console.warn(`[resolveUserLandmarks] unknown muscle '${slug}' in user=${userId}.muscle_landmarks.overrides — skipping`);
+      console.warn(
+        `[resolveUserLandmarks] unknown muscle '${slug}' in user=${userId}.muscle_landmarks.overrides — skipping`,
+      );
     }
   }
   const out: ResolvedLandmarks = {};
