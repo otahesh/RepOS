@@ -1,37 +1,49 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { apiFetch } from '../../auth';
 import BodyweightChart from './BodyweightChart';
 import TrendStats from './TrendStats';
-import type { WeightRangeResponse } from '../../lib/api/health';
+import type { WeightRange, WeightRangeResponse } from '../../lib/api/health';
 
 type WeightData = WeightRangeResponse;
 
+const RANGES: readonly WeightRange[] = ['7d', '30d', '90d', '1y', 'all'];
+
 export default function DesktopDashboard() {
   const [data, setData] = useState<WeightData | null>(null);
+  const [range, setRange] = useState<WeightRange>('90d');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await apiFetch('/api/health/weight?range=90d');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json: WeightData = await res.json();
-      setData(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Refetch whenever the selected range changes. The `cancelled` flag makes the
+  // effect race-safe: switching range quickly discards a previous, possibly
+  // out-of-order response instead of letting it clobber the latest selection.
   useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`/api/health/weight?range=${range}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json: WeightData = await res.json();
+        if (cancelled) return;
+        setData(json);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
 
-  if (loading) {
+  // Full-screen loader only on the initial load. Range switches keep the
+  // existing chart visible (dimmed) so the layout doesn't flash.
+  if (loading && !data) {
     return (
       <div
         style={{
@@ -99,30 +111,33 @@ export default function DesktopDashboard() {
             Weight Tracking
           </h1>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {(['7d', '30d', '90d', '1y', 'all'] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => {
-                /* range switching could be added */
-              }}
-              style={{
-                height: 32,
-                padding: '0 12px',
-                borderRadius: 6,
-                border: `1px solid ${range === '90d' ? TOKENS.accent : TOKENS.line}`,
-                background: range === '90d' ? TOKENS.accentGlow : 'transparent',
-                color: range === '90d' ? TOKENS.accent : TOKENS.textDim,
-                fontFamily: FONTS.mono,
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: 0.4,
-                cursor: 'pointer',
-              }}
-            >
-              {range.toUpperCase()}
-            </button>
-          ))}
+        <div role="group" aria-label="Chart date range" style={{ display: 'flex', gap: 8 }}>
+          {RANGES.map((r) => {
+            const selected = r === range;
+            return (
+              <button
+                key={r}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setRange(r)}
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 6,
+                  border: `1px solid ${selected ? TOKENS.accent : TOKENS.line}`,
+                  background: selected ? TOKENS.accentGlow : 'transparent',
+                  color: selected ? TOKENS.accent : TOKENS.textDim,
+                  fontFamily: FONTS.mono,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  cursor: 'pointer',
+                }}
+              >
+                {r.toUpperCase()}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -207,7 +222,15 @@ export default function DesktopDashboard() {
 
       {/* Data views */}
       {hasData && data && (
-        <>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 20,
+            opacity: loading ? 0.5 : 1,
+            transition: 'opacity 0.15s ease',
+          }}
+        >
           <TrendStats
             stats={
               data.stats ?? {
@@ -225,7 +248,7 @@ export default function DesktopDashboard() {
             current={data.current}
             stats={data.stats ?? null}
           />
-        </>
+        </div>
       )}
     </div>
   );
