@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { resolveUserProgramStructure } from '../services/resolveUserProgramStructure.js';
@@ -11,6 +12,7 @@ import {
 import { validateFrequencyLimits, validateCardioScheduling } from '../services/scheduleRules.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { UuidParamSchema } from '../schemas/idParams.js';
+import type { UserProgramCustomizations } from '../schemas/userProgramCustomizations.js';
 import {
   UserProgramStartRequestSchema,
   UserProgramStartIntentQuerySchema,
@@ -29,7 +31,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
     '/user-programs',
     { preHandler: requireBearerOrCfAccess },
     async (req, _reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const includePast = req.query.include === 'past';
       // LEFT JOIN program_templates to carry template_slug through to the client
       // so the fork-wizard "Restart" action can navigate to /programs/:slug
@@ -63,7 +65,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const resolved = await resolveUserProgramStructure(req.params.id, userId);
       if (!resolved) {
         reply.code(404);
@@ -82,7 +84,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const parsed = UserProgramPatchSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
@@ -119,7 +121,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
           archived = true;
           await client.query('ROLLBACK');
         } else {
-          const cust: any = rows[0].customizations ?? {};
+          const cust: UserProgramCustomizations = rows[0].customizations ?? {};
           const op = parsed.data;
 
           // Reducer — translate schema body to persisted shape
@@ -142,14 +144,14 @@ export async function userProgramRoutes(app: FastifyInstance) {
               }
               auditFromSlug = block.exercise_slug;
               cust.swaps = (cust.swaps ?? []).filter(
-                (s: any) =>
+                (s) =>
                   !(s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx),
               );
               cust.swaps.push({
                 week_idx: 1,
                 day_idx: op.day_idx,
                 block_idx: op.block_idx,
-                from_slug: auditFromSlug,
+                from_slug: block.exercise_slug,
                 to_slug: op.to_exercise_slug,
               });
               break;
@@ -195,7 +197,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
               // per-block ownership model intact (a later swap of (day,block)
               // still works); also record a sibling `swaps_all` audit list.
               cust.swaps = (cust.swaps ?? []).filter(
-                (s: any) =>
+                (s) =>
                   !matches.some(
                     (m) =>
                       s.week_idx === 1 && s.day_idx === m.day_idx && s.block_idx === m.block_idx,
@@ -222,8 +224,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
               const delta = op.op === 'add_set' ? +1 : -1;
               // Aggregate existing override at the same coords (sum deltas)
               const existing = (cust.set_count_overrides ?? []).find(
-                (s: any) =>
-                  s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx,
+                (s) => s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx,
               );
               if (existing) {
                 existing.delta += delta;
@@ -242,7 +243,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
             }
             case 'shift_weekday':
               cust.day_offset_overrides = (cust.day_offset_overrides ?? []).filter(
-                (s: any) => !(s.week_idx === 1 && s.day_idx === op.day_idx),
+                (s) => !(s.week_idx === 1 && s.day_idx === op.day_idx),
               );
               cust.day_offset_overrides.push({
                 week_idx: 1,
@@ -252,13 +253,13 @@ export async function userProgramRoutes(app: FastifyInstance) {
               break;
             case 'skip_day':
               cust.skipped_days = (cust.skipped_days ?? []).filter(
-                (s: any) => !(s.week_idx === op.week_idx && s.day_idx === op.day_idx),
+                (s) => !(s.week_idx === op.week_idx && s.day_idx === op.day_idx),
               );
               cust.skipped_days.push({ week_idx: op.week_idx, day_idx: op.day_idx });
               break;
             case 'change_rir':
               cust.rir_overrides = (cust.rir_overrides ?? []).filter(
-                (s: any) =>
+                (s) =>
                   !(
                     s.week_idx === op.week_idx &&
                     s.day_idx === op.day_idx &&
@@ -342,7 +343,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const resolved = await resolveUserProgramStructure(req.params.id, userId);
       if (!resolved) {
         reply.code(404);
@@ -370,7 +371,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const { rows: owns } = await db.query(
         `SELECT 1 FROM user_programs WHERE id=$1 AND user_id=$2`,
         [req.params.id, userId],
@@ -406,7 +407,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       // [C-RUN-IT-BACK-ROUTE] Parse the ?intent= query guard FIRST so
       // `?intent=garbage` is a clean 400 before any body work.
       const queryParsed = UserProgramStartIntentQuerySchema.safeParse(req.query);

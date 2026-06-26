@@ -30,9 +30,11 @@ describe('userInjuries client', () => {
     );
     const out = await listInjuries();
     expect(out.map((i) => i.joint)).toEqual(['knee_left']);
+    // Goes through apiFetch: API_BASE-prefixed URL + credentials:'include' (a
+    // GET carries no explicit method).
     expect(fetchSpy).toHaveBeenCalledWith(
-      '/api/user/injuries',
-      expect.objectContaining({ method: 'GET' }),
+      expect.stringContaining('/api/user/injuries'),
+      expect.objectContaining({ credentials: 'include' }),
     );
   });
 
@@ -62,7 +64,7 @@ describe('userInjuries client', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     await deleteInjury('elbow');
     expect(fetchSpy).toHaveBeenCalledWith(
-      '/api/user/injuries/elbow',
+      expect.stringContaining('/api/user/injuries/elbow'),
       expect.objectContaining({ method: 'DELETE' }),
     );
   });

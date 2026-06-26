@@ -9,6 +9,7 @@
  * The corrected type mirrors the real API contract.
  */
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 
 export { ApiError } from './_http';
@@ -22,15 +23,14 @@ export type RecoveryFlag = {
 };
 
 export async function listRecoveryFlags(): Promise<{ flags: RecoveryFlag[] }> {
-  const res = await fetch('/api/recovery-flags', { credentials: 'same-origin' });
+  const res = await apiFetch('/api/recovery-flags', {});
   return jsonOrThrow(res);
 }
 
 export async function dismissRecoveryFlag(flag: RecoveryFlagKey): Promise<void> {
-  const res = await fetch('/api/recovery-flags/dismiss', {
+  const res = await apiFetch('/api/recovery-flags/dismiss', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify({ flag }),
   });
   if (!res.ok && res.status !== 204) {

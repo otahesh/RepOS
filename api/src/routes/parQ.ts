@@ -19,6 +19,7 @@
 // but CF Tunnel collapses all egress to one IP. parQRateLimit.ts checks
 // per-user write count over 24h; >5 → 429.
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
@@ -40,7 +41,7 @@ import { clientIp } from '../utils/clientIp.js';
 
 export async function parQRoutes(app: FastifyInstance) {
   app.get('/me/par-q', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
-    const userId = (req as any).userId as string;
+    const userId = requireUserId(req);
     const {
       rows: [u],
     } = await db.query<{ par_q_version: number; par_q_advisory_active: boolean }>(
@@ -62,7 +63,7 @@ export async function parQRoutes(app: FastifyInstance) {
     '/me/par-q',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const ip = clientIp(req) ?? '';
 
       const parsed = ParQAcceptRequestSchema.safeParse(req.body);
@@ -222,7 +223,7 @@ export async function parQRoutes(app: FastifyInstance) {
     '/me/par-q/mark-cleared',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const { rows } = await db.query(
         `UPDATE users SET par_q_advisory_active = false WHERE id = $1 RETURNING id`,
         [userId],

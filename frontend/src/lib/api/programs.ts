@@ -29,6 +29,7 @@ export type ProgramTemplateStructure = {
   }>;
 };
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 
 export { ApiError } from './_http';
@@ -50,7 +51,7 @@ export type UserProgramRecord = {
 };
 
 export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
-  const res = await fetch('/api/program-templates', { credentials: 'same-origin' });
+  const res = await apiFetch('/api/program-templates', {});
   // API wraps the list in { templates: [...] } — the detail and fork
   // endpoints return bare bodies, but list endpoints leave room for pagination.
   const body = await jsonOrThrow<{ templates: ProgramTemplate[] }>(res);
@@ -58,9 +59,7 @@ export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
 }
 
 export async function getProgramTemplate(slug: string): Promise<ProgramTemplate> {
-  const res = await fetch(`/api/program-templates/${encodeURIComponent(slug)}`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/program-templates/${encodeURIComponent(slug)}`, {});
   return jsonOrThrow<ProgramTemplate>(res);
 }
 
@@ -68,10 +67,9 @@ export async function forkProgramTemplate(
   slug: string,
   body: { name: string },
 ): Promise<UserProgramRecord> {
-  const res = await fetch(`/api/program-templates/${encodeURIComponent(slug)}/fork`, {
+  const res = await apiFetch(`/api/program-templates/${encodeURIComponent(slug)}/fork`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(body),
   });
   return jsonOrThrow<UserProgramRecord>(res);

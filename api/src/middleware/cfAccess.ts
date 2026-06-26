@@ -148,10 +148,10 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
     }
   }
 
-  (req as any).userId = userId;
-  (req as any).userEmail = rawEmail;
-  (req as any).userDisplayName = userDisplayName;
-  (req as any).userTimezone = userTz;
+  req.userId = userId;
+  req.userEmail = rawEmail;
+  req.userDisplayName = userDisplayName;
+  req.userTimezone = userTz;
 }
 
 // Composer: tries Bearer first (the iOS Shortcut machine path), then CF
@@ -193,7 +193,7 @@ function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolea
     reply.code(403).send({ error: 'admin_check_misconfigured' });
     return true;
   }
-  const userEmail = (req as { userEmail?: string }).userEmail;
+  const userEmail = req.userEmail;
   if (!isAdminEmail(userEmail)) {
     req.log.warn({ userEmail }, 'admin_check_rejected');
     reply.code(403).send({ error: 'not_an_admin' });
@@ -219,7 +219,7 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
       // the dual-auth branch uses below. Production always sets ADMIN_API_KEY,
       // so the strict CF-Access-only path below is enforced in prod.
       if (!process.env.ADMIN_API_KEY) {
-        (req as any).authMode = 'cf_access_fresh';
+        req.authMode = 'cf_access_fresh';
         return;
       }
       // Restore endpoints — reject any X-Admin-Key presence, require CF Access.
@@ -234,7 +234,7 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
       await requireCfAccess(req, reply);
       if (reply.sent) return;
       if (rejectIfNotAdminEmail(req, reply)) return;
-      (req as any).authMode = 'cf_access_fresh';
+      req.authMode = 'cf_access_fresh';
       return;
     }
 
@@ -242,7 +242,7 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
 
     // Dev / test: ADMIN_API_KEY unset means open admin path.
     if (!adminKey) {
-      (req as any).authMode = 'admin';
+      req.authMode = 'admin';
       return;
     }
 
@@ -251,14 +251,14 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
       if (!constantTimeEqual(provided, adminKey)) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
-      (req as any).authMode = 'admin';
+      req.authMode = 'admin';
       return;
     }
 
     if (isCfAccessEnabled()) {
       await requireCfAccess(req, reply);
       if (reply.sent) return;
-      (req as any).authMode = 'cf_access';
+      req.authMode = 'cf_access';
 
       // Per D10: when authenticated via CF Access (not the admin key), enforce
       // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
@@ -290,5 +290,5 @@ export async function requireCfAccessOnly(req: FastifyRequest, reply: FastifyRep
   }
   await requireCfAccess(req, reply);
   if (reply.sent) return;
-  (req as any).authMode = 'cf_access';
+  req.authMode = 'cf_access';
 }

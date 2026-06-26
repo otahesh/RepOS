@@ -13,7 +13,7 @@ export async function feedbackRoutes(app: FastifyInstance) {
     '/feedback',
     { preHandler: [requireBearerOrCfAccess, csrfOrigin] },
     async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
+      const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
       const parsed = FeedbackCreateSchema.safeParse(req.body);
@@ -23,7 +23,7 @@ export async function feedbackRoutes(app: FastifyInstance) {
 
       // The bearer path doesn't populate userEmail; re-read it (same precedent as
       // account.ts) so the row + Discord embed carry a human identifier.
-      let email = (req as { userEmail?: string }).userEmail;
+      let email = req.userEmail;
       if (!email) {
         const { rows } = await db.query<{ email: string }>(`SELECT email FROM users WHERE id=$1`, [
           userId,

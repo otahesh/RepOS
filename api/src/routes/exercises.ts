@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { findSubstitutions } from '../services/substitutions.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
@@ -62,7 +63,7 @@ export async function exerciseRoutes(app: FastifyInstance) {
     '/exercises/:slug/substitutions',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const { rows } = await db.query<{ equipment_profile: Record<string, unknown> }>(
         `SELECT equipment_profile FROM users WHERE id=$1`,
         [userId],

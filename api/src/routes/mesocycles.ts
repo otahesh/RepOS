@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { getTodayWorkout } from '../services/getTodayWorkout.js';
@@ -14,7 +15,7 @@ import type {
 export async function mesocycleRoutes(app: FastifyInstance) {
   // /today must be registered before /:id so the literal path wins over the param.
   app.get('/mesocycles/today', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
-    const userId = (req as any).userId as string;
+    const userId = requireUserId(req);
     return getTodayWorkout(userId);
   });
 
@@ -26,7 +27,7 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const {
         rows: [run],
       } = await db.query(
@@ -62,7 +63,7 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const { rows } = await db.query(`SELECT id FROM mesocycle_runs WHERE id=$1 AND user_id=$2`, [
         req.params.id,
         userId,
@@ -84,7 +85,7 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
 
       // Ownership + existence check; grab weeks while we're at it.
       const {
@@ -173,7 +174,7 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const client = await db.connect();
       try {
         await client.query('BEGIN');

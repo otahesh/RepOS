@@ -17,6 +17,7 @@
 //     dismiss, for the post-cohort tuning pass on W3 thresholds.
 
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
@@ -50,7 +51,7 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
       preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')],
     },
     async (req) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
 
       // Resolve the user's active mesocycle_run so run-anchored evaluators
       // (stalled_pr, overreaching) can read current_week + program context.
@@ -110,7 +111,7 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
     '/recovery-flags/dismiss',
     { preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
 
       const parsed = RecoveryFlagDismissRequestSchema.safeParse(req.body);
       if (!parsed.success) {

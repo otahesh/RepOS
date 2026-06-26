@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { EquipmentProfileSchema } from '../schemas/equipmentProfile.js';
@@ -8,14 +9,14 @@ import type { EquipmentProfileResponse } from '../schemas/equipment.js';
 
 export async function equipmentRoutes(app: FastifyInstance) {
   app.get('/equipment/profile', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const userId = (req as any).userId as string;
+    const userId = requireUserId(req);
     const { rows } = await db.query(`SELECT equipment_profile FROM users WHERE id=$1`, [userId]);
     reply.header('cache-control', 'no-store');
     return rows[0]?.equipment_profile ?? { _v: 1 };
   });
 
   app.put('/equipment/profile', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
-    const userId = (req as any).userId as string;
+    const userId = requireUserId(req);
     const parsed = EquipmentProfileSchema.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -32,7 +33,7 @@ export async function equipmentRoutes(app: FastifyInstance) {
     '/equipment/profile/preset/:name',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       if (!isPreset(req.params.name)) {
         reply.code(400);
         return { error: 'unknown preset', field: 'name' };

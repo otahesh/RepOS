@@ -3,6 +3,8 @@
  * Manually kept in sync with api/src/schemas/userInjuries.ts.
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
+import { apiFetch } from '../../auth';
+import { ApiError, jsonOrThrow } from './_http';
 
 export type InjuryJoint =
   | 'shoulder_left'
@@ -25,9 +27,7 @@ export type UserInjury = {
 };
 
 export async function listInjuries(): Promise<UserInjury[]> {
-  const r = await fetch('/api/user/injuries', { method: 'GET', credentials: 'include' });
-  if (!r.ok) throw new Error(`listInjuries: ${r.status}`);
-  const body = (await r.json()) as { injuries: UserInjury[] };
+  const body = await jsonOrThrow<{ injuries: UserInjury[] }>(await apiFetch('/api/user/injuries'));
   return body.injuries;
 }
 
@@ -37,14 +37,13 @@ export async function upsertInjury(payload: {
   notes?: string;
   onset_at?: string | null;
 }): Promise<UserInjury> {
-  const r = await fetch('/api/user/injuries', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!r.ok) throw new Error(`upsertInjury: ${r.status}`);
-  const body = (await r.json()) as { injury: UserInjury };
+  const body = await jsonOrThrow<{ injury: UserInjury }>(
+    await apiFetch('/api/user/injuries', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  );
   return body.injury;
 }
 
@@ -56,21 +55,17 @@ export async function patchInjury(
     onset_at?: string | null;
   },
 ): Promise<UserInjury> {
-  const r = await fetch(`/api/user/injuries/${joint}`, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(patch),
-  });
-  if (!r.ok) throw new Error(`patchInjury: ${r.status}`);
-  const body = (await r.json()) as { injury: UserInjury };
+  const body = await jsonOrThrow<{ injury: UserInjury }>(
+    await apiFetch(`/api/user/injuries/${joint}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  );
   return body.injury;
 }
 
 export async function deleteInjury(joint: InjuryJoint): Promise<void> {
-  const r = await fetch(`/api/user/injuries/${joint}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  if (!r.ok && r.status !== 204) throw new Error(`deleteInjury: ${r.status}`);
+  const res = await apiFetch(`/api/user/injuries/${joint}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, undefined, await res.text());
 }

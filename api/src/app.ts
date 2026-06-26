@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { requireUserId, requireUserEmail } from './utils/requestIdentity.js';
 import sensible from '@fastify/sensible';
 import helmet from '@fastify/helmet';
 import { db } from './db/client.js';
@@ -91,7 +92,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   // aren't on the request (requireCfAccess only stamps identity) so we SELECT
   // them by userId here.
   app.get('/api/me', { preHandler: requireCfAccess }, async (req) => {
-    const userId = (req as any).userId as string;
+    const userId = requireUserId(req);
     const {
       rows: [u],
     } = await db.query<{
@@ -108,13 +109,13 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     );
     return {
       id: userId,
-      email: (req as any).userEmail as string,
-      display_name: ((req as any).userDisplayName as string | null) ?? null,
-      timezone: (req as any).userTimezone as string,
+      email: requireUserEmail(req),
+      display_name: req.userDisplayName ?? null,
+      timezone: req.userTimezone as string,
       onboarding_completed_at: u?.onboarding_completed_at ?? null,
       par_q_version: u?.par_q_version ?? 0,
       par_q_advisory_active: u?.par_q_advisory_active ?? false,
-      is_admin: isAdminEmail((req as { userEmail?: string }).userEmail),
+      is_admin: isAdminEmail(req.userEmail),
     };
   });
 

@@ -4,6 +4,7 @@
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 export { ApiError } from './_http';
 
@@ -130,36 +131,29 @@ export type MesocycleRecapStats = {
 };
 
 export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {
-  const res = await fetch('/api/mesocycles/today', { credentials: 'same-origin' });
+  const res = await apiFetch('/api/mesocycles/today', {});
   return jsonOrThrow(res);
 }
 
 export async function getMesocycle(id: string): Promise<MesocycleRunDetail> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}`, {});
   return jsonOrThrow(res);
 }
 
 export async function getVolumeRollup(id: string): Promise<VolumeRollup> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, {});
   return jsonOrThrow(res);
 }
 
 export async function abandonMesocycle(id: string): Promise<AbandonMesocycleResponse> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
     method: 'POST',
-    credentials: 'same-origin',
   });
   return jsonOrThrow(res);
 }
 
 export async function getMesocycleRecapStats(id: string): Promise<MesocycleRecapStats> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/recap-stats`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/recap-stats`, {});
   return jsonOrThrow(res);
 }
 
@@ -189,11 +183,10 @@ export async function startMesocycle(input: StartMesocycleInput): Promise<StartM
     start_tz: input.start_tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
   const intent = input.intent ?? 'normal';
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/user-programs/${encodeURIComponent(input.user_program_id)}/start?intent=${intent}`,
     {
       method: 'POST',
-      credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     },

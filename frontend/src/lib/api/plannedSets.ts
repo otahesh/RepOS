@@ -4,6 +4,7 @@
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 
 export { ApiError } from './_http';
@@ -44,10 +45,9 @@ export async function patchPlannedSet(
   id: string,
   patch: PlannedSetPatch,
 ): Promise<PlannedSetPatchResponse> {
-  const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(patch),
   });
   return jsonOrThrow<PlannedSetPatchResponse>(res);
@@ -57,10 +57,9 @@ export async function substitutePlannedSet(
   id: string,
   body: { to_exercise_id: string },
 ): Promise<PlannedSetSubstituteResponse> {
-  const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}/substitute`, {
+  const res = await apiFetch(`/api/planned-sets/${encodeURIComponent(id)}/substitute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(body),
   });
   return jsonOrThrow<PlannedSetSubstituteResponse>(res);

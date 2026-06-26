@@ -3,6 +3,7 @@
 // Mount path: /api/mesocycles/:id/deload-now + /undo.
 // Scope: account:write (panel C-SCOPE).
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
 import { UuidParamSchema } from '../schemas/idParams.js';
@@ -23,7 +24,7 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'not_found' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       try {
         const r = await applyManualDeload(userId, req.params.id);
         return { run_id: req.params.id, triggered_at: new Date().toISOString(), ...r };
@@ -53,7 +54,7 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'not_found' };
       }
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       try {
         await undoManualDeload(userId, req.params.id);
         return { run_id: req.params.id, reversed_at: new Date().toISOString() };

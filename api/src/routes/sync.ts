@@ -17,7 +17,7 @@ export async function syncRoutes(app: FastifyInstance) {
            ELSE 'broken'
          END AS state
        FROM health_sync_status WHERE user_id = $1`,
-      [(req as any).userId],
+      [req.userId],
     );
 
     reply.header('Cache-Control', 'private, max-age=60');

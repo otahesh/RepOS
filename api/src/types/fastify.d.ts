@@ -11,6 +11,14 @@ declare module 'fastify' {
      * already covers identity at the edge.
      */
     tokenScopes?: string[];
+    /** Set by requireCfAccess — the JWT email claim (lower-cased). */
+    userEmail?: string;
+    /** Set by requireCfAccess — the JWT name claim, may be null. */
+    userDisplayName?: string | null;
+    /** Set by requireCfAccess — the user's IANA timezone from the users row. */
+    userTimezone?: string;
+    /** Set by the admin gate — which auth path the request took. */
+    authMode?: 'admin' | 'cf_access' | 'cf_access_fresh';
   }
 }
 

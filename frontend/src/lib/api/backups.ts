@@ -2,6 +2,9 @@
 //
 // W5 — typed client for /api/backups/* + /api/maintenance/*. Mirrors
 // api/src/schemas/backups.ts and api/src/routes/maintenance.ts.
+import { apiFetch } from '../../auth';
+import { ApiError, jsonOrThrow } from './_http';
+
 export interface BackupItem {
   id: string;
   trigger: 'manual' | 'auto' | 'pre_restore' | 'restore';
@@ -23,40 +26,27 @@ export interface MaintenanceStatus {
 }
 
 export async function listBackups(): Promise<BackupListResponse> {
-  const res = await fetch('/api/backups', { credentials: 'include' });
-  if (!res.ok) throw new Error(`listBackups ${res.status}`);
-  return res.json();
+  return jsonOrThrow<BackupListResponse>(await apiFetch('/api/backups'));
 }
 export async function createBackup(): Promise<BackupItem> {
-  const res = await fetch('/api/backups', { method: 'POST', credentials: 'include' });
-  if (!res.ok) throw new Error(`createBackup ${res.status}`);
-  return res.json();
+  return jsonOrThrow<BackupItem>(await apiFetch('/api/backups', { method: 'POST' }));
 }
 export async function deleteBackup(id: string): Promise<void> {
-  const res = await fetch(`/api/backups/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  if (!res.ok && res.status !== 204) throw new Error(`deleteBackup ${res.status}`);
+  const res = await apiFetch(`/api/backups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, undefined, await res.text());
 }
 export async function restoreBackup(id: string): Promise<void> {
-  const res = await fetch(`/api/backups/${encodeURIComponent(id)}/restore`, {
+  const res = await apiFetch(`/api/backups/${encodeURIComponent(id)}/restore`, {
     method: 'POST',
-    credentials: 'include',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ confirm: 'RESTORE' }),
   });
-  if (!res.ok && res.status !== 202) throw new Error(`restoreBackup ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, undefined, await res.text());
 }
 export async function getMaintenanceStatus(): Promise<MaintenanceStatus> {
-  const res = await fetch('/api/maintenance/status', { credentials: 'include' });
-  if (!res.ok) throw new Error(`getMaintenanceStatus ${res.status}`);
-  return res.json();
+  return jsonOrThrow<MaintenanceStatus>(await apiFetch('/api/maintenance/status'));
 }
 export async function restorePreSnapshot(): Promise<void> {
-  const res = await fetch('/api/maintenance/restore-pre-snapshot', {
-    method: 'POST',
-    credentials: 'include',
-  });
-  if (!res.ok && res.status !== 202) throw new Error(`restorePreSnapshot ${res.status}`);
+  const res = await apiFetch('/api/maintenance/restore-pre-snapshot', { method: 'POST' });
+  if (!res.ok) throw new ApiError(res.status, undefined, await res.text());
 }
