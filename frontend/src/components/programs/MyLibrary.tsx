@@ -2,12 +2,20 @@
 // My Programs library — active view + Past toggle for abandoned/completed.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listMyPrograms, listProgramMesocycles } from '../../lib/api/userPrograms';
+import {
+  listMyPrograms,
+  listProgramMesocycles,
+  deleteUserProgram,
+  archiveUserProgram,
+  unarchiveUserProgram,
+} from '../../lib/api/userPrograms';
 import type { UserProgramRecord } from '../../lib/api/programs';
 import { TOKENS, FONTS } from '../../tokens';
 import { Term } from '../Term';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { pushToast } from '../common/ToastHost';
 
-type ViewTab = 'active' | 'past';
+type ViewTab = 'active' | 'past' | 'archived';
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft',
@@ -15,6 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
   paused: 'Paused',
   completed: 'Completed',
   abandoned: 'Abandoned',
+  archived: 'Archived',
 };
 
 function statusColor(status: UserProgramRecord['status']): string {
@@ -37,12 +46,18 @@ function ProgramCard({
   onResume,
   onOpen,
   onViewRecap,
+  onArchive,
+  onRestore,
+  onDelete,
   faded,
 }: {
   program: UserProgramRecord;
   onResume?: (id: string) => void;
   onOpen?: (id: string) => void;
   onViewRecap?: (id: string) => void;
+  onArchive?: (id: string) => void;
+  onRestore?: (id: string) => void;
+  onDelete?: (id: string) => void;
   faded: boolean;
 }) {
   return (
@@ -164,6 +179,61 @@ function ProgramCard({
             View recap
           </button>
         )}
+        {onRestore && (
+          <button
+            onClick={() => onRestore(program.id)}
+            style={{
+              padding: '8px 14px',
+              background: TOKENS.accentGlow,
+              border: `1px solid ${TOKENS.accentDim}`,
+              borderRadius: 6,
+              color: TOKENS.accent,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              letterSpacing: 0.5,
+            }}
+          >
+            Restore
+          </button>
+        )}
+        {onArchive && (
+          <button
+            onClick={() => onArchive(program.id)}
+            style={{
+              padding: '8px 14px',
+              background: TOKENS.surface3,
+              border: `1px solid ${TOKENS.lineStrong}`,
+              borderRadius: 6,
+              color: TOKENS.text,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Archive
+          </button>
+        )}
+        {onDelete && (
+          <button
+            onClick={() => onDelete(program.id)}
+            style={{
+              padding: '8px 14px',
+              background: 'transparent',
+              border: `1px solid ${TOKENS.danger}`,
+              borderRadius: 6,
+              color: TOKENS.danger,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Delete
+          </button>
+        )}
       </div>
     </article>
   );
@@ -178,17 +248,19 @@ export function MyLibrary({
   const [tab, setTab] = useState<ViewTab>('active');
   const [programs, setPrograms] = useState<UserProgramRecord[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // Dedicated recap-lookup error surface (mirrors MyProgramPage's recapErr) so
-  // a failed "View recap" navigation isn't misattributed as a programs-load
-  // failure. Cleared on tab switch alongside the programs reload.
   const [recapErr, setRecapErr] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<UserProgramRecord | null>(null);
+  // Bumped after a mutation to force the current tab to refetch.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let ignore = false;
     setPrograms(null);
     setErr(null);
     setRecapErr(null);
-    listMyPrograms({ includePast: tab === 'past' })
+    const opts =
+      tab === 'archived' ? { includeArchived: true } : { includePast: tab === 'past' };
+    listMyPrograms(opts)
       .then((rows) => {
         if (!ignore) setPrograms(rows);
       })
@@ -198,15 +270,58 @@ export function MyLibrary({
     return () => {
       ignore = true;
     };
-  }, [tab]);
+  }, [tab, reloadKey]);
 
-  // Filter client-side so a tab switch doesn't flash stale data while loading
+  // Server already scopes the archived tab to archived_at IS NOT NULL, so show
+  // everything it returns there. Active/Past filter client-side by status.
   const filtered =
-    programs?.filter((p) =>
-      tab === 'past'
-        ? p.status === 'abandoned' || p.status === 'completed'
-        : p.status !== 'abandoned' && p.status !== 'completed' && p.status !== 'archived',
-    ) ?? null;
+    programs?.filter((p) => {
+      if (tab === 'archived') return true;
+      if (tab === 'past') return p.status === 'abandoned' || p.status === 'completed';
+      return p.status !== 'abandoned' && p.status !== 'completed' && p.status !== 'archived';
+    }) ?? null;
+
+  async function handleArchive(id: string) {
+    try {
+      await archiveUserProgram(id);
+      pushToast({ severity: 'success', body: 'Program archived.' });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      pushToast({
+        severity: 'error',
+        body: `Archive failed — ${e instanceof Error ? e.message : String(e)}.`,
+      });
+    }
+  }
+
+  async function handleRestore(id: string) {
+    try {
+      await unarchiveUserProgram(id);
+      pushToast({ severity: 'success', body: 'Program restored.' });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      pushToast({
+        severity: 'error',
+        body: `Restore failed — ${e instanceof Error ? e.message : String(e)}.`,
+      });
+    }
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const prog = pendingDelete;
+    setPendingDelete(null);
+    try {
+      await deleteUserProgram(prog.id);
+      pushToast({ severity: 'success', body: `Deleted "${prog.name}".` });
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      pushToast({
+        severity: 'error',
+        body: `Delete failed — ${e instanceof Error ? e.message : String(e)}.`,
+      });
+    }
+  }
 
   function handleOpen(_id: string) {
     // Active program → live workout page.
@@ -277,6 +392,9 @@ export function MyLibrary({
           <button style={tabStyle(tab === 'past')} onClick={() => setTab('past')}>
             Past
           </button>
+          <button style={tabStyle(tab === 'archived')} onClick={() => setTab('archived')}>
+            Archived
+          </button>
         </div>
       </div>
 
@@ -296,7 +414,9 @@ export function MyLibrary({
 
       {!err && filtered && filtered.length === 0 && (
         <div style={{ color: TOKENS.textMute, fontSize: 13, padding: '16px 0' }}>
-          {tab === 'past' ? (
+          {tab === 'archived' ? (
+            'No archived programs. Archive a program to tuck it away here — it stays restorable.'
+          ) : tab === 'past' ? (
             'No past programs yet. Abandoned or completed programs appear here.'
           ) : (
             <>
@@ -318,7 +438,7 @@ export function MyLibrary({
             <ProgramCard
               key={p.id}
               program={p}
-              faded={tab === 'past'}
+              faded={tab !== 'active'}
               onOpen={tab === 'active' ? handleOpen : undefined}
               onResume={
                 tab === 'past' && p.template_slug
@@ -330,10 +450,33 @@ export function MyLibrary({
                   ? (id) => void handleViewRecap(id)
                   : undefined
               }
+              onArchive={
+                tab !== 'archived' && p.status !== 'active' && p.status !== 'paused'
+                  ? (id) => void handleArchive(id)
+                  : undefined
+              }
+              onRestore={tab === 'archived' ? (id) => void handleRestore(id) : undefined}
+              onDelete={(id) => setPendingDelete(programs?.find((x) => x.id === id) ?? null)}
             />
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        tier="heavy"
+        severity="danger"
+        title="Delete this program?"
+        body={
+          pendingDelete
+            ? `This permanently deletes "${pendingDelete.name}" and all of its logged sets and mesocycle history. This cannot be undone.`
+            : ''
+        }
+        requireTyped={pendingDelete?.name ?? ''}
+        confirmLabel="Delete program"
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setPendingDelete(null)}
+      />
     </section>
   );
 }

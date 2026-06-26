@@ -50,6 +50,32 @@ const COMPLETED_PROGRAM = {
   updated_at: '2026-03-15T10:00:00Z',
 };
 
+const DRAFT_PROGRAM = {
+  id: 'up-draft',
+  name: 'Draft Block',
+  status: 'draft' as const,
+  user_id: 'u1',
+  template_id: 't1',
+  template_slug: 'full-body-3x',
+  template_version: 1,
+  customizations: {},
+  created_at: '2026-05-01T10:00:00Z',
+  updated_at: '2026-05-01T10:00:00Z',
+};
+
+const ARCHIVED_PROGRAM = {
+  id: 'up-shelved',
+  name: 'Shelved Block',
+  status: 'completed' as const,
+  user_id: 'u1',
+  template_id: 't1',
+  template_slug: 'full-body-3x',
+  template_version: 1,
+  customizations: {},
+  created_at: '2026-01-01T10:00:00Z',
+  updated_at: '2026-02-01T10:00:00Z',
+};
+
 function renderLibrary(onRestartProgram = vi.fn()) {
   return render(
     <MemoryRouter>
@@ -295,5 +321,78 @@ describe('<MyLibrary> — prior-mesocycle recap entry (WS6 / D6 / G7)', () => {
     await screen.findByText('Old Program');
 
     expect(screen.queryByRole('button', { name: /view recap/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('<MyLibrary> — delete / archive / restore', () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+  });
+
+  it('Delete on a program requires typing the name, then calls deleteUserProgram', async () => {
+    const delSpy = vi.spyOn(api, 'deleteUserProgram').mockResolvedValue();
+    vi.spyOn(api, 'listMyPrograms').mockResolvedValue([ACTIVE_PROGRAM]);
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
+    // Heavy confirm: the typed-confirm field must match the program name exactly.
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My Full Body' } });
+    fireEvent.click(screen.getByRole('button', { name: /Delete program/i }));
+
+    await waitFor(() => expect(delSpy).toHaveBeenCalledWith('up-active'));
+  });
+
+  it('Archive on a draft program calls archiveUserProgram', async () => {
+    const archiveSpy = vi.spyOn(api, 'archiveUserProgram').mockResolvedValue();
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([DRAFT_PROGRAM]) // initial active fetch
+      .mockResolvedValueOnce([]); // reload after archive
+
+    renderLibrary();
+    await screen.findByText('Draft Block');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Archive$/i }));
+    await waitFor(() => expect(archiveSpy).toHaveBeenCalledWith('up-draft'));
+  });
+
+  it('does not show Archive on an active (live-run) program', async () => {
+    vi.spyOn(api, 'listMyPrograms').mockResolvedValue([ACTIVE_PROGRAM]);
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    expect(screen.queryByRole('button', { name: /^Archive$/i })).not.toBeInTheDocument();
+  });
+
+  it('Archived tab fetches with includeArchived and shows a Restore action', async () => {
+    const spy = vi
+      .spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM]) // active
+      .mockResolvedValueOnce([ARCHIVED_PROGRAM]); // archived
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Archived$/i }));
+
+    expect(await screen.findByText('Shelved Block')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Restore$/i })).toBeInTheDocument();
+    expect(spy).toHaveBeenCalledWith({ includeArchived: true });
+  });
+
+  it('Restore calls unarchiveUserProgram', async () => {
+    const unSpy = vi.spyOn(api, 'unarchiveUserProgram').mockResolvedValue();
+    vi.spyOn(api, 'listMyPrograms')
+      .mockResolvedValueOnce([ACTIVE_PROGRAM])
+      .mockResolvedValueOnce([ARCHIVED_PROGRAM])
+      .mockResolvedValueOnce([]); // reload after restore
+
+    renderLibrary();
+    await screen.findByText('My Full Body');
+    fireEvent.click(screen.getByRole('button', { name: /^Archived$/i }));
+    await screen.findByText('Shelved Block');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Restore$/i }));
+    await waitFor(() => expect(unSpy).toHaveBeenCalledWith('up-shelved'));
   });
 });
