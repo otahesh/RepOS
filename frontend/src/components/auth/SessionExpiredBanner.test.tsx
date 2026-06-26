@@ -63,29 +63,54 @@ async function fireExpired() {
 }
 
 // Force window.localStorage.setItem to throw (Safari private-mode / quota path).
-// Define an OWN property directly on the localStorage instance the component
-// reads (`window.localStorage.setItem`). An own property shadows the prototype,
-// so the throw fires no matter what class backs localStorage — bulletproof
-// across jsdom / Node / vitest versions.
 //
-// Why not `vi.spyOn(Storage.prototype, 'setItem')`: the test env installs a
-// MemoryStorage polyfill (see src/test/setup.ts) whose setItem lives on
-// MemoryStorage.prototype, NOT Storage.prototype. The old prototype spy
-// therefore patched a prototype the component never touches and silently
-// no-op'd — which is what turned these 5 tests red.
+// Replace `window.localStorage` WHOLESALE rather than overriding `setItem` on
+// the existing Storage object. Two different backings are in play depending on
+// the runtime:
+//   - Node 26 (local dev): src/test/setup.ts installs a plain MemoryStorage
+//     polyfill (Node's global localStorage is undefined without
+//     --localstorage-file), so an own-property override works.
+//   - Node 22 (CI): jsdom's own Proxy-backed Storage is used; its get-trap
+//     returns the prototype method and IGNORES an own `setItem` override — so
+//     overriding the property ON the Storage object silently no-ops (this is
+//     what turned these 5 tests red on CI while passing locally).
+// The component resolves `window.localStorage` first, then `.setItem`, so
+// swapping the whole property is immune to either backing.
+let localStorageOverridden = false;
+let savedLocalStorageDescriptor: PropertyDescriptor | undefined;
+
 function makeLocalStorageThrow(): void {
-  Object.defineProperty(window.localStorage, 'setItem', {
+  if (!localStorageOverridden) {
+    savedLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    localStorageOverridden = true;
+  }
+  Object.defineProperty(window, 'localStorage', {
     configurable: true,
-    writable: true,
-    value: () => {
-      throw new Error('QuotaExceededError');
-    },
+    value: {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as Storage,
   });
 }
 
-// Remove the own setItem override so the real prototype method is used again.
+// Restore the original window.localStorage — but ONLY if this test overrode it.
+// (Unconditional restore would delete the real localStorage in tests that never
+// called makeLocalStorageThrow, breaking the next test's localStorage.clear().)
 function restoreLocalStorage(): void {
-  delete (window.localStorage as unknown as { setItem?: unknown }).setItem;
+  if (!localStorageOverridden) return;
+  if (savedLocalStorageDescriptor) {
+    Object.defineProperty(window, 'localStorage', savedLocalStorageDescriptor);
+  } else {
+    delete (window as { localStorage?: unknown }).localStorage;
+  }
+  savedLocalStorageDescriptor = undefined;
+  localStorageOverridden = false;
 }
 
 describe('<SessionExpiredBanner>', () => {
@@ -195,8 +220,8 @@ describe('<SessionExpiredBanner>', () => {
   });
 
   // ── W1.3.7.2 — Safari private mode: localStorage.setItem throws ──────────
-  // See makeLocalStorageThrow(): own-property override on the instance, robust
-  // across jsdom / Node / vitest versions.
+  // See makeLocalStorageThrow(): swaps window.localStorage wholesale so it works
+  // across both the MemoryStorage polyfill (local) and jsdom Proxy Storage (CI).
   it('renders blocking modal (does NOT auto-redirect) when localStorage.setItem throws', async () => {
     setCounts({ pending: 2 });
     makeLocalStorageThrow();
