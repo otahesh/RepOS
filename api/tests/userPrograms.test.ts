@@ -667,3 +667,104 @@ describe('DELETE /api/user-programs/:id', () => {
     expect(still.rows.length).toBe(1);
   });
 });
+
+describe('POST /api/user-programs/:id/archive + /unarchive', () => {
+  // A leftover active/paused run from earlier describe blocks would make the
+  // archive-409 test's /start return 409 (active_run_exists). Clear runs for
+  // this user before each test and after the block — scoped to archive only.
+  beforeEach(async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
+  afterAll(async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
+
+  it('archive sets archived_at and hides from default + past lists', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+
+    const arch = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/archive`,
+      headers: auth(),
+    });
+    expect(arch.statusCode).toBe(200);
+
+    const row = await db.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM user_programs WHERE id=$1`,
+      [upId],
+    );
+    expect(row.rows[0].archived_at).not.toBeNull();
+
+    const def = await app.inject({ method: 'GET', url: '/api/user-programs', headers: auth() });
+    expect(def.json<{ programs: { id: string }[] }>().programs.map((p) => p.id)).not.toContain(
+      upId,
+    );
+  });
+
+  it('archive is rejected with 409 when an active mesocycle run exists', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+    const start = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/start`,
+      headers: auth(),
+      body: { start_date: '2026-06-01', start_tz: 'America/Chicago' },
+    });
+    expect(start.statusCode).toBeLessThan(300);
+
+    const arch = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/archive`,
+      headers: auth(),
+    });
+    expect(arch.statusCode).toBe(409);
+  });
+
+  it('unarchive clears archived_at', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+    await app.inject({ method: 'POST', url: `/api/user-programs/${upId}/archive`, headers: auth() });
+
+    const un = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/unarchive`,
+      headers: auth(),
+    });
+    expect(un.statusCode).toBe(200);
+    const row = await db.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM user_programs WHERE id=$1`,
+      [upId],
+    );
+    expect(row.rows[0].archived_at).toBeNull();
+  });
+
+  it('archive returns 404 for a program the caller does not own', async () => {
+    const tmpl = await db.query<{ id: string; version: number; name: string }>(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    const otherUp = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.rows[0].id, tmpl.rows[0].version, tmpl.rows[0].name],
+    );
+    const arch = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${otherUp.rows[0].id}/archive`,
+      headers: auth(),
+    });
+    expect(arch.statusCode).toBe(404);
+  });
+});

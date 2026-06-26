@@ -361,6 +361,67 @@ export async function userProgramRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Params: { id: string } }>(
+    '/user-programs/:id/archive',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const owned = await db.query(`SELECT 1 FROM user_programs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
+      if (owned.rows.length === 0) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      // Guard on a live RUN, not user_programs.status: starting a mesocycle does
+      // not flip the program's status, so status is an unreliable signal here.
+      const live = await db.query(
+        `SELECT 1 FROM mesocycle_runs
+         WHERE user_program_id=$1 AND status IN ('active','paused') LIMIT 1`,
+        [req.params.id],
+      );
+      if (live.rows.length > 0) {
+        reply.code(409);
+        return {
+          error: 'Finish or abandon the in-progress mesocycle before archiving this program.',
+          field: 'status',
+        };
+      }
+      await db.query(
+        `UPDATE user_programs SET archived_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2`,
+        [req.params.id, userId],
+      );
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/user-programs/:id/unarchive',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const { rowCount } = await db.query(
+        `UPDATE user_programs SET archived_at=NULL, updated_at=now()
+         WHERE id=$1 AND user_id=$2 AND archived_at IS NOT NULL`,
+        [req.params.id, userId],
+      );
+      if (rowCount === 0) {
+        reply.code(404);
+        return { error: 'archived user_program not found', field: 'id' };
+      }
+      return { ok: true };
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/user-programs/:id/warnings',
     { preHandler: requireBearerOrCfAccess },
