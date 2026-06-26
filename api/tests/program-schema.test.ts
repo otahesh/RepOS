@@ -171,7 +171,9 @@ describe('user_programs (migration 016)', () => {
       `SELECT indexdef FROM pg_indexes
         WHERE tablename='user_programs' AND indexname='idx_user_programs_user'`,
     );
-    expect(rows[0]?.indexdef).toMatch(/WHERE \(status <> 'archived'/i);
+    // Migration 071 swapped this partial index off the status='archived' enum
+    // value onto the new archived_at column (the reversible-archive source of truth).
+    expect(rows[0]?.indexdef).toMatch(/WHERE \(archived_at IS NULL/i);
   });
 });
 
