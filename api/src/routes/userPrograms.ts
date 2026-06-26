@@ -337,6 +337,30 @@ export async function userProgramRoutes(app: FastifyInstance) {
     },
   );
 
+  app.delete<{ Params: { id: string } }>(
+    '/user-programs/:id',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      // Single DELETE; all children (mesocycle_runs → day_workouts →
+      // planned_sets → set_logs / planned_cardio_blocks / run_events) cascade
+      // via ON DELETE CASCADE FKs. Ownership scoped in the WHERE clause.
+      const { rowCount } = await db.query(
+        `DELETE FROM user_programs WHERE id=$1 AND user_id=$2`,
+        [req.params.id, userId],
+      );
+      if (rowCount === 0) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      return reply.code(204).send();
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/user-programs/:id/warnings',
     { preHandler: requireBearerOrCfAccess },

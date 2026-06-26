@@ -598,3 +598,72 @@ describe('POST /api/user-programs/:id/start', () => {
     expect(body.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
+
+describe('DELETE /api/user-programs/:id', () => {
+  // The START describe block above can leave an active run for this user; clear
+  // it so /start below isn't rejected by the active_run_exists (409) guard.
+  beforeEach(async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
+  afterAll(async () => {
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+  });
+
+  it('deletes the program and cascades its mesocycle data', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+
+    // Start a mesocycle so child rows (runs, day_workouts, planned_sets) exist.
+    const start = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/start`,
+      headers: auth(),
+      body: { start_date: '2026-06-01', start_tz: 'America/Chicago' },
+    });
+    expect(start.statusCode).toBeLessThan(300);
+
+    const before = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM mesocycle_runs WHERE user_program_id=$1`,
+      [upId],
+    );
+    expect(before.rows[0].n).toBe(1);
+
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/api/user-programs/${upId}`,
+      headers: auth(),
+    });
+    expect(del.statusCode).toBe(204);
+
+    const prog = await db.query(`SELECT 1 FROM user_programs WHERE id=$1`, [upId]);
+    expect(prog.rows.length).toBe(0);
+    const runs = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM mesocycle_runs WHERE user_program_id=$1`,
+      [upId],
+    );
+    expect(runs.rows[0].n).toBe(0);
+  });
+
+  it('returns 404 for a program the caller does not own', async () => {
+    const tmpl = await db.query<{ id: string; version: number; name: string }>(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    const otherUp = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [otherUserId, tmpl.rows[0].id, tmpl.rows[0].version, tmpl.rows[0].name],
+    );
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/api/user-programs/${otherUp.rows[0].id}`,
+      headers: auth(),
+    });
+    expect(del.statusCode).toBe(404);
+    const still = await db.query(`SELECT 1 FROM user_programs WHERE id=$1`, [otherUp.rows[0].id]);
+    expect(still.rows.length).toBe(1);
+  });
+});
