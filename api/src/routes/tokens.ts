@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 import { isValidScope } from '../auth/scopes.js';
 import { isValidBigintId } from '../schemas/idParams.js';
+import { clientIp } from '../utils/clientIp.js';
 import type {
   TokenMintResponse,
   TokenListResponse,
@@ -79,7 +80,7 @@ export async function tokenRoutes(app: FastifyInstance) {
           targetUserId: userId,
           tokenId: String(rows[0].id),
           scopes: scopes ?? null,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'device_token minted',
       );
@@ -138,7 +139,7 @@ export async function tokenRoutes(app: FastifyInstance) {
           authMode: (req as { authMode?: string }).authMode ?? 'unknown',
           targetUserId: userId,
           tokenId: req.params.id,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'device_token revoked',
       );

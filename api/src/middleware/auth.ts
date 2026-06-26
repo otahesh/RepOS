@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
+import { clientIp } from '../utils/clientIp.js';
 
 // Token format: "<16-hex-prefix>.<64-hex-secret>"
 // Stored in device_tokens.token_hash as "<prefix>:<argon2hash-of-secret>"
@@ -65,7 +66,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
 
   await db.query(
     `UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`,
-    [req.ip, row.id],
+    [clientIp(req), row.id],
   );
   req.userId = row.user_id as string;
   // Empty array (rather than undefined) on the bearer path so requireScope

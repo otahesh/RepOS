@@ -22,6 +22,7 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireCfAccessOnly } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function authSignoutRoutes(app: FastifyInstance) {
   app.post(
@@ -48,7 +49,7 @@ export async function authSignoutRoutes(app: FastifyInstance) {
         await client.query(
           `INSERT INTO account_events (user_id, user_id_at_event, user_email_at_event, kind, ip, meta)
            VALUES ($1, $1, $2, 'signout_everywhere', $3, $4::jsonb)`,
-          [userId, userEmail, req.ip, JSON.stringify({ revoked_count: rowCount })],
+          [userId, userEmail, clientIp(req), JSON.stringify({ revoked_count: rowCount })],
         );
         await client.query('COMMIT');
       } catch (err) {
@@ -67,7 +68,7 @@ export async function authSignoutRoutes(app: FastifyInstance) {
         'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
       );
       req.log.info(
-        { event: 'signout_everywhere', userId, revoked_count: rowCount, ip: req.ip },
+        { event: 'signout_everywhere', userId, revoked_count: rowCount, ip: clientIp(req) },
         'signout_everywhere',
       );
       return reply.code(204).send();

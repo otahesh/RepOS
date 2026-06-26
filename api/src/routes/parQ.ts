@@ -36,6 +36,7 @@ import {
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { checkParQWriteRateLimit, recordParQWrite } from '../services/parQRateLimit.js';
 import { recordAccountEventTx } from '../services/accountEvents.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function parQRoutes(app: FastifyInstance) {
   app.get('/me/par-q', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
@@ -60,7 +61,7 @@ export async function parQRoutes(app: FastifyInstance) {
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const ip = (req.ip || '') as string;
+      const ip = clientIp(req) ?? '';
 
       const parsed = ParQAcceptRequestSchema.safeParse(req.body);
       if (!parsed.success) {

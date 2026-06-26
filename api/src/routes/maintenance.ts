@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
+import { clientIp } from '../utils/clientIp.js';
 
 function flagPath(): string {
   return process.env.MAINTENANCE_FLAG_PATH ?? '/config/maintenance.flag';
@@ -115,10 +116,7 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const filename = sourcePath.split('/').pop()!;
       const result = await kickOffRestore(filename, {
         adminUserId: (req as any).userId ?? null,
-        sourceIp:
-          (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-          req.ip ??
-          null,
+        sourceIp: clientIp(req),
       });
       return reply.code(202).send({ restore_id: result.restore_id, source: filename });
     },

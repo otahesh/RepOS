@@ -34,6 +34,7 @@ import {
 } from '../schemas/account.js';
 import { IANA_TIMEZONES } from '../lib/timezones.js'; // static fallback per I-IANA-TIMEZONES
 import { isValidBigintId } from '../schemas/idParams.js';
+import { clientIp } from '../utils/clientIp.js';
 
 const VALID_TZ = new Set(IANA_TIMEZONES);
 
@@ -150,7 +151,7 @@ export async function accountRoutes(app: FastifyInstance) {
         userId,
         userEmail,
         kind: 'profile_changed',
-        ip: req.ip,
+        ip: clientIp(req),
         meta: { fields: changedFields, changed: true },
       });
       return reply.code(200).send(rows[0]);
@@ -291,7 +292,7 @@ export async function accountRoutes(app: FastifyInstance) {
         userId,
         userEmail,
         kind: 'token_revoked',
-        ip: req.ip,
+        ip: clientIp(req),
         meta: { token_id: req.params.id },
       });
       return reply.code(204).send();
@@ -357,7 +358,7 @@ export async function accountRoutes(app: FastifyInstance) {
           userId,
           userEmail,
           previous_token_count: previousTokenCount,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'account_deleted',
       );
