@@ -14,7 +14,7 @@ afterAll(async () => {
 
 // G11 — a malformed :id must be a clean 404, never a 500 that leaks a raw
 // Postgres "invalid input syntax for type uuid" error in the response body.
-const UUID_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH'; url: string }> = [
+const UUID_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string }> = [
   { method: 'GET', url: '/api/mesocycles/not-a-uuid' },
   { method: 'GET', url: '/api/mesocycles/not-a-uuid/volume-rollup' },
   { method: 'GET', url: '/api/mesocycles/not-a-uuid/recap-stats' },
@@ -28,6 +28,9 @@ const UUID_ROUTES: Array<{ method: 'GET' | 'POST' | 'PATCH'; url: string }> = [
   { method: 'GET', url: '/api/user-programs/not-a-uuid/warnings' },
   { method: 'GET', url: '/api/user-programs/not-a-uuid/mesocycles' },
   { method: 'POST', url: '/api/user-programs/not-a-uuid/start' },
+  { method: 'DELETE', url: '/api/user-programs/not-a-uuid' },
+  { method: 'POST', url: '/api/user-programs/not-a-uuid/archive' },
+  { method: 'POST', url: '/api/user-programs/not-a-uuid/unarchive' },
 ];
 
 describe('G11 — malformed :id is a clean 404, not a 500', () => {

@@ -349,20 +349,31 @@ describe('PATCH /api/user-programs/:id', () => {
     expect(r.statusCode).toBe(404);
   });
 
-  it('409 on archived program', async () => {
-    // Mark this program as archived, attempt rename → 409
-    await db.query(`UPDATE user_programs SET status='archived' WHERE id=$1`, [upId]);
-    try {
-      const r = await app.inject({
-        method: 'PATCH',
-        url: `/api/user-programs/${upId}`,
-        headers: auth(),
-        body: { op: 'rename', name: 'Should Reject' },
-      });
-      expect(r.statusCode).toBe(409);
-    } finally {
-      await db.query(`UPDATE user_programs SET status='draft' WHERE id=$1`, [upId]);
-    }
+  it('409 on archived program (via the real /archive flow, keyed on archived_at)', async () => {
+    // Fork a fresh program, archive it through the real endpoint (which sets
+    // ONLY archived_at, never status='archived'), then a PATCH must 409. This
+    // proves the guard keys on archived_at, not the status enum.
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const archivedUpId = fork.json<{ id: string }>().id;
+    const arch = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${archivedUpId}/archive`,
+      headers: auth(),
+    });
+    expect(arch.statusCode).toBe(200);
+
+    const r = await app.inject({
+      method: 'PATCH',
+      url: `/api/user-programs/${archivedUpId}`,
+      headers: auth(),
+      body: { op: 'rename', name: 'Should Reject' },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json<{ error: string }>().error).toBe('cannot patch archived program');
   });
 
   it('draft program PATCH emits no mesocycle_run_events row', async () => {
@@ -632,6 +643,34 @@ describe('DELETE /api/user-programs/:id', () => {
     );
     expect(before.rows[0].n).toBe(1);
 
+    // Insert a real set_logs row tied to one of this program's planned_sets so
+    // we exercise the planned_sets → set_logs ON DELETE CASCADE leg too. Walk
+    // the materialized chain (mesocycle_runs → day_workouts → planned_sets) to
+    // grab a real planned_set_id and its exercise_id. NOT NULL set_logs cols:
+    // planned_set_id, user_id, exercise_id, client_request_id (id/performed_at/
+    // created_at/updated_at all have defaults).
+    const ps = await db.query<{ planned_set_id: string; exercise_id: string }>(
+      `SELECT ps.id AS planned_set_id, ps.exercise_id
+       FROM planned_sets ps
+       JOIN day_workouts dw   ON dw.id = ps.day_workout_id
+       JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
+       WHERE mr.user_program_id=$1
+       LIMIT 1`,
+      [upId],
+    );
+    expect(ps.rows.length).toBe(1);
+    const plannedSetId = ps.rows[0].planned_set_id;
+    await db.query(
+      `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id)
+       VALUES ($1, $2, $3, gen_random_uuid())`,
+      [plannedSetId, userId, ps.rows[0].exercise_id],
+    );
+    const slBefore = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM set_logs WHERE planned_set_id=$1`,
+      [plannedSetId],
+    );
+    expect(slBefore.rows[0].n).toBeGreaterThan(0);
+
     const del = await app.inject({
       method: 'DELETE',
       url: `/api/user-programs/${upId}`,
@@ -646,6 +685,11 @@ describe('DELETE /api/user-programs/:id', () => {
       [upId],
     );
     expect(runs.rows[0].n).toBe(0);
+    const slAfter = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM set_logs WHERE planned_set_id=$1`,
+      [plannedSetId],
+    );
+    expect(slAfter.rows[0].n).toBe(0);
   });
 
   it('returns 404 for a program the caller does not own', async () => {
@@ -766,5 +810,94 @@ describe('POST /api/user-programs/:id/archive + /unarchive', () => {
       headers: auth(),
     });
     expect(arch.statusCode).toBe(404);
+    // The non-owner's row must be untouched — archived_at still NULL.
+    const still = await db.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM user_programs WHERE id=$1`,
+      [otherUp.rows[0].id],
+    );
+    expect(still.rows[0].archived_at).toBeNull();
+  });
+
+  it('unarchive returns 404 for a program the caller does not own', async () => {
+    const tmpl = await db.query<{ id: string; version: number; name: string }>(
+      `SELECT id, version, name FROM program_templates WHERE slug='full-body-3-day'`,
+    );
+    // Other user's program is archived; the caller must still get a 404 and
+    // leave the row archived (no cross-user unarchive).
+    const otherUp = await db.query<{ id: string }>(
+      `INSERT INTO user_programs (user_id, template_id, template_version, name, archived_at)
+       VALUES ($1, $2, $3, $4, now()) RETURNING id`,
+      [otherUserId, tmpl.rows[0].id, tmpl.rows[0].version, tmpl.rows[0].name],
+    );
+    const un = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${otherUp.rows[0].id}/unarchive`,
+      headers: auth(),
+    });
+    expect(un.statusCode).toBe(404);
+    const still = await db.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM user_programs WHERE id=$1`,
+      [otherUp.rows[0].id],
+    );
+    expect(still.rows[0].archived_at).not.toBeNull();
+  });
+
+  it('unarchive returns 404 (archived user_program not found) for a never-archived program', async () => {
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+    const un = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/unarchive`,
+      headers: auth(),
+    });
+    expect(un.statusCode).toBe(404);
+    expect(un.json<{ error: string }>().error).toBe('archived user_program not found');
+  });
+
+  it('has_live_run is false on a fresh fork and true once a mesocycle starts', async () => {
+    // Scoped cleanup: this test starts a run; clear this user's runs first so a
+    // leftover active run from an earlier test can't make /start 409. (The
+    // describe beforeEach already does this, but keep it explicit and local.)
+    await db.query(`DELETE FROM mesocycle_runs WHERE user_id=$1`, [userId]);
+    const fork = await app.inject({
+      method: 'POST',
+      url: '/api/program-templates/full-body-3-day/fork',
+      headers: auth(),
+    });
+    const upId = fork.json<{ id: string }>().id;
+
+    const listBefore = await app.inject({
+      method: 'GET',
+      url: '/api/user-programs',
+      headers: auth(),
+    });
+    const beforeRow = listBefore
+      .json<{ programs: { id: string; has_live_run: boolean }[] }>()
+      .programs.find((p) => p.id === upId);
+    expect(beforeRow).toBeDefined();
+    expect(beforeRow!.has_live_run).toBe(false);
+
+    const start = await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/start`,
+      headers: auth(),
+      body: { start_date: '2026-06-01', start_tz: 'America/Chicago' },
+    });
+    expect(start.statusCode).toBeLessThan(300);
+
+    const listAfter = await app.inject({
+      method: 'GET',
+      url: '/api/user-programs',
+      headers: auth(),
+    });
+    const afterRow = listAfter
+      .json<{ programs: { id: string; has_live_run: boolean }[] }>()
+      .programs.find((p) => p.id === upId);
+    expect(afterRow).toBeDefined();
+    expect(afterRow!.has_live_run).toBe(true);
   });
 });
