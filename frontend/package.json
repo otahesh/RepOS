@@ -14,7 +14,10 @@
     "test:watch": "vitest",
     "check-pages": "node scripts/check-page-reachability.mjs",
     "check-tz-sync": "node ../scripts/check-tz-sync.mjs",
-    "validate": "tsc --noEmit && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs && node ../scripts/check-tz-sync.mjs"
+    "lint": "eslint src",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "validate": "tsc --noEmit && eslint src && prettier --check \"src/**/*.{ts,tsx}\" && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs && node ../scripts/check-tz-sync.mjs"
   },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.2",
@@ -28,6 +31,7 @@
   "devDependencies": {
     "@babel/parser": "^7.26.2",
     "@babel/traverse": "^7.25.9",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.0",
@@ -37,10 +41,16 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "@vitest/ui": "^2.1.4",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "^6.2.5",
     "glob": "^11.0.0",
+    "globals": "^17.7.0",
     "jsdom": "^25.0.1",
+    "prettier": "^3.8.5",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.62.0",
     "vite": "^5.4.11",
     "vitest": "^2.1.4"
   }
