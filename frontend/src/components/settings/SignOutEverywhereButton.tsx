@@ -48,9 +48,7 @@ export function SignOutEverywhereButton(): JSX.Element {
     } catch (err) {
       pushToast({
         severity: 'error',
-        body:
-          'Sign out everywhere failed. ' +
-          (err instanceof Error ? err.message : 'Try again.'),
+        body: 'Sign out everywhere failed. ' + (err instanceof Error ? err.message : 'Try again.'),
       });
       setBusy(false);
       setOpen(false);

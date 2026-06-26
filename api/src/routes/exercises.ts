@@ -2,10 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { findSubstitutions } from '../services/substitutions.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
-import type {
-  ExerciseListResponse,
-  SubstitutionResponse,
-} from '../schemas/exercises.js';
+import type { ExerciseListResponse, SubstitutionResponse } from '../schemas/exercises.js';
 
 export async function exerciseRoutes(app: FastifyInstance) {
   app.get('/exercises', async (_req, reply) => {
@@ -34,7 +31,8 @@ export async function exerciseRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { slug: string } }>('/exercises/:slug', async (req, reply) => {
-    const { rows } = await db.query(`
+    const { rows } = await db.query(
+      `
       SELECT
         e.*,
         m.slug AS primary_muscle, m.name AS primary_muscle_name,
@@ -49,7 +47,9 @@ export async function exerciseRoutes(app: FastifyInstance) {
       ) em ON em.exercise_id = e.id
       WHERE e.slug=$1 AND e.archived_at IS NULL
       GROUP BY e.id, m.slug, m.name
-    `, [req.params.slug]);
+    `,
+      [req.params.slug],
+    );
     if (rows.length === 0) {
       reply.code(404);
       return { error: 'exercise not found', field: 'slug' };
@@ -64,14 +64,21 @@ export async function exerciseRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = (req as any).userId as string;
       const { rows } = await db.query<{ equipment_profile: Record<string, unknown> }>(
-        `SELECT equipment_profile FROM users WHERE id=$1`, [userId]
+        `SELECT equipment_profile FROM users WHERE id=$1`,
+        [userId],
       );
-      if (rows.length === 0) { reply.code(404); return { error: 'user not found' }; }
+      if (rows.length === 0) {
+        reply.code(404);
+        return { error: 'user not found' };
+      }
       // Beta W3.2 — pass userId so findSubstitutions invokes the injuryRanker
       // and tags candidates whose joint_stress_profile overlaps the caller's
       // recorded user_injuries.
       const result = await findSubstitutions(req.params.slug, rows[0].equipment_profile, userId);
-      if (!result) { reply.code(404); return { error: 'exercise not found', field: 'slug' }; }
+      if (!result) {
+        reply.code(404);
+        return { error: 'exercise not found', field: 'slug' };
+      }
       reply.header('cache-control', 'private, max-age=60');
       reply.header('vary', 'Authorization');
       const subResp: SubstitutionResponse = result as SubstitutionResponse;

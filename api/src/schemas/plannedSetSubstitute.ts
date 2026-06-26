@@ -7,7 +7,7 @@ import { z } from 'zod';
 export const PlannedSetSubstituteSchema = z.object({
   to_exercise_slug: z.string().regex(/^[a-z0-9-]+$/, 'lowercase-kebab'),
   reason: z.string().min(1).max(200).optional(),
-  scope: z.enum(['today','future_in_meso']).default('today'),
+  scope: z.enum(['today', 'future_in_meso']).default('today'),
 });
 
 export type PlannedSetSubstituteInput = z.infer<typeof PlannedSetSubstituteSchema>;

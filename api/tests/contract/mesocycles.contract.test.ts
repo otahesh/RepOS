@@ -29,10 +29,11 @@ let token: string;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.mesocycles.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.mesocycles.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -64,7 +65,9 @@ describe('GET /api/mesocycles/today contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = TodayWorkoutResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.state).toBe('no_active_run');
     }
@@ -88,7 +91,9 @@ describe('GET /api/mesocycles/:id contract', () => {
   it('detail response parses through MesocycleDetailResponseSchema when run exists', async () => {
     // We need a real mesocycle_run row. Use a template if one exists;
     // otherwise skip since we can't materialize without a seeded template.
-    const { rows: [tmpl] } = await db.query(
+    const {
+      rows: [tmpl],
+    } = await db.query(
       `SELECT id, version, name FROM program_templates WHERE archived_at IS NULL LIMIT 1`,
     );
     if (!tmpl) {
@@ -97,7 +102,9 @@ describe('GET /api/mesocycles/:id contract', () => {
     }
 
     // Fork a user_program and materialize a run via the /start endpoint
-    const { rows: [up] } = await db.query(
+    const {
+      rows: [up],
+    } = await db.query(
       `INSERT INTO user_programs (user_id, template_id, template_version, name, customizations, status)
        VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')
        RETURNING id`,
@@ -123,7 +130,9 @@ describe('GET /api/mesocycles/:id contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = MesocycleDetailResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.id).toBe(mesocycle_run_id);
       expect(Array.isArray(parsed.data.day_workouts)).toBe(true);
@@ -162,10 +171,9 @@ describe('GET /api/mesocycles/:id/recap-stats contract', () => {
 
   it('recap-stats response parses through MesocycleRecapStatsResponseSchema when run exists', async () => {
     // Reuse any run that belongs to our test user (active or completed).
-    const { rows: [run] } = await db.query(
-      `SELECT id FROM mesocycle_runs WHERE user_id=$1 LIMIT 1`,
-      [userId],
-    );
+    const {
+      rows: [run],
+    } = await db.query(`SELECT id FROM mesocycle_runs WHERE user_id=$1 LIMIT 1`, [userId]);
     if (!run) {
       console.warn('No run for test user — skipping recap-stats contract test');
       return;
@@ -177,7 +185,9 @@ describe('GET /api/mesocycles/:id/recap-stats contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = MesocycleRecapStatsResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.weeks).toBeGreaterThanOrEqual(0);
       expect(parsed.data.total_sets).toBeGreaterThanOrEqual(0);
@@ -202,7 +212,9 @@ describe('POST /api/mesocycles/:id/abandon contract', () => {
 
   it('abandon response parses through MesocycleAbandonResponseSchema when run is active', async () => {
     // Find an active run belonging to our test user
-    const { rows: [run] } = await db.query(
+    const {
+      rows: [run],
+    } = await db.query(
       `SELECT id FROM mesocycle_runs WHERE user_id=$1 AND status='active' LIMIT 1`,
       [userId],
     );
@@ -217,7 +229,9 @@ describe('POST /api/mesocycles/:id/abandon contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = MesocycleAbandonResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.status).toBe('abandoned');
       expect(typeof parsed.data.finished_at).toBe('string');

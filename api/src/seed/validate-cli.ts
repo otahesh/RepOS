@@ -26,7 +26,10 @@ if (!tplResult.success) {
 
 const slugs = new Set<string>();
 for (const t of programTemplates) {
-  if (slugs.has(t.slug)) { console.error(`duplicate template slug: ${t.slug}`); process.exit(1); }
+  if (slugs.has(t.slug)) {
+    console.error(`duplicate template slug: ${t.slug}`);
+    process.exit(1);
+  }
   slugs.add(t.slug);
 }
 console.log(`program_templates OK · ${programTemplates.length} entries`);

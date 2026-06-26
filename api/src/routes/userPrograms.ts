@@ -8,10 +8,7 @@ import {
   TemplateOutdatedError,
   ActiveRunExistsError,
 } from '../services/materializeMesocycle.js';
-import {
-  validateFrequencyLimits,
-  validateCardioScheduling,
-} from '../services/scheduleRules.js';
+import { validateFrequencyLimits, validateCardioScheduling } from '../services/scheduleRules.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { UuidParamSchema } from '../schemas/idParams.js';
 import {
@@ -144,12 +141,16 @@ export async function userProgramRoutes(app: FastifyInstance) {
                 break;
               }
               auditFromSlug = block.exercise_slug;
-              cust.swaps = (cust.swaps ?? []).filter((s: any) =>
-                !(s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
+              cust.swaps = (cust.swaps ?? []).filter(
+                (s: any) =>
+                  !(s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx),
               );
               cust.swaps.push({
-                week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx,
-                from_slug: auditFromSlug, to_slug: op.to_exercise_slug,
+                week_idx: 1,
+                day_idx: op.day_idx,
+                block_idx: op.block_idx,
+                from_slug: auditFromSlug,
+                to_slug: op.to_exercise_slug,
               });
               break;
             }
@@ -181,7 +182,8 @@ export async function userProgramRoutes(app: FastifyInstance) {
               const matches: Match[] = [];
               for (const d of days) {
                 (d.blocks ?? []).forEach((b: any, blockIdx: number) => {
-                  if (b.exercise_slug === op.from_slug) matches.push({ day_idx: d.idx, block_idx: blockIdx });
+                  if (b.exercise_slug === op.from_slug)
+                    matches.push({ day_idx: d.idx, block_idx: blockIdx });
                 });
               }
               if (matches.length === 0) {
@@ -192,16 +194,26 @@ export async function userProgramRoutes(app: FastifyInstance) {
               // Rewrite each match as an individual swap entry — keeps the
               // per-block ownership model intact (a later swap of (day,block)
               // still works); also record a sibling `swaps_all` audit list.
-              cust.swaps = (cust.swaps ?? []).filter((s: any) =>
-                !matches.some((m) => s.week_idx === 1 && s.day_idx === m.day_idx && s.block_idx === m.block_idx)
+              cust.swaps = (cust.swaps ?? []).filter(
+                (s: any) =>
+                  !matches.some(
+                    (m) =>
+                      s.week_idx === 1 && s.day_idx === m.day_idx && s.block_idx === m.block_idx,
+                  ),
               );
               for (const m of matches) {
                 cust.swaps.push({
-                  week_idx: 1, day_idx: m.day_idx, block_idx: m.block_idx,
-                  from_slug: op.from_slug, to_slug: op.to_exercise_slug,
+                  week_idx: 1,
+                  day_idx: m.day_idx,
+                  block_idx: m.block_idx,
+                  from_slug: op.from_slug,
+                  to_slug: op.to_exercise_slug,
                 });
               }
-              cust.swaps_all = [...(cust.swaps_all ?? []), { from_slug: op.from_slug, to_slug: op.to_exercise_slug }];
+              cust.swaps_all = [
+                ...(cust.swaps_all ?? []),
+                { from_slug: op.from_slug, to_slug: op.to_exercise_slug },
+              ];
               auditFromSlug = op.from_slug;
               break;
             }
@@ -209,38 +221,54 @@ export async function userProgramRoutes(app: FastifyInstance) {
             case 'remove_set': {
               const delta = op.op === 'add_set' ? +1 : -1;
               // Aggregate existing override at the same coords (sum deltas)
-              const existing = (cust.set_count_overrides ?? []).find((s: any) =>
-                s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx
+              const existing = (cust.set_count_overrides ?? []).find(
+                (s: any) =>
+                  s.week_idx === 1 && s.day_idx === op.day_idx && s.block_idx === op.block_idx,
               );
               if (existing) {
                 existing.delta += delta;
               } else {
-                cust.set_count_overrides = [...(cust.set_count_overrides ?? []), {
-                  week_idx: 1, day_idx: op.day_idx, block_idx: op.block_idx, delta,
-                }];
+                cust.set_count_overrides = [
+                  ...(cust.set_count_overrides ?? []),
+                  {
+                    week_idx: 1,
+                    day_idx: op.day_idx,
+                    block_idx: op.block_idx,
+                    delta,
+                  },
+                ];
               }
               break;
             }
             case 'shift_weekday':
-              cust.day_offset_overrides = (cust.day_offset_overrides ?? []).filter((s: any) =>
-                !(s.week_idx === 1 && s.day_idx === op.day_idx)
+              cust.day_offset_overrides = (cust.day_offset_overrides ?? []).filter(
+                (s: any) => !(s.week_idx === 1 && s.day_idx === op.day_idx),
               );
               cust.day_offset_overrides.push({
-                week_idx: 1, day_idx: op.day_idx, new_day_offset: op.to_day_offset,
+                week_idx: 1,
+                day_idx: op.day_idx,
+                new_day_offset: op.to_day_offset,
               });
               break;
             case 'skip_day':
-              cust.skipped_days = (cust.skipped_days ?? []).filter((s: any) =>
-                !(s.week_idx === op.week_idx && s.day_idx === op.day_idx)
+              cust.skipped_days = (cust.skipped_days ?? []).filter(
+                (s: any) => !(s.week_idx === op.week_idx && s.day_idx === op.day_idx),
               );
               cust.skipped_days.push({ week_idx: op.week_idx, day_idx: op.day_idx });
               break;
             case 'change_rir':
-              cust.rir_overrides = (cust.rir_overrides ?? []).filter((s: any) =>
-                !(s.week_idx === op.week_idx && s.day_idx === op.day_idx && s.block_idx === op.block_idx)
+              cust.rir_overrides = (cust.rir_overrides ?? []).filter(
+                (s: any) =>
+                  !(
+                    s.week_idx === op.week_idx &&
+                    s.day_idx === op.day_idx &&
+                    s.block_idx === op.block_idx
+                  ),
               );
               cust.rir_overrides.push({
-                week_idx: op.week_idx, day_idx: op.day_idx, block_idx: op.block_idx,
+                week_idx: op.week_idx,
+                day_idx: op.day_idx,
+                block_idx: op.block_idx,
                 target_rir: op.target_rir,
               });
               break;
@@ -363,7 +391,9 @@ export async function userProgramRoutes(app: FastifyInstance) {
          ORDER BY created_at DESC`,
         [req.params.id, userId],
       );
-      const resp: ProgramMesocyclesResponse = { mesocycles: rows as ProgramMesocyclesResponse['mesocycles'] };
+      const resp: ProgramMesocyclesResponse = {
+        mesocycles: rows as ProgramMesocyclesResponse['mesocycles'],
+      };
       return resp;
     },
   );
@@ -392,10 +422,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
       // Query intent wins over body intent; default 'normal'.
       const intent = queryParsed.data.intent ?? parsed.data.intent ?? 'normal';
       // Ownership check
-      const { rows } = await db.query(
-        `SELECT id FROM user_programs WHERE id=$1 AND user_id=$2`,
-        [req.params.id, userId],
-      );
+      const { rows } = await db.query(`SELECT id FROM user_programs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
       if (rows.length === 0) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };
@@ -408,7 +438,9 @@ export async function userProgramRoutes(app: FastifyInstance) {
           intent, // [C-RUN-IT-BACK-ROUTE] deload math runs in-txn (materialize service)
         });
         // Enrich response with mesocycle_runs row
-        const { rows: [run] } = await db.query(
+        const {
+          rows: [run],
+        } = await db.query(
           `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks, status, current_week, is_deload
            FROM mesocycle_runs WHERE id=$1`,
           [run_id],

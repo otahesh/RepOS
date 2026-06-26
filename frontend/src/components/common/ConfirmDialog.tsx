@@ -62,9 +62,7 @@ export function ConfirmDialog({
   // mounted/unmounted — so a single mount-time capture would miss the real
   // trigger when the parent keeps <ConfirmDialog open={false}/> mounted.
   const previouslyFocused = useRef<HTMLElement | null>(
-    typeof document !== 'undefined' && open
-      ? (document.activeElement as HTMLElement | null)
-      : null,
+    typeof document !== 'undefined' && open ? (document.activeElement as HTMLElement | null) : null,
   );
   const wasOpen = useRef(open);
 

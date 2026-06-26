@@ -22,23 +22,22 @@ describe('compilePredicates', () => {
 
   it('adjustable_bench with incline:true checks the incline subkey', () => {
     const out = compilePredicates(
-      [{ type: 'adjustable_bench', incline: true } as PredicateT], '$1'
+      [{ type: 'adjustable_bench', incline: true } as PredicateT],
+      '$1',
     );
     expect(out.sql).toContain(`$1->'adjustable_bench'->>'incline' = 'true'`);
   });
 
   it('machine predicate routes to machines.<name>', () => {
-    const out = compilePredicates(
-      [{ type: 'machine', name: 'leg_press' } as PredicateT], '$1'
-    );
+    const out = compilePredicates([{ type: 'machine', name: 'leg_press' } as PredicateT], '$1');
     expect(out.sql).toContain(`$1->'machines'->>'leg_press' = 'true'`);
   });
 
   it('multiple predicates AND-joined', () => {
-    const out = compilePredicates([
-      { type: 'barbell' } as PredicateT,
-      { type: 'flat_bench' } as PredicateT,
-    ], '$1');
+    const out = compilePredicates(
+      [{ type: 'barbell' } as PredicateT, { type: 'flat_bench' } as PredicateT],
+      '$1',
+    );
     expect(out.sql).toMatch(/^\(.*\) AND \(.*\)$/);
   });
 });

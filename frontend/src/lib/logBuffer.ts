@@ -105,7 +105,7 @@ async function flushOnce(): Promise<void> {
   const now = Date.now();
   // FIFO, gated by next_attempt_at and the soft attempt cap.
   const eligible = pending.filter(
-    r => r.next_attempt_at <= now && r.attempt_count < MAX_ATTEMPTS,
+    (r) => r.next_attempt_at <= now && r.attempt_count < MAX_ATTEMPTS,
   );
 
   for (const row of eligible) {
@@ -135,7 +135,11 @@ async function flushOnce(): Promise<void> {
       // codes later — only treat audit_window_expired as a terminal rejection.
       const body = await res.text().catch(() => '');
       let parsed: { error?: string } = {};
-      try { parsed = body ? JSON.parse(body) : {}; } catch { /* keep empty */ }
+      try {
+        parsed = body ? JSON.parse(body) : {};
+      } catch {
+        /* keep empty */
+      }
       if (parsed.error === 'audit_window_expired') {
         await idbQueue.markRejected(row.client_request_id, 'audit_window_expired');
       } else {
@@ -224,9 +228,13 @@ export const logBuffer = {
   },
 
   onReconnect(): () => void {
-    const handler = (): void => { void logBuffer.flush(); };
+    const handler = (): void => {
+      void logBuffer.flush();
+    };
     window.addEventListener('online', handler);
-    return () => { window.removeEventListener('online', handler); };
+    return () => {
+      window.removeEventListener('online', handler);
+    };
   },
 };
 

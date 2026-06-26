@@ -1,24 +1,24 @@
-import { useState } from 'react'
-import { TOKENS, FONTS } from '../../tokens'
-import Icon from '../Icon'
+import { useState } from 'react';
+import { TOKENS, FONTS } from '../../tokens';
+import Icon from '../Icon';
 
 interface Props {
-  token: string
-  onClose: () => void
+  token: string;
+  onClose: () => void;
 }
 
 export default function GenerateTokenModal({ token, onClose }: Props) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(token)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       // fallback — select text
     }
-  }
+  };
 
   return (
     // Backdrop
@@ -37,7 +37,7 @@ export default function GenerateTokenModal({ token, onClose }: Props) {
     >
       {/* Modal */}
       <div
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         style={{
           background: TOKENS.surface,
           border: `1px solid ${TOKENS.lineStrong}`,
@@ -53,25 +53,35 @@ export default function GenerateTokenModal({ token, onClose }: Props) {
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={{
-              fontFamily: FONTS.mono,
-              fontSize: 10,
-              color: TOKENS.good,
-              letterSpacing: 1.4,
-              marginBottom: 6,
-            }}>TOKEN GENERATED</div>
-            <h2 style={{
-              fontSize: 20,
-              fontWeight: 700,
-              letterSpacing: -0.4,
-              color: TOKENS.text,
-            }}>Copy your token</h2>
-            <p style={{
-              fontSize: 13,
-              color: TOKENS.textDim,
-              marginTop: 6,
-              lineHeight: 1.5,
-            }}>
+            <div
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+                color: TOKENS.good,
+                letterSpacing: 1.4,
+                marginBottom: 6,
+              }}
+            >
+              TOKEN GENERATED
+            </div>
+            <h2
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                letterSpacing: -0.4,
+                color: TOKENS.text,
+              }}
+            >
+              Copy your token
+            </h2>
+            <p
+              style={{
+                fontSize: 13,
+                color: TOKENS.textDim,
+                marginTop: 6,
+                lineHeight: 1.5,
+              }}
+            >
               This token will only be shown <strong style={{ color: TOKENS.text }}>once</strong>.
               Store it securely. It cannot be recovered.
             </p>
@@ -96,23 +106,29 @@ export default function GenerateTokenModal({ token, onClose }: Props) {
         </div>
 
         {/* Token display */}
-        <div style={{
-          background: TOKENS.bg,
-          borderRadius: 10,
-          border: `1px solid ${TOKENS.line}`,
-          padding: '14px 16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}>
-          <span style={{
-            fontFamily: FONTS.mono,
-            fontSize: 13,
-            color: TOKENS.text,
-            wordBreak: 'break-all',
-            flex: 1,
-            lineHeight: 1.5,
-          }}>{token}</span>
+        <div
+          style={{
+            background: TOKENS.bg,
+            borderRadius: 10,
+            border: `1px solid ${TOKENS.line}`,
+            padding: '14px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 13,
+              color: TOKENS.text,
+              wordBreak: 'break-all',
+              flex: 1,
+              lineHeight: 1.5,
+            }}
+          >
+            {token}
+          </span>
           <button
             onClick={() => void handleCopy()}
             style={{
@@ -133,29 +149,37 @@ export default function GenerateTokenModal({ token, onClose }: Props) {
               flexShrink: 0,
             }}
           >
-            <Icon name={copied ? 'check' : 'copy'} size={12} color={copied ? TOKENS.good : TOKENS.textDim} />
+            <Icon
+              name={copied ? 'check' : 'copy'}
+              size={12}
+              color={copied ? TOKENS.good : TOKENS.textDim}
+            />
             {copied ? 'COPIED' : 'COPY'}
           </button>
         </div>
 
         {/* Warning */}
-        <div style={{
-          background: 'rgba(245,181,68,0.08)',
-          border: `1px solid rgba(245,181,68,0.3)`,
-          borderRadius: 8,
-          padding: '10px 14px',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-        }}>
+        <div
+          style={{
+            background: 'rgba(245,181,68,0.08)',
+            border: `1px solid rgba(245,181,68,0.3)`,
+            borderRadius: 8,
+            padding: '10px 14px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}
+        >
           <Icon name="info" size={14} color={TOKENS.warn} />
-          <span style={{
-            fontFamily: FONTS.mono,
-            fontSize: 11,
-            color: TOKENS.warn,
-            letterSpacing: 0.3,
-            lineHeight: 1.5,
-          }}>
+          <span
+            style={{
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+              color: TOKENS.warn,
+              letterSpacing: 0.3,
+              lineHeight: 1.5,
+            }}
+          >
             Paste this into your iOS Shortcut. Once dismissed, the plaintext is gone.
           </span>
         </div>
@@ -180,5 +204,5 @@ export default function GenerateTokenModal({ token, onClose }: Props) {
         </button>
       </div>
     </div>
-  )
+  );
 }

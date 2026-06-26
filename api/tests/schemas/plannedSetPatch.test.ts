@@ -4,7 +4,8 @@ import { PlannedSetPatchSchema } from '../../src/schemas/plannedSetPatch.js';
 describe('PlannedSetPatchSchema', () => {
   it('accepts override that lifts target_rir to 1', () => {
     const r = PlannedSetPatchSchema.safeParse({
-      target_rir: 1, override_reason: 'beat-up today',
+      target_rir: 1,
+      override_reason: 'beat-up today',
     });
     expect(r.success).toBe(true);
   });
@@ -16,7 +17,8 @@ describe('PlannedSetPatchSchema', () => {
 
   it('rejects override with target_reps_low > target_reps_high', () => {
     const r = PlannedSetPatchSchema.safeParse({
-      target_reps_low: 12, target_reps_high: 5,
+      target_reps_low: 12,
+      target_reps_high: 5,
     });
     expect(r.success).toBe(false);
   });

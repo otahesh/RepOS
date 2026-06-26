@@ -1,12 +1,17 @@
 // api/tests/recoveryFlags.test.ts
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
-  registerEvaluator, getRegisteredFlagKeys, evaluateAll,
-  bodyweightCrashEvaluator, _resetRegistryForTest,
+  registerEvaluator,
+  getRegisteredFlagKeys,
+  evaluateAll,
+  bodyweightCrashEvaluator,
+  _resetRegistryForTest,
   type RecoveryFlagEvaluator,
 } from '../src/services/recoveryFlags.js';
 import {
-  recordDismissal, isDismissed, isFlagSuppressed,
+  recordDismissal,
+  isDismissed,
+  isFlagSuppressed,
 } from '../src/services/recoveryFlagDismissals.js';
 import 'dotenv/config';
 import { db } from '../src/db/client.js';
@@ -34,10 +39,14 @@ describe('recoveryFlags registry (spec §7.2)', () => {
       version: 1,
       evaluate: async () => ({ triggered: false }),
     });
-    const out = await evaluateAll({ userId: '00000000-0000-0000-0000-000000000000', weekIdx: 1, runId: '00000000-0000-0000-0000-000000000000' });
-    const fired = out.filter(o => o.triggered);
-    expect(fired.find(f => f.key === 'unit_always_fires')).toBeDefined();
-    expect(fired.find(f => f.key === 'unit_never_fires')).toBeUndefined();
+    const out = await evaluateAll({
+      userId: '00000000-0000-0000-0000-000000000000',
+      weekIdx: 1,
+      runId: '00000000-0000-0000-0000-000000000000',
+    });
+    const fired = out.filter((o) => o.triggered);
+    expect(fired.find((f) => f.key === 'unit_always_fires')).toBeDefined();
+    expect(fired.find((f) => f.key === 'unit_never_fires')).toBeUndefined();
   });
 });
 
@@ -72,7 +81,9 @@ describe('bodyweight-crash evaluator (spec §7.2)', () => {
       );
     }
     const r = await bodyweightCrashEvaluator.evaluate({
-      userId, runId: null, weekIdx: 1,
+      userId,
+      runId: null,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(true);
     if (r.triggered) {
@@ -99,7 +110,8 @@ describe('bodyweight-crash evaluator (spec §7.2)', () => {
   it('registry interface accepts the bodyweight-crash evaluator alongside a stub overreaching evaluator (#3-ready)', () => {
     registerEvaluator(bodyweightCrashEvaluator);
     registerEvaluator({
-      key: 'overreaching', version: 1,
+      key: 'overreaching',
+      version: 1,
       evaluate: async () => ({ triggered: false }),
     });
     const keys = getRegisteredFlagKeys();
@@ -117,19 +129,29 @@ describe('recovery_flag_dismissals (spec §7.2)', () => {
 
   it('records a dismissal and reads it back', async () => {
     await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
-    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 })).toBe(true);
-    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart2 })).toBe(false);
+    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 })).toBe(
+      true,
+    );
+    expect(await isDismissed({ userId, flag: 'bodyweight_crash', weekStart: weekStart2 })).toBe(
+      false,
+    );
   });
 
   it('isFlagSuppressed prevents re-fire for the same (user, flag, week)', async () => {
-    expect(await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 })).toBe(true);
-    expect(await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart3 })).toBe(false);
+    expect(
+      await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 }),
+    ).toBe(true);
+    expect(
+      await isFlagSuppressed({ userId, flag: 'bodyweight_crash', weekStart: weekStart3 }),
+    ).toBe(false);
   });
 
   it('idempotent: recording twice does not raise', async () => {
     await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
     await recordDismissal({ userId, flag: 'bodyweight_crash', weekStart: weekStart1 });
-    const { rows: [{ n }] } = await db.query<{ n: number }>(
+    const {
+      rows: [{ n }],
+    } = await db.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM recovery_flag_dismissals
        WHERE user_id=$1 AND flag='bodyweight_crash' AND week_start=$2`,
       [userId, weekStart1],

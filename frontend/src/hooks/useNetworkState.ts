@@ -22,9 +22,7 @@ export function useNetworkState(): NetworkState {
     const handleOnline = (): void => {
       const transitionedAt = Date.now();
       setState({ online: true, transitionedAt });
-      window.dispatchEvent(
-        new CustomEvent('reconnect', { detail: { transitionedAt } }),
-      );
+      window.dispatchEvent(new CustomEvent('reconnect', { detail: { transitionedAt } }));
     };
 
     const handleOffline = (): void => {

@@ -2,14 +2,7 @@
 // bootstrap-guards.ts (pure env validation) so the latter stays trivially
 // unit-testable.
 
-import {
-  existsSync,
-  readFileSync,
-  openSync,
-  writeSync,
-  fsyncSync,
-  closeSync,
-} from 'node:fs';
+import { existsSync, readFileSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { db } from './db/client.js';
 
 const PLACEHOLDER_UUID = '00000000-0000-0000-0000-000000000001';
@@ -30,10 +23,7 @@ const DEFAULT_RESTORE_STATE_PATH = '/config/restore-state.json';
  */
 export async function validatePlaceholderPurge(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.NODE_ENV !== 'production') return;
-  const { rows } = await db.query(
-    `SELECT 1 FROM users WHERE id = $1 LIMIT 1`,
-    [PLACEHOLDER_UUID],
-  );
+  const { rows } = await db.query(`SELECT 1 FROM users WHERE id = $1 LIMIT 1`, [PLACEHOLDER_UUID]);
   if (rows.length > 0) {
     console.error(
       `FATAL: placeholder user row (id=${PLACEHOLDER_UUID}) found in production DB. ` +

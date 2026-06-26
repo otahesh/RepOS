@@ -43,7 +43,9 @@ async function upsertSample(
   const rounded = Math.round(weight_lbs * 10) / 10;
 
   // Rate limit: >5 writes per (user, date) per calendar day
-  const { rows: [logRow] } = await qr.query(
+  const {
+    rows: [logRow],
+  } = await qr.query(
     `INSERT INTO weight_write_log (user_id, log_date, write_count)
      VALUES ($1, $2, 1)
      ON CONFLICT (user_id, log_date) DO UPDATE
@@ -180,7 +182,13 @@ export async function weightRoutes(app: FastifyInstance) {
     const queryResult = WeightRangeQuerySchema.safeParse(req.query);
     const { range } = queryResult.success ? queryResult.data : { range: '90d' as const };
 
-    const rangeMap: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '1y': 365, 'all': 36500 };
+    const rangeMap: Record<string, number> = {
+      '7d': 7,
+      '30d': 30,
+      '90d': 90,
+      '1y': 365,
+      all: 36500,
+    };
     const days = rangeMap[range] ?? 90;
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -189,7 +197,9 @@ export async function weightRoutes(app: FastifyInstance) {
       await computeStats(userId, since);
 
     // Sync block
-    const { rows: [sync] } = await db.query(
+    const {
+      rows: [sync],
+    } = await db.query(
       `SELECT source, last_success_at,
          CASE
            WHEN last_success_at > now() - interval '36 hours' THEN 'fresh'

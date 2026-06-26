@@ -7,7 +7,12 @@ import AppShell from '../layout/AppShell';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockCounts: { pending: number; syncing: number; rejected: number; oldestPendingCreatedAt: number | null } = {
+const mockCounts: {
+  pending: number;
+  syncing: number;
+  rejected: number;
+  oldestPendingCreatedAt: number | null;
+} = {
   pending: 0,
   syncing: 0,
   rejected: 0,

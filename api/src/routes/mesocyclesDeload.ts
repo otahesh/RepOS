@@ -28,9 +28,18 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
         const r = await applyManualDeload(userId, req.params.id);
         return { run_id: req.params.id, triggered_at: new Date().toISOString(), ...r };
       } catch (e: any) {
-        if (e.message === 'not_found') { reply.code(404); return { error: 'not_found' }; }
-        if (e instanceof RunNotActiveError) { reply.code(409); return { error: 'run_not_active' }; }
-        if (e instanceof AlreadyDeloadedError) { reply.code(409); return { error: 'already_deloaded' }; }
+        if (e.message === 'not_found') {
+          reply.code(404);
+          return { error: 'not_found' };
+        }
+        if (e instanceof RunNotActiveError) {
+          reply.code(409);
+          return { error: 'run_not_active' };
+        }
+        if (e instanceof AlreadyDeloadedError) {
+          reply.code(409);
+          return { error: 'already_deloaded' };
+        }
         throw e;
       }
     },
@@ -49,9 +58,18 @@ export async function mesocyclesDeloadRoutes(app: FastifyInstance) {
         await undoManualDeload(userId, req.params.id);
         return { run_id: req.params.id, reversed_at: new Date().toISOString() };
       } catch (e: any) {
-        if (e.message === 'not_found') { reply.code(404); return { error: 'not_found' }; }
-        if (e.message === 'no_manual_deload') { reply.code(409); return { error: 'no_manual_deload' }; }
-        if (e instanceof UndoWindowExpiredError) { reply.code(409); return { error: 'undo_window_expired' }; }
+        if (e.message === 'not_found') {
+          reply.code(404);
+          return { error: 'not_found' };
+        }
+        if (e.message === 'no_manual_deload') {
+          reply.code(409);
+          return { error: 'no_manual_deload' };
+        }
+        if (e instanceof UndoWindowExpiredError) {
+          reply.code(409);
+          return { error: 'undo_window_expired' };
+        }
         throw e;
       }
     },

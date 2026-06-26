@@ -31,28 +31,69 @@ export function DayCard({
   onSwap: (dayIdx: number, blockIdx: number) => void;
 }) {
   return (
-    <div style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
+    <div
+      style={{
+        background: '#10141C',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
       <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
         {WEEKDAYS[day.day_offset] ?? `+${day.day_offset}d`} · {day.kind}
       </div>
       <div style={{ fontWeight: 600, marginTop: 4 }}>{day.name}</div>
-      <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ul
+        style={{
+          listStyle: 'none',
+          padding: 0,
+          margin: '8px 0 0',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
         {day.blocks.map((b, i) => (
-          <li key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+          <li
+            key={i}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: 12,
+            }}
+          >
             <div>
               <button
                 onClick={() => onSwap(day.idx, i)}
-                style={{ background: 'transparent', border: 'none', color: '#4D8DFF', cursor: 'pointer', padding: 0, font: 'inherit' }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#4D8DFF',
+                  cursor: 'pointer',
+                  padding: 0,
+                  font: 'inherit',
+                }}
               >
                 {b.exercise_slug.replace(/-/g, ' ')}
               </button>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
+              <div
+                style={{
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.5)',
+                }}
+              >
                 {b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
-              <button onClick={() => onRemoveSet(day.idx, i, b.mav - 1)} style={btn}>{'− set'}</button>
-              <button onClick={() => onAddSet(day.idx, i)} style={btn}>{'+ set'}</button>
+              <button onClick={() => onRemoveSet(day.idx, i, b.mav - 1)} style={btn}>
+                {'− set'}
+              </button>
+              <button onClick={() => onAddSet(day.idx, i)} style={btn}>
+                {'+ set'}
+              </button>
             </div>
           </li>
         ))}

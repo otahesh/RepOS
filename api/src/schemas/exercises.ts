@@ -7,10 +7,12 @@ import { INJURY_JOINTS } from './userInjuries.js';
 
 // required_equipment is stored as JSONB. Schema matches the EquipmentProfileSchema
 // predicate structure loosely to avoid coupling tightly to the runtime registry.
-const RequiredEquipmentSchema = z.object({
-  _v: z.number().int(),
-  requires: z.array(z.unknown()),
-}).passthrough();
+const RequiredEquipmentSchema = z
+  .object({
+    _v: z.number().int(),
+    requires: z.array(z.unknown()),
+  })
+  .passthrough();
 
 export const ExerciseSchema = z.object({
   id: z.string().uuid(),
@@ -18,7 +20,7 @@ export const ExerciseSchema = z.object({
   name: z.string(),
   movement_pattern: z.string(),
   peak_tension_length: z.string(),
-  primary_muscle: z.string(),       // muscle slug
+  primary_muscle: z.string(), // muscle slug
   primary_muscle_name: z.string(),
   skill_complexity: z.number(),
   loading_demand: z.number(),
@@ -63,10 +65,12 @@ const SubstitutionCandidateSchema = z.object({
   name: z.string(),
   score: z.number(),
   reason: z.string(),
-  injury_advisory: z.object({
-    joint: z.enum(INJURY_JOINTS),
-    level: z.enum(['mod', 'high']),
-  }).optional(),
+  injury_advisory: z
+    .object({
+      joint: z.enum(INJURY_JOINTS),
+      level: z.enum(['mod', 'high']),
+    })
+    .optional(),
 });
 
 const ClosestPartialSchema = z.object({

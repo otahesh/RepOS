@@ -11,13 +11,18 @@ describe('<TodayCard>', () => {
     expect(await screen.findByText(/Pick a program/i)).toBeInTheDocument();
   });
   it('shows rest day', async () => {
-    vi.spyOn(api, 'getTodayWorkout').mockResolvedValue({ state: 'rest', run_id: 'mr-1', scheduled_date: '2026-05-05' });
+    vi.spyOn(api, 'getTodayWorkout').mockResolvedValue({
+      state: 'rest',
+      run_id: 'mr-1',
+      scheduled_date: '2026-05-05',
+    });
     render(<TodayCard onStart={vi.fn()} />);
     expect(await screen.findByText(/Rest day/i)).toBeInTheDocument();
   });
   it('shows workout day with START WORKOUT CTA', async () => {
     vi.spyOn(api, 'getTodayWorkout').mockResolvedValue({
-      state: 'workout', run_id: 'mr-1',
+      state: 'workout',
+      run_id: 'mr-1',
       day: { id: 'dw-1', kind: 'strength', name: 'Upper Heavy', week_idx: 1, day_idx: 0 } as any,
       sets: [],
       cardio: [],

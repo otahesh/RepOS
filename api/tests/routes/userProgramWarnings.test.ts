@@ -5,7 +5,13 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import { mkUser, mkTemplate, mkUserProgram, cleanupUser, cleanupTemplate } from '../helpers/program-fixtures.js';
+import {
+  mkUser,
+  mkTemplate,
+  mkUserProgram,
+  cleanupUser,
+  cleanupTemplate,
+} from '../helpers/program-fixtures.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
@@ -52,15 +58,60 @@ beforeAll(async () => {
     structure: {
       _v: 1,
       days: [
-        { idx: 0, day_offset: 0, kind: 'strength', name: 'Full Body A', blocks: [
-          { exercise_slug: 'squat', mev: 8, mav: 14, target_reps_low: 6, target_reps_high: 8, target_rir: 3, rest_sec: 180, movement_pattern: 'squat' },
-        ]},
-        { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [
-          { exercise_slug: 'bench-press', mev: 8, mav: 14, target_reps_low: 8, target_reps_high: 10, target_rir: 3, rest_sec: 120, movement_pattern: 'push' },
-        ]},
-        { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [
-          { exercise_slug: 'rdl', mev: 8, mav: 14, target_reps_low: 8, target_reps_high: 10, target_rir: 3, rest_sec: 120, movement_pattern: 'hinge' },
-        ]},
+        {
+          idx: 0,
+          day_offset: 0,
+          kind: 'strength',
+          name: 'Full Body A',
+          blocks: [
+            {
+              exercise_slug: 'squat',
+              mev: 8,
+              mav: 14,
+              target_reps_low: 6,
+              target_reps_high: 8,
+              target_rir: 3,
+              rest_sec: 180,
+              movement_pattern: 'squat',
+            },
+          ],
+        },
+        {
+          idx: 1,
+          day_offset: 2,
+          kind: 'strength',
+          name: 'Full Body B',
+          blocks: [
+            {
+              exercise_slug: 'bench-press',
+              mev: 8,
+              mav: 14,
+              target_reps_low: 8,
+              target_reps_high: 10,
+              target_rir: 3,
+              rest_sec: 120,
+              movement_pattern: 'push',
+            },
+          ],
+        },
+        {
+          idx: 2,
+          day_offset: 4,
+          kind: 'strength',
+          name: 'Full Body C',
+          blocks: [
+            {
+              exercise_slug: 'rdl',
+              mev: 8,
+              mav: 14,
+              target_reps_low: 8,
+              target_reps_high: 10,
+              target_rir: 3,
+              rest_sec: 120,
+              movement_pattern: 'hinge',
+            },
+          ],
+        },
       ],
     },
   });
@@ -73,13 +124,22 @@ beforeAll(async () => {
     daysPerWeek: 7,
     structure: {
       _v: 1,
-      days: [0, 1, 2, 3, 4, 5, 6].map(offset => ({
+      days: [0, 1, 2, 3, 4, 5, 6].map((offset) => ({
         idx: offset,
         day_offset: offset,
         kind: 'strength',
         name: `Day ${offset + 1}`,
         blocks: [
-          { exercise_slug: 'squat', mev: 8, mav: 14, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 180, movement_pattern: 'squat' },
+          {
+            exercise_slug: 'squat',
+            mev: 8,
+            mav: 14,
+            target_reps_low: 6,
+            target_reps_high: 8,
+            target_rir: 2,
+            rest_sec: 180,
+            movement_pattern: 'squat',
+          },
         ],
       })),
     },
@@ -126,7 +186,9 @@ describe('GET /api/user-programs/:id/warnings', () => {
     expect(r.statusCode).toBe(200);
     const body = r.json<{ warnings: Array<{ code: string; severity: string; message: string }> }>();
     expect(Array.isArray(body.warnings)).toBe(true);
-    const blockWarn = body.warnings.find(w => w.code === 'too_many_days_per_week' && w.severity === 'block');
+    const blockWarn = body.warnings.find(
+      (w) => w.code === 'too_many_days_per_week' && w.severity === 'block',
+    );
     expect(blockWarn).toBeDefined();
     expect(typeof blockWarn!.message).toBe('string');
     expect(blockWarn!.message.length).toBeGreaterThan(0);

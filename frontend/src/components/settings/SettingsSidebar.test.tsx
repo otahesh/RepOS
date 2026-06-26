@@ -4,7 +4,15 @@ import { SETTINGS_SECTIONS } from './SettingsSidebar';
 describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
   it('ships the W6 lineup plus the W2 Health entry (slotted after Account)', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.label)).toEqual([
-      'Account','Health','Equipment','Integrations','Program prefs','Backups','Feedback','Storage','Injuries',
+      'Account',
+      'Health',
+      'Equipment',
+      'Integrations',
+      'Program prefs',
+      'Backups',
+      'Feedback',
+      'Storage',
+      'Injuries',
     ]);
   });
 

@@ -7,20 +7,23 @@ import { z } from 'zod';
 // (target_rir up to 10, rest_sec up to 900) — we match those here.
 // ---------------------------------------------------------------------------
 
-export const PlannedSetPatchRequestSchema = z.object({
-  target_reps_low: z.number().int().min(1).max(50).optional(),
-  target_reps_high: z.number().int().min(1).max(50).optional(),
-  target_rir: z.number().int().min(1).max(10).optional(),
-  target_load_hint: z.string().max(200).optional().nullable(),
-  rest_sec: z.number().int().min(0).max(900).optional(),
-  override_reason: z.string().max(200).nullable().optional(),
-}).refine(
-  (b) => b.target_reps_low == null || b.target_reps_high == null || b.target_reps_low <= b.target_reps_high,
-  { message: 'target_reps_low must be <= target_reps_high' },
-).refine(
-  (b) => Object.keys(b).length > 0,
-  { message: 'patch body cannot be empty' },
-);
+export const PlannedSetPatchRequestSchema = z
+  .object({
+    target_reps_low: z.number().int().min(1).max(50).optional(),
+    target_reps_high: z.number().int().min(1).max(50).optional(),
+    target_rir: z.number().int().min(1).max(10).optional(),
+    target_load_hint: z.string().max(200).optional().nullable(),
+    rest_sec: z.number().int().min(0).max(900).optional(),
+    override_reason: z.string().max(200).nullable().optional(),
+  })
+  .refine(
+    (b) =>
+      b.target_reps_low == null ||
+      b.target_reps_high == null ||
+      b.target_reps_low <= b.target_reps_high,
+    { message: 'target_reps_low must be <= target_reps_high' },
+  )
+  .refine((b) => Object.keys(b).length > 0, { message: 'patch body cannot be empty' });
 
 export type PlannedSetPatchRequest = z.infer<typeof PlannedSetPatchRequestSchema>;
 

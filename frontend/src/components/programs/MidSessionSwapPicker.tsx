@@ -57,7 +57,9 @@ export function MidSessionSwapPicker({
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fromSlug]);
 
   // Capture pre-mount focus + steer initial focus into the dialog.
@@ -81,9 +83,7 @@ export function MidSessionSwapPicker({
   // intrusive.
   useEffect(() => {
     if (loading || !dialogRef.current) return;
-    const first = dialogRef.current.querySelector<HTMLElement>(
-      'button:not([disabled])',
-    );
+    const first = dialogRef.current.querySelector<HTMLElement>('button:not([disabled])');
     first?.focus();
   }, [loading]);
 
@@ -114,7 +114,9 @@ export function MidSessionSwapPicker({
       }
     };
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('keydown', onKey); };
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
   }, [onClose]);
 
   // When a candidate is picked, hand off to the existing confirm sheet.
@@ -141,23 +143,33 @@ export function MidSessionSwapPicker({
       aria-modal="true"
       aria-labelledby="picker-title"
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'flex-end', zIndex: 100,
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.7)',
+        display: 'flex',
+        alignItems: 'flex-end',
+        zIndex: 100,
       }}
     >
       <div
         ref={dialogRef}
         style={{
-          background: TOKENS.surface, borderRadius: '16px 16px 0 0',
-          padding: 24, width: '100%', maxWidth: 480, margin: '0 auto',
-          color: TOKENS.text, fontFamily: FONTS.ui,
-          maxHeight: '80vh', overflowY: 'auto',
+          background: TOKENS.surface,
+          borderRadius: '16px 16px 0 0',
+          padding: 24,
+          width: '100%',
+          maxWidth: 480,
+          margin: '0 auto',
+          color: TOKENS.text,
+          fontFamily: FONTS.ui,
+          maxHeight: '80vh',
+          overflowY: 'auto',
         }}
       >
-        <h3 id="picker-title" style={{ marginTop: 0, fontSize: 16 }}>Swap {fromName}?</h3>
-        {loading && (
-          <p style={{ color: TOKENS.textDim, fontSize: 13 }}>Loading…</p>
-        )}
+        <h3 id="picker-title" style={{ marginTop: 0, fontSize: 16 }}>
+          Swap {fromName}?
+        </h3>
+        {loading && <p style={{ color: TOKENS.textDim, fontSize: 13 }}>Loading…</p>}
         {!loading && err && (
           <p style={{ color: TOKENS.danger, fontSize: 13 }}>Couldn’t load alternatives: {err}</p>
         )}
@@ -176,9 +188,14 @@ export function MidSessionSwapPicker({
                   setPick({ id: s.id, name: s.name });
                 }}
                 style={{
-                  width: '100%', textAlign: 'left', background: 'transparent',
-                  border: `1px solid ${TOKENS.line}`, borderRadius: 8,
-                  padding: 12, color: TOKENS.text, cursor: 'pointer',
+                  width: '100%',
+                  textAlign: 'left',
+                  background: 'transparent',
+                  border: `1px solid ${TOKENS.line}`,
+                  borderRadius: 8,
+                  padding: 12,
+                  color: TOKENS.text,
+                  cursor: 'pointer',
                   fontFamily: FONTS.ui,
                 }}
               >
@@ -197,9 +214,14 @@ export function MidSessionSwapPicker({
           type="button"
           onClick={() => onClose(false)}
           style={{
-            marginTop: 12, padding: '8px 12px', background: 'transparent',
-            border: `1px solid ${TOKENS.lineStrong}`, color: TOKENS.text,
-            borderRadius: 6, cursor: 'pointer', fontFamily: FONTS.ui,
+            marginTop: 12,
+            padding: '8px 12px',
+            background: 'transparent',
+            border: `1px solid ${TOKENS.lineStrong}`,
+            color: TOKENS.text,
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
           }}
         >
           Cancel

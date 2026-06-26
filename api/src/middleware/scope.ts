@@ -19,12 +19,9 @@ import type { Scope } from '../auth/scopes.js';
 export function requireScope(scope: Scope) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     const granted = req.tokenScopes;
-    if (granted === undefined) return;             // CF Access path
-    if (granted.includes(scope)) return;           // bearer has the scope
-    req.log.warn(
-      { userId: req.userId, scope, granted },
-      'scope_denied',
-    );
+    if (granted === undefined) return; // CF Access path
+    if (granted.includes(scope)) return; // bearer has the scope
+    req.log.warn({ userId: req.userId, scope, granted }, 'scope_denied');
     return reply.code(403).send({ error: `scope_required:${scope}` });
   };
 }

@@ -70,7 +70,9 @@ export async function seedUserAndMintBearer(opts: {
 }): Promise<{ bearer: string; userId: string; handle: SeedHandle }> {
   const userTag = randomUUID();
   const email = `scope-fixture.${userTag}@repos.test`;
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
     [email],
   );
@@ -112,7 +114,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
 
   // 1. User. Goal column was added in migration 026 with a NOT NULL default,
   //    so we don't have to specify it; same for timezone.
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'America/New_York')
      RETURNING id`,
     [email],
@@ -141,13 +145,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   });
 
   // 3. Pick any seeded exercise.
-  const { rows: ex } = await db.query<{ id: string }>(
-    `SELECT id FROM exercises LIMIT 1`,
-  );
+  const { rows: ex } = await db.query<{ id: string }>(`SELECT id FROM exercises LIMIT 1`);
   if (ex.length === 0) {
-    throw new Error(
-      'seedUserWithMesocycle: no exercises in DB. Run `npm run seed` in api/.',
-    );
+    throw new Error('seedUserWithMesocycle: no exercises in DB. Run `npm run seed` in api/.');
   }
   const exerciseId = ex[0].id;
 
@@ -156,7 +156,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   //    user_programs.template_id can FK to.
   const slug = `setlogs-tpl-${userTag}`;
   const structure = { _v: 1, days: [] };
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
        (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, $2, 1, 1, $3::jsonb, 1, 'system')
@@ -165,7 +167,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   );
 
   // 5. user_program.
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, $3, 'active')
      RETURNING id`,
@@ -176,7 +180,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   // 6. mesocycle_run. Partial unique index allows multiple active runs per
   //    user only if filtered out, but here we have one user per fixture so
   //    a single 'active' is fine.
-  const { rows: [mr] } = await db.query<{ id: string }>(
+  const {
+    rows: [mr],
+  } = await db.query<{ id: string }>(
     `INSERT INTO mesocycle_runs
        (user_program_id, user_id, start_date, start_tz, weeks, current_week, status)
      VALUES ($1, $2, CURRENT_DATE, 'America/New_York', 1, 1, 'active')
@@ -188,7 +194,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   // 7. day_workout. week_idx is 1-indexed per the mesocycles schema (min 1) —
   // the volume rollup service iterates 1..nWeeks and would otherwise drop
   // this fixture's day_workouts when filtering by week_idx.
-  const { rows: [dw] } = await db.query<{ id: string }>(
+  const {
+    rows: [dw],
+  } = await db.query<{ id: string }>(
     `INSERT INTO day_workouts
        (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
      VALUES ($1, 1, 0, CURRENT_DATE, 'strength', 'Seed Day')
@@ -198,7 +206,9 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   const dayWorkoutId = dw.id;
 
   // 8. planned_set. target_rir must be >= 1 (Q4 hard ban on RIR 0).
-  const { rows: [ps] } = await db.query<{ id: string }>(
+  const {
+    rows: [ps],
+  } = await db.query<{ id: string }>(
     `INSERT INTO planned_sets
        (day_workout_id, block_idx, set_idx, exercise_id,
         target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -229,7 +239,9 @@ export async function seedUserWithLoggedSet(opts: {
   minutesAgo: number;
 }): Promise<SeedHandleWithLog> {
   const base = await seedUserWithMesocycle();
-  const { rows: [log] } = await db.query<{ id: string }>(
+  const {
+    rows: [log],
+  } = await db.query<{ id: string }>(
     `INSERT INTO set_logs
        (user_id, exercise_id, planned_set_id, client_request_id,
         performed_load_lbs, performed_reps, performed_rir,
@@ -253,7 +265,9 @@ export async function seedThreeLogsOnSamePlannedSet(): Promise<SeedHandleWithLog
   const base = await seedUserWithMesocycle();
   const ids: string[] = [];
   for (const minutesAgo of [1, 2, 3]) {
-    const { rows: [r] } = await db.query<{ id: string }>(
+    const {
+      rows: [r],
+    } = await db.query<{ id: string }>(
       `INSERT INTO set_logs
          (user_id, exercise_id, planned_set_id, client_request_id,
           performed_load_lbs, performed_reps, performed_rir,
@@ -282,23 +296,29 @@ export async function seedThreeLogsOnSamePlannedSet(): Promise<SeedHandleWithLog
 // UNIQUE (mesocycle_run_id, week_idx, day_idx) constraint isn't violated and
 // they sit on the same week as the seed.
 // ---------------------------------------------------------------------------
-export async function addThreeDistinctSessions(seed: SeedHandle): Promise<Array<{
-  plannedSetId: string;
-  dayWorkoutId: string;
-}>> {
+export async function addThreeDistinctSessions(seed: SeedHandle): Promise<
+  Array<{
+    plannedSetId: string;
+    dayWorkoutId: string;
+  }>
+> {
   const { mesocycleRunId, dayWorkoutId, plannedSetId } = seed;
   const sessions: Array<{ plannedSetId: string; dayWorkoutId: string }> = [
     { plannedSetId, dayWorkoutId },
   ];
   for (let i = 1; i < 3; i++) {
-    const { rows: [dw] } = await db.query<{ id: string }>(
+    const {
+      rows: [dw],
+    } = await db.query<{ id: string }>(
       `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status)
        SELECT $1, 1, $2::int, CURRENT_DATE + $2::int, kind, name, 'completed'
        FROM day_workouts WHERE id = $3
        RETURNING id`,
       [mesocycleRunId, i, dayWorkoutId],
     );
-    const { rows: [ps] } = await db.query<{ id: string }>(
+    const {
+      rows: [ps],
+    } = await db.query<{ id: string }>(
       `INSERT INTO planned_sets
          (day_workout_id, block_idx, set_idx, exercise_id,
           target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -337,10 +357,9 @@ export async function seedStalledPr(opts: {
 
   // Shape only — the per-row is_deload flag (set below for the 'deload'
   // pattern) is what actually drives the W2-swapped evaluator's guard.
-  await db.query(
-    `UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`,
-    [mesocycleRunId],
-  );
+  await db.query(`UPDATE mesocycle_runs SET weeks = 4, current_week = 2 WHERE id = $1`, [
+    mesocycleRunId,
+  ]);
 
   const sessions = await addThreeDistinctSessions(seed);
 
@@ -348,10 +367,9 @@ export async function seedStalledPr(opts: {
     // [W2 SWAP] Mark all three session day_workouts as deload so the per-row
     // guard mutes the evaluator (replaces the old current_week === weeks
     // heuristic).
-    await db.query(
-      `UPDATE day_workouts SET is_deload = true WHERE id = ANY($1::uuid[])`,
-      [sessions.map((s) => s.dayWorkoutId)],
-    );
+    await db.query(`UPDATE day_workouts SET is_deload = true WHERE id = ANY($1::uuid[])`, [
+      sessions.map((s) => s.dayWorkoutId),
+    ]);
   }
 
   const baseLoad = 225;
@@ -407,10 +425,9 @@ export async function seedUserOverreaching(): Promise<SeedHandle> {
   // overreaching evaluator looks up mesocycle_runs.current_week (=1) and
   // matches WeekVolume.week_idx=1. weeks=4 keeps current_week (1) < weeks
   // so the conservative "not deload" stance holds for parity with stalledPr.
-  await db.query(
-    `UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`,
-    [seed.mesocycleRunId],
-  );
+  await db.query(`UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`, [
+    seed.mesocycleRunId,
+  ]);
   const sessions = await addThreeDistinctSessions(seed);
   // 3 RIR-0 compound sessions in trailing 7d, each with enough sets to push
   // volume >= MAV on the primary muscle. Per-session minutes-ago is
@@ -453,10 +470,9 @@ export async function seedOverreachingPartial(opts: {
   underMav?: true;
 }): Promise<SeedHandle> {
   const seed = await seedUserWithMesocycle();
-  await db.query(
-    `UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`,
-    [seed.mesocycleRunId],
-  );
+  await db.query(`UPDATE mesocycle_runs SET weeks = 4, current_week = 1 WHERE id = $1`, [
+    seed.mesocycleRunId,
+  ]);
   const sessions = await addThreeDistinctSessions(seed);
 
   // 'isolation' variant: re-point planned_sets + set_logs to an exercise whose
@@ -474,15 +490,15 @@ export async function seedOverreachingPartial(opts: {
     if (rows.length === 0) {
       throw new Error(
         'seedOverreachingPartial: no non-compound exercise seeded — ' +
-        'check api/src/seed/exercises.ts',
+          'check api/src/seed/exercises.ts',
       );
     }
     exerciseIdForLogs = rows[0].id;
     for (const sess of sessions) {
-      await db.query(
-        `UPDATE planned_sets SET exercise_id = $1 WHERE id = $2`,
-        [exerciseIdForLogs, sess.plannedSetId],
-      );
+      await db.query(`UPDATE planned_sets SET exercise_id = $1 WHERE id = $2`, [
+        exerciseIdForLogs,
+        sess.plannedSetId,
+      ]);
     }
   }
 
@@ -532,15 +548,37 @@ function fixtureTemplateStructure(): unknown {
     _v: 1,
     days: [
       {
-        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        idx: 0,
+        day_offset: 0,
+        kind: 'strength',
+        name: 'Day A',
         blocks: [
-          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
+          {
+            exercise_slug: 'barbell-bench-press',
+            mev: 3,
+            mav: 5,
+            target_reps_low: 6,
+            target_reps_high: 8,
+            target_rir: 2,
+            rest_sec: 150,
+          },
         ],
       },
       {
-        idx: 1, day_offset: 2, kind: 'strength', name: 'Day B',
+        idx: 1,
+        day_offset: 2,
+        kind: 'strength',
+        name: 'Day B',
         blocks: [
-          { exercise_slug: 'dumbbell-curl', mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 12, target_rir: 2, rest_sec: 90 },
+          {
+            exercise_slug: 'dumbbell-curl',
+            mev: 2,
+            mav: 4,
+            target_reps_low: 8,
+            target_reps_high: 12,
+            target_rir: 2,
+            rest_sec: 90,
+          },
         ],
       },
     ],
@@ -553,12 +591,20 @@ async function mkFixtureTemplate(opts: {
   structure?: unknown;
 }): Promise<{ id: string }> {
   const slug = `w2-fixture-tpl-${randomUUID()}`;
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
        (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, $2, $3, 2, $4::jsonb, $5, 'system')
      RETURNING id`,
-    [slug, `W2 Fixture ${slug}`, opts.weeks, JSON.stringify(opts.structure ?? fixtureTemplateStructure()), opts.version ?? 1],
+    [
+      slug,
+      `W2 Fixture ${slug}`,
+      opts.weeks,
+      JSON.stringify(opts.structure ?? fixtureTemplateStructure()),
+      opts.version ?? 1,
+    ],
   );
   return tpl;
 }
@@ -576,12 +622,14 @@ async function mkFixtureTemplate(opts: {
 // a known version (independent of the environment-dependent curated versions)
 // so the stale-fork condition is reproducible.
 export async function seedUserProgramAtTemplateVersion(opts: {
-  templateVersion: number;            // the fork's pinned (stale) version
-  currentTemplateVersion?: number;    // the template row's actual version (default 2)
+  templateVersion: number; // the fork's pinned (stale) version
+  currentTemplateVersion?: number; // the template row's actual version (default 2)
 }): Promise<SeedHandle> {
   const currentVersion = opts.currentTemplateVersion ?? 2;
   const userTag = randomUUID();
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
     [`w2-altfork.${userTag}@repos.test`],
   );
@@ -597,20 +645,43 @@ export async function seedUserProgramAtTemplateVersion(opts: {
     _v: 1,
     days: [
       {
-        idx: 0, day_offset: 0, kind: 'strength', name: 'Day A',
+        idx: 0,
+        day_offset: 0,
+        kind: 'strength',
+        name: 'Day A',
         blocks: [
-          { exercise_slug: 'barbell-bench-press', mev: 3, mav: 5, target_reps_low: 6, target_reps_high: 8, target_rir: 2, rest_sec: 150 },
-          { exercise_slug: 'side-plank',          mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 15, target_rir: 2, rest_sec: 60 },
+          {
+            exercise_slug: 'barbell-bench-press',
+            mev: 3,
+            mav: 5,
+            target_reps_low: 6,
+            target_reps_high: 8,
+            target_rir: 2,
+            rest_sec: 150,
+          },
+          {
+            exercise_slug: 'side-plank',
+            mev: 2,
+            mav: 4,
+            target_reps_low: 8,
+            target_reps_high: 15,
+            target_rir: 2,
+            rest_sec: 60,
+          },
         ],
       },
     ],
   };
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, $2, 5, 1, $3::jsonb, $4, 'system') RETURNING id`,
     [slug, `Alt Fork Tpl ${userTag}`, JSON.stringify(structure), currentVersion],
   );
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
     [userId, tpl.id, opts.templateVersion, `Alpha Fork ${userTag}`],
@@ -629,7 +700,9 @@ export async function seedUserProgramAtTemplateVersion(opts: {
 export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<SeedHandle> {
   const weeks = opts.weeks ?? 5;
   const userTag = randomUUID();
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
     [`w2-userprogram.${userTag}@repos.test`],
   );
@@ -639,7 +712,9 @@ export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<Se
     scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
   });
   const tpl = await mkFixtureTemplate({ weeks });
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
     [userId, tpl.id, `W2 Program ${userTag}`],
@@ -674,7 +749,9 @@ export interface UserPairHandle {
 async function mkLoneUser(tag: string): Promise<SeedHandle> {
   const userTag = randomUUID();
   const email = `pair-${tag}.${userTag}@repos.test`;
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
     [email],
   );
@@ -700,13 +777,13 @@ export async function mkUserPair(): Promise<UserPairHandle> {
   return { userA, userB };
 }
 
-export async function cleanupUserPair(
-  handles: UserPairHandle | UserPairHandle[],
-): Promise<void> {
+export async function cleanupUserPair(handles: UserPairHandle | UserPairHandle[]): Promise<void> {
   const list = Array.isArray(handles) ? handles : [handles];
   if (list.length === 0) return;
   const flat: SeedHandle[] = [];
-  for (const p of list) { flat.push(p.userA, p.userB); }
+  for (const p of list) {
+    flat.push(p.userA, p.userB);
+  }
   await cleanupSeeded(flat);
 }
 
@@ -723,7 +800,9 @@ export async function seedFullMesocycleForUser(
   const weeks = opts.weeks ?? 5;
   const { materializeMesocycle } = await import('../../src/services/materializeMesocycle.js');
   const tpl = await mkFixtureTemplate({ weeks });
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
     [userId, tpl.id, `W2 Full Meso ${randomUUID()}`],
@@ -734,7 +813,10 @@ export async function seedFullMesocycleForUser(
     startTz: 'UTC',
   });
   if (opts.currentWeek !== undefined) {
-    await db.query(`UPDATE mesocycle_runs SET current_week = $2 WHERE id = $1`, [run_id, opts.currentWeek]);
+    await db.query(`UPDATE mesocycle_runs SET current_week = $2 WHERE id = $1`, [
+      run_id,
+      opts.currentWeek,
+    ]);
   }
   return run_id;
 }
@@ -768,7 +850,9 @@ export async function seedUserWithFullMesocycle(opts: {
 }): Promise<FullMesocycleHandle> {
   const { materializeMesocycle } = await import('../../src/services/materializeMesocycle.js');
   const userTag = randomUUID();
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'America/New_York') RETURNING id`,
     [`w2-fullmeso.${userTag}@repos.test`],
   );
@@ -786,15 +870,28 @@ export async function seedUserWithFullMesocycle(opts: {
     const blocks = Object.keys(opts.blockMuscleMavOverrides).map((muscle) => {
       const slug = MUSCLE_TO_SEED_SLUG[muscle];
       if (!slug) throw new Error(`seedUserWithFullMesocycle: no seed slug for muscle '${muscle}'`);
-      return { exercise_slug: slug, mev: 2, mav: 4, target_reps_low: 8, target_reps_high: 12, target_rir: 2, rest_sec: 90 };
+      return {
+        exercise_slug: slug,
+        mev: 2,
+        mav: 4,
+        target_reps_low: 8,
+        target_reps_high: 12,
+        target_rir: 2,
+        rest_sec: 90,
+      };
     });
-    structure = { _v: 1, days: [{ idx: 0, day_offset: 0, kind: 'strength', name: 'Day A', blocks }] };
+    structure = {
+      _v: 1,
+      days: [{ idx: 0, day_offset: 0, kind: 'strength', name: 'Day A', blocks }],
+    };
   } else {
     structure = fixtureTemplateStructure();
   }
 
   const tpl = await mkFixtureTemplate({ weeks: opts.weeks, structure });
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
     [userId, tpl.id, `W2 Full Meso ${userTag}`],
@@ -805,17 +902,22 @@ export async function seedUserWithFullMesocycle(opts: {
     startTz: 'UTC',
   });
 
-  await db.query(
-    `UPDATE mesocycle_runs SET current_week = $2, status = $3 WHERE id = $1`,
-    [run_id, opts.currentWeek, opts.status ?? 'active'],
-  );
+  await db.query(`UPDATE mesocycle_runs SET current_week = $2, status = $3 WHERE id = $1`, [
+    run_id,
+    opts.currentWeek,
+    opts.status ?? 'active',
+  ]);
 
   // Pick a representative day_workout + planned_set for the SeedHandle shape.
-  const { rows: [dw] } = await db.query<{ id: string }>(
+  const {
+    rows: [dw],
+  } = await db.query<{ id: string }>(
     `SELECT id FROM day_workouts WHERE mesocycle_run_id=$1 ORDER BY week_idx, day_idx LIMIT 1`,
     [run_id],
   );
-  const { rows: [ps] } = await db.query<{ id: string; exercise_id: string }>(
+  const {
+    rows: [ps],
+  } = await db.query<{ id: string; exercise_id: string }>(
     `SELECT id, exercise_id FROM planned_sets WHERE day_workout_id=$1 LIMIT 1`,
     [dw?.id],
   );
@@ -870,13 +972,17 @@ async function insertStalledSession(opts: {
   minutesAgo: number;
   isDeload?: boolean;
 }): Promise<string> {
-  const { rows: [dw] } = await db.query<{ id: string }>(
+  const {
+    rows: [dw],
+  } = await db.query<{ id: string }>(
     `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, status, is_deload)
      VALUES ($1, $2, $3, CURRENT_DATE, 'strength', 'Stalled Day', 'completed', $4)
      RETURNING id`,
     [opts.runId, opts.weekIdx, opts.dayIdx, opts.isDeload ?? false],
   );
-  const { rows: [ps] } = await db.query<{ id: string }>(
+  const {
+    rows: [ps],
+  } = await db.query<{ id: string }>(
     `INSERT INTO planned_sets
        (day_workout_id, block_idx, set_idx, exercise_id,
         target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -894,10 +1000,15 @@ async function insertStalledSession(opts: {
 }
 
 async function mkBenchRun(opts: { weeks: number; currentWeek: number }): Promise<{
-  userId: string; bearer: string; runId: string; exerciseId: string;
+  userId: string;
+  bearer: string;
+  runId: string;
+  exerciseId: string;
 }> {
   const userTag = randomUUID();
-  const { rows: [u] } = await db.query<{ id: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string }>(
     `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
     [`w2-stalledpr.${userTag}@repos.test`],
   );
@@ -915,17 +1026,23 @@ async function mkBenchRun(opts: { weeks: number; currentWeek: number }): Promise
   // Minimal template + user_program so the run FK resolves (structure unused —
   // we insert day_workouts/planned_sets/set_logs by hand).
   const slug = `w2-stalled-tpl-${userTag}`;
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, $2, $3, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system') RETURNING id`,
     [slug, `Stalled ${userTag}`, opts.weeks],
   );
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, $3, 'active') RETURNING id`,
     [userId, tpl.id, `Stalled Program ${userTag}`],
   );
-  const { rows: [mr] } = await db.query<{ id: string }>(
+  const {
+    rows: [mr],
+  } = await db.query<{ id: string }>(
     `INSERT INTO mesocycle_runs
        (user_program_id, user_id, start_date, start_tz, weeks, current_week, status)
      VALUES ($1, $2, CURRENT_DATE, 'UTC', $3, $4, 'active') RETURNING id`,
@@ -938,9 +1055,39 @@ export async function seedStalledPrMultiWeekFixture(): Promise<StalledPrMultiWee
   const { userId, bearer, runId, exerciseId } = await mkBenchRun({ weeks: 5, currentWeek: 3 });
   // 3 identical RIR-0 stalled bench sessions across weeks 3 & 4 (non-deload).
   // Most-recent first via minutesAgo. No sessions in week 5 (deload week).
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 3, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 4320 }); // ~3d ago
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 3, dayIdx: 1, load: 220, reps: 5, rir: 0, minutesAgo: 2880 }); // ~2d ago
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: 4, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 1440 }); // ~1d ago
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: 3,
+    dayIdx: 0,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 4320,
+  }); // ~3d ago
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: 3,
+    dayIdx: 1,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 2880,
+  }); // ~2d ago
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: 4,
+    dayIdx: 0,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 1440,
+  }); // ~1d ago
   return { userId, mesocycleRunId: runId, bearer };
 }
 
@@ -960,9 +1107,42 @@ export async function seedUserWithStalledPrFixture(opts: {
   // markLastSessionDeload, flip ALL three day_workouts to is_deload=true so the
   // per-row guard mutes the evaluator.
   const isDeload = opts.markLastSessionDeload;
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 0, load: 220, reps: 5, rir: 0, minutesAgo: 4320, isDeload });
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 1, load: 220, reps: 5, rir: 0, minutesAgo: 2880, isDeload });
-  await insertStalledSession({ runId, userId, exerciseId, weekIdx: targetWeek, dayIdx: 2, load: 220, reps: 5, rir: 0, minutesAgo: 1440, isDeload });
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: targetWeek,
+    dayIdx: 0,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 4320,
+    isDeload,
+  });
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: targetWeek,
+    dayIdx: 1,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 2880,
+    isDeload,
+  });
+  await insertStalledSession({
+    runId,
+    userId,
+    exerciseId,
+    weekIdx: targetWeek,
+    dayIdx: 2,
+    load: 220,
+    reps: 5,
+    rir: 0,
+    minutesAgo: 1440,
+    isDeload,
+  });
   return { userId, mesocycleRunId: runId, bearer, currentWeek };
 }
 
@@ -983,12 +1163,8 @@ export async function cleanupSeeded(
     [userIds],
   );
   await db.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [userIds]);
-  const tplIds = templateIds.rows
-    .map((r) => r.template_id)
-    .filter((x): x is string => !!x);
+  const tplIds = templateIds.rows.map((r) => r.template_id).filter((x): x is string => !!x);
   if (tplIds.length > 0) {
-    await db.query(`DELETE FROM program_templates WHERE id = ANY($1::uuid[])`, [
-      tplIds,
-    ]);
+    await db.query(`DELETE FROM program_templates WHERE id = ANY($1::uuid[])`, [tplIds]);
   }
 }

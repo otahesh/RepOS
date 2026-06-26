@@ -34,9 +34,13 @@ export function useIdbQueueCounts(): QueueCounts {
           idbQueue.peekRejected(),
         ]);
         if (cancelled) return;
-        const oldest = pending.length > 0
-          ? pending.reduce((min, r) => (r.created_at < min ? r.created_at : min), pending[0].created_at)
-          : null;
+        const oldest =
+          pending.length > 0
+            ? pending.reduce(
+                (min, r) => (r.created_at < min ? r.created_at : min),
+                pending[0].created_at,
+              )
+            : null;
         setCounts({
           pending: pending.length,
           syncing: syncing.length,
@@ -50,7 +54,9 @@ export function useIdbQueueCounts(): QueueCounts {
     };
 
     void tick();
-    const id = setInterval(() => { void tick(); }, POLL_MS);
+    const id = setInterval(() => {
+      void tick();
+    }, POLL_MS);
 
     return () => {
       cancelled = true;

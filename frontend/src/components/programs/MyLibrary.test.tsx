@@ -216,8 +216,22 @@ describe('<MyLibrary> — prior-mesocycle recap entry (WS6 / D6 / G7)', () => {
       .mockResolvedValueOnce([ACTIVE_PROGRAM])
       .mockResolvedValueOnce([COMPLETED_PROGRAM]);
     const listSpy = vi.spyOn(api, 'listProgramMesocycles').mockResolvedValue([
-      { id: 'run-latest', status: 'completed', start_date: '2026-03-01', finished_at: '2026-04-01T00:00:00Z', is_deload: false, weeks: 4 },
-      { id: 'run-old', status: 'completed', start_date: '2026-01-01', finished_at: '2026-02-01T00:00:00Z', is_deload: false, weeks: 4 },
+      {
+        id: 'run-latest',
+        status: 'completed',
+        start_date: '2026-03-01',
+        finished_at: '2026-04-01T00:00:00Z',
+        is_deload: false,
+        weeks: 4,
+      },
+      {
+        id: 'run-old',
+        status: 'completed',
+        start_date: '2026-01-01',
+        finished_at: '2026-02-01T00:00:00Z',
+        is_deload: false,
+        weeks: 4,
+      },
     ]);
 
     renderLibrary();
@@ -264,7 +278,9 @@ describe('<MyLibrary> — prior-mesocycle recap entry (WS6 / D6 / G7)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /view recap/i }));
 
-    expect(await screen.findByText(/No completed mesocycle for this program yet\./)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/No completed mesocycle for this program yet\./),
+    ).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 

@@ -14,7 +14,10 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
-import { OnboardingCompleteRequestSchema, type OnboardingCompleteResponse } from '../schemas/onboarding.js';
+import {
+  OnboardingCompleteRequestSchema,
+  type OnboardingCompleteResponse,
+} from '../schemas/onboarding.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { recordAccountEventTx } from '../services/accountEvents.js';
 import { clientIp } from '../utils/clientIp.js';
@@ -68,7 +71,11 @@ export async function onboardingRoutes(app: FastifyInstance) {
         };
         return resp;
       } catch (e) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
         throw e;
       } finally {
         client.release();

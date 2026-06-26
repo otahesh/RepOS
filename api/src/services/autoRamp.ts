@@ -2,9 +2,9 @@
 
 export type RampInput = {
   mev: number;
-  mav: number;     // carried for caller convenience; formula only uses mev + mrv
+  mav: number; // carried for caller convenience; formula only uses mev + mrv
   mrv: number;
-  week: number;       // 1-indexed
+  week: number; // 1-indexed
   totalWeeks: number; // N (deload is week N)
 };
 
@@ -42,22 +42,28 @@ export function distributeWeekTargetAcrossBlocks(
   weekTarget: number,
 ): BlockSets[] {
   if (blocks.length === 0) return [];
-  if (weekTarget <= 0) return blocks.map(b => ({ blockKey: b.blockKey, sets: 0 }));
+  if (weekTarget <= 0) return blocks.map((b) => ({ blockKey: b.blockKey, sets: 0 }));
 
   const totalMev = blocks.reduce((s, b) => s + b.mev, 0);
-  const raw = totalMev === 0
-    ? blocks.map(b => ({ blockKey: b.blockKey, share: weekTarget / blocks.length }))
-    : blocks.map(b => ({ blockKey: b.blockKey, share: weekTarget * (b.mev / totalMev) }));
+  const raw =
+    totalMev === 0
+      ? blocks.map((b) => ({ blockKey: b.blockKey, share: weekTarget / blocks.length }))
+      : blocks.map((b) => ({ blockKey: b.blockKey, share: weekTarget * (b.mev / totalMev) }));
 
-  const floored = raw.map(r => ({ blockKey: r.blockKey, sets: Math.floor(r.share), remainder: r.share - Math.floor(r.share) }));
+  const floored = raw.map((r) => ({
+    blockKey: r.blockKey,
+    sets: Math.floor(r.share),
+    remainder: r.share - Math.floor(r.share),
+  }));
   let remaining = weekTarget - floored.reduce((s, b) => s + b.sets, 0);
 
   // Largest-remainder reconciliation (stable: original order on tiebreak).
-  const order = [...floored].map((b, i) => ({ ...b, idx: i }))
-    .sort((a, b) => (b.remainder - a.remainder) || (a.idx - b.idx));
+  const order = [...floored]
+    .map((b, i) => ({ ...b, idx: i }))
+    .sort((a, b) => b.remainder - a.remainder || a.idx - b.idx);
   for (let i = 0; i < order.length && remaining > 0; i++) {
     floored[order[i].idx].sets += 1;
     remaining -= 1;
   }
-  return floored.map(b => ({ blockKey: b.blockKey, sets: b.sets }));
+  return floored.map((b) => ({ blockKey: b.blockKey, sets: b.sets }));
 }

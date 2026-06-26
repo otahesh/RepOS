@@ -14,10 +14,7 @@ export interface RestTimerState {
   isOvertime: boolean;
 }
 
-function compute(
-  lastLoggedAt: number | null,
-  targetRestSec: number,
-): RestTimerState {
+function compute(lastLoggedAt: number | null, targetRestSec: number): RestTimerState {
   if (lastLoggedAt === null) {
     return {
       elapsedSec: 0,
@@ -40,9 +37,7 @@ function compute(
  */
 export function useRestTimer(args: RestTimerArgs): RestTimerState {
   const { lastLoggedAt, targetRestSec } = args;
-  const [state, setState] = useState<RestTimerState>(() =>
-    compute(lastLoggedAt, targetRestSec),
-  );
+  const [state, setState] = useState<RestTimerState>(() => compute(lastLoggedAt, targetRestSec));
 
   useEffect(() => {
     setState(compute(lastLoggedAt, targetRestSec));

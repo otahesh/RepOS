@@ -20,8 +20,12 @@ describe('<DeloadThisWeekSheet>', () => {
 
   it('Confirm calls triggerManualDeload then onClose(true)', async () => {
     const trigger = vi.spyOn(deloadApi, 'triggerManualDeload').mockResolvedValue({
-      run_id: 'run-1', removed_planned_sets: 2, affected_planned_sets: 4,
-      affected_day_workouts: 3, affected_week_idxs: [2, 3, 4], triggered_at: 't',
+      run_id: 'run-1',
+      removed_planned_sets: 2,
+      affected_planned_sets: 4,
+      affected_day_workouts: 3,
+      affected_week_idxs: [2, 3, 4],
+      triggered_at: 't',
     });
     const onClose = vi.fn();
     render(<DeloadThisWeekSheet runId="run-1" onClose={onClose} />);
@@ -31,7 +35,9 @@ describe('<DeloadThisWeekSheet>', () => {
   });
 
   it('surfaces an error inline if the POST fails (sheet stays open)', async () => {
-    vi.spyOn(deloadApi, 'triggerManualDeload').mockRejectedValue(new Error('manual_deload_failed_409'));
+    vi.spyOn(deloadApi, 'triggerManualDeload').mockRejectedValue(
+      new Error('manual_deload_failed_409'),
+    );
     const onClose = vi.fn();
     render(<DeloadThisWeekSheet runId="run-1" onClose={onClose} />);
     fireEvent.click(screen.getByText('CONFIRM DELOAD'));

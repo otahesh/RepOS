@@ -1,186 +1,218 @@
-import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ProgramPage } from '../components/programs/ProgramPage'
-import { DayCard } from '../components/programs/DayCard'
-import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings'
-import { MesocycleRecap, type RecapChoice } from '../components/programs/MesocycleRecap'
-import { getMesocycle, getMesocycleRecapStats, abandonMesocycle, startMesocycle, type MesocycleRunDetail, type MesocycleRecapStats } from '../lib/api/mesocycles'
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ProgramPage } from '../components/programs/ProgramPage';
+import { DayCard } from '../components/programs/DayCard';
+import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings';
+import { MesocycleRecap, type RecapChoice } from '../components/programs/MesocycleRecap';
+import {
+  getMesocycle,
+  getMesocycleRecapStats,
+  abandonMesocycle,
+  startMesocycle,
+  type MesocycleRunDetail,
+  type MesocycleRecapStats,
+} from '../lib/api/mesocycles';
 import {
   getUserProgram,
   getUserProgramWarnings,
   patchUserProgram,
   type UserProgramDetail,
-} from '../lib/api/userPrograms'
-import { TOKENS } from '../tokens'
-import { pushToast } from '../components/common/ToastHost'
-import { ConfirmDialog } from '../components/common/ConfirmDialog'
-import { Term } from '../components/Term'
-import { DeloadThisWeekButton } from '../components/programs/DeloadThisWeekButton'
-import { DesktopSwapSheet } from '../components/programs/DesktopSwapSheet'
-import { useIsMobile } from '../lib/useIsMobile'
+} from '../lib/api/userPrograms';
+import { TOKENS } from '../tokens';
+import { pushToast } from '../components/common/ToastHost';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
+import { Term } from '../components/Term';
+import { DeloadThisWeekButton } from '../components/programs/DeloadThisWeekButton';
+import { DesktopSwapSheet } from '../components/programs/DesktopSwapSheet';
+import { useIsMobile } from '../lib/useIsMobile';
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
 export default function MyProgramPage() {
-  const { id = '' } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const [run, setRun] = useState<MesocycleRunDetail | null>(null)
-  const [up, setUp] = useState<UserProgramDetail | null>(null)
-  const [warnings, setWarnings] = useState<ScheduleWarning[]>([])
-  const [err, setErr] = useState<string | null>(null)
-  const [recapStats, setRecapStats] = useState<MesocycleRecapStats | null>(null)
-  const [recapErr, setRecapErr] = useState<string | null>(null)
-  const [recapLoading, setRecapLoading] = useState(false)
-  const [abandonOpen, setAbandonOpen] = useState(false)
-  const [abandoning, setAbandoning] = useState(false)
-  const [reloadTick, setReloadTick] = useState(0)
+  const { id = '' } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [run, setRun] = useState<MesocycleRunDetail | null>(null);
+  const [up, setUp] = useState<UserProgramDetail | null>(null);
+  const [warnings, setWarnings] = useState<ScheduleWarning[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [recapStats, setRecapStats] = useState<MesocycleRecapStats | null>(null);
+  const [recapErr, setRecapErr] = useState<string | null>(null);
+  const [recapLoading, setRecapLoading] = useState(false);
+  const [abandonOpen, setAbandonOpen] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   // [W4.1] desktop swap side-sheet target (day/block whose exercise to swap).
-  const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null)
+  const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null);
   // [W4.5 / D4] deload confirm dialog gate.
-  const [confirmDeload, setConfirmDeload] = useState(false)
-  const isMobile = useIsMobile()
+  const [confirmDeload, setConfirmDeload] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
-    if (!id) return
-    let ignore = false
+    if (!id) return;
+    let ignore = false;
     getMesocycle(id)
-      .then((r) => { if (!ignore) setRun(r) })
-      .catch((e) => { if (!ignore) setErr(String(e)) })
-    return () => { ignore = true }
-  }, [id])
+      .then((r) => {
+        if (!ignore) setRun(r);
+      })
+      .catch((e) => {
+        if (!ignore) setErr(String(e));
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
 
   useEffect(() => {
-    if (!run) return
-    let ignore = false
+    if (!run) return;
+    let ignore = false;
     getUserProgram(run.user_program_id)
-      .then((p) => { if (!ignore) setUp(p) })
-      .catch((e) => { if (!ignore) setErr(String(e)) })
+      .then((p) => {
+        if (!ignore) setUp(p);
+      })
+      .catch((e) => {
+        if (!ignore) setErr(String(e));
+      });
     getUserProgramWarnings(run.user_program_id)
-      .then((w) => { if (!ignore) setWarnings(w) })
-      .catch(() => { if (!ignore) setWarnings([]) })
-    return () => { ignore = true }
-  }, [run])
+      .then((w) => {
+        if (!ignore) setWarnings(w);
+      })
+      .catch(() => {
+        if (!ignore) setWarnings([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [run]);
 
   // Fetch recap stats when the run is completed.
   useEffect(() => {
-    if (!run || run.status !== 'completed') return
-    let ignore = false
-    setRecapLoading(true)
+    if (!run || run.status !== 'completed') return;
+    let ignore = false;
+    setRecapLoading(true);
     getMesocycleRecapStats(run.id)
       .then((s) => {
         if (!ignore) {
-          setRecapStats(s)
-          setRecapLoading(false)
+          setRecapStats(s);
+          setRecapLoading(false);
         }
       })
       .catch((e) => {
         if (!ignore) {
-          setRecapErr(e instanceof Error ? e.message : String(e))
-          setRecapLoading(false)
+          setRecapErr(e instanceof Error ? e.message : String(e));
+          setRecapLoading(false);
         }
-      })
-    return () => { ignore = true }
-  }, [run])
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [run]);
 
   async function handleChoice(choice: RecapChoice) {
     if (choice === 'deload') {
       // [D4] Don't fire the backend until the user confirms the volume math.
-      setConfirmDeload(true)
-      return
+      setConfirmDeload(true);
+      return;
     }
     if (choice === 'run_it_back') {
       // [C-RUN-IT-BACK-ROUTE] "Run it back" is now a real new mesocycle via the
       // unified start route (intent=normal), not a fork-wizard navigation.
-      if (!up) { navigate('/programs'); return }
+      if (!up) {
+        navigate('/programs');
+        return;
+      }
       try {
-        const r = await startMesocycle({ user_program_id: up.id, intent: 'normal' })
-        navigate(`/my-programs/${r.mesocycle_run_id}`)
+        const r = await startMesocycle({ user_program_id: up.id, intent: 'normal' });
+        navigate(`/my-programs/${r.mesocycle_run_id}`);
       } catch (e) {
-        setErr(`Couldn't restart mesocycle: ${e instanceof Error ? e.message : String(e)}`)
+        setErr(`Couldn't restart mesocycle: ${e instanceof Error ? e.message : String(e)}`);
       }
     } else {
       // 'new_program' — browse catalog.
-      navigate('/programs')
+      navigate('/programs');
     }
   }
 
   // [D4] Fires only after the user confirms in the heavy ConfirmDialog.
   async function onConfirmDeload() {
-    if (!up) { navigate('/programs'); return }
+    if (!up) {
+      navigate('/programs');
+      return;
+    }
     try {
-      const r = await startMesocycle({ user_program_id: up.id, intent: 'deload' })
-      navigate(`/my-programs/${r.mesocycle_run_id}`)
+      const r = await startMesocycle({ user_program_id: up.id, intent: 'deload' });
+      navigate(`/my-programs/${r.mesocycle_run_id}`);
     } catch (e) {
-      setErr(`Couldn't start deload mesocycle: ${e instanceof Error ? e.message : String(e)}`)
+      setErr(`Couldn't start deload mesocycle: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setConfirmDeload(false)
+      setConfirmDeload(false);
     }
   }
 
   async function refreshUserProgram() {
-    if (!up) return
+    if (!up) return;
     try {
-      const refreshed = await getUserProgram(up.id)
-      setUp(refreshed)
+      const refreshed = await getUserProgram(up.id);
+      setUp(refreshed);
     } catch (e) {
-      setErr(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`)
+      setErr(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function handleAddSet(dayIdx: number, blockIdx: number) {
-    if (!up) return
+    if (!up) return;
     try {
-      await patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx })
-      await refreshUserProgram()
+      await patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx });
+      await refreshUserProgram();
     } catch (e) {
-      setErr(`Add set failed: ${e instanceof Error ? e.message : String(e)}`)
+      setErr(`Add set failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function handleRemoveSet(dayIdx: number, blockIdx: number, _setIdx: number) {
-    if (!up) return
+    if (!up) return;
     try {
-      await patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx })
-      await refreshUserProgram()
+      await patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx });
+      await refreshUserProgram();
     } catch (e) {
-      setErr(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`)
+      setErr(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   // Heavy-tier destructive action. The ConfirmDialog gates this behind a typed
   // match of the program name (per the W6 destructive-confirm tier ladder).
   async function handleAbandon() {
-    if (!run) return
-    setAbandoning(true)
+    if (!run) return;
+    setAbandoning(true);
     try {
-      await abandonMesocycle(run.id)
-      setAbandonOpen(false)
-      pushToast({ severity: 'success', body: 'Mesocycle abandoned.' })
-      navigate('/programs')
+      await abandonMesocycle(run.id);
+      setAbandonOpen(false);
+      pushToast({ severity: 'success', body: 'Mesocycle abandoned.' });
+      navigate('/programs');
     } catch (e) {
-      setAbandonOpen(false)
-      setErr(`Abandon failed: ${e instanceof Error ? e.message : String(e)}`)
+      setAbandonOpen(false);
+      setErr(`Abandon failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setAbandoning(false)
+      setAbandoning(false);
     }
   }
 
-  if (err) return <div style={{ padding: 16, color: TOKENS.danger }}>Couldn't load program: {err}</div>
-  if (!run) return <div style={{ padding: 16, color: TOKENS.textDim }}>Loading…</div>
+  if (err)
+    return <div style={{ padding: 16, color: TOKENS.danger }}>Couldn't load program: {err}</div>;
+  if (!run) return <div style={{ padding: 16, color: TOKENS.textDim }}>Loading…</div>;
 
   if (run.status === 'completed') {
     if (recapLoading) {
-      return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>
+      return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>;
     }
     if (recapErr) {
       return (
         <div style={{ padding: 24, color: TOKENS.danger }}>
           Couldn't load recap stats: {recapErr}
         </div>
-      )
+      );
     }
     if (recapStats) {
-      const deloadWeeks = run.weeks ?? 4
+      const deloadWeeks = run.weeks ?? 4;
       return (
         <>
           <MesocycleRecap stats={recapStats} onChoice={(c) => void handleChoice(c)} />
@@ -202,14 +234,14 @@ export default function MyProgramPage() {
             onCancel={() => setConfirmDeload(false)}
           />
         </>
-      )
+      );
     }
     // recapStats not yet populated (first render before effect fires) — show
     // a brief spinner to avoid a flash of empty content.
-    return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>
+    return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>;
   }
 
-  const programName = up?.effective_name ?? up?.name ?? ''
+  const programName = up?.effective_name ?? up?.name ?? '';
 
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -226,16 +258,31 @@ export default function MyProgramPage() {
 
       {up ? (
         <section style={{ padding: '0 24px 24px' }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, color: TOKENS.textDim, fontFamily: 'Inter Tight' }}>
+          <h3
+            style={{
+              margin: '0 0 12px',
+              fontSize: 14,
+              color: TOKENS.textDim,
+              fontFamily: 'Inter Tight',
+            }}
+          >
             Days
           </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(240px, 1fr))`, gap: 12 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(auto-fit, minmax(240px, 1fr))`,
+              gap: 12,
+            }}
+          >
             {up.effective_structure.days.map((d) => (
               <DayCard
                 key={d.idx}
                 day={d}
                 onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
-                onRemoveSet={(dayIdx, blockIdx, setIdx) => void handleRemoveSet(dayIdx, blockIdx, setIdx)}
+                onRemoveSet={(dayIdx, blockIdx, setIdx) =>
+                  void handleRemoveSet(dayIdx, blockIdx, setIdx)
+                }
                 onSwap={(dayIdx, blockIdx) => {
                   // [W4.1] Desktop opens the swap side-sheet. Mobile keeps the
                   // existing mid-session swap flow (BlockOverflowMenu →
@@ -243,9 +290,12 @@ export default function MyProgramPage() {
                   // planning surface is desktop-primary, so on mobile we just
                   // hint the user toward the live-workout swap.
                   if (isMobile) {
-                    pushToast({ severity: 'info', body: 'Swap exercises from the live workout on mobile.' })
+                    pushToast({
+                      severity: 'info',
+                      body: 'Swap exercises from the live workout on mobile.',
+                    });
                   } else {
-                    setSwapTarget({ dayIdx, blockIdx })
+                    setSwapTarget({ dayIdx, blockIdx });
                   }
                 }}
               />
@@ -255,37 +305,65 @@ export default function MyProgramPage() {
       ) : null}
 
       {/* [W4.1] Desktop swap side-sheet — desktop only. */}
-      {!isMobile && swapTarget && up && (() => {
-        const block = up.effective_structure.days[swapTarget.dayIdx]?.blocks[swapTarget.blockIdx]
-        if (!block) return null
-        return (
-          <DesktopSwapSheet
-            open
-            context="program_edit"
-            fromSlug={block.exercise_slug}
-            onClose={() => setSwapTarget(null)}
-            onApply={async ({ scope, toExerciseSlug }) => {
-              if (!up) return
-              try {
-                const op = scope === 'all'
-                  ? { op: 'swap_exercise_all' as const, from_slug: block.exercise_slug, to_exercise_slug: toExerciseSlug }
-                  : { op: 'swap_exercise' as const, day_idx: swapTarget.dayIdx, block_idx: swapTarget.blockIdx, to_exercise_slug: toExerciseSlug }
-                await patchUserProgram(up.id, op)
-                await refreshUserProgram()
-                setSwapTarget(null)
-              } catch (e) {
-                setErr(`Swap failed: ${e instanceof Error ? e.message : String(e)}`)
-              }
-            }}
-          />
-        )
-      })()}
+      {!isMobile &&
+        swapTarget &&
+        up &&
+        (() => {
+          const block = up.effective_structure.days[swapTarget.dayIdx]?.blocks[swapTarget.blockIdx];
+          if (!block) return null;
+          return (
+            <DesktopSwapSheet
+              open
+              context="program_edit"
+              fromSlug={block.exercise_slug}
+              onClose={() => setSwapTarget(null)}
+              onApply={async ({ scope, toExerciseSlug }) => {
+                if (!up) return;
+                try {
+                  const op =
+                    scope === 'all'
+                      ? {
+                          op: 'swap_exercise_all' as const,
+                          from_slug: block.exercise_slug,
+                          to_exercise_slug: toExerciseSlug,
+                        }
+                      : {
+                          op: 'swap_exercise' as const,
+                          day_idx: swapTarget.dayIdx,
+                          block_idx: swapTarget.blockIdx,
+                          to_exercise_slug: toExerciseSlug,
+                        };
+                  await patchUserProgram(up.id, op);
+                  await refreshUserProgram();
+                  setSwapTarget(null);
+                } catch (e) {
+                  setErr(`Swap failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }}
+            />
+          );
+        })()}
 
       <section style={{ padding: '0 24px 32px' }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: 14, color: TOKENS.danger, fontFamily: 'Inter Tight' }}>
+        <h3
+          style={{
+            margin: '0 0 8px',
+            fontSize: 14,
+            color: TOKENS.danger,
+            fontFamily: 'Inter Tight',
+          }}
+        >
           Danger zone
         </h3>
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: TOKENS.textDim, maxWidth: 520, lineHeight: 1.5 }}>
+        <p
+          style={{
+            margin: '0 0 12px',
+            fontSize: 13,
+            color: TOKENS.textDim,
+            maxWidth: 520,
+            lineHeight: 1.5,
+          }}
+        >
           Abandoning this <Term k="mesocycle" variant="abbr" /> ends it permanently. Logged sets are
           kept for your history, but the remaining schedule is discarded and cannot be resumed.
         </p>
@@ -319,5 +397,5 @@ export default function MyProgramPage() {
         onCancel={() => setAbandonOpen(false)}
       />
     </div>
-  )
+  );
 }

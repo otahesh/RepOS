@@ -51,13 +51,12 @@ afterAll(async () => {
  * spec can POST three set_logs against three distinct planned_set_ids on a
  * single exercise — which is the shape the W3 evaluator will look for.
  */
-async function addExtraPlannedSets(
-  seed: SeedHandle,
-  count: number,
-): Promise<string[]> {
+async function addExtraPlannedSets(seed: SeedHandle, count: number): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 1; i <= count; i++) {
-    const { rows: [r] } = await db.query<{ id: string }>(
+    const {
+      rows: [r],
+    } = await db.query<{ id: string }>(
       `INSERT INTO planned_sets
          (day_workout_id, block_idx, set_idx, exercise_id,
           target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -87,9 +86,7 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     // Three RIR-0 logs, one per planned_set, spread one day apart so they all
     // fall in the last-7-days window but in distinct minute buckets.
     for (let i = 0; i < 3; i++) {
-      const performed_at = new Date(
-        Date.now() - i * 24 * 60 * 60 * 1000,
-      ).toISOString();
+      const performed_at = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString();
       const resp = await app.inject({
         method: 'POST',
         url: '/api/set-logs',
@@ -149,9 +146,7 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     });
     expect(flags.statusCode).toBe(200);
     expect(
-      flags.json<{ flags: Array<{ flag: string }> }>().flags.some(
-        (f) => f.flag === 'overreaching',
-      ),
+      flags.json<{ flags: Array<{ flag: string }> }>().flags.some((f) => f.flag === 'overreaching'),
     ).toBe(true);
 
     await app.close();

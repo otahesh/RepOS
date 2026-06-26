@@ -40,7 +40,9 @@ export async function mkUser(opts: MkUserOpts = {}): Promise<{ id: string; email
     placeholders.push(`$${values.length}`);
   }
 
-  const { rows: [u] } = await db.query<{ id: string; email: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string; email: string }>(
     `INSERT INTO users (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING id, email`,
     values,
   );
@@ -60,7 +62,9 @@ export interface MkTemplateOpts {
 export async function mkTemplate(opts: MkTemplateOpts): Promise<{ id: string; slug: string }> {
   const prefix = opts.prefix ?? 'vitest-tpl';
   const slug = `${prefix}-${randomUUID()}`;
-  const { rows: [t] } = await db.query<{ id: string; slug: string }>(
+  const {
+    rows: [t],
+  } = await db.query<{ id: string; slug: string }>(
     `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, $2, $3, $4, $5::jsonb, 1, 'system') RETURNING id, slug`,
     [
@@ -86,16 +90,12 @@ export interface MkUserProgramOpts {
 export async function mkUserProgram(opts: MkUserProgramOpts): Promise<{ id: string }> {
   const templateId = opts.templateId ?? null;
   const templateVersion = templateId ? (opts.templateVersion ?? 1) : null;
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [
-      opts.userId,
-      templateId,
-      templateVersion,
-      opts.name ?? 'Vitest run',
-      opts.status ?? 'draft',
-    ],
+    [opts.userId, templateId, templateVersion, opts.name ?? 'Vitest run', opts.status ?? 'draft'],
   );
   return up;
 }

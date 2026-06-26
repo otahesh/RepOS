@@ -5,18 +5,18 @@ import { computeUserLocalDate } from '../src/services/userLocalDate.js';
 describe('computeUserLocalDate (spec §3.3)', () => {
   it('returns YYYY-MM-DD in the supplied tz', () => {
     // 2026-05-04T03:00:00Z is 2026-05-03 in Los_Angeles (UTC-7 PDT)
-    expect(computeUserLocalDate('America/Los_Angeles', new Date('2026-05-04T03:00:00Z')))
-      .toBe('2026-05-03');
+    expect(computeUserLocalDate('America/Los_Angeles', new Date('2026-05-04T03:00:00Z'))).toBe(
+      '2026-05-03',
+    );
     // same instant is 2026-05-04 in UTC
-    expect(computeUserLocalDate('UTC', new Date('2026-05-04T03:00:00Z')))
-      .toBe('2026-05-04');
+    expect(computeUserLocalDate('UTC', new Date('2026-05-04T03:00:00Z'))).toBe('2026-05-04');
   });
 
   it('DST spring-forward day still resolves once', () => {
     // 2026-03-08 02:00 local NY is the spring-forward; both sides of the gap
     // resolve to a defined date string and never throw.
     const before = new Date('2026-03-08T06:00:00Z'); // 01:00 EST (before jump)
-    const after  = new Date('2026-03-08T08:00:00Z'); // 04:00 EDT (after jump)
+    const after = new Date('2026-03-08T08:00:00Z'); // 04:00 EDT (after jump)
     expect(computeUserLocalDate('America/New_York', before)).toBe('2026-03-08');
     expect(computeUserLocalDate('America/New_York', after)).toBe('2026-03-08');
   });
@@ -24,7 +24,7 @@ describe('computeUserLocalDate (spec §3.3)', () => {
   it('DST fall-back day still resolves once', () => {
     // 2026-11-01 02:00 NY falls back to 01:00 EST. The 01:30 hour exists twice;
     // both must resolve to 2026-11-01.
-    const first  = new Date('2026-11-01T05:30:00Z'); // 01:30 EDT
+    const first = new Date('2026-11-01T05:30:00Z'); // 01:30 EDT
     const second = new Date('2026-11-01T06:30:00Z'); // 01:30 EST
     expect(computeUserLocalDate('America/New_York', first)).toBe('2026-11-01');
     expect(computeUserLocalDate('America/New_York', second)).toBe('2026-11-01');
@@ -51,7 +51,13 @@ describe('computeUserLocalDate (spec §3.3)', () => {
     // ignores most locale tags and falls back to 'MM/DD/YYYY'. Any drift here
     // breaks getTodayWorkout's date comparison silently — every active
     // mesocycle would read as no_active_run. Lock the format down.
-    for (const tz of ['UTC', 'America/Los_Angeles', 'America/Indianapolis', 'Europe/Berlin', 'Asia/Tokyo']) {
+    for (const tz of [
+      'UTC',
+      'America/Los_Angeles',
+      'America/Indianapolis',
+      'Europe/Berlin',
+      'Asia/Tokyo',
+    ]) {
       const out = computeUserLocalDate(tz, new Date('2026-05-07T16:00:00Z'));
       expect(out).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }

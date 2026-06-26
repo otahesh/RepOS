@@ -64,10 +64,10 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     return reply.code(401).send();
   }
 
-  await db.query(
-    `UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`,
-    [clientIp(req), row.id],
-  );
+  await db.query(`UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`, [
+    clientIp(req),
+    row.id,
+  ]);
   req.userId = row.user_id as string;
   // Empty array (rather than undefined) on the bearer path so requireScope
   // can distinguish "bearer with zero scopes" (403) from "no bearer used,

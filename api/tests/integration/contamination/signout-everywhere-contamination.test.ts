@@ -123,10 +123,7 @@ describe('POST /api/auth/signout-everywhere contamination — G2', () => {
     const { rows: bTok } = await db.query<{
       revoke_reason: string | null;
       revoked_at: Date | null;
-    }>(
-      `SELECT revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`,
-      [userB],
-    );
+    }>(`SELECT revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`, [userB]);
     expect(bTok.length).toBe(1);
     expect(bTok[0].revoked_at).toBeNull();
     expect(bTok[0].revoke_reason).toBeNull();

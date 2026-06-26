@@ -6,10 +6,7 @@ import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 import { isValidScope } from '../auth/scopes.js';
 import { isValidBigintId } from '../schemas/idParams.js';
 import { clientIp } from '../utils/clientIp.js';
-import type {
-  TokenMintResponse,
-  TokenListResponse,
-} from '../schemas/tokens.js';
+import type { TokenMintResponse, TokenListResponse } from '../schemas/tokens.js';
 
 // Token mint / list / revoke. Two auth modes:
 //   - admin   : body/query supplies user_id (CLI, tests, ops scripts).
@@ -55,17 +52,18 @@ export async function tokenRoutes(app: FastifyInstance) {
       const hash = await argon2.hash(secret);
       const storedHash = `${prefix}:${hash}`;
 
-      const { rows } = scopes === undefined
-        ? await db.query(
-            `INSERT INTO device_tokens (user_id, token_hash, label)
+      const { rows } =
+        scopes === undefined
+          ? await db.query(
+              `INSERT INTO device_tokens (user_id, token_hash, label)
              VALUES ($1, $2, $3) RETURNING id, created_at`,
-            [userId, storedHash, req.body.label ?? null],
-          )
-        : await db.query(
-            `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
+              [userId, storedHash, req.body.label ?? null],
+            )
+          : await db.query(
+              `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
              VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-            [userId, storedHash, req.body.label ?? null, scopes],
-          );
+              [userId, storedHash, req.body.label ?? null, scopes],
+            );
 
       // Audit log for the mint event — there's no other persistent record of
       // "this caller minted a token for this user_id with these scopes from
@@ -85,7 +83,11 @@ export async function tokenRoutes(app: FastifyInstance) {
         'device_token minted',
       );
 
-      const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
+      const mintResp: TokenMintResponse = {
+        id: String(rows[0].id),
+        token: plaintext,
+        created_at: rows[0].created_at,
+      };
       return reply.code(201).send(mintResp);
     },
   );
@@ -104,7 +106,7 @@ export async function tokenRoutes(app: FastifyInstance) {
          ORDER BY created_at DESC`,
         [userId],
       );
-      const listResp: TokenListResponse = rows.map(r => ({
+      const listResp: TokenListResponse = rows.map((r) => ({
         id: String(r.id),
         label: r.label,
         created_at: r.created_at,

@@ -2,10 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { clientIp } from '../../src/utils/clientIp.js';
 
-function reqWith(
-  headers: Record<string, string | undefined>,
-  ip = '127.0.0.1',
-): FastifyRequest {
+function reqWith(headers: Record<string, string | undefined>, ip = '127.0.0.1'): FastifyRequest {
   return { headers, ip } as unknown as FastifyRequest;
 }
 
@@ -28,7 +25,9 @@ describe('clientIp', () => {
 
   it('trims whitespace in the CF header and the XFF entry', () => {
     expect(clientIp(reqWith({ 'cf-connecting-ip': '  203.0.113.7  ' }))).toBe('203.0.113.7');
-    expect(clientIp(reqWith({ 'x-forwarded-for': ' 198.51.100.1 , 10.0.0.1' }))).toBe('198.51.100.1');
+    expect(clientIp(reqWith({ 'x-forwarded-for': ' 198.51.100.1 , 10.0.0.1' }))).toBe(
+      '198.51.100.1',
+    );
   });
 
   it('ignores empty CF and XFF headers, falling through to req.ip', () => {

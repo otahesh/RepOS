@@ -72,7 +72,11 @@ describe('MaintenanceBanner', () => {
   it('reloads when transitioning from active to inactive', async () => {
     const reload = stubLocation('/settings/backups');
     (api.getMaintenanceStatus as any)
-      .mockResolvedValueOnce({ active: true, restore: { status: 'running' }, recovery_available: false })
+      .mockResolvedValueOnce({
+        active: true,
+        restore: { status: 'running' },
+        recovery_available: false,
+      })
       .mockResolvedValue({ active: false, restore: { status: 'ok' }, recovery_available: false });
     render(<MaintenanceBanner pollIntervalMs={10} />);
     await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 1000 });
@@ -82,10 +86,16 @@ describe('MaintenanceBanner', () => {
   it('does NOT auto-reload on /today/:runId/log; shows Reload CTA instead', async () => {
     const reload = stubLocation('/today/abc-123/log');
     (api.getMaintenanceStatus as any)
-      .mockResolvedValueOnce({ active: true, restore: { status: 'running' }, recovery_available: false })
+      .mockResolvedValueOnce({
+        active: true,
+        restore: { status: 'running' },
+        recovery_available: false,
+      })
       .mockResolvedValue({ active: false, restore: { status: 'ok' }, recovery_available: false });
     render(<MaintenanceBanner pollIntervalMs={10} />);
-    await waitFor(() => screen.getByText(/Restore complete — reload to continue/), { timeout: 1000 });
+    await waitFor(() => screen.getByText(/Restore complete — reload to continue/), {
+      timeout: 1000,
+    });
     expect(reload).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /reload/i }));
     expect(reload).toHaveBeenCalled();
@@ -96,10 +106,16 @@ describe('MaintenanceBanner', () => {
     const reload = stubLocation('/settings/backups');
     (idbQueue.peekSyncing as any).mockResolvedValue([{ client_request_id: 'q-1' }]);
     (api.getMaintenanceStatus as any)
-      .mockResolvedValueOnce({ active: true, restore: { status: 'running' }, recovery_available: false })
+      .mockResolvedValueOnce({
+        active: true,
+        restore: { status: 'running' },
+        recovery_available: false,
+      })
       .mockResolvedValue({ active: false, restore: { status: 'ok' }, recovery_available: false });
     render(<MaintenanceBanner pollIntervalMs={10} />);
-    await waitFor(() => screen.getByText(/Restore complete — reload to continue/), { timeout: 1000 });
+    await waitFor(() => screen.getByText(/Restore complete — reload to continue/), {
+      timeout: 1000,
+    });
     expect(reload).not.toHaveBeenCalled();
   });
 });

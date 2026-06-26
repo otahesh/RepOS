@@ -12,15 +12,26 @@ export function ProgramCatalog({ onPick }: ProgramCatalogProps) {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    listProgramTemplates().then(setRows).catch(e => setErr(String(e)));
+    listProgramTemplates()
+      .then(setRows)
+      .catch((e) => setErr(String(e)));
   }, []);
 
-  if (err) return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load programs: {err}</div>;
+  if (err)
+    return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load programs: {err}</div>;
   if (!rows) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, padding: 16, fontFamily: 'Inter Tight' }}>
-      {rows.map(t => (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: 16,
+        padding: 16,
+        fontFamily: 'Inter Tight',
+      }}
+    >
+      {rows.map((t) => (
         <article
           key={t.slug}
           style={{
@@ -35,13 +46,25 @@ export function ProgramCatalog({ onPick }: ProgramCatalogProps) {
           }}
         >
           <header>
-            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1, color: '#4D8DFF', textTransform: 'uppercase' }}>
+            <div
+              style={{
+                fontFamily: 'JetBrains Mono',
+                fontSize: 11,
+                letterSpacing: 1,
+                color: '#4D8DFF',
+                textTransform: 'uppercase',
+              }}
+            >
               {t.weeks}-week <Term k="mesocycle" />
             </div>
             <h3 style={{ margin: '6px 0 0', fontSize: 18 }}>{t.name}</h3>
           </header>
-          <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>{t.description}</p>
-          <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+            {t.description}
+          </p>
+          <div
+            style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.5)' }}
+          >
             {t.days_per_week} days/week
           </div>
           <button

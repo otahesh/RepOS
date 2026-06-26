@@ -95,10 +95,13 @@ describe('useIdbQueueCounts', () => {
       await idbQueue.markRejected('live-1', 'planned_set_deleted');
     });
 
-    await waitFor(() => {
-      expect(result.current.pending).toBe(1);
-      expect(result.current.rejected).toBe(1);
-    }, { timeout: 2500 });
+    await waitFor(
+      () => {
+        expect(result.current.pending).toBe(1);
+        expect(result.current.rejected).toBe(1);
+      },
+      { timeout: 2500 },
+    );
   });
 
   it('clears the interval on unmount', () => {

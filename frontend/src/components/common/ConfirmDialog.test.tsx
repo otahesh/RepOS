@@ -92,9 +92,18 @@ describe('ConfirmDialog tiers', () => {
       const [open, setOpen] = useState(false);
       return (
         <>
-          <button data-testid="trigger" onClick={() => setOpen(true)}>Open</button>
+          <button data-testid="trigger" onClick={() => setOpen(true)}>
+            Open
+          </button>
           {open && (
-            <ConfirmDialog open tier="medium" title="X" body="" onConfirm={() => setOpen(false)} onCancel={() => setOpen(false)} />
+            <ConfirmDialog
+              open
+              tier="medium"
+              title="X"
+              body=""
+              onConfirm={() => setOpen(false)}
+              onCancel={() => setOpen(false)}
+            />
           )}
         </>
       );

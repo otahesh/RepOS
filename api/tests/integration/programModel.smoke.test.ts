@@ -93,7 +93,7 @@ describe('program model v1 smoke — golden path', () => {
     expect(Array.isArray(listBody.templates)).toBe(true);
     // Seed has 3 templates; sanity-check at least 1 exists.
     expect(listBody.templates.length).toBeGreaterThanOrEqual(1);
-    const hasFourDay = listBody.templates.some(t => t.slug === 'upper-lower-4-day');
+    const hasFourDay = listBody.templates.some((t) => t.slug === 'upper-lower-4-day');
     expect(hasFourDay).toBe(true);
 
     // ── 2. Fork upper-lower-4-day ────────────────────────────────────────────
@@ -109,10 +109,12 @@ describe('program model v1 smoke — golden path', () => {
     expect(userProgram.status).toBe('draft');
 
     // Verify the fork produced a user_programs row in the DB.
-    const { rows: [upRow] } = await db.query(
-      `SELECT id, status FROM user_programs WHERE id=$1 AND user_id=$2`,
-      [userProgram.id, userId],
-    );
+    const {
+      rows: [upRow],
+    } = await db.query(`SELECT id, status FROM user_programs WHERE id=$1 AND user_id=$2`, [
+      userProgram.id,
+      userId,
+    ]);
     expect(upRow).toBeDefined();
     expect(upRow.status).toBe('draft');
 
@@ -143,14 +145,18 @@ describe('program model v1 smoke — golden path', () => {
     const mesoRunId = startBody.mesocycle_run_id;
 
     // Verify materialization created day_workouts and planned_sets.
-    const { rows: [{ dw_count }] } = await db.query<{ dw_count: number }>(
+    const {
+      rows: [{ dw_count }],
+    } = await db.query<{ dw_count: number }>(
       `SELECT COUNT(*)::int AS dw_count FROM day_workouts WHERE mesocycle_run_id=$1`,
       [mesoRunId],
     );
     // upper-lower-4-day has 4 days/week; exact count depends on template weeks.
     expect(dw_count).toBeGreaterThan(0);
 
-    const { rows: [{ ps_count }] } = await db.query<{ ps_count: number }>(
+    const {
+      rows: [{ ps_count }],
+    } = await db.query<{ ps_count: number }>(
       `SELECT COUNT(*)::int AS ps_count
        FROM planned_sets ps
        JOIN day_workouts dw ON dw.id = ps.day_workout_id
@@ -160,7 +166,9 @@ describe('program model v1 smoke — golden path', () => {
     expect(ps_count).toBeGreaterThan(0);
 
     // Partial unique index: only one active run allowed per user.
-    const { rows: [{ active_count }] } = await db.query<{ active_count: number }>(
+    const {
+      rows: [{ active_count }],
+    } = await db.query<{ active_count: number }>(
       `SELECT COUNT(*)::int AS active_count FROM mesocycle_runs WHERE user_id=$1 AND status='active'`,
       [userId],
     );
@@ -216,13 +224,19 @@ describe('program model v1 smoke — golden path', () => {
           body: JSON.stringify({ target_rir: 2, override_reason: 'smoke test override' }),
         });
         expect(patchRes.statusCode).toBe(200);
-        const patchBody = patchRes.json<{ id: string; target_rir: number; overridden_at: string }>();
+        const patchBody = patchRes.json<{
+          id: string;
+          target_rir: number;
+          overridden_at: string;
+        }>();
         expect(patchBody.id).toBe(setId);
         expect(patchBody.target_rir).toBe(2);
         expect(patchBody.overridden_at).toBeTruthy();
 
         // Verify audit event was written.
-        const { rows: [{ evt_count }] } = await db.query<{ evt_count: number }>(
+        const {
+          rows: [{ evt_count }],
+        } = await db.query<{ evt_count: number }>(
           `SELECT COUNT(*)::int AS evt_count
            FROM mesocycle_run_events
            WHERE run_id=$1 AND event_type='set_overridden'`,
@@ -236,7 +250,9 @@ describe('program model v1 smoke — golden path', () => {
     // Grab any planned_set from this run to log against. The set_logs Beta
     // schema (migration 029) requires user_id + exercise_id + client_request_id
     // NOT NULL, so the SELECT pulls exercise_id along with the planned_set id.
-    const { rows: [sampleSet] } = await db.query<{ id: string; exercise_id: string }>(
+    const {
+      rows: [sampleSet],
+    } = await db.query<{ id: string; exercise_id: string }>(
       `SELECT ps.id, ps.exercise_id FROM planned_sets ps
        JOIN day_workouts dw ON dw.id = ps.day_workout_id
        WHERE dw.mesocycle_run_id = $1
@@ -254,7 +270,9 @@ describe('program model v1 smoke — golden path', () => {
       [sampleSet.id, userId, sampleSet.exercise_id],
     );
 
-    const { rows: [{ log_count }] } = await db.query<{ log_count: number }>(
+    const {
+      rows: [{ log_count }],
+    } = await db.query<{ log_count: number }>(
       `SELECT COUNT(*)::int AS log_count FROM set_logs WHERE planned_set_id=$1`,
       [sampleSet.id],
     );
@@ -286,7 +304,9 @@ describe('program model v1 smoke — golden path', () => {
     expect(start2Body.error).toBe('active_run_exists');
 
     // Still only one active run.
-    const { rows: [{ final_count }] } = await db.query<{ final_count: number }>(
+    const {
+      rows: [{ final_count }],
+    } = await db.query<{ final_count: number }>(
       `SELECT COUNT(*)::int AS final_count FROM mesocycle_runs WHERE user_id=$1 AND status='active'`,
       [userId],
     );

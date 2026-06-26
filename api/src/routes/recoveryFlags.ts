@@ -44,60 +44,67 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
   registerEvaluator(stalledPrEvaluator);
   registerEvaluator(overreachingEvaluator);
 
-  app.get('/recovery-flags', {
-    preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')],
-  }, async (req) => {
-    const userId = (req as any).userId as string;
+  app.get(
+    '/recovery-flags',
+    {
+      preHandler: [requireBearerOrCfAccess, requireScope('health:recovery:read')],
+    },
+    async (req) => {
+      const userId = (req as any).userId as string;
 
-    // Resolve the user's active mesocycle_run so run-anchored evaluators
-    // (stalled_pr, overreaching) can read current_week + program context.
-    // bodyweightCrash ignores runId so absence is harmless.
-    const { rows: runRows } = await db.query<{ id: string; current_week: number }>(
-      `SELECT id, current_week FROM mesocycle_runs
+      // Resolve the user's active mesocycle_run so run-anchored evaluators
+      // (stalled_pr, overreaching) can read current_week + program context.
+      // bodyweightCrash ignores runId so absence is harmless.
+      const { rows: runRows } = await db.query<{ id: string; current_week: number }>(
+        `SELECT id, current_week FROM mesocycle_runs
        WHERE user_id = $1 AND status = 'active'
        ORDER BY created_at DESC LIMIT 1`,
-      [userId],
-    );
-    const ctx = {
-      userId,
-      runId: runRows[0]?.id ?? null,
-      weekIdx: runRows[0]?.current_week ?? 1,
-    };
+        [userId],
+      );
+      const ctx = {
+        userId,
+        runId: runRows[0]?.id ?? null,
+        weekIdx: runRows[0]?.current_week ?? 1,
+      };
 
-    // Compute current ISO-week Monday for dismissal lookup (TZ-stable via Postgres)
-    const { rows: [{ week_start }] } = await db.query<{ week_start: string }>(
-      `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
-    );
+      // Compute current ISO-week Monday for dismissal lookup (TZ-stable via Postgres)
+      const {
+        rows: [{ week_start }],
+      } = await db.query<{ week_start: string }>(
+        `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
+      );
 
-    const triggered = (await evaluateAll(ctx))
-      .filter((f): f is Extract<EvaluatedFlag, { triggered: true }> => f.triggered);
+      const triggered = (await evaluateAll(ctx)).filter(
+        (f): f is Extract<EvaluatedFlag, { triggered: true }> => f.triggered,
+      );
 
-    const flags: RecoveryFlagListResponse['flags'] = [];
-    const visibleKeys: RecoveryFlagKey[] = [];
-    for (const f of triggered) {
-      const dismissed = await isDismissed({ userId, flag: f.key, weekStart: week_start });
-      if (dismissed) continue;
-      flags.push({
-        flag: f.key as RecoveryFlagListResponse['flags'][number]['flag'],
-        message: f.message,
-        ...(typeof f.payload?.trend_7d_lbs === 'number'
-          ? { trend_7d_lbs: f.payload.trend_7d_lbs }
-          : {}),
-      });
-      visibleKeys.push(f.key as RecoveryFlagKey);
-    }
+      const flags: RecoveryFlagListResponse['flags'] = [];
+      const visibleKeys: RecoveryFlagKey[] = [];
+      for (const f of triggered) {
+        const dismissed = await isDismissed({ userId, flag: f.key, weekStart: week_start });
+        if (dismissed) continue;
+        flags.push({
+          flag: f.key as RecoveryFlagListResponse['flags'][number]['flag'],
+          message: f.message,
+          ...(typeof f.payload?.trend_7d_lbs === 'number'
+            ? { trend_7d_lbs: f.payload.trend_7d_lbs }
+            : {}),
+        });
+        visibleKeys.push(f.key as RecoveryFlagKey);
+      }
 
-    // [FIX-6] EvaluatedFlag's discriminator is `key` (not `flag`). We track
-    // f.key into visibleKeys above so the telemetry write here uses the
-    // evaluator key directly. Append-only on first emit per (user, flag,
-    // week); subsequent polls dedupe via the partial unique index.
-    for (const key of visibleKeys) {
-      await recordFlagShown({ userId, flag: key });
-    }
+      // [FIX-6] EvaluatedFlag's discriminator is `key` (not `flag`). We track
+      // f.key into visibleKeys above so the telemetry write here uses the
+      // evaluator key directly. Append-only on first emit per (user, flag,
+      // week); subsequent polls dedupe via the partial unique index.
+      for (const key of visibleKeys) {
+        await recordFlagShown({ userId, flag: key });
+      }
 
-    const flagsResp: RecoveryFlagListResponse = { flags };
-    return flagsResp;
-  });
+      const flagsResp: RecoveryFlagListResponse = { flags };
+      return flagsResp;
+    },
+  );
 
   app.post<{ Body: unknown }>(
     '/recovery-flags/dismiss',
@@ -112,7 +119,9 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
       }
 
       // Compute current ISO-week Monday (TZ-stable via Postgres, same formula as GET)
-      const { rows: [{ week_start }] } = await db.query<{ week_start: string }>(
+      const {
+        rows: [{ week_start }],
+      } = await db.query<{ week_start: string }>(
         `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
       );
 

@@ -5,7 +5,7 @@ describe('computeWarmupSets', () => {
   it('returns 3 sets at 40/60/80% rounded to nearest 5 lb', () => {
     const out = computeWarmupSets(225);
     expect(out).toEqual([
-      { pct: 40, load_lbs: 90,  rir: 5 },
+      { pct: 40, load_lbs: 90, rir: 5 },
       { pct: 60, load_lbs: 135, rir: 5 },
       { pct: 80, load_lbs: 180, rir: 5 },
     ]);

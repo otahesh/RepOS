@@ -61,7 +61,11 @@ describe('<Term variant="abbr">', () => {
   });
 
   it('renders children when provided (override label)', () => {
-    render(<Term k="RPE" variant="abbr">rate of perceived exertion</Term>);
+    render(
+      <Term k="RPE" variant="abbr">
+        rate of perceived exertion
+      </Term>,
+    );
     expect(screen.getByText('rate of perceived exertion')).toBeInTheDocument();
   });
 
@@ -153,12 +157,16 @@ describe('<Term variant="abbr">', () => {
     const abbr = container.querySelector('abbr')!;
     // First tap — opens
     await act(async () => {
-      abbr.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+      abbr.dispatchEvent(
+        new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }),
+      );
     });
     expect(await screen.findByText(/Minimum Effective Volume/)).toBeInTheDocument();
     // Second tap — closes
     await act(async () => {
-      abbr.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+      abbr.dispatchEvent(
+        new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }),
+      );
     });
     expect(screen.queryByText(/Minimum Effective Volume/)).toBeNull();
   });

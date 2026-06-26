@@ -13,9 +13,7 @@ import type { PendingSetLog } from '../lib/idbQueue';
  *   • 'rejected' — terminal failure; user must review.
  *   • 'unknown' — no client_request_id yet (initial state before enqueue).
  */
-export type QueueRowStatus =
-  | PendingSetLog['status']
-  | 'unknown';
+export type QueueRowStatus = PendingSetLog['status'] | 'unknown';
 
 const POLL_MS = 500;
 
@@ -59,7 +57,9 @@ export function useIdbQueueStatus(clientRequestId: string | null): QueueRowStatu
     };
 
     void tick(); // immediate read so the UI doesn't wait 500ms for first sample
-    const id = setInterval(() => { void tick(); }, POLL_MS);
+    const id = setInterval(() => {
+      void tick();
+    }, POLL_MS);
 
     return () => {
       cancelled = true;

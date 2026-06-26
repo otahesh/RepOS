@@ -7,11 +7,16 @@ type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 
 beforeAll(async () => {
-  const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM exercises WHERE archived_at IS NULL`);
+  const { rows } = await db.query(
+    `SELECT COUNT(*)::int AS n FROM exercises WHERE archived_at IS NULL`,
+  );
   if (rows[0].n < 30) throw new Error('seed not applied');
   app = await buildApp();
 });
-afterAll(async () => { await app.close(); await db.end(); });
+afterAll(async () => {
+  await app.close();
+  await db.end();
+});
 
 describe('GET /api/exercises (spec §9.4)', () => {
   it('19. returns full non-archived catalog with stable slug ordering', async () => {
@@ -19,7 +24,7 @@ describe('GET /api/exercises (spec §9.4)', () => {
     expect(r.statusCode).toBe(200);
     const body = r.json<{ exercises: any[] }>();
     expect(body.exercises.length).toBeGreaterThanOrEqual(30);
-    const slugs = body.exercises.map(e => e.slug);
+    const slugs = body.exercises.map((e) => e.slug);
     expect(slugs).toEqual([...slugs].sort());
   });
 
@@ -49,18 +54,24 @@ describe('GET /api/exercises/:slug/substitutions', () => {
   let userId: string;
   let token: string;
   beforeAll(async () => {
-    const { rows: [u] } = await db.query(
+    const {
+      rows: [u],
+    } = await db.query(
       `INSERT INTO users (email, equipment_profile)
        VALUES ($1, $2::jsonb) RETURNING id`,
-      [`vitest.subs.${Date.now()}@repos.test`, JSON.stringify({
-        _v: 1,
-        dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 },
-        adjustable_bench: { incline: true, decline: true },
-      })],
+      [
+        `vitest.subs.${Date.now()}@repos.test`,
+        JSON.stringify({
+          _v: 1,
+          dumbbells: { min_lb: 10, max_lb: 100, increment_lb: 10 },
+          adjustable_bench: { incline: true, decline: true },
+        }),
+      ],
     );
     userId = u.id;
     const mint = await app.inject({
-      method: 'POST', url: '/api/tokens',
+      method: 'POST',
+      url: '/api/tokens',
       body: { user_id: userId, label: 'sub-test' },
     });
     token = mint.json<{ token: string }>().token;

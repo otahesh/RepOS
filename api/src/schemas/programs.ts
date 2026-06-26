@@ -36,20 +36,24 @@ export type ProgramTemplateListResponse = z.infer<typeof ProgramTemplateListResp
 
 // Structure is stored/returned as arbitrary JSONB. We define a loose schema
 // that accepts the known shape without being fragile to new optional fields.
-const BlockSchema = z.object({
-  exercise_slug: z.string(),
-  mev: z.number().int().min(0).optional(),
-  mav: z.number().int().min(0).optional(),
-  target_reps_low: z.number().int().min(1).optional(),
-  target_reps_high: z.number().int().min(1).optional(),
-  target_rir: z.number().int().min(1).optional(),
-  rest_sec: z.number().int().min(0).optional(),
-  cardio: z.object({
-    target_duration_sec: z.number().int().optional(),
-    target_distance_m: z.number().int().optional(),
-    target_zone: z.number().int().min(1).max(5).optional(),
-  }).optional(),
-}).passthrough();
+const BlockSchema = z
+  .object({
+    exercise_slug: z.string(),
+    mev: z.number().int().min(0).optional(),
+    mav: z.number().int().min(0).optional(),
+    target_reps_low: z.number().int().min(1).optional(),
+    target_reps_high: z.number().int().min(1).optional(),
+    target_rir: z.number().int().min(1).optional(),
+    rest_sec: z.number().int().min(0).optional(),
+    cardio: z
+      .object({
+        target_duration_sec: z.number().int().optional(),
+        target_distance_m: z.number().int().optional(),
+        target_zone: z.number().int().min(1).max(5).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
 
 const DayDefSchema = z.object({
   idx: z.number().int().min(0),

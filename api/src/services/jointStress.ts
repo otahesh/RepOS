@@ -5,8 +5,8 @@ import { db } from '../db/client.js';
 // (Σ sets × stress) is a separate intensity-weighted axis surfaced via
 // week.joints[joint].score, not gated by these caps.
 const SOFT_CAPS = {
-  lumbar:   { cap: 16, kind: 'soft_cap_lumbar' },
-  knee:     { cap: 20, kind: 'soft_cap_knee' },
+  lumbar: { cap: 16, kind: 'soft_cap_lumbar' },
+  knee: { cap: 20, kind: 'soft_cap_knee' },
   shoulder: { cap: 14, kind: 'soft_cap_shoulder' },
 } as const;
 const HIGH_LEVEL = 'high';
@@ -30,8 +30,11 @@ export type JointStressReport = {
 
 export async function computeWeeklyJointStress(runId: string): Promise<JointStressReport> {
   const { rows } = await db.query<{
-    week_idx: number; day_workout_id: string; ex_name: string;
-    sets: number; profile: any;
+    week_idx: number;
+    day_workout_id: string;
+    ex_name: string;
+    sets: number;
+    profile: any;
   }>(
     `SELECT dw.week_idx, dw.id AS day_workout_id, e.name AS ex_name,
             COUNT(*)::int AS sets,
@@ -47,7 +50,10 @@ export async function computeWeeklyJointStress(runId: string): Promise<JointStre
   const byWeek = new Map<number, WeekJointStress>();
   for (const r of rows) {
     let wk = byWeek.get(r.week_idx);
-    if (!wk) { wk = { week_idx: r.week_idx, joints: {}, warnings: [] }; byWeek.set(r.week_idx, wk); }
+    if (!wk) {
+      wk = { week_idx: r.week_idx, joints: {}, warnings: [] };
+      byWeek.set(r.week_idx, wk);
+    }
 
     const profile = r.profile ?? { _v: 1 };
     for (const [joint, raw] of Object.entries(profile)) {
@@ -75,7 +81,11 @@ export async function computeWeeklyJointStress(runId: string): Promise<JointStre
   for (const [dwId, info] of bySession) {
     if (info.exercises.length >= 2) {
       const wk = byWeek.get(info.week_idx);
-      wk?.warnings.push({ kind: 'multi_high_lumbar_in_session', day_workout_id: dwId, exercises: info.exercises });
+      wk?.warnings.push({
+        kind: 'multi_high_lumbar_in_session',
+        day_workout_id: dwId,
+        exercises: info.exercises,
+      });
     }
   }
 
@@ -101,5 +111,8 @@ export async function computeWeeklyJointStress(runId: string): Promise<JointStre
     }
   }
 
-  return { run_id: runId, weeks: Array.from(byWeek.values()).sort((a, b) => a.week_idx - b.week_idx) };
+  return {
+    run_id: runId,
+    weeks: Array.from(byWeek.values()).sort((a, b) => a.week_idx - b.week_idx),
+  };
 }

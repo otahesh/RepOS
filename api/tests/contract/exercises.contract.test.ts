@@ -25,10 +25,11 @@ let exerciseSlug: string | undefined;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.exercises.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.exercises.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -45,9 +46,9 @@ beforeAll(async () => {
   );
 
   // Find a real exercise slug to exercise the detail + substitution endpoints
-  const { rows: [ex] } = await db.query(
-    `SELECT slug FROM exercises WHERE archived_at IS NULL LIMIT 1`,
-  );
+  const {
+    rows: [ex],
+  } = await db.query(`SELECT slug FROM exercises WHERE archived_at IS NULL LIMIT 1`);
   exerciseSlug = ex?.slug;
 }, 30_000);
 
@@ -71,7 +72,9 @@ describe('GET /api/exercises contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = ExerciseListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data.exercises)).toBe(true);
     }
@@ -94,7 +97,9 @@ describe('GET /api/exercises/:slug contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = ExerciseDetailResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.slug).toBe(exerciseSlug);
     }
@@ -126,7 +131,9 @@ describe('GET /api/exercises/:slug/substitutions contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = SubstitutionResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.from.slug).toBe(exerciseSlug);
       expect(Array.isArray(parsed.data.subs)).toBe(true);

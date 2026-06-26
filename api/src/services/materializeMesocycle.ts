@@ -1,7 +1,6 @@
 import { db } from '../db/client.js';
 import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
 import { addDaysISO } from './_dateUtil.js';
-import { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
 import { resolveUserLandmarksWith } from './resolveUserLandmarks.js';
 
 export { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
@@ -17,20 +16,29 @@ const DELOAD_TARGET_RIR = 4;
 
 type Block = {
   exercise_slug: string;
-  mev: number; mav: number;
-  target_reps_low: number; target_reps_high: number;
-  target_rir: number; rest_sec: number;
+  mev: number;
+  mav: number;
+  target_reps_low: number;
+  target_reps_high: number;
+  target_rir: number;
+  rest_sec: number;
   cardio?: { target_duration_sec?: number; target_distance_m?: number; target_zone?: number };
 };
 
-type DayDef = { idx: number; day_offset: number; kind: 'strength'|'cardio'|'hybrid'; name: string; blocks: Block[] };
+type DayDef = {
+  idx: number;
+  day_offset: number;
+  kind: 'strength' | 'cardio' | 'hybrid';
+  name: string;
+  blocks: Block[];
+};
 
 type Structure = { _v: number; days: DayDef[] };
 
 export type MaterializeInput = {
   userProgramId: string;
-  startDate: string;     // YYYY-MM-DD
-  startTz: string;       // IANA tz
+  startDate: string; // YYYY-MM-DD
+  startTz: string; // IANA tz
   // [C-RUN-IT-BACK-ROUTE + I-DELOAD-TXN-BOUNDARY] When 'deload', the deload
   // post-process runs INSIDE the same SERIALIZABLE txn as materialize (no
   // second client, no commit-then-mutate window).
@@ -41,14 +49,22 @@ export type MaterializeResult = { run_id: string };
 export class TemplateOutdatedError extends Error {
   code = 'template_outdated' as const;
   status = 409;
-  constructor(public latest_version: number) { super('template_outdated'); }
-  toJSON() { return { error: this.code, latest_version: this.latest_version, must_refork: true }; }
+  constructor(public latest_version: number) {
+    super('template_outdated');
+  }
+  toJSON() {
+    return { error: this.code, latest_version: this.latest_version, must_refork: true };
+  }
 }
 
 export class ActiveRunExistsError extends Error {
   status = 409;
-  constructor() { super('active run already exists'); }
-  toJSON() { return { error: 'active_run_exists' }; }
+  constructor() {
+    super('active run already exists');
+  }
+  toJSON() {
+    return { error: 'active_run_exists' };
+  }
 }
 
 async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
@@ -57,13 +73,22 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
 
     // Step 2: template version match.
-    const { rows: [up] } = await client.query<{
-      user_id: string; template_id: string | null; template_version: number | null; customizations: any;
+    const {
+      rows: [up],
+    } = await client.query<{
+      user_id: string;
+      template_id: string | null;
+      template_version: number | null;
+      customizations: any;
     }>(
       `SELECT user_id, template_id, template_version, customizations
-       FROM user_programs WHERE id=$1 FOR UPDATE`, [input.userProgramId],
+       FROM user_programs WHERE id=$1 FOR UPDATE`,
+      [input.userProgramId],
     );
-    if (!up) { await client.query('ROLLBACK'); throw new Error('user_program not found'); }
+    if (!up) {
+      await client.query('ROLLBACK');
+      throw new Error('user_program not found');
+    }
 
     // [C-LANDMARKS-ACTIVE-RUN] Resolve the user's effective landmarks ONCE per
     // materialize. The merge of MUSCLE_LANDMARKS defaults + the user's overrides
@@ -78,11 +103,16 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     let structure: Structure;
     let weeks: number;
     if (up.template_id) {
-      const { rows: [tpl] } = await client.query<{ structure: Structure; version: number; weeks: number }>(
+      const {
+        rows: [tpl],
+      } = await client.query<{ structure: Structure; version: number; weeks: number }>(
         `SELECT structure, version, weeks FROM program_templates WHERE id=$1`,
         [up.template_id],
       );
-      if (!tpl) { await client.query('ROLLBACK'); throw new Error('template not found'); }
+      if (!tpl) {
+        await client.query('ROLLBACK');
+        throw new Error('template not found');
+      }
       if (tpl.version !== up.template_version) {
         await client.query('ROLLBACK');
         throw new TemplateOutdatedError(tpl.version);
@@ -99,7 +129,9 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     // if another active run already exists for this user (23505).
     let runId: string;
     try {
-      const { rows: [run] } = await client.query<{ id: string }>(
+      const {
+        rows: [run],
+      } = await client.query<{ id: string }>(
         `INSERT INTO mesocycle_runs (user_program_id, user_id, start_date, start_tz, weeks, status)
          SELECT $1, user_id, $2::date, $3, $4, 'active'
          FROM user_programs WHERE id=$1
@@ -118,31 +150,44 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     // [C-LANDMARKS-ACTIVE-RUN] Snapshot the resolved landmarks into the run row
     // (same txn). Mid-run PATCH /me/landmarks cannot silently change the MAV
     // thresholds the user is training against — the snapshot is the contract.
-    await client.query(
-      `UPDATE mesocycle_runs SET landmarks_snapshot=$2::jsonb WHERE id=$1`,
-      [runId, JSON.stringify(resolvedLandmarks)],
-    );
+    await client.query(`UPDATE mesocycle_runs SET landmarks_snapshot=$2::jsonb WHERE id=$1`, [
+      runId,
+      JSON.stringify(resolvedLandmarks),
+    ]);
 
     // Step 6: day_workouts (UNNEST bulk insert).
     // W2.5: is_deload = (w === weeks) — the canonical RP deload week is the
     // final week. The stalledPrEvaluator reads this per-row flag (replacing the
     // interim `current_week >= weeks` heuristic). W4's full deload-meso will
     // also flip these rows when mesocycle_runs.is_deload=true.
-    const dayRows: { week_idx: number; day_idx: number; scheduled_date: string; kind: string; name: string; is_deload: boolean }[] = [];
+    const dayRows: {
+      week_idx: number;
+      day_idx: number;
+      scheduled_date: string;
+      kind: string;
+      name: string;
+      is_deload: boolean;
+    }[] = [];
     for (let w = 1; w <= weeks; w++) {
       for (const d of structure.days) {
         const offset = (w - 1) * 7 + d.day_offset;
         dayRows.push({
-          week_idx: w, day_idx: d.idx,
+          week_idx: w,
+          day_idx: d.idx,
           scheduled_date: addDaysISO(input.startDate, offset),
-          kind: d.kind, name: d.name,
+          kind: d.kind,
+          name: d.name,
           is_deload: w === weeks,
         });
       }
     }
     const dayIdMap = new Map<string, string>(); // (week_idx,day_idx) → day_workout_id
     if (dayRows.length > 0) {
-      const { rows: dwInserted } = await client.query<{ id: string; week_idx: number; day_idx: number }>(
+      const { rows: dwInserted } = await client.query<{
+        id: string;
+        week_idx: number;
+        day_idx: number;
+      }>(
         `INSERT INTO day_workouts (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name, is_deload)
          SELECT $1, w, d, sd::date, k, n, dl
          FROM unnest($2::int[], $3::int[], $4::text[], $5::day_workout_kind[], $6::text[], $7::bool[])
@@ -150,43 +195,64 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
          RETURNING id, week_idx, day_idx`,
         [
           runId,
-          dayRows.map(r => r.week_idx),
-          dayRows.map(r => r.day_idx),
-          dayRows.map(r => r.scheduled_date),
-          dayRows.map(r => r.kind),
-          dayRows.map(r => r.name),
-          dayRows.map(r => r.is_deload),
+          dayRows.map((r) => r.week_idx),
+          dayRows.map((r) => r.day_idx),
+          dayRows.map((r) => r.scheduled_date),
+          dayRows.map((r) => r.kind),
+          dayRows.map((r) => r.name),
+          dayRows.map((r) => r.is_deload),
         ],
       );
       for (const r of dwInserted) dayIdMap.set(`${r.week_idx}|${r.day_idx}`, r.id);
     }
 
     // Lookup exercise IDs for all referenced slugs in one round-trip.
-    const allSlugs = Array.from(new Set(structure.days.flatMap(d => d.blocks.map(b => b.exercise_slug))));
-    const { rows: exRows } = await client.query<{ id: string; slug: string; primary_muscle_slug: string }>(
+    const allSlugs = Array.from(
+      new Set(structure.days.flatMap((d) => d.blocks.map((b) => b.exercise_slug))),
+    );
+    const { rows: exRows } = await client.query<{
+      id: string;
+      slug: string;
+      primary_muscle_slug: string;
+    }>(
       `SELECT e.id, e.slug, m.slug AS primary_muscle_slug
        FROM exercises e JOIN muscles m ON m.id = e.primary_muscle_id
        WHERE e.slug = ANY($1::text[]) AND e.archived_at IS NULL`,
       [allSlugs],
     );
-    const exBySlug = new Map(exRows.map(r => [r.slug, r]));
+    const exBySlug = new Map(exRows.map((r) => [r.slug, r]));
 
     // Step 7: planned_sets / planned_cardio_blocks via UNNEST.
     // Group blocks-of-the-week by primary_muscle so the ramp + distributor
     // can split a muscle's weekly target across that muscle's blocks-of-the-week.
     const setRows: {
-      day_workout_id: string; block_idx: number; set_idx: number;
-      exercise_id: string; reps_low: number; reps_high: number;
-      rir: number; rest: number;
+      day_workout_id: string;
+      block_idx: number;
+      set_idx: number;
+      exercise_id: string;
+      reps_low: number;
+      reps_high: number;
+      rir: number;
+      rest: number;
     }[] = [];
     const cardioRows: {
-      day_workout_id: string; block_idx: number; exercise_id: string;
-      duration_sec: number | null; distance_m: number | null; zone: number | null;
+      day_workout_id: string;
+      block_idx: number;
+      exercise_id: string;
+      duration_sec: number | null;
+      distance_m: number | null;
+      zone: number | null;
     }[] = [];
 
     for (let w = 1; w <= weeks; w++) {
       // Group blocks across all days in this week by primary_muscle.
-      type GroupBlock = { dayIdx: number; blockIdx: number; block: Block; exerciseId: string; mev: number };
+      type GroupBlock = {
+        dayIdx: number;
+        blockIdx: number;
+        block: Block;
+        exerciseId: string;
+        mev: number;
+      };
       const muscleGroups = new Map<string, GroupBlock[]>();
       for (const d of structure.days) {
         d.blocks.forEach((b, blockIdx) => {
@@ -206,19 +272,27 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       for (const [muscleSlug, blocks] of muscleGroups) {
         const lm = resolvedLandmarks[muscleSlug];
         if (!lm) throw new Error(`muscle '${muscleSlug}' has no MEV/MAV/MRV landmarks`);
-        const weekTarget = computeRamp({ mev: lm.mev, mav: lm.mav, mrv: lm.mrv, week: w, totalWeeks: weeks });
+        const weekTarget = computeRamp({
+          mev: lm.mev,
+          mav: lm.mav,
+          mrv: lm.mrv,
+          week: w,
+          totalWeeks: weeks,
+        });
         const dist = distributeWeekTargetAcrossBlocks(
-          blocks.map(b => ({ blockKey: `${b.dayIdx}|${b.blockIdx}`, mev: b.mev })),
+          blocks.map((b) => ({ blockKey: `${b.dayIdx}|${b.blockIdx}`, mev: b.mev })),
           weekTarget,
         );
-        const setsByKey = new Map(dist.map(d => [d.blockKey, d.sets]));
+        const setsByKey = new Map(dist.map((d) => [d.blockKey, d.sets]));
         for (const gb of blocks) {
           const sets = setsByKey.get(`${gb.dayIdx}|${gb.blockIdx}`) ?? 0;
           const dwId = dayIdMap.get(`${w}|${gb.dayIdx}`);
           if (!dwId) continue;
           for (let s = 0; s < sets; s++) {
             setRows.push({
-              day_workout_id: dwId, block_idx: gb.blockIdx, set_idx: s,
+              day_workout_id: dwId,
+              block_idx: gb.blockIdx,
+              set_idx: s,
               exercise_id: gb.exerciseId,
               reps_low: gb.block.target_reps_low,
               reps_high: gb.block.target_reps_high,
@@ -238,7 +312,9 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
           const dwId = dayIdMap.get(`${w}|${d.idx}`);
           if (!dwId) return;
           cardioRows.push({
-            day_workout_id: dwId, block_idx: blockIdx, exercise_id: ex.id,
+            day_workout_id: dwId,
+            block_idx: blockIdx,
+            exercise_id: ex.id,
             duration_sec: b.cardio.target_duration_sec ?? null,
             distance_m: b.cardio.target_distance_m ?? null,
             zone: b.cardio.target_zone ?? null,
@@ -257,14 +333,14 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
                      $5::int[], $6::int[], $7::int[], $8::int[])
               AS t(dw, bi, si, ex, rl, rh, ri, rs)`,
         [
-          setRows.map(r => r.day_workout_id),
-          setRows.map(r => r.block_idx),
-          setRows.map(r => r.set_idx),
-          setRows.map(r => r.exercise_id),
-          setRows.map(r => r.reps_low),
-          setRows.map(r => r.reps_high),
-          setRows.map(r => r.rir),
-          setRows.map(r => r.rest),
+          setRows.map((r) => r.day_workout_id),
+          setRows.map((r) => r.block_idx),
+          setRows.map((r) => r.set_idx),
+          setRows.map((r) => r.exercise_id),
+          setRows.map((r) => r.reps_low),
+          setRows.map((r) => r.reps_high),
+          setRows.map((r) => r.rir),
+          setRows.map((r) => r.rest),
         ],
       );
     }
@@ -276,12 +352,12 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
          FROM unnest($1::uuid[], $2::int[], $3::uuid[], $4::int[], $5::int[], $6::int[])
               AS t(dw, bi, ex, du, di, zo)`,
         [
-          cardioRows.map(r => r.day_workout_id),
-          cardioRows.map(r => r.block_idx),
-          cardioRows.map(r => r.exercise_id),
-          cardioRows.map(r => r.duration_sec),
-          cardioRows.map(r => r.distance_m),
-          cardioRows.map(r => r.zone),
+          cardioRows.map((r) => r.day_workout_id),
+          cardioRows.map((r) => r.block_idx),
+          cardioRows.map((r) => r.exercise_id),
+          cardioRows.map((r) => r.duration_sec),
+          cardioRows.map((r) => r.distance_m),
+          cardioRows.map((r) => r.zone),
         ],
       );
     }
@@ -332,25 +408,30 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       // [C-IS-DELOAD] Update BOTH is_deload columns coherently (run-level +
       // every week's day_workouts) so the overreaching-evaluator guard and
       // MesocycleRecap copy both see a consistent deload context.
-      await client.query(
-        `UPDATE mesocycle_runs SET is_deload=true WHERE id=$1`, [runId],
-      );
-      await client.query(
-        `UPDATE day_workouts SET is_deload=true WHERE mesocycle_run_id=$1`, [runId],
-      );
+      await client.query(`UPDATE mesocycle_runs SET is_deload=true WHERE id=$1`, [runId]);
+      await client.query(`UPDATE day_workouts SET is_deload=true WHERE mesocycle_run_id=$1`, [
+        runId,
+      ]);
     }
 
     // Step 8: started event.
     await client.query(
       `INSERT INTO mesocycle_run_events (run_id, event_type, payload)
        VALUES ($1, 'started', $2::jsonb)`,
-      [runId, JSON.stringify({ user_program_id: input.userProgramId, intent: input.intent ?? 'normal' })],
+      [
+        runId,
+        JSON.stringify({ user_program_id: input.userProgramId, intent: input.intent ?? 'normal' }),
+      ],
     );
 
     await client.query('COMMIT');
     return { run_id: runId };
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* already rolled back */
+    }
     throw e;
   } finally {
     client.release();
@@ -373,7 +454,7 @@ export async function materializeMesocycle(input: MaterializeInput): Promise<Mat
       // the partial unique index — those are deterministic outcomes.
       if (e?.code !== '40001') throw e;
       const backoffMs = 5 * Math.pow(5, attempt); // 5, 25, 125, 625, 3125
-      await new Promise(r => setTimeout(r, backoffMs));
+      await new Promise((r) => setTimeout(r, backoffMs));
     }
   }
   throw lastErr;

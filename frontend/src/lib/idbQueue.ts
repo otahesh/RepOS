@@ -1,10 +1,10 @@
 import Dexie, { type Table } from 'dexie';
 
 export interface PendingSetLog {
-  client_request_id: string;     // uuid; primary key
-  queue_owner_user_id: string;   // who enqueued; checked at boot for auth-state-change purge
-  planned_set_id: string;        // uuid
-  performed_at: string;          // ISO with offset
+  client_request_id: string; // uuid; primary key
+  queue_owner_user_id: string; // who enqueued; checked at boot for auth-state-change purge
+  planned_set_id: string; // uuid
+  performed_at: string; // ISO with offset
   weight_lbs: number | null;
   reps: number | null;
   rir: number | null;
@@ -103,7 +103,7 @@ class IdbQueue {
     if (stuck.length === 0) return;
     const now = Date.now();
     await this.db.pendingSetLogs.bulkPut(
-      stuck.map(row => ({
+      stuck.map((row) => ({
         ...row,
         status: 'pending' as const,
         attempt_count: row.attempt_count + 1,

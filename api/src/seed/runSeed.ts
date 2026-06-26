@@ -17,15 +17,18 @@ export type RunSeedResult =
 export async function runSeed<T>(opts: RunSeedOpts<T>): Promise<RunSeedResult> {
   const validation = opts.adapter.validate(opts.entries);
   if (!validation.success) {
-    const issues = validation.error.issues.map(i => `${i.path.join('.')}: ${i.message}`);
+    const issues = validation.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
     throw new Error(`seed validation failed (${opts.key}):\n${issues.join('\n')}`);
   }
 
   const hash = createHash('sha256').update(JSON.stringify(opts.entries)).digest('hex');
   const client = await db.connect();
   try {
-    const { rows: [meta] } = await client.query<{ hash: string; generation: number }>(
-      `SELECT hash, generation FROM _seed_meta WHERE key=$1`, [opts.key]
+    const {
+      rows: [meta],
+    } = await client.query<{ hash: string; generation: number }>(
+      `SELECT hash, generation FROM _seed_meta WHERE key=$1`,
+      [opts.key],
     );
     if (meta && meta.hash === hash) {
       return { applied: false, reason: 'hash_unchanged', generation: meta.generation };

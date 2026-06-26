@@ -23,45 +23,67 @@ describe('UserProgramPatchSchema', () => {
   });
 
   it('accepts add_set / remove_set', () => {
-    expect(UserProgramPatchSchema.safeParse({
-      op: 'add_set', day_idx: 0, block_idx: 0,
-    }).success).toBe(true);
-    expect(UserProgramPatchSchema.safeParse({
-      op: 'remove_set', day_idx: 0, block_idx: 0,
-    }).success).toBe(true);
+    expect(
+      UserProgramPatchSchema.safeParse({
+        op: 'add_set',
+        day_idx: 0,
+        block_idx: 0,
+      }).success,
+    ).toBe(true);
+    expect(
+      UserProgramPatchSchema.safeParse({
+        op: 'remove_set',
+        day_idx: 0,
+        block_idx: 0,
+      }).success,
+    ).toBe(true);
   });
 
   it('accepts change_rir for week', () => {
     const r = UserProgramPatchSchema.safeParse({
-      op: 'change_rir', week_idx: 2, day_idx: 0, block_idx: 0, target_rir: 1,
+      op: 'change_rir',
+      week_idx: 2,
+      day_idx: 0,
+      block_idx: 0,
+      target_rir: 1,
     });
     expect(r.success).toBe(true);
   });
 
   it('rejects change_rir target_rir = 0', () => {
     const r = UserProgramPatchSchema.safeParse({
-      op: 'change_rir', week_idx: 2, day_idx: 0, block_idx: 0, target_rir: 0,
+      op: 'change_rir',
+      week_idx: 2,
+      day_idx: 0,
+      block_idx: 0,
+      target_rir: 0,
     });
     expect(r.success).toBe(false);
   });
 
   it('accepts shift_weekday', () => {
     const r = UserProgramPatchSchema.safeParse({
-      op: 'shift_weekday', day_idx: 0, to_day_offset: 2,
+      op: 'shift_weekday',
+      day_idx: 0,
+      to_day_offset: 2,
     });
     expect(r.success).toBe(true);
   });
 
   it('rejects shift_weekday to_day_offset > 6', () => {
     const r = UserProgramPatchSchema.safeParse({
-      op: 'shift_weekday', day_idx: 0, to_day_offset: 7,
+      op: 'shift_weekday',
+      day_idx: 0,
+      to_day_offset: 7,
     });
     expect(r.success).toBe(false);
   });
 
   it('accepts skip_day', () => {
     const r = UserProgramPatchSchema.safeParse({
-      op: 'skip_day', week_idx: 1, day_idx: 0,
+      op: 'skip_day',
+      week_idx: 1,
+      day_idx: 0,
     });
     expect(r.success).toBe(true);
   });

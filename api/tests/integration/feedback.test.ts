@@ -7,7 +7,7 @@ import { mkUser } from '../helpers/program-fixtures.js';
 
 describe('deliverFeedbackWebhook', () => {
   let server: Server;
-  let received: unknown[] = [];
+  const received: unknown[] = [];
   let userId: string;
   const savedUrl = process.env.FEEDBACK_WEBHOOK_URL;
 
@@ -49,10 +49,10 @@ describe('deliverFeedbackWebhook', () => {
     await deliverFeedbackWebhook(id, { sleep: () => Promise.resolve() });
 
     expect(received).toHaveLength(1);
-    const { rows: after } = await db.query<{ webhook_delivered_at: Date | null; webhook_attempts: number }>(
-      `SELECT webhook_delivered_at, webhook_attempts FROM feedback WHERE id=$1`,
-      [id],
-    );
+    const { rows: after } = await db.query<{
+      webhook_delivered_at: Date | null;
+      webhook_attempts: number;
+    }>(`SELECT webhook_delivered_at, webhook_attempts FROM feedback WHERE id=$1`, [id]);
     expect(after[0].webhook_delivered_at).not.toBeNull();
     expect(after[0].webhook_attempts).toBe(1);
   });

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState, Fragment } from 'react';
-import { getMesocycle, getVolumeRollup, type MesocycleRunDetail, type VolumeRollup } from '../../lib/api/mesocycles';
+import {
+  getMesocycle,
+  getVolumeRollup,
+  type MesocycleRunDetail,
+  type VolumeRollup,
+} from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 
 function tierColor(sets: number, mev: number, mav: number, mrv: number): string {
@@ -35,7 +40,8 @@ function pivotByMuscle(vol: VolumeRollup): {
   for (const wk of vol.weeks) {
     for (const m of wk.muscles) {
       if (!setsByMuscleByWeek[m.muscle]) setsByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
-      if (!performedByMuscleByWeek[m.muscle]) performedByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
+      if (!performedByMuscleByWeek[m.muscle])
+        performedByMuscleByWeek[m.muscle] = Array(totalWeeks).fill(0);
       // week_idx is 1-indexed; align to 0-indexed array.
       setsByMuscleByWeek[m.muscle][wk.week_idx - 1] = m.sets;
       performedByMuscleByWeek[m.muscle][wk.week_idx - 1] = m.performed_sets;
@@ -66,41 +72,88 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
   const [run, setRun] = useState<MesocycleRunDetail | null>(null);
   const [vol, setVol] = useState<VolumeRollup | null>(null);
   useEffect(() => {
-    getMesocycle(mesocycleRunId).then(setRun).catch(() => setRun(null));
-    getVolumeRollup(mesocycleRunId).then(setVol).catch(() => setVol(null));
+    getMesocycle(mesocycleRunId)
+      .then(setRun)
+      .catch(() => setRun(null));
+    getVolumeRollup(mesocycleRunId)
+      .then(setVol)
+      .catch(() => setVol(null));
   }, [mesocycleRunId]);
   const pivot = useMemo(() => (vol ? pivotByMuscle(vol) : null), [vol]);
-  if (!run || !vol || !pivot) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+  if (!run || !vol || !pivot)
+    return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
 
   const muscles = pivot.muscles;
 
   return (
-    <div style={{ padding: 24, fontFamily: 'Inter Tight', color: '#fff', display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div
+      style={{
+        padding: 24,
+        fontFamily: 'Inter Tight',
+        color: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 24,
+      }}
+    >
       <header>
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1, color: '#4D8DFF', textTransform: 'uppercase' }}>
-          {'Active '}<Term k="mesocycle" />{' · Week '}{run.current_week}{' of '}{run.weeks}
+        <div
+          style={{
+            fontFamily: 'JetBrains Mono',
+            fontSize: 11,
+            letterSpacing: 1,
+            color: '#4D8DFF',
+            textTransform: 'uppercase',
+          }}
+        >
+          {'Active '}
+          <Term k="mesocycle" />
+          {' · Week '}
+          {run.current_week}
+          {' of '}
+          {run.weeks}
         </div>
-        <h2 style={{ margin: '8px 0', fontSize: 22 }}><Term k="mesocycle">Mesocycle</Term>{' Run'}</h2>
+        <h2 style={{ margin: '8px 0', fontSize: 22 }}>
+          <Term k="mesocycle">Mesocycle</Term>
+          {' Run'}
+        </h2>
       </header>
 
       <section>
         <h3 style={{ marginTop: 0, fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
-          <Term k="working_set" />{' heatmap (logged / planned per week)'}
+          <Term k="working_set" />
+          {' heatmap (logged / planned per week)'}
         </h3>
-        <div style={{ display: 'grid', gridTemplateColumns: `auto repeat(${run.weeks}, 1fr)`, gap: 4, fontFamily: 'JetBrains Mono', fontSize: 11 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `auto repeat(${run.weeks}, 1fr)`,
+            gap: 4,
+            fontFamily: 'JetBrains Mono',
+            fontSize: 11,
+          }}
+        >
           <div></div>
           {Array.from({ length: run.weeks }, (_, i) => (
-            <div key={`hdr-${i}`} style={{ textAlign: 'center', color: i + 1 === run.current_week ? '#4D8DFF' : 'rgba(255,255,255,0.5)' }}>
+            <div
+              key={`hdr-${i}`}
+              style={{
+                textAlign: 'center',
+                color: i + 1 === run.current_week ? '#4D8DFF' : 'rgba(255,255,255,0.5)',
+              }}
+            >
               {`W${i + 1}`}
             </div>
           ))}
-          {muscles.map(m => {
+          {muscles.map((m) => {
             const lm = pivot.landmarks[m];
             const cells = pivot.setsByMuscleByWeek[m] ?? [];
             const performed = pivot.performedByMuscleByWeek[m] ?? [];
             return (
               <Fragment key={m}>
-                <div data-testid={`heatmap-row-${m}`} style={{ color: 'rgba(255,255,255,0.7)' }}>{m}</div>
+                <div data-testid={`heatmap-row-${m}`} style={{ color: 'rgba(255,255,255,0.7)' }}>
+                  {m}
+                </div>
                 {cells.map((sets, w) => {
                   const done = performed[w] ?? 0;
                   // Hidden description region keyed via aria-describedby so
@@ -153,7 +206,15 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           })}
         </div>
         <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-          {'Tile color: planned tier ('}<Term k="MEV" />{' → '}<Term k="MAV" />{' → '}<Term k="MRV" />{'). Cell text: logged sets / planned sets — logged number appears once you start logging.'}
+          {'Tile color: planned tier ('}
+          <Term k="MEV" />
+          {' → '}
+          <Term k="MAV" />
+          {' → '}
+          <Term k="MRV" />
+          {
+            '). Cell text: logged sets / planned sets — logged number appears once you start logging.'
+          }
         </div>
       </section>
     </div>

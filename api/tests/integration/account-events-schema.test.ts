@@ -3,10 +3,16 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
 describe('account_events schema (migration 060)', () => {
-  afterAll(async () => { await db.end(); });
+  afterAll(async () => {
+    await db.end();
+  });
 
   it('table exists with the required columns + types', async () => {
-    const { rows } = await db.query<{ column_name: string; data_type: string; is_nullable: string }>(
+    const { rows } = await db.query<{
+      column_name: string;
+      data_type: string;
+      is_nullable: string;
+    }>(
       `SELECT column_name, data_type, is_nullable
          FROM information_schema.columns
         WHERE table_name = 'account_events'
@@ -37,13 +43,16 @@ describe('account_events schema (migration 060)', () => {
     // the route layer. The DB does NOT enforce CHECK on kind, so new kinds
     // (par_q_acknowledged, onboarding_completed, restore_replayed) can ship
     // post-cutover via TypeScript-only changes without migration churn.
-    const { rows: [u] } = await db.query<{ id: string }>(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.acct-events.${crypto.randomUUID()}@repos.test`],
-    );
+    const {
+      rows: [u],
+    } = await db.query<{ id: string }>(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.acct-events.${crypto.randomUUID()}@repos.test`,
+    ]);
     // Inserting a kind the DB doesn't know about should succeed at SQL level
     // (the app-layer union prevents it in production code paths).
-    const { rows: [evt] } = await db.query<{ id: string }>(
+    const {
+      rows: [evt],
+    } = await db.query<{ id: string }>(
       `INSERT INTO account_events (user_id, kind, ip, meta) VALUES ($1, 'arbitrary_app_layer_kind', '1.2.3.4', '{}'::jsonb) RETURNING id`,
       [u.id],
     );
@@ -56,11 +65,14 @@ describe('account_events schema (migration 060)', () => {
   });
 
   it('occurred_at defaults to now(), meta defaults to {}', async () => {
-    const { rows: [u] } = await db.query<{ id: string }>(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.acct-events.${crypto.randomUUID()}@repos.test`],
-    );
-    const { rows: [evt] } = await db.query<{ id: string; occurred_at: Date | null; meta: unknown }>(
+    const {
+      rows: [u],
+    } = await db.query<{ id: string }>(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.acct-events.${crypto.randomUUID()}@repos.test`,
+    ]);
+    const {
+      rows: [evt],
+    } = await db.query<{ id: string; occurred_at: Date | null; meta: unknown }>(
       `INSERT INTO account_events (user_id, kind) VALUES ($1, 'defaults_probe') RETURNING id, occurred_at, meta`,
       [u.id],
     );

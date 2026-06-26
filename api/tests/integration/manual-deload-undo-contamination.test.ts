@@ -2,12 +2,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W8.2 — manual-deload undo contamination', () => {
   it("user B cannot undo user A's deload of user A's mesocycle_run", async () => {
@@ -37,7 +46,7 @@ describe('W8.2 — manual-deload undo contamination', () => {
       `SELECT event_type FROM mesocycle_run_events WHERE run_id=$1 ORDER BY occurred_at`,
       [runId],
     );
-    const kinds = events.map(r => r.event_type);
+    const kinds = events.map((r) => r.event_type);
     expect(kinds).toContain('manual_deload');
     expect(kinds).not.toContain('manual_deload_undone');
   });

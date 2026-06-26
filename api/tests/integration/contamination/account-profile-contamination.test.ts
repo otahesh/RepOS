@@ -36,19 +36,14 @@ beforeAll(async () => {
     body: { user_id: userA, label: 'a', scopes: ['health:weight:write'] },
   });
   tokenA = m.json<{ token: string }>().token;
-  await db.query(`UPDATE users SET display_name='B Original' WHERE id=$1`, [
-    userB,
-  ]);
+  await db.query(`UPDATE users SET display_name='B Original' WHERE id=$1`, [userB]);
 });
 
 afterAll(async () => {
   // account_events rows for either user cascade via ON DELETE SET NULL — we
   // still want to keep the test corpus tight, so drop any rows we wrote
   // explicitly to userB before deleting the users.
-  await db.query(`DELETE FROM account_events WHERE user_id IN ($1,$2)`, [
-    userA,
-    userB,
-  ]);
+  await db.query(`DELETE FROM account_events WHERE user_id IN ($1,$2)`, [userA, userB]);
   await cleanupUser(userA);
   await cleanupUser(userB);
   await app.close();

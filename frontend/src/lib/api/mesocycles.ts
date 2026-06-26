@@ -8,7 +8,12 @@ import { jsonOrThrow } from './_http';
 export { ApiError } from './_http';
 
 export type MesocycleRunStatus =
-  | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
+  | 'draft'
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'archived'
+  | 'abandoned';
 
 export type TodaySet = {
   id: string;
@@ -130,12 +135,16 @@ export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {
 }
 
 export async function getMesocycle(id: string): Promise<MesocycleRunDetail> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}`, {
+    credentials: 'same-origin',
+  });
   return jsonOrThrow(res);
 }
 
 export async function getVolumeRollup(id: string): Promise<VolumeRollup> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, { credentials: 'same-origin' });
+  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, {
+    credentials: 'same-origin',
+  });
   return jsonOrThrow(res);
 }
 

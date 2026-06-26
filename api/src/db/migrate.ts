@@ -27,7 +27,7 @@ try {
     ),
   );
 
-  const files = (await readdir(migrationsDir)).filter(f => f.endsWith('.sql')).sort();
+  const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
 
   for (const file of files) {
     if (applied.has(file)) continue;

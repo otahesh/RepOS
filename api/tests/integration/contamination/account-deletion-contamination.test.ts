@@ -72,16 +72,16 @@ beforeAll(async () => {
   // Seed B with a deeper trail (program + set_log + account_event) so the
   // contamination check has real bytes to verify against. Reuses the same
   // template/exercise pattern as the cascade test.
-  const { rows: ex } = await db.query<{ id: string }>(
-    `SELECT id FROM exercises LIMIT 1`,
-  );
+  const { rows: ex } = await db.query<{ id: string }>(`SELECT id FROM exercises LIMIT 1`);
   if (ex.length === 0) {
     throw new Error('seed: no exercises in DB. Run `npm run seed` in api/.');
   }
   exerciseId = ex[0].id;
 
   const tplSlug = `del-cont-tpl-${randomUUID()}`;
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
        (slug, name, weeks, days_per_week, structure, version, created_by)
      VALUES ($1, 'Del Cont Tpl', 1, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system')
@@ -89,24 +89,32 @@ beforeAll(async () => {
     [tplSlug],
   );
   templateB = tpl.id;
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, 'B Program', 'active') RETURNING id`,
     [userB, templateB],
   );
-  const { rows: [mr] } = await db.query<{ id: string }>(
+  const {
+    rows: [mr],
+  } = await db.query<{ id: string }>(
     `INSERT INTO mesocycle_runs
        (user_program_id, user_id, start_date, start_tz, weeks, current_week, status)
      VALUES ($1, $2, CURRENT_DATE, 'UTC', 1, 1, 'active') RETURNING id`,
     [up.id, userB],
   );
-  const { rows: [dw] } = await db.query<{ id: string }>(
+  const {
+    rows: [dw],
+  } = await db.query<{ id: string }>(
     `INSERT INTO day_workouts
        (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
      VALUES ($1, 1, 0, CURRENT_DATE, 'strength', 'B Day') RETURNING id`,
     [mr.id],
   );
-  const { rows: [ps] } = await db.query<{ id: string }>(
+  const {
+    rows: [ps],
+  } = await db.query<{ id: string }>(
     `INSERT INTO planned_sets
        (day_workout_id, block_idx, set_idx, exercise_id,
         target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -140,7 +148,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // A is most likely already deleted; B and its template still need cleanup.
-  await db.query(`DELETE FROM account_events WHERE user_id IN ($1,$2) OR user_id_at_event IN ($1,$2)`, [userA, userB]);
+  await db.query(
+    `DELETE FROM account_events WHERE user_id IN ($1,$2) OR user_id_at_event IN ($1,$2)`,
+    [userA, userB],
+  );
   await db.query(`DELETE FROM users WHERE id IN ($1,$2)`, [userA, userB]);
   if (templateB) {
     await db.query(`DELETE FROM program_templates WHERE id=$1`, [templateB]);
@@ -154,15 +165,13 @@ afterAll(async () => {
 describe('DELETE /api/me contamination — G2', () => {
   it("A's CF Access delete wipes A only — B's user, tokens, set_logs, events intact", async () => {
     // Precondition — both users exist with their seeded content.
-    const preA = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM users WHERE id=$1`,
-      [userA],
-    );
+    const preA = await db.query<{ n: number }>(`SELECT count(*)::int n FROM users WHERE id=$1`, [
+      userA,
+    ]);
     expect(preA.rows[0].n).toBe(1);
-    const preB = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM users WHERE id=$1`,
-      [userB],
-    );
+    const preB = await db.query<{ n: number }>(`SELECT count(*)::int n FROM users WHERE id=$1`, [
+      userB,
+    ]);
     expect(preB.rows[0].n).toBe(1);
 
     // A deletes their account via the CF Access cookie path.

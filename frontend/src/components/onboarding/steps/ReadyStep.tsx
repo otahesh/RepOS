@@ -25,10 +25,17 @@ export default function ReadyStep({ onStart }: { onStart: () => Promise<void> | 
       </p>
       <p style={{ color: TOKENS.textMute, fontSize: 13, lineHeight: 1.6, margin: '0 0 20px' }}>
         No program selected yet? You can browse and fork one any time from the{' '}
-        <Link to="/programs" style={{ color: TOKENS.accent }}>Programs</Link> page — until then your
-        Today card will be empty.
+        <Link to="/programs" style={{ color: TOKENS.accent }}>
+          Programs
+        </Link>{' '}
+        page — until then your Today card will be empty.
       </p>
-      <button type="button" onClick={finish} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
+      <button
+        type="button"
+        onClick={finish}
+        disabled={busy}
+        style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}
+      >
         {busy ? 'STARTING…' : 'START TRAINING'}
       </button>
     </div>
@@ -36,7 +43,14 @@ export default function ReadyStep({ onStart }: { onStart: () => Promise<void> | 
 }
 
 const primaryBtn: React.CSSProperties = {
-  background: TOKENS.accent, color: '#0A0D12', border: 'none', borderRadius: 10,
-  padding: '12px 22px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-  fontFamily: FONTS.ui, letterSpacing: 0.4,
+  background: TOKENS.accent,
+  color: '#0A0D12',
+  border: 'none',
+  borderRadius: 10,
+  padding: '12px 22px',
+  fontWeight: 700,
+  fontSize: 14,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
+  letterSpacing: 0.4,
 };

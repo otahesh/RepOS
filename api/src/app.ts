@@ -92,7 +92,9 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   // them by userId here.
   app.get('/api/me', { preHandler: requireCfAccess }, async (req) => {
     const userId = (req as any).userId as string;
-    const { rows: [u] } = await db.query<{
+    const {
+      rows: [u],
+    } = await db.query<{
       onboarding_completed_at: string | null;
       par_q_version: number;
       par_q_advisory_active: boolean;

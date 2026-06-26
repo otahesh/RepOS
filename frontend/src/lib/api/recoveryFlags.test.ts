@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { listRecoveryFlags, dismissRecoveryFlag } from './recoveryFlags';
 describe('recoveryFlags API client', () => {
-  beforeEach(() => { globalThis.fetch = vi.fn(); });
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
   it('lists active', async () => {
     // API returns { flags: [...] }, not a bare array
-    (fetch as any).mockResolvedValueOnce({ ok: true, json: async () => ({ flags: [{ flag: 'bodyweight_crash', message: 'Weight dropping fast' }] }) });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        flags: [{ flag: 'bodyweight_crash', message: 'Weight dropping fast' }],
+      }),
+    });
     const r = await listRecoveryFlags();
     expect(r.flags[0].flag).toBe('bodyweight_crash');
   });

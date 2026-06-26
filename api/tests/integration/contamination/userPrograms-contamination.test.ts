@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 async function userProgramIdFor(userId: string): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
@@ -25,11 +34,12 @@ describe('W8.2 contamination — user-programs', () => {
     const upB = await userProgramIdFor(pair.userA.userId); // A's program id
 
     const res = await app.inject({
-      method: 'GET', url: '/api/user-programs',
+      method: 'GET',
+      url: '/api/user-programs',
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(200);
-    const ids = res.json<{ programs: { id: string }[] }>().programs.map(p => p.id);
+    const ids = res.json<{ programs: { id: string }[] }>().programs.map((p) => p.id);
     expect(ids).not.toContain(upB);
   });
 
@@ -41,7 +51,8 @@ describe('W8.2 contamination — user-programs', () => {
     const upA = await userProgramIdFor(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'GET', url: `/api/user-programs/${upA}`,
+      method: 'GET',
+      url: `/api/user-programs/${upA}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);
@@ -55,13 +66,15 @@ describe('W8.2 contamination — user-programs', () => {
     const upA = await userProgramIdFor(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'PATCH', url: `/api/user-programs/${upA}`,
+      method: 'PATCH',
+      url: `/api/user-programs/${upA}`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       payload: { op: 'rename', name: 'pwned' },
     });
     expect(res.statusCode).toBe(404);
     const { rows } = await db.query<{ customizations: unknown }>(
-      `SELECT customizations FROM user_programs WHERE id=$1`, [upA],
+      `SELECT customizations FROM user_programs WHERE id=$1`,
+      [upA],
     );
     expect(JSON.stringify(rows[0].customizations ?? {})).not.toContain('pwned');
   });
@@ -74,7 +87,8 @@ describe('W8.2 contamination — user-programs', () => {
     const upA = await userProgramIdFor(pair.userA.userId);
 
     const res = await app.inject({
-      method: 'GET', url: `/api/user-programs/${upA}/warnings`,
+      method: 'GET',
+      url: `/api/user-programs/${upA}/warnings`,
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(404);

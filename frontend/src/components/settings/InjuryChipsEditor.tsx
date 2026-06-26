@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 import { TOKENS } from '../../tokens';
 import {
-  listInjuries, upsertInjury, patchInjury, deleteInjury,
-  type UserInjury, type InjuryJoint, type InjurySeverity,
+  listInjuries,
+  upsertInjury,
+  patchInjury,
+  deleteInjury,
+  type UserInjury,
+  type InjuryJoint,
+  type InjurySeverity,
 } from '../../lib/api/userInjuries';
 
 // W3.4 Q3 — InjuryChipsEditor with expanded per-row panel (Task 21).
@@ -17,8 +22,13 @@ import {
 //   [FIX-23] Severity-button queries in tests are scoped via within(panel).
 
 const CHIPS: InjuryJoint[] = [
-  'shoulder_left', 'shoulder_right', 'low_back',
-  'knee_left', 'knee_right', 'elbow', 'wrist',
+  'shoulder_left',
+  'shoulder_right',
+  'low_back',
+  'knee_left',
+  'knee_right',
+  'elbow',
+  'wrist',
 ];
 const SEVERITIES: InjurySeverity[] = ['low', 'mod', 'high'];
 
@@ -31,7 +41,11 @@ const SEVERITIES: InjurySeverity[] = ['low', 'mod', 'high'];
  *    tab-through doesn't fire a no-op PATCH that would bounce updated_at.
  */
 function ControlledField({
-  value, onCommit, type, placeholder, style,
+  value,
+  onCommit,
+  type,
+  placeholder,
+  style,
 }: {
   value: string;
   onCommit: (v: string) => Promise<void> | void;
@@ -41,14 +55,18 @@ function ControlledField({
 }): JSX.Element {
   const [v, setV] = useState(value);
   // Re-sync when the prop changes (PATCH success → parent updates `item`).
-  useEffect(() => { setV(value); }, [value]);
+  useEffect(() => {
+    setV(value);
+  }, [value]);
   return (
     <input
       type={type ?? 'text'}
       value={v}
       placeholder={placeholder}
       onChange={(e) => setV(e.target.value)}
-      onBlur={() => { if (v !== value) void onCommit(v); }}
+      onBlur={() => {
+        if (v !== value) void onCommit(v);
+      }}
       style={style}
     />
   );
@@ -144,7 +162,9 @@ export function InjuryChipsEditor(): JSX.Element {
               aria-expanded={expanded === j}
               aria-controls={active ? `injury-panel-${j}` : undefined}
               disabled={isPending}
-              onClick={() => { void tap(j); }}
+              onClick={() => {
+                void tap(j);
+              }}
               style={{
                 padding: '6px 12px',
                 borderRadius: 999,
@@ -156,7 +176,8 @@ export function InjuryChipsEditor(): JSX.Element {
                 border: `1px solid ${active ? TOKENS.accent : TOKENS.lineStrong}`,
               }}
             >
-              {j}{active ? ' ✓' : ''}
+              {j}
+              {active ? ' ✓' : ''}
             </button>
           );
         })}
@@ -178,103 +199,111 @@ export function InjuryChipsEditor(): JSX.Element {
         </div>
       )}
 
-      {expanded !== null && (() => {
-        const item = find(expanded);
-        if (!item) return null;
-        const panelId = `injury-panel-${expanded}`;
-        const chipId = `injury-chip-${expanded}`;
-        return (
-          // [FIX-22] role=region + aria-labelledby pointing to the chip
-          <section
-            id={panelId}
-            role="region"
-            aria-labelledby={chipId}
-            style={{
-              marginTop: 12,
-              padding: 12,
-              borderRadius: 8,
-              background: TOKENS.accentGlow,
-              borderLeft: `2px solid ${TOKENS.accent}`,
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 8, color: TOKENS.text }}>{item.joint}</div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-              {SEVERITIES.map((s) => {
-                const activeBg = s === 'low' ? TOKENS.accent : s === 'mod' ? TOKENS.warn : TOKENS.danger;
-                const isOn = item.severity === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    aria-pressed={isOn}
-                    onClick={() => { void updateSeverity(item.joint, s); }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      background: isOn ? activeBg : 'rgba(255,255,255,0.05)',
-                      color: isOn ? TOKENS.bg : TOKENS.text,
-                      border: 0,
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-            <ControlledField
-              key={`notes-${item.joint}`}
-              value={item.notes}
-              placeholder="Notes (optional)"
-              onCommit={(v) => updateNotes(item.joint, v)}
+      {expanded !== null &&
+        (() => {
+          const item = find(expanded);
+          if (!item) return null;
+          const panelId = `injury-panel-${expanded}`;
+          const chipId = `injury-chip-${expanded}`;
+          return (
+            // [FIX-22] role=region + aria-labelledby pointing to the chip
+            <section
+              id={panelId}
+              role="region"
+              aria-labelledby={chipId}
               style={{
-                width: '100%',
-                background: TOKENS.surface,
-                border: `1px solid ${TOKENS.line}`,
-                color: TOKENS.text,
-                padding: 6,
-                borderRadius: 4,
-                fontSize: 12,
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 8,
+                background: TOKENS.accentGlow,
+                borderLeft: `2px solid ${TOKENS.accent}`,
               }}
-            />
-            <ControlledField
-              key={`onset-${item.joint}`}
-              type="date"
-              value={item.onset_at ?? ''}
-              onCommit={(v) => updateOnset(item.joint, v || null)}
-              style={{
-                marginTop: 6,
-                background: TOKENS.surface,
-                border: `1px solid ${TOKENS.line}`,
-                color: TOKENS.text,
-                padding: 4,
-                borderRadius: 4,
-                fontSize: 12,
-              }}
-            />
-            <div>
-              <button
-                type="button"
-                onClick={() => { void remove(item.joint); }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 8, color: TOKENS.text }}>
+                {item.joint}
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                {SEVERITIES.map((s) => {
+                  const activeBg =
+                    s === 'low' ? TOKENS.accent : s === 'mod' ? TOKENS.warn : TOKENS.danger;
+                  const isOn = item.severity === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      aria-pressed={isOn}
+                      onClick={() => {
+                        void updateSeverity(item.joint, s);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: isOn ? activeBg : 'rgba(255,255,255,0.05)',
+                        color: isOn ? TOKENS.bg : TOKENS.text,
+                        border: 0,
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+              <ControlledField
+                key={`notes-${item.joint}`}
+                value={item.notes}
+                placeholder="Notes (optional)"
+                onCommit={(v) => updateNotes(item.joint, v)}
                 style={{
-                  marginTop: 8,
-                  padding: '4px 10px',
-                  background: 'transparent',
-                  border: `1px solid ${TOKENS.danger}`,
-                  color: TOKENS.danger,
+                  width: '100%',
+                  background: TOKENS.surface,
+                  border: `1px solid ${TOKENS.line}`,
+                  color: TOKENS.text,
+                  padding: 6,
                   borderRadius: 4,
                   fontSize: 12,
-                  cursor: 'pointer',
                 }}
-              >
-                Remove
-              </button>
-            </div>
-          </section>
-        );
-      })()}
+              />
+              <ControlledField
+                key={`onset-${item.joint}`}
+                type="date"
+                value={item.onset_at ?? ''}
+                onCommit={(v) => updateOnset(item.joint, v || null)}
+                style={{
+                  marginTop: 6,
+                  background: TOKENS.surface,
+                  border: `1px solid ${TOKENS.line}`,
+                  color: TOKENS.text,
+                  padding: 4,
+                  borderRadius: 4,
+                  fontSize: 12,
+                }}
+              />
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void remove(item.joint);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    padding: '4px 10px',
+                    background: 'transparent',
+                    border: `1px solid ${TOKENS.danger}`,
+                    color: TOKENS.danger,
+                    borderRadius: 4,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </section>
+          );
+        })()}
     </div>
   );
 }

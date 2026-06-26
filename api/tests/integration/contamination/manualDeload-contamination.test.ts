@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W8.2 — manual-deload contamination', () => {
   it("user B cannot deload user A's mesocycle_run", async () => {

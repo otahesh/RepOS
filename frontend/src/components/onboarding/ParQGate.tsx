@@ -58,7 +58,9 @@ export function ParQGate({
         setStatus(s);
         setAnswers(new Array(s.questions.length).fill(false));
       })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : String(e)); });
+      .catch((e) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      });
     return () => {
       cancelled = true;
       previouslyFocusedRef.current?.focus?.();
@@ -68,7 +70,9 @@ export function ParQGate({
   // Re-focus the first question once the async question list arrives.
   useEffect(() => {
     if (!status || !dialogRef.current) return;
-    const first = dialogRef.current.querySelector<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    const first = dialogRef.current.querySelector<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
     first?.focus();
   }, [status]);
 
@@ -105,7 +109,9 @@ export function ParQGate({
   if (err) {
     return (
       <Shell labelledById="parq-title">
-        <h2 id="parq-title" style={titleStyle}>Couldn't load the health screen</h2>
+        <h2 id="parq-title" style={titleStyle}>
+          Couldn't load the health screen
+        </h2>
         <p style={{ color: TOKENS.danger, fontSize: 14 }}>{err}</p>
       </Shell>
     );
@@ -113,7 +119,9 @@ export function ParQGate({
   if (!status) {
     return (
       <Shell labelledById="parq-title">
-        <h2 id="parq-title" style={titleStyle}>Loading health screen…</h2>
+        <h2 id="parq-title" style={titleStyle}>
+          Loading health screen…
+        </h2>
       </Shell>
     );
   }
@@ -161,13 +169,20 @@ export function ParQGate({
   if (result?.any_yes) {
     return (
       <Shell labelledById="parq-title" dialogRef={dialogRef}>
-        <h2 id="parq-title" style={titleStyle}>Before you ramp up</h2>
+        <h2 id="parq-title" style={titleStyle}>
+          Before you ramp up
+        </h2>
         <div
           role="alert"
           style={{
-            border: `1px solid ${TOKENS.warn}`, background: 'rgba(245,181,68,0.10)',
-            borderRadius: 12, padding: '14px 16px', marginBottom: 16, fontSize: 14,
-            lineHeight: 1.6, color: TOKENS.text,
+            border: `1px solid ${TOKENS.warn}`,
+            background: 'rgba(245,181,68,0.10)',
+            borderRadius: 12,
+            padding: '14px 16px',
+            marginBottom: 16,
+            fontSize: 14,
+            lineHeight: 1.6,
+            color: TOKENS.text,
           }}
         >
           Based on your answers, talk to a clinician before increasing training load. You can keep
@@ -185,7 +200,9 @@ export function ParQGate({
             will steer exercise suggestions around {result.injuries_created === 1 ? 'it' : 'them'}.
           </p>
         )}
-        <button type="button" onClick={continueAfterBanner} style={primaryBtn}>CONTINUE</button>
+        <button type="button" onClick={continueAfterBanner} style={primaryBtn}>
+          CONTINUE
+        </button>
       </Shell>
     );
   }
@@ -193,7 +210,15 @@ export function ParQGate({
   // ── Question screen ─────────────────────────────────────────────────────────
   return (
     <Shell labelledById="parq-title" dialogRef={dialogRef}>
-      <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.4, color: TOKENS.accent, marginBottom: 8 }}>
+      <div
+        style={{
+          fontFamily: FONTS.mono,
+          fontSize: 11,
+          letterSpacing: 1.4,
+          color: TOKENS.accent,
+          marginBottom: 8,
+        }}
+      >
         HEALTH SCREEN
       </div>
       <h2 id="parq-title" style={titleStyle}>
@@ -203,13 +228,31 @@ export function ParQGate({
         Answer honestly. A "yes" is a <Term k="soft_gate" /> — it never locks you out, it just keeps
         your program conservative until a clinician clears you.
       </p>
-      <ol data-testid="parq-questions" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
+      <ol
+        data-testid="parq-questions"
+        style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}
+      >
         {status.questions.map((q, i) => (
           <li key={i} style={{ borderBottom: `1px solid ${TOKENS.line}`, paddingBottom: 12 }}>
-            <div style={{ fontSize: 14, color: TOKENS.text, marginBottom: 8, lineHeight: 1.5 }}>{q}</div>
-            <div role="radiogroup" aria-label={`Question ${i + 1}`} style={{ display: 'flex', gap: 8 }}>
-              <YesNo label="No" selected={answers[i] === false} onClick={() => setAnswer(i, false)} />
-              <YesNo label="Yes" selected={answers[i] === true} onClick={() => setAnswer(i, true)} danger />
+            <div style={{ fontSize: 14, color: TOKENS.text, marginBottom: 8, lineHeight: 1.5 }}>
+              {q}
+            </div>
+            <div
+              role="radiogroup"
+              aria-label={`Question ${i + 1}`}
+              style={{ display: 'flex', gap: 8 }}
+            >
+              <YesNo
+                label="No"
+                selected={answers[i] === false}
+                onClick={() => setAnswer(i, false)}
+              />
+              <YesNo
+                label="Yes"
+                selected={answers[i] === true}
+                onClick={() => setAnswer(i, true)}
+                danger
+              />
             </div>
             {i === Q5_INDEX && q5Yes && (
               <ParQJointPicker selected={q5Joints} onChange={setQ5Joints} />
@@ -219,18 +262,35 @@ export function ParQGate({
       </ol>
       {err && <p style={{ color: TOKENS.danger, fontSize: 13, marginTop: 12 }}>{err}</p>}
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 20 }}>
-        <button type="button" onClick={submit} disabled={submitting} style={{ ...primaryBtn, opacity: submitting ? 0.6 : 1 }}>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting}
+          style={{ ...primaryBtn, opacity: submitting ? 0.6 : 1 }}
+        >
           {submitting ? 'SAVING…' : 'CONFIRM'}
         </button>
         {(forceReview || onClose) && (
-          <button type="button" onClick={() => onClose?.()} style={cancelBtn}>Cancel</button>
+          <button type="button" onClick={() => onClose?.()} style={cancelBtn}>
+            Cancel
+          </button>
         )}
       </div>
     </Shell>
   );
 }
 
-function YesNo({ label, selected, onClick, danger }: { label: string; selected: boolean; onClick: () => void; danger?: boolean }) {
+function YesNo({
+  label,
+  selected,
+  onClick,
+  danger,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+  danger?: boolean;
+}) {
   const accent = danger ? TOKENS.danger : TOKENS.accent;
   return (
     <button
@@ -239,10 +299,15 @@ function YesNo({ label, selected, onClick, danger }: { label: string; selected: 
       aria-checked={selected}
       onClick={onClick}
       style={{
-        padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+        padding: '8px 18px',
+        borderRadius: 8,
+        fontSize: 13,
+        fontWeight: 600,
         border: `1px solid ${selected ? accent : TOKENS.line}`,
         background: selected ? (danger ? 'rgba(255,106,106,0.12)' : TOKENS.accentGlow) : TOKENS.bg,
-        color: TOKENS.text, cursor: 'pointer', fontFamily: FONTS.ui,
+        color: TOKENS.text,
+        cursor: 'pointer',
+        fontFamily: FONTS.ui,
       }}
     >
       {label}
@@ -266,16 +331,29 @@ function Shell({
       aria-labelledby={labelledById}
       ref={dialogRef}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(10,13,18,0.92)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        zIndex: TOKENS.zModal.zOverlay, padding: 24, overflowY: 'auto',
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(10,13,18,0.92)',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        zIndex: TOKENS.zModal.zOverlay,
+        padding: 24,
+        overflowY: 'auto',
       }}
     >
-      <div style={{
-        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 16,
-        padding: '28px 32px', maxWidth: 640, width: '100%', margin: '24px 0',
-        fontFamily: FONTS.ui,
-      }}>
+      <div
+        style={{
+          background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`,
+          borderRadius: 16,
+          padding: '28px 32px',
+          maxWidth: 640,
+          width: '100%',
+          margin: '24px 0',
+          fontFamily: FONTS.ui,
+        }}
+      >
         {children}
       </div>
     </div>
@@ -283,14 +361,30 @@ function Shell({
 }
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 22, fontWeight: 700, color: TOKENS.text, margin: '0 0 12px', letterSpacing: -0.4,
+  fontSize: 22,
+  fontWeight: 700,
+  color: TOKENS.text,
+  margin: '0 0 12px',
+  letterSpacing: -0.4,
 };
 const primaryBtn: React.CSSProperties = {
-  background: TOKENS.accent, color: '#0A0D12', border: 'none', borderRadius: 10,
-  padding: '12px 22px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-  fontFamily: FONTS.ui, letterSpacing: 0.4,
+  background: TOKENS.accent,
+  color: '#0A0D12',
+  border: 'none',
+  borderRadius: 10,
+  padding: '12px 22px',
+  fontWeight: 700,
+  fontSize: 14,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
+  letterSpacing: 0.4,
 };
 const cancelBtn: React.CSSProperties = {
-  background: 'transparent', color: TOKENS.textDim, border: 'none',
-  fontSize: 13, cursor: 'pointer', fontFamily: FONTS.ui, textDecoration: 'underline',
+  background: 'transparent',
+  color: TOKENS.textDim,
+  border: 'none',
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: FONTS.ui,
+  textDecoration: 'underline',
 };

@@ -21,11 +21,7 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
-import {
-  seedUserAndMintBearer,
-  cleanupSeeded,
-  type SeedHandle,
-} from '../helpers/seed-fixtures.js';
+import { seedUserAndMintBearer, cleanupSeeded, type SeedHandle } from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 
 const handles: SeedHandle[] = [];
@@ -196,9 +192,7 @@ describe('POST /api/health/workouts', () => {
          ORDER BY user_id`,
         [payload.started_at, payload.source],
       );
-      expect(rows.map((r) => r.user_id).sort()).toEqual(
-        [a.handle.userId, b.handle.userId].sort(),
-      );
+      expect(rows.map((r) => r.user_id).sort()).toEqual([a.handle.userId, b.handle.userId].sort());
     } finally {
       await app.close();
     }
@@ -260,9 +254,7 @@ describe('POST /api/health/workouts', () => {
       // Guards against a future refactor that increments-then-resets
       // write_count on the boundary, which would still pass the 11-only check.
       const twelfthStartedAt = new Date(Date.UTC(2026, 4, 12, 10, 11)).toISOString();
-      const twelfthEndedAt = new Date(
-        Date.parse(twelfthStartedAt) + 30 * 60_000,
-      ).toISOString();
+      const twelfthEndedAt = new Date(Date.parse(twelfthStartedAt) + 30 * 60_000).toISOString();
       const twelfth = await app.inject({
         method: 'POST',
         url: '/api/health/workouts',
@@ -380,7 +372,9 @@ describe('POST /api/health/workouts', () => {
       handles.push(handle);
 
       const tooOldStart = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString();
-      const tooOldEnd = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString();
+      const tooOldEnd = new Date(
+        Date.now() - 366 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000,
+      ).toISOString();
       const resp = await app.inject({
         method: 'POST',
         url: '/api/health/workouts',

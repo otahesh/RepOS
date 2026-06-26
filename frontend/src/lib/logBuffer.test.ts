@@ -81,9 +81,7 @@ describe('logBuffer', () => {
       },
       'user-1',
     );
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(spy).toHaveBeenCalledTimes(1);
     const enqueued = spy.mock.calls[0][0] as PendingSetLog;
     expect(enqueued.client_request_id).toBe(id);
@@ -134,8 +132,16 @@ describe('logBuffer', () => {
     const a = await seedRow({ client_request_id: 'a', planned_set_id: 'ps-a', created_at: 1 });
     const b = await seedRow({ client_request_id: 'b', planned_set_id: 'ps-b', created_at: 2 });
     (fetch as any)
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 'srv-a', deduped: false }) })
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 'srv-b', deduped: false }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'srv-a', deduped: false }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'srv-b', deduped: false }),
+      });
 
     await logBuffer.flush();
 
@@ -145,18 +151,25 @@ describe('logBuffer', () => {
     expect(firstUrl).toBe('/api/set-logs');
     expect(firstInit.method).toBe('POST');
     expect(JSON.parse(firstInit.body).client_request_id).toBe(a.client_request_id);
-    expect(JSON.parse((fetch as any).mock.calls[1][1].body).client_request_id).toBe(b.client_request_id);
+    expect(JSON.parse((fetch as any).mock.calls[1][1].body).client_request_id).toBe(
+      b.client_request_id,
+    );
 
     expect(await idbQueue.peekPending()).toHaveLength(0);
     // Synced rows are deleted by idbQueue.markSynced — see idbQueue.ts line 122.
     expect(await idbQueue.peekRejected()).toHaveLength(0);
-    void a; void b;
+    void a;
+    void b;
   });
 
   it('flush on 201 calls markSynced', async () => {
     await seedRow({ client_request_id: 'x' });
     const synced = vi.spyOn(idbQueue, 'markSynced');
-    (fetch as any).mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 's', deduped: false }) });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 's', deduped: false }),
+    });
     await logBuffer.flush();
     expect(synced).toHaveBeenCalledWith('x');
   });
@@ -164,7 +177,11 @@ describe('logBuffer', () => {
   it('flush on 200 (deduped) calls markSynced', async () => {
     await seedRow({ client_request_id: 'x' });
     const synced = vi.spyOn(idbQueue, 'markSynced');
-    (fetch as any).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 's', deduped: true }) });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 's', deduped: true }),
+    });
     await logBuffer.flush();
     expect(synced).toHaveBeenCalledWith('x');
   });
@@ -247,7 +264,9 @@ describe('logBuffer', () => {
     (fetch as any).mockResolvedValueOnce({
       ok: false,
       status: 401,
-      headers: new Headers({ 'WWW-Authenticate': 'CFAccess url=https://example.cloudflareaccess.com/login' }),
+      headers: new Headers({
+        'WWW-Authenticate': 'CFAccess url=https://example.cloudflareaccess.com/login',
+      }),
       text: async () => '',
     });
 
@@ -301,7 +320,11 @@ describe('logBuffer', () => {
     // Defer the fetch response so the first flush() is still in-flight when the
     // second is invoked.
     let resolve!: (r: unknown) => void;
-    (fetch as any).mockReturnValueOnce(new Promise(r => { resolve = r as (r: unknown) => void; }));
+    (fetch as any).mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r as (r: unknown) => void;
+      }),
+    );
 
     const p1 = logBuffer.flush();
     const p2 = logBuffer.flush(); // should immediately return without queuing another fetch
@@ -443,8 +466,16 @@ describe('logBuffer', () => {
     const synced = vi.spyOn(idbQueue, 'markSynced');
     const rejected = vi.spyOn(idbQueue, 'markRejected');
     (fetch as any)
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 's-a', deduped: false }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 's-a', deduped: true }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 's-a', deduped: false }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 's-a', deduped: true }),
+      });
 
     await logBuffer.flush();
 

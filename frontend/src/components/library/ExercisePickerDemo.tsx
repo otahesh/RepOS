@@ -12,13 +12,35 @@ export function ExercisePickerDemo() {
       <ExercisePicker onPick={setPicked} />
       {picked && (
         <div style={{ marginTop: 24 }}>
-          <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1.4, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>
+          <div
+            style={{
+              fontFamily: 'JetBrains Mono',
+              fontSize: 11,
+              letterSpacing: 1.4,
+              color: 'rgba(255,255,255,0.6)',
+              marginBottom: 8,
+            }}
+          >
             PICKED: {picked.slug}
           </div>
-          <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1.4, color: '#4D8DFF', marginTop: 16, marginBottom: 8 }}>
+          <div
+            style={{
+              fontFamily: 'JetBrains Mono',
+              fontSize: 11,
+              letterSpacing: 1.4,
+              color: '#4D8DFF',
+              marginTop: 16,
+              marginBottom: 8,
+            }}
+          >
             SUBSTITUTIONS
           </div>
-          <SubstitutionRow fromSlug={picked.slug} onSelect={(slug) => pushToast({ severity: 'info', body: `Selected substitute: ${slug}` })} />
+          <SubstitutionRow
+            fromSlug={picked.slug}
+            onSelect={(slug) =>
+              pushToast({ severity: 'info', body: `Selected substitute: ${slug}` })
+            }
+          />
         </div>
       )}
     </div>

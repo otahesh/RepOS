@@ -13,7 +13,9 @@
 import { test, expect } from '@playwright/test';
 import { inspectQueue, logSet, seedMesocycle } from './_helpers';
 
-test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; banner surfaces', async ({ page }) => {
+test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; banner surfaces', async ({
+  page,
+}) => {
   const server = await seedMesocycle(page);
   server.setResponder(() => ({ kind: 'orphan' }));
 
@@ -22,10 +24,15 @@ test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; b
 
   await logSet(page, 0, { weight: 135, reps: 6 });
 
-  await expect.poll(async () => {
-    const rows = await inspectQueue(page);
-    return rows[0]?.status ?? 'none';
-  }, { timeout: 5000 }).toBe('rejected');
+  await expect
+    .poll(
+      async () => {
+        const rows = await inspectQueue(page);
+        return rows[0]?.status ?? 'none';
+      },
+      { timeout: 5000 },
+    )
+    .toBe('rejected');
 
   const rows = await inspectQueue(page);
   expect(rows).toHaveLength(1);

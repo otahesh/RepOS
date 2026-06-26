@@ -9,10 +9,16 @@ import { exercises } from '../../src/seed/exercises.js';
 // If a future test also touches that key, the file-parallel race risk on
 // `archived` and the active-row invariant must be re-evaluated.
 describe('exercises seed (production smoke)', () => {
-  afterAll(async () => { await db.end(); });
+  afterAll(async () => {
+    await db.end();
+  });
 
   it('runs without error and reports archived=0 against the deployed seed_meta row', async () => {
-    const r = await runSeed({ key: 'exercises', entries: exercises, adapter: makeExerciseSeedAdapter('exercises') });
+    const r = await runSeed({
+      key: 'exercises',
+      entries: exercises,
+      adapter: makeExerciseSeedAdapter('exercises'),
+    });
     // applied may be true or false depending on prior state — both acceptable
     if (r.applied) expect(r.archived).toBe(0); // no curated entries removed
   });

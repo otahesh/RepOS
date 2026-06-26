@@ -18,20 +18,22 @@ describe('programs API client', () => {
   });
   it('GET /api/program-templates/:slug returns detail', async () => {
     (fetch as any).mockResolvedValueOnce({
-      ok: true, json: async () => ({ slug: 'full-body-3-day', structure: { _v: 1, days: [] } }),
+      ok: true,
+      json: async () => ({ slug: 'full-body-3-day', structure: { _v: 1, days: [] } }),
     });
     const t = await getProgramTemplate('full-body-3-day');
     expect(t.structure?._v).toBe(1);
   });
   it('POST /api/program-templates/:slug/fork returns user_program', async () => {
     (fetch as any).mockResolvedValueOnce({
-      ok: true, json: async () => ({ id: 'up-1', status: 'draft' }),
+      ok: true,
+      json: async () => ({ id: 'up-1', status: 'draft' }),
     });
     const up = await forkProgramTemplate('full-body-3-day', { name: 'My FB' });
     expect(up.status).toBe('draft');
     expect(fetch).toHaveBeenCalledWith(
       '/api/program-templates/full-body-3-day/fork',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({ method: 'POST' }),
     );
   });
   it('throws on non-OK', async () => {

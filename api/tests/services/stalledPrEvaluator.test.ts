@@ -26,7 +26,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'stalled' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(true);
     if (r.triggered) {
@@ -38,7 +40,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'progressing' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });
@@ -47,7 +51,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'rir-mixed' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });
@@ -59,7 +65,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'deload' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });
@@ -70,7 +78,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'low-rep' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });
@@ -82,7 +92,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     const seed = await seedStalledPr({ pattern: 'stalled' });
     handles.push(seed);
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: null, weekIdx: 0,
+      userId: seed.userId,
+      runId: null,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });
@@ -98,11 +110,12 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     // Mark the seeded run as completed so we can create a fresh active run
     // for the same user (the unique idx_meso_one_active_per_user partial index
     // forbids two active runs per user).
-    await db.query(
-      `UPDATE mesocycle_runs SET status = 'completed' WHERE id = $1`,
-      [seed.mesocycleRunId],
-    );
-    const { rows: [freshRun] } = await db.query<{ id: string }>(
+    await db.query(`UPDATE mesocycle_runs SET status = 'completed' WHERE id = $1`, [
+      seed.mesocycleRunId,
+    ]);
+    const {
+      rows: [freshRun],
+    } = await db.query<{ id: string }>(
       `INSERT INTO mesocycle_runs
          (user_id, user_program_id, status, weeks, current_week, start_date, start_tz)
        SELECT user_id, user_program_id, 'active', 4, 1, current_date, start_tz
@@ -111,7 +124,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
       [seed.mesocycleRunId],
     );
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: freshRun.id, weekIdx: 0,
+      userId: seed.userId,
+      runId: freshRun.id,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
     await db.query(`DELETE FROM mesocycle_runs WHERE id = $1`, [freshRun.id]);
@@ -136,7 +151,9 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
       [seed.userId, seed.exerciseId, seed.plannedSetId, 185], // back-off load vs 225 base
     );
     const r = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: 0,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: 0,
     });
     expect(r.triggered).toBe(false);
   });

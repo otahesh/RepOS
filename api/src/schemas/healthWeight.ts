@@ -11,11 +11,7 @@ function isValidCalendarDate(s: string): boolean {
   if (!DATE_RE.test(s)) return false;
   const [y, m, d] = s.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
-  return (
-    dt.getUTCFullYear() === y &&
-    dt.getUTCMonth() === m - 1 &&
-    dt.getUTCDate() === d
-  );
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
 function isValidTime(s: string): boolean {
@@ -24,15 +20,11 @@ function isValidTime(s: string): boolean {
   return h < 24 && m < 60 && sec < 60;
 }
 
-const WeightDate = z
-  .string()
-  .refine(isValidCalendarDate, {
-    message: 'date must be a valid YYYY-MM-DD calendar date',
-  });
+const WeightDate = z.string().refine(isValidCalendarDate, {
+  message: 'date must be a valid YYYY-MM-DD calendar date',
+});
 
-const WeightTime = z
-  .string()
-  .refine(isValidTime, { message: 'time must be HH:MM:SS' });
+const WeightTime = z.string().refine(isValidTime, { message: 'time must be HH:MM:SS' });
 
 export const VALID_SOURCES = ['Apple Health', 'Manual', 'Withings', 'Renpho'] as const;
 export type WeightSource = (typeof VALID_SOURCES)[number];

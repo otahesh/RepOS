@@ -15,7 +15,9 @@ const EMPTY_PROFILE = { _v: 1 };
 
 beforeAll(async () => {
   // Ensure seed has been applied; tests assume curated catalog is present.
-  const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM exercises WHERE created_by='system' AND archived_at IS NULL`);
+  const { rows } = await db.query(
+    `SELECT COUNT(*)::int AS n FROM exercises WHERE created_by='system' AND archived_at IS NULL`,
+  );
   if (rows[0].n < 30) throw new Error('seed not applied — run npm run seed first');
 
   // Purge any test-scoped exercise rows leaked by prior test runs (e.g. from
@@ -31,7 +33,9 @@ beforeAll(async () => {
        OR slug LIKE 'sl-test-ex-%'
   `);
 });
-afterAll(async () => { await db.end(); });
+afterAll(async () => {
+  await db.end();
+});
 
 describe('substitutions (spec §9.3)', () => {
   it('12. empty equipment_profile → no_equipment_profile', async () => {
@@ -54,7 +58,7 @@ describe('substitutions (spec §9.3)', () => {
     // be returned as a sub for any other exercise.
     const profile = { _v: 1, barbell: true /* no flat_bench */ };
     const r = await findSubstitutions('dumbbell-bench-press', profile);
-    expect(r?.subs.find(s => s.slug === 'barbell-bench-press')).toBeUndefined();
+    expect(r?.subs.find((s) => s.slug === 'barbell-bench-press')).toBeUndefined();
   });
 
   it('15. ranking: same pattern beats same primary beats overlap', async () => {
@@ -67,7 +71,7 @@ describe('substitutions (spec §9.3)', () => {
   it('16. deterministic tiebreak: two calls return identical ordering', async () => {
     const a = await findSubstitutions('barbell-bench-press', TEST_USER_1_PROFILE);
     const b = await findSubstitutions('barbell-bench-press', TEST_USER_1_PROFILE);
-    expect(a?.subs.map(s => s.slug)).toEqual(b?.subs.map(s => s.slug));
+    expect(a?.subs.map((s) => s.slug)).toEqual(b?.subs.map((s) => s.slug));
   });
 
   it('17. profile change between calls → different sub set', async () => {

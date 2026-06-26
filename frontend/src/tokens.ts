@@ -27,10 +27,10 @@ export const TOKENS = {
   // a token here, NEVER an inline zIndex literal. Auth tier is highest because
   // a session-expired prompt must obscure even onboarding.
   zModal: {
-    zSheet: 100,    // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
-    zBanner: 1000,  // LogBufferRecovery
+    zSheet: 100, // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
+    zBanner: 1000, // LogBufferRecovery
     zOverlay: 1500, // OnboardingOverlay, ParQGate
-    zAuth: 2000,    // SessionExpiredBanner
+    zAuth: 2000, // SessionExpiredBanner
   },
 } as const;
 
@@ -39,4 +39,5 @@ export const FONTS = {
   mono: '"JetBrains Mono", "SF Mono", ui-monospace, monospace',
 } as const;
 
-export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
+export const API_BASE: string =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';

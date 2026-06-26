@@ -127,7 +127,9 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
       const { joint, severity, notes, onset_at } = parsed.data;
 
-      const { rows: [row] } = await db.query<InjuryRow & { is_new: boolean }>(
+      const {
+        rows: [row],
+      } = await db.query<InjuryRow & { is_new: boolean }>(
         `INSERT INTO user_injuries (user_id, joint, severity, notes, onset_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (user_id, joint) DO UPDATE SET
@@ -193,7 +195,9 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       }
       if (!fields.length) return reply.code(400).send({ error: 'empty_patch' });
 
-      const { rows: [row] } = await db.query<InjuryRow>(
+      const {
+        rows: [row],
+      } = await db.query<InjuryRow>(
         `UPDATE user_injuries SET ${fields.join(', ')}, updated_at = now()
          WHERE user_id = $1 AND joint = $2
          RETURNING joint, severity, notes,
@@ -230,10 +234,10 @@ export async function userInjuriesRoutes(app: FastifyInstance) {
       }
       const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
-      await db.query(
-        `DELETE FROM user_injuries WHERE user_id=$1 AND joint=$2`,
-        [userId, req.params.joint],
-      );
+      await db.query(`DELETE FROM user_injuries WHERE user_id=$1 AND joint=$2`, [
+        userId,
+        req.params.joint,
+      ]);
       return reply.code(204).send();
     },
   );

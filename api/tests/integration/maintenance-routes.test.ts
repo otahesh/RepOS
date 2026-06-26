@@ -157,6 +157,10 @@ describe('POST /api/backups/:id/restore', () => {
     const { rows } = await db.query(
       `SELECT trigger, status, event_kind FROM backup_runs WHERE trigger='restore' ORDER BY started_at DESC LIMIT 1`,
     );
-    expect(rows[0]).toMatchObject({ trigger: 'restore', status: 'running', event_kind: 'restore_init' });
+    expect(rows[0]).toMatchObject({
+      trigger: 'restore',
+      status: 'running',
+      event_kind: 'restore_init',
+    });
   });
 });

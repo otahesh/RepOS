@@ -26,9 +26,15 @@ describe('program record types', () => {
 
   it('MesocycleRunEventType lists all 9 v1 events', () => {
     expectTypeOf<MesocycleRunEventType>().toEqualTypeOf<
-      | 'started' | 'paused' | 'resumed'
-      | 'day_overridden' | 'set_overridden'
-      | 'day_skipped' | 'customized' | 'completed' | 'abandoned'
+      | 'started'
+      | 'paused'
+      | 'resumed'
+      | 'day_overridden'
+      | 'set_overridden'
+      | 'day_skipped'
+      | 'customized'
+      | 'completed'
+      | 'abandoned'
     >();
   });
 
@@ -42,10 +48,8 @@ describe('program record types', () => {
   });
 
   it('PlannedCardioBlockRecord allows nullable duration / distance', () => {
-    expectTypeOf<PlannedCardioBlockRecord['target_duration_sec']>()
-      .toEqualTypeOf<number | null>();
-    expectTypeOf<PlannedCardioBlockRecord['target_distance_m']>()
-      .toEqualTypeOf<number | null>();
+    expectTypeOf<PlannedCardioBlockRecord['target_duration_sec']>().toEqualTypeOf<number | null>();
+    expectTypeOf<PlannedCardioBlockRecord['target_distance_m']>().toEqualTypeOf<number | null>();
   });
 
   it('SetLogRecord performed_load_lbs is number-string union (pg returns string for NUMERIC)', () => {

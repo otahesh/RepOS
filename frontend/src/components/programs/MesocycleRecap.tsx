@@ -10,24 +10,61 @@ export function MesocycleRecap({
   onChoice: (c: RecapChoice) => void;
 }) {
   return (
-    <div style={{ padding: 32, fontFamily: 'Inter Tight', color: '#fff', maxWidth: 720, margin: '0 auto' }}>
+    <div
+      style={{
+        padding: 32,
+        fontFamily: 'Inter Tight',
+        color: '#fff',
+        maxWidth: 720,
+        margin: '0 auto',
+      }}
+    >
       <header style={{ marginBottom: 24 }}>
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, letterSpacing: 1, color: '#4D8DFF', textTransform: 'uppercase' }}>
-          <Term k="mesocycle" />{' complete'}
+        <div
+          style={{
+            fontFamily: 'JetBrains Mono',
+            fontSize: 11,
+            letterSpacing: 1,
+            color: '#4D8DFF',
+            textTransform: 'uppercase',
+          }}
+        >
+          <Term k="mesocycle" />
+          {' complete'}
         </div>
         <h1 style={{ margin: '8px 0', fontSize: 28 }}>Solid block.</h1>
         <div style={{ fontFamily: 'JetBrains Mono', fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
-          {stats.weeks}{' weeks · '}{stats.total_sets}{' '}<Term k="working_set" compact />{'s · '}{stats.prs}{' PR'}{stats.prs === 1 ? '' : 's'}
+          {stats.weeks}
+          {' weeks · '}
+          {stats.total_sets} <Term k="working_set" compact />
+          {'s · '}
+          {stats.prs}
+          {' PR'}
+          {stats.prs === 1 ? '' : 's'}
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 16,
+        }}
+      >
         <Choice
           accent="#6BE28B"
           recommended
           label={'Take a deload'}
           /* [D4] Templated volume math instead of vague "one light week". */
-          desc={<>{`A ${stats.weeks}-week deload `}<Term k="mesocycle" variant="abbr" />{' at ~50% of your '}<Term k="MAV" />{' with RIR 4 throughout.'}</>}
+          desc={
+            <>
+              {`A ${stats.weeks}-week deload `}
+              <Term k="mesocycle" variant="abbr" />
+              {' at ~50% of your '}
+              <Term k="MAV" />
+              {' with RIR 4 throughout.'}
+            </>
+          }
           onClick={() => onChoice('deload')}
         />
         <Choice
@@ -47,7 +84,19 @@ export function MesocycleRecap({
   );
 }
 
-function Choice({ accent, recommended, label, desc, onClick }: { accent: string; recommended?: boolean; label: string; desc: React.ReactNode; onClick: () => void }) {
+function Choice({
+  accent,
+  recommended,
+  label,
+  desc,
+  onClick,
+}: {
+  accent: string;
+  recommended?: boolean;
+  label: string;
+  desc: React.ReactNode;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
@@ -66,7 +115,15 @@ function Choice({ accent, recommended, label, desc, onClick }: { accent: string;
       }}
     >
       {recommended ? (
-        <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, letterSpacing: 1, color: accent, textTransform: 'uppercase' }}>
+        <div
+          style={{
+            fontFamily: 'JetBrains Mono',
+            fontSize: 10,
+            letterSpacing: 1,
+            color: accent,
+            textTransform: 'uppercase',
+          }}
+        >
           Recommended
         </div>
       ) : null}

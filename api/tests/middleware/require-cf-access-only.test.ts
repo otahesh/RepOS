@@ -24,9 +24,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await jwks.teardown();
-  await db.query(`DELETE FROM users WHERE email = $1`, [
-    'cfaccess.only@repos.test',
-  ]);
+  await db.query(`DELETE FROM users WHERE email = $1`, ['cfaccess.only@repos.test']);
   await db.end();
 });
 

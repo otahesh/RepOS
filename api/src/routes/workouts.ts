@@ -65,7 +65,9 @@ export async function workoutsRoutes(app: FastifyInstance) {
 
         // Rate-limit FIRST so dedupes also count toward the cap (mirrors
         // weight.ts). 11th write/day per user returns 409.
-        const { rows: [logRow] } = await client.query<{ write_count: number }>(
+        const {
+          rows: [logRow],
+        } = await client.query<{ write_count: number }>(
           `INSERT INTO workout_write_log (user_id, log_date, write_count)
            VALUES ($1, $2, 1)
            ON CONFLICT (user_id, log_date) DO UPDATE

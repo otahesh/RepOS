@@ -1,20 +1,23 @@
-import { TOKENS } from '../tokens'
-import { useIsMobile } from '../lib/useIsMobile'
-import { TodayCard } from '../components/programs/TodayCard'
-import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile'
-import MobileWeightChip from '../components/MobileWeightChip'
-import DesktopDashboard from '../components/dashboard/DesktopDashboard'
-import { pushToast } from '../components/common/ToastHost'
+import { TOKENS } from '../tokens';
+import { useIsMobile } from '../lib/useIsMobile';
+import { TodayCard } from '../components/programs/TodayCard';
+import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile';
+import MobileWeightChip from '../components/MobileWeightChip';
+import DesktopDashboard from '../components/dashboard/DesktopDashboard';
+import { pushToast } from '../components/common/ToastHost';
 
 // Desktop TodayCard's onStart still routes through this placeholder until the
 // desktop logger ships (W2.x); mobile path now navigates via TodayWorkoutMobile's
 // internal useNavigate to /today/:runId/log.
 function handleDesktopStart(_runId: string, _dayId: string) {
-  pushToast({ severity: 'info', body: 'Desktop workout execution lands later in Beta. Use the mobile logger.' })
+  pushToast({
+    severity: 'info',
+    body: 'Desktop workout execution lands later in Beta. Use the mobile logger.',
+  });
 }
 
 export default function TodayPage() {
-  const isMobile = useIsMobile()
+  const isMobile = useIsMobile();
 
   if (isMobile) {
     return (
@@ -24,7 +27,7 @@ export default function TodayPage() {
           <MobileWeightChip />
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -32,5 +35,5 @@ export default function TodayPage() {
       <TodayCard onStart={handleDesktopStart} />
       <DesktopDashboard />
     </div>
-  )
+  );
 }

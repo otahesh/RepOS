@@ -12,7 +12,14 @@ export type TodayWorkout =
   | {
       state: 'workout';
       run_id: string;
-      day: { id: string; week_idx: number; day_idx: number; kind: string; name: string; scheduled_date: string };
+      day: {
+        id: string;
+        week_idx: number;
+        day_idx: number;
+        kind: string;
+        name: string;
+        scheduled_date: string;
+      };
       sets: Array<{
         id: string;
         block_idx: number;
@@ -34,9 +41,17 @@ export type TodayWorkout =
       }>;
     };
 
-export async function getTodayWorkout(userId: string, now: Date = new Date()): Promise<TodayWorkout> {
-  const { rows: [run] } = await db.query<{
-    id: string; start_date: string; start_tz: string; weeks: number;
+export async function getTodayWorkout(
+  userId: string,
+  now: Date = new Date(),
+): Promise<TodayWorkout> {
+  const {
+    rows: [run],
+  } = await db.query<{
+    id: string;
+    start_date: string;
+    start_tz: string;
+    weeks: number;
   }>(
     `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks
      FROM mesocycle_runs WHERE user_id=$1 AND status='active'
@@ -49,8 +64,15 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
   const lastDate = addDaysISO(run.start_date, run.weeks * 7 - 1);
   if (todayLocal < run.start_date || todayLocal > lastDate) return { state: 'no_active_run' };
 
-  const { rows: [day] } = await db.query<{
-    id: string; week_idx: number; day_idx: number; kind: string; name: string; scheduled_date: string;
+  const {
+    rows: [day],
+  } = await db.query<{
+    id: string;
+    week_idx: number;
+    day_idx: number;
+    kind: string;
+    name: string;
+    scheduled_date: string;
   }>(
     `SELECT id, week_idx, day_idx, kind, name, to_char(scheduled_date, 'YYYY-MM-DD') AS scheduled_date
      FROM day_workouts
@@ -60,9 +82,17 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
   if (!day) return { state: 'rest', run_id: run.id, scheduled_date: todayLocal };
 
   const { rows: setRows } = await db.query<{
-    id: string; block_idx: number; set_idx: number;
-    target_reps_low: number; target_reps_high: number; target_rir: number; rest_sec: number;
-    ex_id: string; ex_slug: string; ex_name: string; ex_required: any;
+    id: string;
+    block_idx: number;
+    set_idx: number;
+    target_reps_low: number;
+    target_reps_high: number;
+    target_rir: number;
+    rest_sec: number;
+    ex_id: string;
+    ex_slug: string;
+    ex_name: string;
+    ex_required: any;
   }>(
     `SELECT ps.id, ps.block_idx, ps.set_idx,
             ps.target_reps_low, ps.target_reps_high, ps.target_rir, ps.rest_sec,
@@ -74,9 +104,14 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
     [day.id],
   );
   const { rows: cardioRows } = await db.query<{
-    id: string; block_idx: number;
-    target_duration_sec: number | null; target_distance_m: number | null; target_zone: number | null;
-    ex_id: string; ex_slug: string; ex_name: string;
+    id: string;
+    block_idx: number;
+    target_duration_sec: number | null;
+    target_distance_m: number | null;
+    target_zone: number | null;
+    ex_id: string;
+    ex_slug: string;
+    ex_name: string;
   }>(
     `SELECT pc.id, pc.block_idx, pc.target_duration_sec, pc.target_distance_m, pc.target_zone,
             e.id AS ex_id, e.slug AS ex_slug, e.name AS ex_name
@@ -86,44 +121,58 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
     [day.id],
   );
 
-  const { rows: [profileRow] } = await db.query<{ equipment_profile: Record<string, unknown> }>(
-    `SELECT equipment_profile FROM users WHERE id=$1`, [userId],
+  const {
+    rows: [profileRow],
+  } = await db.query<{ equipment_profile: Record<string, unknown> }>(
+    `SELECT equipment_profile FROM users WHERE id=$1`,
+    [userId],
   );
   const profile = profileRow?.equipment_profile ?? { _v: 1 };
 
   // For any block whose required_equipment predicates fail under the user's
   // current profile, attach a suggested_substitution from Library v1's ranker.
-  const sets = await Promise.all(setRows.map(async (s) => {
-    const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
-    const fits = allPredicatesSatisfied(predicates, profile);
-    let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
-    if (!fits) {
-      // Beta W3.2 — pass userId so the picked suggested_substitution also
-      // reflects injury-aware ranking (knee-stressful alternative for a knee
-      // injury would otherwise outrank a safer choice).
-      const sub = await findSubstitutions(s.ex_slug, profile, userId);
-      const top = sub?.subs?.[0];
-      if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
-    }
-    return {
-      id: s.id, block_idx: s.block_idx, set_idx: s.set_idx,
-      exercise: { id: s.ex_id, slug: s.ex_slug, name: s.ex_name },
-      target_reps_low: s.target_reps_low, target_reps_high: s.target_reps_high,
-      target_rir: s.target_rir, rest_sec: s.rest_sec,
-      ...(suggested ? { suggested_substitution: suggested } : {}),
-    };
-  }));
+  const sets = await Promise.all(
+    setRows.map(async (s) => {
+      const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
+      const fits = allPredicatesSatisfied(predicates, profile);
+      let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
+      if (!fits) {
+        // Beta W3.2 — pass userId so the picked suggested_substitution also
+        // reflects injury-aware ranking (knee-stressful alternative for a knee
+        // injury would otherwise outrank a safer choice).
+        const sub = await findSubstitutions(s.ex_slug, profile, userId);
+        const top = sub?.subs?.[0];
+        if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
+      }
+      return {
+        id: s.id,
+        block_idx: s.block_idx,
+        set_idx: s.set_idx,
+        exercise: { id: s.ex_id, slug: s.ex_slug, name: s.ex_name },
+        target_reps_low: s.target_reps_low,
+        target_reps_high: s.target_reps_high,
+        target_rir: s.target_rir,
+        rest_sec: s.rest_sec,
+        ...(suggested ? { suggested_substitution: suggested } : {}),
+      };
+    }),
+  );
 
   return {
     state: 'workout',
     run_id: run.id,
     day: {
-      id: day.id, week_idx: day.week_idx, day_idx: day.day_idx,
-      kind: day.kind, name: day.name, scheduled_date: day.scheduled_date,
+      id: day.id,
+      week_idx: day.week_idx,
+      day_idx: day.day_idx,
+      kind: day.kind,
+      name: day.name,
+      scheduled_date: day.scheduled_date,
     },
     sets,
-    cardio: cardioRows.map(c => ({
-      id: c.id, block_idx: c.block_idx,
+    cardio: cardioRows.map((c) => ({
+      id: c.id,
+      block_idx: c.block_idx,
       exercise: { id: c.ex_id, slug: c.ex_slug, name: c.ex_name },
       target_duration_sec: c.target_duration_sec,
       target_distance_m: c.target_distance_m,
@@ -131,4 +180,3 @@ export async function getTodayWorkout(userId: string, now: Date = new Date()): P
     })),
   };
 }
-

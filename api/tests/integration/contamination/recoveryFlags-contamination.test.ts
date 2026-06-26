@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../../helpers/build-test-app.js';
-import { mkUserPair, seedFullMesocycleForUser, cleanupUserPair, type UserPairHandle } from '../../helpers/seed-fixtures.js';
+import {
+  mkUserPair,
+  seedFullMesocycleForUser,
+  cleanupUserPair,
+  type UserPairHandle,
+} from '../../helpers/seed-fixtures.js';
 import { db } from '../../../src/db/client.js';
 
 const handles: UserPairHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupUserPair(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupUserPair(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W8.2 contamination — recovery-flags', () => {
   it('GET /recovery-flags for B does not surface flags or dismissals from A', async () => {
@@ -18,7 +27,9 @@ describe('W8.2 contamination — recovery-flags', () => {
 
     // Seed A a known dismissal in the CURRENT ISO week (mirror the dismiss
     // test's table). The week_start formula matches the route (date_trunc).
-    const { rows: [{ week_start }] } = await db.query<{ week_start: string }>(
+    const {
+      rows: [{ week_start }],
+    } = await db.query<{ week_start: string }>(
       `SELECT to_char(date_trunc('week', current_date)::date, 'YYYY-MM-DD') AS week_start`,
     );
     await db.query(
@@ -28,7 +39,8 @@ describe('W8.2 contamination — recovery-flags', () => {
     );
 
     const res = await app.inject({
-      method: 'GET', url: '/api/recovery-flags',
+      method: 'GET',
+      url: '/api/recovery-flags',
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
     });
     expect(res.statusCode).toBe(200);
@@ -41,11 +53,14 @@ describe('W8.2 contamination — recovery-flags', () => {
     // (or any other row) into A's identity space.
     expect(body.flags.some((f) => f.flag === 'overreaching')).toBe(false);
     const { rows: bDismissals } = await db.query(
-      `SELECT 1 FROM recovery_flag_dismissals WHERE user_id=$1`, [pair.userB.userId]);
+      `SELECT 1 FROM recovery_flag_dismissals WHERE user_id=$1`,
+      [pair.userB.userId],
+    );
     expect(bDismissals.length).toBe(0);
     const { rows: aDismissals } = await db.query(
       `SELECT 1 FROM recovery_flag_dismissals WHERE user_id=$1 AND flag='overreaching'`,
-      [pair.userA.userId]);
+      [pair.userA.userId],
+    );
     expect(aDismissals.length).toBe(1); // A's dismissal untouched by B's GET
   });
 
@@ -55,7 +70,8 @@ describe('W8.2 contamination — recovery-flags', () => {
     handles.push(pair);
 
     const res = await app.inject({
-      method: 'POST', url: '/api/recovery-flags/dismiss',
+      method: 'POST',
+      url: '/api/recovery-flags/dismiss',
       headers: { authorization: `Bearer ${pair.userB.bearer}` },
       payload: { flag: 'overreaching' },
     });
