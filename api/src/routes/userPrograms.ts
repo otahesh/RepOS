@@ -359,10 +359,10 @@ export async function userProgramRoutes(app: FastifyInstance) {
       // Single DELETE; all children (mesocycle_runs → day_workouts →
       // planned_sets → set_logs / planned_cardio_blocks / run_events) cascade
       // via ON DELETE CASCADE FKs. Ownership scoped in the WHERE clause.
-      const { rowCount } = await db.query(
-        `DELETE FROM user_programs WHERE id=$1 AND user_id=$2`,
-        [req.params.id, userId],
-      );
+      const { rowCount } = await db.query(`DELETE FROM user_programs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
       if (rowCount === 0) {
         reply.code(404);
         return { error: 'user_program not found', field: 'id' };

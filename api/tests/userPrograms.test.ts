@@ -780,7 +780,11 @@ describe('POST /api/user-programs/:id/archive + /unarchive', () => {
       headers: auth(),
     });
     const upId = fork.json<{ id: string }>().id;
-    await app.inject({ method: 'POST', url: `/api/user-programs/${upId}/archive`, headers: auth() });
+    await app.inject({
+      method: 'POST',
+      url: `/api/user-programs/${upId}/archive`,
+      headers: auth(),
+    });
 
     const un = await app.inject({
       method: 'POST',
