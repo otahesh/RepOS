@@ -171,8 +171,16 @@ describe('user_programs (migration 016)', () => {
       `SELECT indexdef FROM pg_indexes
         WHERE tablename='user_programs' AND indexname='idx_user_programs_user'`,
     );
-    // Migration 071 swapped this partial index off the status='archived' enum
-    // value onto the new archived_at column (the reversible-archive source of truth).
+    expect(rows[0]?.indexdef).toMatch(/WHERE \(status <> 'archived'/i);
+  });
+
+  it('active partial index keys on archived_at (migration 071, additive)', async () => {
+    // Migration 071 adds a new partial index on the archived_at source of truth
+    // (the legacy idx_user_programs_user above is left in place — D10 expand step).
+    const { rows } = await db.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE tablename='user_programs' AND indexname='idx_user_programs_active'`,
+    );
     expect(rows[0]?.indexdef).toMatch(/WHERE \(archived_at IS NULL/i);
   });
 });
