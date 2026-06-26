@@ -1,7 +1,9 @@
 -- 071_user_programs_archived_at.sql
 -- Reversible "archive" for user programs: a nullable timestamp, mirroring
--- program_templates.archived_at. Non-lossy (unlike overloading status='archived'),
--- so unarchive restores the program to its real status.
+-- program_templates.archived_at. Column-archived rows (the new /archive path)
+-- restore cleanly on unarchive. Legacy status='archived' rows backfilled below
+-- keep their enum value, so after unarchive they surface only under ?include=past
+-- (none expected in prod). The column is the single source of truth for filtering.
 ALTER TABLE user_programs ADD COLUMN archived_at TIMESTAMPTZ NULL;
 
 -- Carry over any rows previously archived via the enum value so the new column
