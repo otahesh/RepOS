@@ -1,5 +1,6 @@
 import type { ProgramTemplateStructure, UserProgramRecord } from './programs';
 import type { ScheduleWarning } from '../../components/programs/ScheduleWarnings';
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 export { ApiError } from './_http';
 
@@ -34,15 +35,13 @@ export async function listMyPrograms(opts?: {
   includePast?: boolean;
 }): Promise<UserProgramRecord[]> {
   const url = opts?.includePast ? '/api/user-programs?include=past' : '/api/user-programs';
-  const res = await fetch(url, { credentials: 'same-origin' });
+  const res = await apiFetch(url, {});
   const data = await jsonOrThrow<{ programs: UserProgramRecord[] }>(res);
   return data.programs;
 }
 
 export async function getUserProgram(id: string): Promise<UserProgramDetail> {
-  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}`, {});
   return jsonOrThrow(res);
 }
 
@@ -50,10 +49,9 @@ export async function patchUserProgram(
   id: string,
   patch: UserProgramPatch,
 ): Promise<UserProgramRecord> {
-  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(patch),
   });
   return jsonOrThrow(res);
@@ -63,19 +61,16 @@ export async function startUserProgram(
   id: string,
   body: { start_date: string; start_tz: string },
 ): Promise<{ mesocycle_run_id: string }> {
-  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}/start`, {
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
     body: JSON.stringify(body),
   });
   return jsonOrThrow(res);
 }
 
 export async function getUserProgramWarnings(id: string): Promise<ScheduleWarning[]> {
-  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}/warnings`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}/warnings`, {});
   const data = await jsonOrThrow<{ warnings: ScheduleWarning[] }>(res);
   return data.warnings;
 }
@@ -93,9 +88,7 @@ export type ProgramMesocycle = {
 };
 
 export async function listProgramMesocycles(id: string): Promise<ProgramMesocycle[]> {
-  const res = await fetch(`/api/user-programs/${encodeURIComponent(id)}/mesocycles`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}/mesocycles`, {});
   const data = await jsonOrThrow<{ mesocycles: ProgramMesocycle[] }>(res);
   return data.mesocycles;
 }

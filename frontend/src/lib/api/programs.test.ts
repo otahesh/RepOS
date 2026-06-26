@@ -14,7 +14,10 @@ describe('programs API client', () => {
     });
     const rows = await listProgramTemplates();
     expect(rows[0].slug).toBe('full-body-3-day');
-    expect(fetch).toHaveBeenCalledWith('/api/program-templates', expect.any(Object));
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/program-templates'),
+      expect.any(Object),
+    );
   });
   it('GET /api/program-templates/:slug returns detail', async () => {
     (fetch as any).mockResolvedValueOnce({
@@ -32,7 +35,7 @@ describe('programs API client', () => {
     const up = await forkProgramTemplate('full-body-3-day', { name: 'My FB' });
     expect(up.status).toBe('draft');
     expect(fetch).toHaveBeenCalledWith(
-      '/api/program-templates/full-body-3-day/fork',
+      expect.stringContaining('/api/program-templates/full-body-3-day/fork'),
       expect.objectContaining({ method: 'POST' }),
     );
   });
