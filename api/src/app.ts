@@ -24,6 +24,7 @@ import { parQRoutes } from './routes/parQ.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { mesocyclesDeloadRoutes } from './routes/mesocyclesDeload.js';
 import { requireCfAccess, isAdminEmail } from './middleware/cfAccess.js';
+import { registerErrorHandler } from './middleware/errorHandler.js';
 import { registerMaintenanceGate } from './middleware/maintenance.js';
 import { backupRoutes } from './routes/backups.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
@@ -48,6 +49,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(sensible);
+  // Global error handler — sanitize 5xx so raw pg/internal errors never leak.
+  registerErrorHandler(app);
   // W5 — maintenance gate. Registers the onRequest 503 hook + /health/user-facing
   // BEFORE any /api/* route plugin so a set flag short-circuits everything
   // except /api/maintenance/* and /health.

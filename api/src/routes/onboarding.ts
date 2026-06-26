@@ -17,6 +17,7 @@ import { requireScope } from '../middleware/scope.js';
 import { OnboardingCompleteRequestSchema, type OnboardingCompleteResponse } from '../schemas/onboarding.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { recordAccountEventTx } from '../services/accountEvents.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function onboardingRoutes(app: FastifyInstance) {
   app.post(
@@ -24,7 +25,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
       const userId = (req as any).userId as string;
-      const ip = (req.ip || '') as string;
+      const ip = clientIp(req) ?? '';
       const parsed = OnboardingCompleteRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);

@@ -22,6 +22,7 @@ import {
 } from '../schemas/backups.js';
 import { runManualBackup } from '../services/backupRunner.js';
 import { kickOffRestore, DumpSchemaRevTooNewError } from '../services/restoreRunner.js';
+import { clientIp } from '../utils/clientIp.js';
 
 function backupsDir(): string {
   return process.env.BACKUPS_DIR ?? '/config/backups';
@@ -47,10 +48,7 @@ export function safeBackupPath(id: string): string | null {
 function callerContext(req: any): { adminUserId: string | null; sourceIp: string | null } {
   return {
     adminUserId: req.userId ?? null,
-    sourceIp:
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-      req.ip ??
-      null,
+    sourceIp: clientIp(req),
   };
 }
 
@@ -106,10 +104,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
   app.post('/backups', { preHandler: requireAdminKeyOrCfAccess() }, async (req, reply) => {
     const result = await runManualBackup({
       adminUserId: (req as any).userId ?? null, // C-ADMIN-USER-ID
-      sourceIp:
-        (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-        req.ip ??
-        null,
+      sourceIp: clientIp(req),
     });
     return reply.code(201).send({
       id: result.id,
