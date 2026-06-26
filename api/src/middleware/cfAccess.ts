@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
 import { assertNotPlaceholderUserId } from '../bootstrap-runtime.js';
+import { constantTimeEqual } from '../utils/constantTimeEqual.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
@@ -254,7 +255,7 @@ export function requireAdminKeyOrCfAccess(
 
     const provided = req.headers['x-admin-key'];
     if (typeof provided === 'string' && provided.length > 0) {
-      if (provided !== adminKey) {
+      if (!constantTimeEqual(provided, adminKey)) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
       (req as any).authMode = 'admin';
