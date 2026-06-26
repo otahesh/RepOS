@@ -73,6 +73,40 @@ describe('equipment profile (spec §9.2)', () => {
     expect(get.json()).toEqual(profile);
   });
 
+  it('9b. cardio object-toggles (recumbent_bike, outdoor_walking) round-trip', async () => {
+    // These keys are object-kind in the registry; the Settings editor sends them
+    // as objects (not boolean true). This locks that the backend accepts the
+    // exact shapes the editor now emits — the Beta "equipment doesn't save" fix.
+    const profile = {
+      _v: 1,
+      recumbent_bike: { resistance_levels: 16 },
+      outdoor_walking: { loop_mi: 0 },
+    };
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/api/equipment/profile',
+      headers: auth(),
+      body: profile,
+    });
+    expect(put.statusCode).toBe(200);
+    const get = await app.inject({
+      method: 'GET',
+      url: '/api/equipment/profile',
+      headers: auth(),
+    });
+    expect(get.json()).toEqual(profile);
+  });
+
+  it('9c. recumbent_bike as boolean true → 400 (guards the old frontend bug)', async () => {
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/api/equipment/profile',
+      headers: auth(),
+      body: { _v: 1, recumbent_bike: true },
+    });
+    expect(put.statusCode).toBe(400);
+  });
+
   it('11. v1-shaped profile reads cleanly under simulated v2 expansion', async () => {
     // Manually inject a profile with an extra unknown key and ensure GET still reads.
     // We bypass PUT validation via direct DB write.
