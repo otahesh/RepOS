@@ -29,15 +29,41 @@ export type UserProgramPatch =
   | { op: 'skip_day'; week_idx: number; day_idx: number }
   | { op: 'trim_week'; drop_last_n: number };
 
-// include='past' returns abandoned + completed programs in addition to active ones.
-// Default (omitted) returns only active programs (draft/active/paused).
+// include='past' returns all non-archived programs (client filters to
+// completed/abandoned). include='archived' returns only archived programs.
+// Default returns only active programs (draft/active/paused).
 export async function listMyPrograms(opts?: {
   includePast?: boolean;
+  includeArchived?: boolean;
 }): Promise<UserProgramRecord[]> {
-  const url = opts?.includePast ? '/api/user-programs?include=past' : '/api/user-programs';
+  const url = opts?.includeArchived
+    ? '/api/user-programs?include=archived'
+    : opts?.includePast
+      ? '/api/user-programs?include=past'
+      : '/api/user-programs';
   const res = await apiFetch(url, {});
   const data = await jsonOrThrow<{ programs: UserProgramRecord[] }>(res);
   return data.programs;
+}
+
+export async function deleteUserProgram(id: string): Promise<void> {
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  // 204 No Content on success; only parse (and throw) on error.
+  if (!res.ok) await jsonOrThrow(res);
+}
+
+export async function archiveUserProgram(id: string): Promise<void> {
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}/archive`, {
+    method: 'POST',
+  });
+  await jsonOrThrow<{ ok: boolean }>(res);
+}
+
+export async function unarchiveUserProgram(id: string): Promise<void> {
+  const res = await apiFetch(`/api/user-programs/${encodeURIComponent(id)}/unarchive`, {
+    method: 'POST',
+  });
+  await jsonOrThrow<{ ok: boolean }>(res);
 }
 
 export async function getUserProgram(id: string): Promise<UserProgramDetail> {

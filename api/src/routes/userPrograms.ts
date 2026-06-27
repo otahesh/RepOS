@@ -16,6 +16,7 @@ import type { UserProgramCustomizations } from '../schemas/userProgramCustomizat
 import {
   UserProgramStartRequestSchema,
   UserProgramStartIntentQuerySchema,
+  UserProgramListQuerySchema,
   type UserProgramListResponse,
   type UserProgramDetailResponse,
   type UserProgramPatchResponse,
@@ -25,31 +26,42 @@ import {
 } from '../schemas/userPrograms.js';
 
 export async function userProgramRoutes(app: FastifyInstance) {
-  // ?include=past  → returns active + abandoned + completed (excludes only 'archived')
-  // default        → returns active programs only (status IN ('draft','active','paused'))
+  // default          → active programs only: archived_at IS NULL AND status IN (draft,active,paused)
+  // ?include=past     → all non-archived (client filters to completed/abandoned)
+  // ?include=archived → archived programs only (archived_at IS NOT NULL)
   app.get<{ Querystring: { include?: string } }>(
     '/user-programs',
     { preHandler: requireBearerOrCfAccess },
-    async (req, _reply) => {
+    async (req, reply) => {
       const userId = requireUserId(req);
-      const includePast = req.query.include === 'past';
+      const q = UserProgramListQuerySchema.safeParse(req.query);
+      if (!q.success) {
+        reply.code(400);
+        return zodToFieldError(q.error);
+      }
+      const include = q.data.include;
       // LEFT JOIN program_templates to carry template_slug through to the client
-      // so the fork-wizard "Restart" action can navigate to /programs/:slug
-      // without a second round-trip.
+      // so the fork-wizard "Restart" action can navigate to /programs/:slug.
+      const cols = `up.id, up.template_id, pt.slug AS template_slug, up.template_version,
+                    up.name, up.customizations, up.status, up.created_at, up.updated_at,
+                    EXISTS (
+                      SELECT 1 FROM mesocycle_runs mr
+                      WHERE mr.user_program_id = up.id AND mr.status IN ('active','paused')
+                    ) AS has_live_run`;
+      let where: string;
+      if (include === 'archived') {
+        where = `up.user_id=$1 AND up.archived_at IS NOT NULL`;
+      } else if (include === 'past') {
+        where = `up.user_id=$1 AND up.archived_at IS NULL`;
+      } else {
+        where = `up.user_id=$1 AND up.archived_at IS NULL AND up.status IN ('draft','active','paused')`;
+      }
       const { rows } = await db.query(
-        includePast
-          ? `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
-                    up.name, up.customizations, up.status, up.created_at, up.updated_at
-             FROM user_programs up
-             LEFT JOIN program_templates pt ON pt.id = up.template_id
-             WHERE up.user_id=$1 AND up.status <> 'archived'
-             ORDER BY up.created_at DESC`
-          : `SELECT up.id, up.template_id, pt.slug AS template_slug, up.template_version,
-                    up.name, up.customizations, up.status, up.created_at, up.updated_at
-             FROM user_programs up
-             LEFT JOIN program_templates pt ON pt.id = up.template_id
-             WHERE up.user_id=$1 AND up.status IN ('draft','active','paused')
-             ORDER BY up.created_at DESC`,
+        `SELECT ${cols}
+         FROM user_programs up
+         LEFT JOIN program_templates pt ON pt.id = up.template_id
+         WHERE ${where}
+         ORDER BY up.created_at DESC`,
         [userId],
       );
       const listResp: UserProgramListResponse = { programs: rows };
@@ -111,13 +123,13 @@ export async function userProgramRoutes(app: FastifyInstance) {
         // customizations. Protects BOTH swap_exercise and swap_exercise_all
         // (and every other reducer op that read-modify-writes customizations).
         const { rows } = await client.query(
-          `SELECT customizations, status, template_id FROM user_programs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
+          `SELECT customizations, status, template_id, archived_at FROM user_programs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
           [req.params.id, userId],
         );
         if (rows.length === 0) {
           notFound = true;
           await client.query('ROLLBACK');
-        } else if (rows[0].status === 'archived') {
+        } else if (rows[0].archived_at !== null) {
           archived = true;
           await client.query('ROLLBACK');
         } else {
@@ -332,6 +344,91 @@ export async function userProgramRoutes(app: FastifyInstance) {
         return { error: 'invalid block coordinates', field: 'block_idx' };
       }
       return updated as UserProgramPatchResponse;
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    '/user-programs/:id',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      // Single DELETE; all children (mesocycle_runs → day_workouts →
+      // planned_sets → set_logs / planned_cardio_blocks / run_events) cascade
+      // via ON DELETE CASCADE FKs. Ownership scoped in the WHERE clause.
+      const { rowCount } = await db.query(`DELETE FROM user_programs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
+      if (rowCount === 0) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/user-programs/:id/archive',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const owned = await db.query(`SELECT 1 FROM user_programs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
+      if (owned.rows.length === 0) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      // Guard on a live RUN, not user_programs.status: starting a mesocycle does
+      // not flip the program's status, so status is an unreliable signal here.
+      const live = await db.query(
+        `SELECT 1 FROM mesocycle_runs
+         WHERE user_program_id=$1 AND status IN ('active','paused') LIMIT 1`,
+        [req.params.id],
+      );
+      if (live.rows.length > 0) {
+        reply.code(409);
+        return {
+          error: 'Finish or abandon the in-progress mesocycle before archiving this program.',
+          field: 'status',
+        };
+      }
+      await db.query(
+        `UPDATE user_programs SET archived_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2`,
+        [req.params.id, userId],
+      );
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/user-programs/:id/unarchive',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'user_program not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const { rowCount } = await db.query(
+        `UPDATE user_programs SET archived_at=NULL, updated_at=now()
+         WHERE id=$1 AND user_id=$2 AND archived_at IS NOT NULL`,
+        [req.params.id, userId],
+      );
+      if (rowCount === 0) {
+        reply.code(404);
+        return { error: 'archived user_program not found', field: 'id' };
+      }
+      return { ok: true };
     },
   );
 
