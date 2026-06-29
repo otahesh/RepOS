@@ -29,6 +29,7 @@ beforeEach(() => {
       weeks: 5,
       days_per_week: 3,
       version: 1,
+      track: 'beginner',
     },
   ] as any);
 });

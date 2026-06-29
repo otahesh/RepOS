@@ -57,6 +57,7 @@ export interface MkTemplateOpts {
   daysPerWeek?: number;
   /** structure JSONB (required). */
   structure: object;
+  track?: 'beginner' | 'intermediate' | 'advanced';
 }
 
 export async function mkTemplate(opts: MkTemplateOpts): Promise<{ id: string; slug: string }> {
@@ -65,14 +66,15 @@ export async function mkTemplate(opts: MkTemplateOpts): Promise<{ id: string; sl
   const {
     rows: [t],
   } = await db.query<{ id: string; slug: string }>(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, $3, $4, $5::jsonb, 1, 'system') RETURNING id, slug`,
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 1, 'system', $6) RETURNING id, slug`,
     [
       slug,
       opts.name ?? 'Vitest Template',
       opts.weeks ?? 5,
       opts.daysPerWeek ?? 1,
       JSON.stringify(opts.structure),
+      opts.track ?? 'beginner',
     ],
   );
   return t;

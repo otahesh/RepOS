@@ -18,6 +18,7 @@ export const ProgramTemplateSummarySchema = z.object({
   description: z.string(),
   weeks: z.number().int().min(1),
   days_per_week: z.number().int().min(1).max(7),
+  track: z.enum(['beginner', 'intermediate', 'advanced']),
   version: z.number().int().min(1),
   created_at: z.string(),
 });

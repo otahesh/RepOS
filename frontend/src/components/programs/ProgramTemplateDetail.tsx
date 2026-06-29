@@ -36,7 +36,8 @@ export function ProgramTemplateDetail({
             textTransform: 'uppercase',
           }}
         >
-          {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk
+          {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk ·{' '}
+          {t.track.toUpperCase()}
         </div>
         <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>{t.name}</h2>
         <p style={{ margin: 0, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{t.description}</p>

@@ -63,6 +63,7 @@ export interface ProgramTemplateRecord {
   description: string;
   weeks: number;
   days_per_week: number;
+  track: 'beginner' | 'intermediate' | 'advanced';
   structure: unknown; // validated app-side by ProgramTemplateSchema
   version: number;
   created_by: 'system' | 'user';

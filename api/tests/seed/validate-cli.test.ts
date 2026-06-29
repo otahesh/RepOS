@@ -8,6 +8,6 @@ describe('validate-cli (program templates)', () => {
       encoding: 'utf-8',
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/program_templates OK · 3 entries/);
+    expect(r.stdout).toMatch(/program_templates OK · 4 entries/);
   });
 });

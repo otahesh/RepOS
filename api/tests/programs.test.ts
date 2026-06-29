@@ -7,9 +7,14 @@ type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 
 // Phase D's seed-runner e2e tests archive 'strength-cardio-3-2' when proving
-// the "missing from input → archive" path (D.19). Restore the curated 3 here
+// the "missing from input → archive" path (D.19). Restore the curated 4 here
 // so this catalog suite is order-independent vs. seed-runner suites.
-const CURATED_SLUGS = ['full-body-3-day', 'strength-cardio-3-2', 'upper-lower-4-day'];
+const CURATED_SLUGS = [
+  'full-body-2-day',
+  'full-body-3-day',
+  'strength-cardio-3-2',
+  'upper-lower-4-day',
+];
 
 beforeAll(async () => {
   await db.query(
@@ -30,13 +35,18 @@ afterAll(async () => {
 });
 
 describe('GET /api/program-templates', () => {
-  it('returns 3 non-archived templates with strength + cardio coverage', async () => {
+  it('returns 4 non-archived templates with strength + cardio coverage', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/program-templates' });
     expect(r.statusCode).toBe(200);
     const body = r.json<{ templates: any[] }>();
-    expect(body.templates.length).toBe(3);
+    expect(body.templates.length).toBe(4);
     const slugs = body.templates.map((t) => t.slug).sort();
-    expect(slugs).toEqual(['full-body-3-day', 'strength-cardio-3-2', 'upper-lower-4-day']);
+    expect(slugs).toEqual([
+      'full-body-2-day',
+      'full-body-3-day',
+      'strength-cardio-3-2',
+      'upper-lower-4-day',
+    ]);
     const cardio = body.templates.find((t) => t.slug === 'strength-cardio-3-2');
     expect(cardio).toBeDefined();
     expect(cardio.days_per_week).toBe(5);
@@ -50,8 +60,8 @@ describe('GET /api/program-templates', () => {
   it('omits archived_at IS NOT NULL templates', async () => {
     const { rows } = await db.query(
       `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, archived_at)
-       VALUES ('vitest-archived-tmpl', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now())
+       (slug, name, weeks, days_per_week, structure, archived_at, track)
+       VALUES ('vitest-archived-tmpl', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now(), 'beginner')
        RETURNING id`,
     );
     try {
@@ -61,6 +71,29 @@ describe('GET /api/program-templates', () => {
     } finally {
       await db.query(`DELETE FROM program_templates WHERE id=$1`, [rows[0].id]);
     }
+  });
+  it('list returns a track on every template', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates' });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ templates: { slug: string; track: string }[] }>();
+    expect(body.templates.length).toBeGreaterThanOrEqual(3);
+    for (const t of body.templates) {
+      expect(['beginner', 'intermediate', 'advanced']).toContain(t.track);
+    }
+  });
+
+  it('?track=intermediate returns only intermediate templates', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates?track=intermediate' });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ templates: { slug: string; track: string }[] }>();
+    expect(body.templates.length).toBeGreaterThan(0);
+    expect(body.templates.every((t) => t.track === 'intermediate')).toBe(true);
+  });
+
+  it('?track=bogus returns 400 with actionable error', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates?track=bogus' });
+    expect(r.statusCode).toBe(400);
+    expect(r.json<{ error: string }>().error).toMatch(/track/i);
   });
 });
 
@@ -77,6 +110,12 @@ describe('GET /api/program-templates/:slug', () => {
     expect(Array.isArray(body.structure.days)).toBe(true);
   });
 
+  it('detail returns a track', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates/full-body-3-day' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json<{ track: string }>().track).toBe('beginner');
+  });
+
   it('404 on unknown slug', async () => {
     const r = await app.inject({
       method: 'GET',
@@ -88,8 +127,8 @@ describe('GET /api/program-templates/:slug', () => {
   it('404 on archived template (treats as gone)', async () => {
     const { rows } = await db.query(
       `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, archived_at)
-       VALUES ('vitest-archived-detail', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now())
+       (slug, name, weeks, days_per_week, structure, archived_at, track)
+       VALUES ('vitest-archived-detail', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now(), 'beginner')
        RETURNING id`,
     );
     try {

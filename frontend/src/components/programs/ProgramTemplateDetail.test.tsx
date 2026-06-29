@@ -13,6 +13,7 @@ describe('<ProgramTemplateDetail>', () => {
       weeks: 5,
       days_per_week: 4,
       version: 1,
+      track: 'intermediate',
       structure: {
         _v: 1,
         days: [
@@ -47,5 +48,6 @@ describe('<ProgramTemplateDetail>', () => {
     expect(screen.getByText(/Upper Volume/)).toBeInTheDocument();
     expect(screen.getByText(/Lower Volume/)).toBeInTheDocument();
     expect(screen.getByText(/barbell bench press/i)).toBeInTheDocument();
+    expect(screen.getByText(/INTERMEDIATE/)).toBeInTheDocument();
   });
 });
