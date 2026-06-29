@@ -24,7 +24,12 @@ describe('W2 — curated programs include core blocks (new version) but old fork
     // Scope to the curated lineup by slug — other tests seed throwaway
     // created_by='system' fixture templates (no core block) that would
     // otherwise pollute an "all system templates" query under parallelism.
-    const CURATED = ['full-body-3-day', 'upper-lower-4-day', 'strength-cardio-3-2'];
+    const CURATED = [
+      'full-body-2-day',
+      'full-body-3-day',
+      'upper-lower-4-day',
+      'strength-cardio-3-2',
+    ];
     const { rows: templates } = await db.query<{ slug: string; version: number; structure: any }>(
       `SELECT slug, version, structure FROM program_templates
        WHERE archived_at IS NULL AND created_by = 'system' AND slug = ANY($1::text[])`,

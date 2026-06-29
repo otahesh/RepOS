@@ -24,8 +24,8 @@ beforeAll(async () => {
 // Restore the canonical curated lineup before releasing the shared DB. The
 // "removing a template soft-archives it" case above leaves strength-cardio-3-2
 // ARCHIVED; without this restore the next suite (notably the integration
-// core-blocks test) sees only 2 active curated templates. Re-run the real
-// seed so all 3 curated rows are active + current again.
+// core-blocks test) sees only 3 active curated templates. Re-run the real
+// seed so all 4 curated rows are active + current again.
 afterAll(async () => {
   try {
     const all = (
@@ -48,7 +48,7 @@ afterAll(async () => {
 });
 
 describe('program_templates seed (e2e)', () => {
-  it('inserts 3 active templates on first run', async () => {
+  it('inserts 4 active templates on first run', async () => {
     const { all, cardio } = await loadKnownSlugs();
     const r = await runSeed({
       key: 'program_templates',
@@ -56,11 +56,12 @@ describe('program_templates seed (e2e)', () => {
       adapter: makeProgramTemplateAdapter(all, cardio),
     });
     expect(r.applied).toBe(true);
-    if (r.applied) expect(r.upserted).toBe(3);
+    if (r.applied) expect(r.upserted).toBe(4);
     const { rows } = await db.query<{ slug: string }>(
       `SELECT slug FROM program_templates WHERE seed_key='program_templates' AND archived_at IS NULL ORDER BY slug`,
     );
     expect(rows.map((r) => r.slug)).toEqual([
+      'full-body-2-day',
       'full-body-3-day',
       'strength-cardio-3-2',
       'upper-lower-4-day',
@@ -135,7 +136,7 @@ describe('program_templates seed (e2e)', () => {
     expect(after['strength-cardio-3-2']).toBe(before['strength-cardio-3-2']);
   });
 
-  it('removing a template soft-archives it; the other two stay active', async () => {
+  it('removing a template soft-archives it; the other three stay active', async () => {
     const { all, cardio } = await loadKnownSlugs();
     const minus1 = programTemplates.filter((t) => t.slug !== 'strength-cardio-3-2');
     const r = await runSeed({
@@ -150,6 +151,7 @@ describe('program_templates seed (e2e)', () => {
        WHERE seed_key='program_templates' ORDER BY slug`,
     );
     expect(rows).toEqual([
+      { slug: 'full-body-2-day', archived: false },
       { slug: 'full-body-3-day', archived: false },
       { slug: 'strength-cardio-3-2', archived: true },
       { slug: 'upper-lower-4-day', archived: false },
