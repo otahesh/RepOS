@@ -63,8 +63,8 @@ describe('program_templates (migration 015)', () => {
   it('rejects non-kebab slug', async () => {
     await expect(
       db.query(
-        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('Bad Slug','x',5,3,'{}'::jsonb)`,
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, track)
+         VALUES ('Bad Slug','x',5,3,'{}'::jsonb,'beginner')`,
       ),
     ).rejects.toThrow();
   });
@@ -72,8 +72,8 @@ describe('program_templates (migration 015)', () => {
   it('rejects weeks > 16', async () => {
     await expect(
       db.query(
-        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('test-too-many-weeks','x',17,3,'{}'::jsonb)`,
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, track)
+         VALUES ('test-too-many-weeks','x',17,3,'{}'::jsonb,'beginner')`,
       ),
     ).rejects.toThrow();
   });
@@ -81,8 +81,8 @@ describe('program_templates (migration 015)', () => {
   it('rejects days_per_week > 7', async () => {
     await expect(
       db.query(
-        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ('test-too-many-days','x',5,8,'{}'::jsonb)`,
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, track)
+         VALUES ('test-too-many-days','x',5,8,'{}'::jsonb,'beginner')`,
       ),
     ).rejects.toThrow();
   });
@@ -90,8 +90,8 @@ describe('program_templates (migration 015)', () => {
   it('rejects created_by outside system|user', async () => {
     await expect(
       db.query(
-        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, created_by)
-         VALUES ('test-bad-author','x',5,3,'{}'::jsonb,'machine')`,
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, created_by, track)
+         VALUES ('test-bad-author','x',5,3,'{}'::jsonb,'machine','beginner')`,
       ),
     ).rejects.toThrow();
   });
@@ -108,8 +108,8 @@ describe('program_templates (migration 015)', () => {
     const {
       rows: [t],
     } = await db.query(
-      `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-       VALUES ('test-valid-template','Valid', 5, 3, '{"_v":1,"days":[]}'::jsonb)
+      `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, track)
+       VALUES ('test-valid-template','Valid', 5, 3, '{"_v":1,"days":[]}'::jsonb,'beginner')
        RETURNING version, created_by`,
     );
     expect(t.version).toBe(1);
@@ -126,8 +126,8 @@ describe('user_programs (migration 016)', () => {
       const {
         rows: [t],
       } = await db.query(
-        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure)
-         VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb) RETURNING id`,
+        `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, track)
+         VALUES ($1,'X',5,3,'{"_v":1,"days":[]}'::jsonb,'beginner') RETURNING id`,
         [`tpl-up-${randomUUID()}`],
       );
       templateId = t.id;

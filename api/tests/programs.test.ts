@@ -50,8 +50,8 @@ describe('GET /api/program-templates', () => {
   it('omits archived_at IS NOT NULL templates', async () => {
     const { rows } = await db.query(
       `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, archived_at)
-       VALUES ('vitest-archived-tmpl', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now())
+       (slug, name, weeks, days_per_week, structure, archived_at, track)
+       VALUES ('vitest-archived-tmpl', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now(), 'beginner')
        RETURNING id`,
     );
     try {
@@ -88,8 +88,8 @@ describe('GET /api/program-templates/:slug', () => {
   it('404 on archived template (treats as gone)', async () => {
     const { rows } = await db.query(
       `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, archived_at)
-       VALUES ('vitest-archived-detail', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now())
+       (slug, name, weeks, days_per_week, structure, archived_at, track)
+       VALUES ('vitest-archived-detail', 'Archived', 4, 3, '{"_v":1,"days":[]}'::jsonb, now(), 'beginner')
        RETURNING id`,
     );
     try {
