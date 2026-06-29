@@ -5,6 +5,7 @@ export type ProgramTemplate = {
   description: string;
   weeks: number;
   days_per_week: number;
+  track: 'beginner' | 'intermediate' | 'advanced';
   version: number;
   structure?: ProgramTemplateStructure;
 };
