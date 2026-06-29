@@ -156,6 +156,54 @@ describe('program_templates seed (e2e)', () => {
     ]);
   });
 
+  it('persists track through upsertOne', async () => {
+    const { all, cardio } = await loadKnownSlugs();
+    const entry = {
+      slug: 'vitest-track-rt',
+      name: 'Track RT',
+      description: '',
+      weeks: 1,
+      days_per_week: 1,
+      track: 'advanced' as const,
+      structure: {
+        _v: 1 as const,
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'strength' as const,
+            name: 'D',
+            blocks: [
+              {
+                exercise_slug: 'dumbbell-curl',
+                mev: 2,
+                mav: 3,
+                target_reps_low: 8,
+                target_reps_high: 12,
+                target_rir: 2,
+                rest_sec: 90,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    try {
+      await runSeed({
+        key: 'vitest_track_rt',
+        entries: [entry],
+        adapter: makeProgramTemplateAdapter(all, cardio),
+      });
+      const { rows } = await db.query<{ track: string }>(
+        `SELECT track FROM program_templates WHERE slug='vitest-track-rt'`,
+      );
+      expect(rows[0].track).toBe('advanced');
+    } finally {
+      await db.query(`DELETE FROM program_templates WHERE slug='vitest-track-rt'`);
+      await db.query(`DELETE FROM _seed_meta WHERE key='vitest_track_rt'`);
+    }
+  });
+
   it('every exercise_slug in every template resolves to a live exercises row', async () => {
     const slugs = new Set<string>();
     for (const t of programTemplates)
