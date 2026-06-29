@@ -62,6 +62,29 @@ describe('GET /api/program-templates', () => {
       await db.query(`DELETE FROM program_templates WHERE id=$1`, [rows[0].id]);
     }
   });
+  it('list returns a track on every template', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates' });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ templates: { slug: string; track: string }[] }>();
+    expect(body.templates.length).toBeGreaterThanOrEqual(3);
+    for (const t of body.templates) {
+      expect(['beginner', 'intermediate', 'advanced']).toContain(t.track);
+    }
+  });
+
+  it('?track=intermediate returns only intermediate templates', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates?track=intermediate' });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ templates: { slug: string; track: string }[] }>();
+    expect(body.templates.length).toBeGreaterThan(0);
+    expect(body.templates.every((t) => t.track === 'intermediate')).toBe(true);
+  });
+
+  it('?track=bogus returns 400 with actionable error', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates?track=bogus' });
+    expect(r.statusCode).toBe(400);
+    expect(r.json<{ error: string }>().error).toMatch(/track/i);
+  });
 });
 
 describe('GET /api/program-templates/:slug', () => {
@@ -75,6 +98,12 @@ describe('GET /api/program-templates/:slug', () => {
     expect(body.slug).toBe('full-body-3-day');
     expect(body.structure._v).toBe(1);
     expect(Array.isArray(body.structure.days)).toBe(true);
+  });
+
+  it('detail returns a track', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/program-templates/full-body-3-day' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json<{ track: string }>().track).toBe('beginner');
   });
 
   it('404 on unknown slug', async () => {

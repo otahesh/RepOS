@@ -9,13 +9,20 @@ import type {
 } from '../schemas/programs.js';
 
 export async function programRoutes(app: FastifyInstance) {
-  app.get('/program-templates', async (_req, reply) => {
-    const { rows } = await db.query(`
-      SELECT id, slug, name, description, weeks, days_per_week, version, created_at
-      FROM program_templates
-      WHERE archived_at IS NULL
-      ORDER BY slug ASC
-    `);
+  app.get<{ Querystring: { track?: string } }>('/program-templates', async (req, reply) => {
+    const track = req.query.track;
+    if (track !== undefined && !['beginner', 'intermediate', 'advanced'].includes(track)) {
+      reply.code(400);
+      return { error: 'track must be one of beginner|intermediate|advanced', field: 'track' };
+    }
+    const { rows } = await db.query(
+      `SELECT id, slug, name, description, weeks, days_per_week, track, version, created_at
+       FROM program_templates
+       WHERE archived_at IS NULL
+         AND ($1::text IS NULL OR track = $1)
+       ORDER BY slug ASC`,
+      [track ?? null],
+    );
     reply.header('cache-control', 'public, max-age=300');
     const listResp: ProgramTemplateListResponse = { templates: rows };
     return listResp;
@@ -23,7 +30,7 @@ export async function programRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { slug: string } }>('/program-templates/:slug', async (req, reply) => {
     const { rows } = await db.query(
-      `SELECT id, slug, name, description, weeks, days_per_week, structure, version,
+      `SELECT id, slug, name, description, weeks, days_per_week, track, structure, version,
               seed_key, seed_generation, created_at
        FROM program_templates
        WHERE slug=$1 AND archived_at IS NULL`,
