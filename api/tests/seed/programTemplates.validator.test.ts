@@ -25,6 +25,7 @@ const baseTpl: ProgramTemplateSeed = {
   description: '',
   weeks: 1,
   days_per_week: 1,
+  track: 'beginner',
   structure: { _v: 1, days: [minimalDay] },
 };
 

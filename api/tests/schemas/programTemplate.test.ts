@@ -26,6 +26,7 @@ const validTemplate = {
   description: 'desc',
   weeks: 5,
   days_per_week: 3,
+  track: 'beginner' as const,
   structure: {
     _v: 1,
     days: [
@@ -217,6 +218,23 @@ describe('ProgramTemplateSchema', () => {
     if (!r.success) {
       expect(JSON.stringify(r.error.issues)).toMatch(/duration|distance/i);
     }
+  });
+
+  it('accepts each track value', () => {
+    for (const track of ['beginner', 'intermediate', 'advanced'] as const) {
+      expect(ProgramTemplateSchema.safeParse({ ...validTemplate, track }).success).toBe(true);
+    }
+  });
+
+  it('rejects an unknown track', () => {
+    const r = ProgramTemplateSchema.safeParse({ ...validTemplate, track: 'expert' });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/track/);
+  });
+
+  it('rejects a template with no track', () => {
+    const { track, ...noTrack } = validTemplate as typeof validTemplate & { track: string };
+    expect(ProgramTemplateSchema.safeParse(noTrack).success).toBe(false);
   });
 
   it('cardio block accepts duration', () => {

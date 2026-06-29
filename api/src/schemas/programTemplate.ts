@@ -83,6 +83,7 @@ export const ProgramTemplateSchema = z
     description: z.string().max(2000).default(''),
     weeks: z.number().int().min(1).max(16),
     days_per_week: z.number().int().min(1).max(7),
+    track: z.enum(['beginner', 'intermediate', 'advanced']),
     structure: Structure,
   })
   .strict()

@@ -9,6 +9,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'full-body-3-day',
     name: 'Full Body 3-Day Foundation',
+    track: 'beginner',
     description:
       'Three full-body sessions per week (Mon/Wed/Fri). Best for beginners and time-limited trainees. Equipment minimum: dumbbells + adjustable bench.',
     weeks: 5,
@@ -173,6 +174,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'upper-lower-4-day',
     name: 'Upper / Lower 4-Day Hypertrophy',
+    track: 'intermediate',
     description:
       'Mon Upper Heavy / Tue Lower Heavy / Thu Upper Volume / Fri Lower Volume. The canonical RP shape for intermediate hypertrophy. Equipment minimum: garage gym (barbell, rack, dumbbells, adjustable bench, pull-up bar).',
     weeks: 5,
@@ -400,6 +402,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'strength-cardio-3-2',
     name: 'Strength + Z2 (3 + 2)',
+    track: 'intermediate',
     description:
       'Three full-body strength days plus two Zone-2 cardio days. Best for hybrid trainees, runners/cyclists who lift. Lower strength volume than full-body-3-day to leave room for cardio. Equipment minimum: garage gym + any one cardio modality.',
     weeks: 5,
