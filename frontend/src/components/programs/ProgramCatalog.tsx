@@ -100,7 +100,7 @@ export function ProgramCatalog({ onPick }: ProgramCatalogProps) {
                       >
                         {t.weeks}-week <Term k="mesocycle" />
                       </div>
-                      <h3 style={{ margin: '6px 0 0', fontSize: 18 }}>{t.name}</h3>
+                      <h4 style={{ margin: '6px 0 0', fontSize: 18 }}>{t.name}</h4>
                     </header>
                     <p
                       style={{
