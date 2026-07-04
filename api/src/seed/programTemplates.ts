@@ -1,5 +1,5 @@
 // File: api/src/seed/programTemplates.ts
-// Curated v1 program lineup. Three templates: full-body-3-day, upper-lower-4-day, strength-cardio-3-2.
+// Curated v1 program lineup. Four templates: full-body-2-day, full-body-3-day, upper-lower-4-day, strength-cardio-3-2.
 // Auto-ramp materializer expands these template-week structures across N weeks at run-start.
 // MEV/MAV per block are inputs the materializer reads; do not pre-expand here.
 
@@ -9,6 +9,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'full-body-3-day',
     name: 'Full Body 3-Day Foundation',
+    track: 'beginner',
     description:
       'Three full-body sessions per week (Mon/Wed/Fri). Best for beginners and time-limited trainees. Equipment minimum: dumbbells + adjustable bench.',
     weeks: 5,
@@ -173,6 +174,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'upper-lower-4-day',
     name: 'Upper / Lower 4-Day Hypertrophy',
+    track: 'intermediate',
     description:
       'Mon Upper Heavy / Tue Lower Heavy / Thu Upper Volume / Fri Lower Volume. The canonical RP shape for intermediate hypertrophy. Equipment minimum: garage gym (barbell, rack, dumbbells, adjustable bench, pull-up bar).',
     weeks: 5,
@@ -400,6 +402,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
   {
     slug: 'strength-cardio-3-2',
     name: 'Strength + Z2 (3 + 2)',
+    track: 'intermediate',
     description:
       'Three full-body strength days plus two Zone-2 cardio days. Best for hybrid trainees, runners/cyclists who lift. Lower strength volume than full-body-3-day to leave room for cardio. Equipment minimum: garage gym + any one cardio modality.',
     weeks: 5,
@@ -555,6 +558,141 @@ export const programTemplates: ProgramTemplateSeed[] = [
               target_rir: 1,
               rest_sec: 0,
               cardio: { target_duration_sec: 2700, target_zone: 2 },
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    slug: 'full-body-2-day',
+    name: 'Full Body 2-Day Foundation',
+    description:
+      'Two full-body sessions per week (Mon/Thu) for a true beginner training twice weekly. Day A is squat-emphasis, Day B is hinge-emphasis. Short, learnable sessions built only from low-skill dumbbell movements plus bodyweight core. Quads, chest, back, and core each get the full-body 2x/week advantage; lats are trained directly via the 1-arm dumbbell row (a vertical-pull machine or pull-up bar is intentionally not required, to hold the beginner equipment floor — the same call full-body-3-day makes). Equipment minimum: dumbbells + adjustable bench.',
+    weeks: 5,
+    days_per_week: 2,
+    track: 'beginner',
+    // RIR 3 on the primary compounds (goblet squat, DB bench, RDL, incline bench)
+    // is intentionally one notch more conservative than full-body-3-day's RIR 2:
+    // the 2-day is most often a true first-timer's first block, so the prime lifts
+    // stay further from failure during technique acquisition. mev/mav follow the
+    // same 2/4-compound · 2/3-isolation house scale as full-body-3-day — they are
+    // relative volume-distribution weights for the auto-ramp, not absolute set counts.
+    structure: {
+      _v: 1,
+      days: [
+        {
+          idx: 0,
+          day_offset: 0,
+          kind: 'strength',
+          name: 'Full Body A — Squat',
+          blocks: [
+            {
+              exercise_slug: 'dumbbell-goblet-squat',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 10,
+              target_rir: 3,
+              rest_sec: 150,
+            },
+            {
+              exercise_slug: 'dumbbell-bench-press',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 10,
+              target_rir: 3,
+              rest_sec: 150,
+            },
+            {
+              exercise_slug: 'chest-supported-dumbbell-row',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 2,
+              rest_sec: 120,
+            },
+            {
+              exercise_slug: 'dumbbell-shoulder-press-seated',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 2,
+              rest_sec: 120,
+            },
+            {
+              exercise_slug: 'dead-bug',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 2,
+              rest_sec: 60,
+            },
+          ],
+        },
+        {
+          idx: 1,
+          day_offset: 3,
+          kind: 'strength',
+          name: 'Full Body B — Hinge',
+          blocks: [
+            {
+              exercise_slug: 'dumbbell-romanian-deadlift',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 3,
+              rest_sec: 150,
+            },
+            {
+              exercise_slug: 'dumbbell-reverse-lunge',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 2,
+              rest_sec: 120,
+            },
+            {
+              exercise_slug: 'incline-dumbbell-bench-press',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 3,
+              rest_sec: 120,
+            },
+            {
+              exercise_slug: 'dumbbell-row-1arm',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 12,
+              target_rir: 2,
+              rest_sec: 120,
+            },
+            {
+              exercise_slug: 'dumbbell-standing-calf-raise',
+              mev: 2,
+              mav: 3,
+              target_reps_low: 10,
+              target_reps_high: 15,
+              target_rir: 2,
+              rest_sec: 75,
+            },
+            {
+              exercise_slug: 'side-plank',
+              mev: 2,
+              mav: 4,
+              target_reps_low: 8,
+              target_reps_high: 15,
+              target_rir: 2,
+              rest_sec: 60,
             },
           ],
         },

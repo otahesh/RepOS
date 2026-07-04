@@ -20,6 +20,16 @@ describe('programTemplates entries (lineup)', () => {
     expect(ProgramTemplateSeedSchema.safeParse(t).success).toBe(true);
   });
 
+  it('includes full-body-2-day: beginner, 5 weeks, 2 days/week on offsets [0,3]', () => {
+    const t = programTemplates.find((p) => p.slug === 'full-body-2-day');
+    expect(t).toBeDefined();
+    expect(t!.track).toBe('beginner');
+    expect(t!.weeks).toBe(5);
+    expect(t!.days_per_week).toBe(2);
+    expect(t!.structure.days.map((d) => d.day_offset)).toEqual([0, 3]);
+    expect(ProgramTemplateSeedSchema.safeParse(t).success).toBe(true);
+  });
+
   it('includes strength-cardio-3-2 with 5 days/week and 2 cardio days', () => {
     const t = programTemplates.find((p) => p.slug === 'strength-cardio-3-2');
     expect(t).toBeDefined();

@@ -24,8 +24,8 @@ beforeAll(async () => {
 // Restore the canonical curated lineup before releasing the shared DB. The
 // "removing a template soft-archives it" case above leaves strength-cardio-3-2
 // ARCHIVED; without this restore the next suite (notably the integration
-// core-blocks test) sees only 2 active curated templates. Re-run the real
-// seed so all 3 curated rows are active + current again.
+// core-blocks test) sees only 3 active curated templates. Re-run the real
+// seed so all 4 curated rows are active + current again.
 afterAll(async () => {
   try {
     const all = (
@@ -48,7 +48,7 @@ afterAll(async () => {
 });
 
 describe('program_templates seed (e2e)', () => {
-  it('inserts 3 active templates on first run', async () => {
+  it('inserts 4 active templates on first run', async () => {
     const { all, cardio } = await loadKnownSlugs();
     const r = await runSeed({
       key: 'program_templates',
@@ -56,11 +56,12 @@ describe('program_templates seed (e2e)', () => {
       adapter: makeProgramTemplateAdapter(all, cardio),
     });
     expect(r.applied).toBe(true);
-    if (r.applied) expect(r.upserted).toBe(3);
+    if (r.applied) expect(r.upserted).toBe(4);
     const { rows } = await db.query<{ slug: string }>(
       `SELECT slug FROM program_templates WHERE seed_key='program_templates' AND archived_at IS NULL ORDER BY slug`,
     );
     expect(rows.map((r) => r.slug)).toEqual([
+      'full-body-2-day',
       'full-body-3-day',
       'strength-cardio-3-2',
       'upper-lower-4-day',
@@ -135,7 +136,7 @@ describe('program_templates seed (e2e)', () => {
     expect(after['strength-cardio-3-2']).toBe(before['strength-cardio-3-2']);
   });
 
-  it('removing a template soft-archives it; the other two stay active', async () => {
+  it('removing a template soft-archives it; the other three stay active', async () => {
     const { all, cardio } = await loadKnownSlugs();
     const minus1 = programTemplates.filter((t) => t.slug !== 'strength-cardio-3-2');
     const r = await runSeed({
@@ -150,10 +151,59 @@ describe('program_templates seed (e2e)', () => {
        WHERE seed_key='program_templates' ORDER BY slug`,
     );
     expect(rows).toEqual([
+      { slug: 'full-body-2-day', archived: false },
       { slug: 'full-body-3-day', archived: false },
       { slug: 'strength-cardio-3-2', archived: true },
       { slug: 'upper-lower-4-day', archived: false },
     ]);
+  });
+
+  it('persists track through upsertOne', async () => {
+    const { all, cardio } = await loadKnownSlugs();
+    const entry = {
+      slug: 'vitest-track-rt',
+      name: 'Track RT',
+      description: '',
+      weeks: 1,
+      days_per_week: 1,
+      track: 'advanced' as const,
+      structure: {
+        _v: 1 as const,
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'strength' as const,
+            name: 'D',
+            blocks: [
+              {
+                exercise_slug: 'dumbbell-curl',
+                mev: 2,
+                mav: 3,
+                target_reps_low: 8,
+                target_reps_high: 12,
+                target_rir: 2,
+                rest_sec: 90,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    try {
+      await runSeed({
+        key: 'vitest_track_rt',
+        entries: [entry],
+        adapter: makeProgramTemplateAdapter(all, cardio),
+      });
+      const { rows } = await db.query<{ track: string }>(
+        `SELECT track FROM program_templates WHERE slug='vitest-track-rt'`,
+      );
+      expect(rows[0].track).toBe('advanced');
+    } finally {
+      await db.query(`DELETE FROM program_templates WHERE slug='vitest-track-rt'`);
+      await db.query(`DELETE FROM _seed_meta WHERE key='vitest_track_rt'`);
+    }
   });
 
   it('every exercise_slug in every template resolves to a live exercises row', async () => {

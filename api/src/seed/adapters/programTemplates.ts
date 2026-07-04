@@ -76,8 +76,8 @@ export function makeProgramTemplateAdapter(
       await tx.query(
         `INSERT INTO program_templates (
            slug, name, description, weeks, days_per_week, structure, version,
-           created_by, seed_key, seed_generation, archived_at, updated_at
-         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'system',$8,$9,NULL,now())
+           created_by, seed_key, seed_generation, archived_at, updated_at, track
+         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'system',$8,$9,NULL,now(),$10)
          ON CONFLICT (slug) DO UPDATE SET
            name=EXCLUDED.name,
            description=EXCLUDED.description,
@@ -88,7 +88,8 @@ export function makeProgramTemplateAdapter(
            seed_key=EXCLUDED.seed_key,
            seed_generation=EXCLUDED.seed_generation,
            archived_at=NULL,
-           updated_at=now()`,
+           updated_at=now(),
+           track=EXCLUDED.track`,
         [
           e.slug,
           e.name,
@@ -99,6 +100,7 @@ export function makeProgramTemplateAdapter(
           nextVersion,
           'program_templates',
           generation,
+          e.track,
         ],
       );
     },

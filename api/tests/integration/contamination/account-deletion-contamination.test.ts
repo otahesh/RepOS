@@ -83,8 +83,8 @@ beforeAll(async () => {
     rows: [tpl],
   } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, 'Del Cont Tpl', 1, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system')
+       (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, 'Del Cont Tpl', 1, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system', 'beginner')
      RETURNING id`,
     [tplSlug],
   );

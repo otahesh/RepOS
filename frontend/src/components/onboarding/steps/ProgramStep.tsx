@@ -48,27 +48,50 @@ export default function ProgramStep({
       {loading ? (
         <div style={{ color: TOKENS.textMute, fontSize: 13 }}>Loading programs…</div>
       ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {templates.slice(0, 4).map((t) => (
-            <Link
-              key={t.id}
-              to={`/programs/${t.slug}`}
-              style={{
-                display: 'block',
-                textDecoration: 'none',
-                padding: '12px 14px',
-                borderRadius: 10,
-                border: `1px solid ${TOKENS.line}`,
-                background: TOKENS.bg,
-                color: TOKENS.text,
-              }}
-            >
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</div>
-              <div style={{ fontSize: 12, color: TOKENS.textDim, marginTop: 2 }}>
-                {t.days_per_week} days/week · {t.weeks} weeks
+        <div style={{ display: 'grid', gap: 14 }}>
+          {(['beginner', 'intermediate', 'advanced'] as const).map((track) => {
+            const group = templates.filter((t) => t.track === track);
+            if (group.length === 0) return null;
+            return (
+              <div key={track}>
+                <h4
+                  style={{
+                    fontFamily: FONTS.mono,
+                    fontSize: 11,
+                    letterSpacing: 1,
+                    textTransform: 'uppercase',
+                    color: TOKENS.textMute,
+                    margin: '0 0 6px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {track}
+                </h4>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {group.map((t) => (
+                    <Link
+                      key={t.id}
+                      to={`/programs/${t.slug}`}
+                      style={{
+                        display: 'block',
+                        textDecoration: 'none',
+                        padding: '12px 14px',
+                        borderRadius: 10,
+                        border: `1px solid ${TOKENS.line}`,
+                        background: TOKENS.bg,
+                        color: TOKENS.text,
+                      }}
+                    >
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{t.name}</div>
+                      <div style={{ fontSize: 12, color: TOKENS.textDim, marginTop: 2 }}>
+                        {t.days_per_week} days/week · {t.weeks} weeks
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 18 }}>

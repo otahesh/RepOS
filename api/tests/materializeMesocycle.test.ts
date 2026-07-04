@@ -12,10 +12,15 @@ import {
   cleanupUser,
   cleanupTemplate,
 } from './helpers/program-fixtures.js';
+import { addDaysISO } from '../src/services/_dateUtil.js';
 
 let userId: string;
 let templateId: string;
 let userProgramId: string;
+
+// Module-scope fixtures for the 2-day describe block (cleaned up in the shared afterAll).
+let uId2: string;
+let tId2: string;
 
 const MIN_TEMPLATE_STRUCTURE = {
   _v: 1,
@@ -70,6 +75,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await cleanupUser(userId);
   await cleanupTemplate(templateId);
+  if (uId2) await cleanupUser(uId2);
+  if (tId2) await cleanupTemplate(tId2);
   await db.end();
 });
 
@@ -250,6 +257,84 @@ describe('materializeMesocycle concurrency (spec §9 guardrail)', () => {
       expect(Date.now() - t0).toBeLessThan(1500);
     } finally {
       await cleanupUser(u4.id);
+    }
+  });
+});
+
+describe('full-body-2-day style template materializes to offsets 0 and 3', () => {
+  let upId2: string;
+  const STRUCT_2DAY = {
+    _v: 1,
+    days: [
+      {
+        idx: 0,
+        day_offset: 0,
+        kind: 'strength',
+        name: 'Full Body A',
+        blocks: [
+          {
+            exercise_slug: 'dumbbell-goblet-squat',
+            mev: 2,
+            mav: 4,
+            target_reps_low: 8,
+            target_reps_high: 12,
+            target_rir: 2,
+            rest_sec: 150,
+          },
+        ],
+      },
+      {
+        idx: 1,
+        day_offset: 3,
+        kind: 'strength',
+        name: 'Full Body B',
+        blocks: [
+          {
+            exercise_slug: 'dumbbell-romanian-deadlift',
+            mev: 2,
+            mav: 4,
+            target_reps_low: 8,
+            target_reps_high: 12,
+            target_rir: 2,
+            rest_sec: 150,
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeAll(async () => {
+    const u = await mkUser({ prefix: 'vitest.materialize.2day' });
+    uId2 = u.id;
+    const t = await mkTemplate({
+      prefix: 'vitest-2day',
+      name: '2-day',
+      weeks: 5,
+      daysPerWeek: 2,
+      structure: STRUCT_2DAY,
+    });
+    tId2 = t.id;
+    const up = await mkUserProgram({ userId: uId2, templateId: tId2, name: '2-day run' });
+    upId2 = up.id;
+  });
+
+  it('produces 10 day_workouts on start (offset 0) and start+3 (offset 3) each week', async () => {
+    const start = '2026-05-04'; // a Monday
+    const { run_id } = await materializeMesocycle({
+      userProgramId: upId2,
+      startDate: start,
+      startTz: 'America/New_York',
+    });
+    const { rows } = await db.query<{ week_idx: number; day_idx: number; scheduled_date: string }>(
+      `SELECT week_idx, day_idx, to_char(scheduled_date, 'YYYY-MM-DD') AS scheduled_date FROM day_workouts WHERE mesocycle_run_id=$1 ORDER BY week_idx, day_idx`,
+      [run_id],
+    );
+    expect(rows.length).toBe(10);
+    for (let w = 1; w <= 5; w++) {
+      const mon = rows.find((r) => r.week_idx === w && r.day_idx === 0)!;
+      const thu = rows.find((r) => r.week_idx === w && r.day_idx === 1)!;
+      expect(mon.scheduled_date).toBe(addDaysISO(start, (w - 1) * 7 + 0));
+      expect(thu.scheduled_date).toBe(addDaysISO(start, (w - 1) * 7 + 3));
     }
   });
 });

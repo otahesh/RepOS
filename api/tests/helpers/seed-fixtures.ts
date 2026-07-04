@@ -160,8 +160,8 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
     rows: [tpl],
   } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, 1, 1, $3::jsonb, 1, 'system')
+       (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, $2, 1, 1, $3::jsonb, 1, 'system', 'beginner')
      RETURNING id`,
     [slug, `Seed ${userTag}`, JSON.stringify(structure)],
   );
@@ -595,8 +595,8 @@ async function mkFixtureTemplate(opts: {
     rows: [tpl],
   } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, $3, 2, $4::jsonb, $5, 'system')
+       (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, $2, $3, 2, $4::jsonb, $5, 'system', 'beginner')
      RETURNING id`,
     [
       slug,
@@ -675,8 +675,8 @@ export async function seedUserProgramAtTemplateVersion(opts: {
   const {
     rows: [tpl],
   } = await db.query<{ id: string }>(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, 5, 1, $3::jsonb, $4, 'system') RETURNING id`,
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, $2, 5, 1, $3::jsonb, $4, 'system', 'beginner') RETURNING id`,
     [slug, `Alt Fork Tpl ${userTag}`, JSON.stringify(structure), currentVersion],
   );
   const {
@@ -1029,8 +1029,8 @@ async function mkBenchRun(opts: { weeks: number; currentWeek: number }): Promise
   const {
     rows: [tpl],
   } = await db.query<{ id: string }>(
-    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, $2, $3, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system') RETURNING id`,
+    `INSERT INTO program_templates (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, $2, $3, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system', 'beginner') RETURNING id`,
     [slug, `Stalled ${userTag}`, opts.weeks],
   );
   const {
