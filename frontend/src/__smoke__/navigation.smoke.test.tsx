@@ -20,7 +20,26 @@ vi.mock('../auth', () => {
   return {
     AuthProvider: passthrough,
     AuthGate: passthrough,
-    apiFetch: vi.fn(),
+    // Must resolve, not just exist — real apiFetch always returns a Promise<Response>,
+    // and mounted pages (e.g. DesktopDashboard, Topbar's sync pill, TodayCard on the
+    // "/" route) chain `.then` straight off the call. A bare `vi.fn()` resolves to
+    // `undefined`, so `.then` throws asynchronously after this test's own assertions
+    // already ran — surfaced only as an "Unhandled Error" in the vitest run, not a
+    // failed assertion. One shape doesn't fit every endpoint (e.g. TodayCard reads
+    // `data.day.week_idx` for any state other than 'no_active_run'/'rest'), so this
+    // switches on the requested path — add a case here if a newly-mounted page's
+    // effect throws on the fallback sync-status shape.
+    apiFetch: vi.fn().mockImplementation(async (path: string) => {
+      const body = path.includes('/api/mesocycles/today')
+        ? { state: 'no_active_run' }
+        : { state: 'fresh', last_success_at: null, source: 'Apple Health' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        headers: new Headers(),
+      } as Response;
+    }),
     useCurrentUser: () => ({
       status: 'authenticated' as const,
       user: {
