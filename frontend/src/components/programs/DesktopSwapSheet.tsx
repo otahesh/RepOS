@@ -106,7 +106,7 @@ export function DesktopSwapSheet({
       <div
         ref={dialogRef}
         style={{
-          width: 480,
+          width: 'min(480px, 100vw)',
           background: TOKENS.surface,
           color: TOKENS.text,
           borderLeft: `1px solid ${TOKENS.line}`,

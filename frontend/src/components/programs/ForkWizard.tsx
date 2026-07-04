@@ -16,6 +16,7 @@ import {
 } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 import { DayCard } from './DayCard';
+import { DesktopSwapSheet } from './DesktopSwapSheet';
 import { ScheduleWarnings, type ScheduleWarning } from './ScheduleWarnings';
 
 type ConflictState = { runId: string } | null;
@@ -36,6 +37,7 @@ export function ForkWizard({
   const [conflict, setConflict] = useState<ConflictState>(null);
   const [refork, setRefork] = useState<{ latestVersion: number } | null>(null);
   const [abandoning, setAbandoning] = useState(false);
+  const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null);
 
   useEffect(() => {
     getUserProgram(userProgramId)
@@ -66,6 +68,32 @@ export function ForkWizard({
 
   if (err) return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load: {err}</div>;
   if (!up) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+
+  async function refreshProgram() {
+    if (!up) return;
+    const p = await getUserProgram(up.id);
+    setUp(p);
+  }
+
+  async function handleAddSet(dayIdx: number, blockIdx: number) {
+    if (!up) return;
+    try {
+      await patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx });
+      await refreshProgram();
+    } catch (e) {
+      setErr(`Add set failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleRemoveSet(dayIdx: number, blockIdx: number) {
+    if (!up) return;
+    try {
+      await patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx });
+      await refreshProgram();
+    } catch (e) {
+      setErr(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   async function saveName() {
     if (!up) return;
@@ -278,19 +306,53 @@ export function ForkWizard({
             <DayCard
               key={d.idx}
               day={d}
-              onAddSet={(dayIdx, blockIdx) =>
-                patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx })
-              }
-              onRemoveSet={(dayIdx, blockIdx, _setIdx) =>
-                patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx })
-              }
-              onSwap={(_dayIdx, _blockIdx) => {
-                /* TODO: open exercise picker */
-              }}
+              onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
+              onRemoveSet={(dayIdx, blockIdx, _setIdx) => void handleRemoveSet(dayIdx, blockIdx)}
+              onSwap={(dayIdx, blockIdx) => setSwapTarget({ dayIdx, blockIdx })}
             />
           ))}
         </div>
       </section>
+
+      {/* Pre-start swap picker. Unlike MyProgramPage (where mobile is steered to
+          the live-workout swap flow), a draft fork has no live run yet — the
+          sheet is the only swap path, so it opens on every viewport. */}
+      {swapTarget &&
+        (() => {
+          const block = up.effective_structure.days[swapTarget.dayIdx]?.blocks[swapTarget.blockIdx];
+          if (!block) return null;
+          return (
+            <DesktopSwapSheet
+              open
+              context="program_edit"
+              fromSlug={block.exercise_slug}
+              onClose={() => setSwapTarget(null)}
+              onApply={async ({ scope, toExerciseSlug }) => {
+                try {
+                  const op =
+                    scope === 'all'
+                      ? {
+                          op: 'swap_exercise_all' as const,
+                          from_slug: block.exercise_slug,
+                          to_exercise_slug: toExerciseSlug,
+                        }
+                      : {
+                          op: 'swap_exercise' as const,
+                          day_idx: swapTarget.dayIdx,
+                          block_idx: swapTarget.blockIdx,
+                          to_exercise_slug: toExerciseSlug,
+                        };
+                  await patchUserProgram(up.id, op);
+                  await refreshProgram();
+                  setSwapTarget(null);
+                } catch (e) {
+                  setErr(`Swap failed: ${e instanceof Error ? e.message : String(e)}`);
+                  setSwapTarget(null);
+                }
+              }}
+            />
+          );
+        })()}
 
       <ScheduleWarnings warnings={warnings} />
 

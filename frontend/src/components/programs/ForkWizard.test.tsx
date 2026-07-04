@@ -5,7 +5,14 @@ import { MemoryRouter } from 'react-router-dom';
 import { ForkWizard } from './ForkWizard';
 import * as upApi from '../../lib/api/userPrograms';
 import * as msApi from '../../lib/api/mesocycles';
+import * as exApi from '../../lib/api/exercises';
+import * as eqApi from '../../lib/api/equipment';
 import { ApiError } from '../../lib/api/_http';
+
+// Auto-mock (no factory) — resolved values are set in beforeEach because the
+// repo's vitest config has `restoreMocks: true` (see DesktopSwapSheet.test.tsx).
+vi.mock('../../lib/api/exercises');
+vi.mock('../../lib/api/equipment');
 
 function renderWizard(onStarted = vi.fn()) {
   return render(
@@ -15,43 +22,68 @@ function renderWizard(onStarted = vi.fn()) {
   );
 }
 
+// Program detail fixture, parameterized on the first block's MAV so refresh
+// tests can assert the re-fetched structure actually reaches the DOM.
+function program(mav = 14) {
+  return {
+    id: 'up-1',
+    user_id: 'u-1',
+    template_id: 't-1',
+    template_version: 1,
+    name: 'Full Body 3-Day Foundation',
+    effective_name: 'Full Body 3-Day Foundation',
+    customizations: {},
+    status: 'draft',
+    effective_structure: {
+      _v: 1,
+      days: [
+        {
+          idx: 0,
+          day_offset: 0,
+          kind: 'strength',
+          name: 'Full Body A',
+          blocks: [
+            {
+              exercise_slug: 'dumbbell-goblet-squat',
+              mev: 8,
+              mav,
+              target_reps_low: 8,
+              target_reps_high: 10,
+              target_rir: 2,
+              rest_sec: 120,
+            },
+          ],
+        },
+        { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [] },
+        { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [] },
+      ],
+    },
+  } as any;
+}
+
+const EXERCISES = [
+  {
+    id: '1',
+    slug: 'db-bench-press',
+    name: 'DB Bench Press',
+    primary_muscle: 'chest',
+    primary_muscle_name: 'Chest',
+    movement_pattern: 'push_horizontal',
+    peak_tension_length: 'mid',
+    skill_complexity: 2,
+    loading_demand: 3,
+    systemic_fatigue: 3,
+    required_equipment: { _v: 1, requires: [] },
+    muscle_contributions: { chest: 1 },
+  },
+];
+
 describe('<ForkWizard>', () => {
   beforeEach(() => {
-    vi.spyOn(upApi, 'getUserProgram').mockResolvedValue({
-      id: 'up-1',
-      user_id: 'u-1',
-      template_id: 't-1',
-      template_version: 1,
-      name: 'Full Body 3-Day Foundation',
-      effective_name: 'Full Body 3-Day Foundation',
-      customizations: {},
-      status: 'draft',
-      effective_structure: {
-        _v: 1,
-        days: [
-          {
-            idx: 0,
-            day_offset: 0,
-            kind: 'strength',
-            name: 'Full Body A',
-            blocks: [
-              {
-                exercise_slug: 'dumbbell-goblet-squat',
-                mev: 8,
-                mav: 14,
-                target_reps_low: 8,
-                target_reps_high: 10,
-                target_rir: 2,
-                rest_sec: 120,
-              },
-            ],
-          },
-          { idx: 1, day_offset: 2, kind: 'strength', name: 'Full Body B', blocks: [] },
-          { idx: 2, day_offset: 4, kind: 'strength', name: 'Full Body C', blocks: [] },
-        ],
-      },
-    } as any);
+    vi.spyOn(upApi, 'getUserProgram').mockResolvedValue(program());
     vi.spyOn(upApi, 'getUserProgramWarnings').mockResolvedValue([]);
+    vi.mocked(exApi.listExercises).mockResolvedValue(EXERCISES as any);
+    vi.mocked(eqApi.getEquipmentProfile).mockResolvedValue({ _v: 1 } as any);
     vi.spyOn(upApi, 'patchUserProgram').mockResolvedValue({ id: 'up-1' } as any);
     vi.spyOn(upApi, 'startUserProgram').mockResolvedValue({ mesocycle_run_id: 'mr-1' });
     // Default: no active run anywhere — happy-path wizard.
@@ -156,5 +188,71 @@ describe('<ForkWizard>', () => {
     await user.click(screen.getByRole('button', { name: /start mesocycle/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/version 4/);
     expect(screen.getByRole('alert')).toHaveTextContent(/re-?fork/i);
+  });
+
+  it('+ set patches add_set and re-renders the refreshed set range', async () => {
+    vi.spyOn(upApi, 'getUserProgram')
+      .mockResolvedValueOnce(program(14))
+      .mockResolvedValueOnce(program(15));
+    const user = userEvent.setup();
+    renderWizard();
+    expect(await screen.findByText(/8–14 sets/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /\+ set/i }));
+    expect(upApi.patchUserProgram).toHaveBeenCalledWith('up-1', {
+      op: 'add_set',
+      day_idx: 0,
+      block_idx: 0,
+    });
+    expect(await screen.findByText(/8–15 sets/)).toBeInTheDocument();
+  });
+
+  it('− set patches remove_set and re-renders the refreshed set range', async () => {
+    vi.spyOn(upApi, 'getUserProgram')
+      .mockResolvedValueOnce(program(14))
+      .mockResolvedValueOnce(program(13));
+    const user = userEvent.setup();
+    renderWizard();
+    expect(await screen.findByText(/8–14 sets/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /− set/i }));
+    expect(upApi.patchUserProgram).toHaveBeenCalledWith('up-1', {
+      op: 'remove_set',
+      day_idx: 0,
+      block_idx: 0,
+    });
+    expect(await screen.findByText(/8–13 sets/)).toBeInTheDocument();
+  });
+
+  it('surfaces an error when the add-set PATCH fails', async () => {
+    vi.spyOn(upApi, 'patchUserProgram').mockRejectedValue(new Error('boom'));
+    const user = userEvent.setup();
+    renderWizard();
+    await screen.findByText(/8–14 sets/);
+    await user.click(screen.getByRole('button', { name: /\+ set/i }));
+    expect(await screen.findByText(/add set failed/i)).toBeInTheDocument();
+  });
+
+  it('clicking the exercise name opens the swap sheet; applying swaps + refreshes', async () => {
+    vi.spyOn(upApi, 'getUserProgram')
+      .mockResolvedValueOnce(program(14))
+      .mockResolvedValueOnce(program(14));
+    const user = userEvent.setup();
+    renderWizard();
+    await screen.findByText(/8–14 sets/);
+    await user.click(screen.getByRole('button', { name: /dumbbell goblet squat/i }));
+    const dialog = await screen.findByRole('dialog', { name: /swap exercise/i });
+    expect(dialog).toBeInTheDocument();
+    await screen.findByText(/DB Bench Press/);
+    await user.click(screen.getByText(/DB Bench Press/));
+    await user.click(screen.getByRole('button', { name: /apply/i }));
+    // program_edit context defaults to "every occurrence" scope
+    expect(upApi.patchUserProgram).toHaveBeenCalledWith('up-1', {
+      op: 'swap_exercise_all',
+      from_slug: 'dumbbell-goblet-squat',
+      to_exercise_slug: 'db-bench-press',
+    });
+    // Sheet closes after a successful apply
+    await vi.waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /swap exercise/i })).not.toBeInTheDocument(),
+    );
   });
 });
