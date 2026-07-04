@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../../tokens';
 import { Term } from '../../Term';
 import { listProgramTemplates, type ProgramTemplate } from '../../../lib/api/programs';
+import { PROGRAM_TRACKS, TRACK_META } from '../../../lib/programTracks';
 import type { OnboardingGoal } from '../../../lib/api/onboarding';
 
 export default function ProgramStep({
@@ -21,6 +22,11 @@ export default function ProgramStep({
 }) {
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Onboarding is a short, skippable step, not the full catalog — cap at 4 cards
+  // total (same budget as before track-grouping was introduced).
+  const MAX_CARDS = 4;
+  let remaining = MAX_CARDS;
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +55,12 @@ export default function ProgramStep({
         <div style={{ color: TOKENS.textMute, fontSize: 13 }}>Loading programs…</div>
       ) : (
         <div style={{ display: 'grid', gap: 14 }}>
-          {(['beginner', 'intermediate', 'advanced'] as const).map((track) => {
-            const group = templates.filter((t) => t.track === track);
+          {PROGRAM_TRACKS.map((track) => {
+            if (remaining <= 0) return null;
+            const group = templates.filter((t) => t.track === track).slice(0, remaining);
             if (group.length === 0) return null;
+            remaining -= group.length;
+            const meta = TRACK_META[track];
             return (
               <div key={track}>
                 <h4
@@ -65,7 +74,18 @@ export default function ProgramStep({
                     fontWeight: 600,
                   }}
                 >
-                  {track}
+                  {meta.label}
+                  <span
+                    style={{
+                      textTransform: 'none',
+                      fontWeight: 400,
+                      letterSpacing: 0,
+                      marginLeft: 8,
+                      color: TOKENS.textDim,
+                    }}
+                  >
+                    {meta.blurb}
+                  </span>
                 </h4>
                 <div style={{ display: 'grid', gap: 8 }}>
                   {group.map((t) => (

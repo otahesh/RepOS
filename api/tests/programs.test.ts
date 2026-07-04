@@ -25,8 +25,10 @@ beforeAll(async () => {
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS n FROM program_templates WHERE archived_at IS NULL`,
   );
-  if (rows[0].n < 3)
-    throw new Error('program_templates seed not applied (need 3 curated templates)');
+  if (rows[0].n < CURATED_SLUGS.length)
+    throw new Error(
+      `program_templates seed not applied (need ${CURATED_SLUGS.length} curated templates)`,
+    );
   app = await buildApp();
 });
 afterAll(async () => {

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { getProgramTemplate, type ProgramTemplate } from '../../lib/api/programs';
 import { Term } from '../Term';
+import { TrackChip } from './TrackChip';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -29,6 +30,9 @@ export function ProgramTemplateDetail({
       <header style={{ marginBottom: 16 }}>
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
             fontFamily: 'JetBrains Mono',
             fontSize: 11,
             letterSpacing: 1,
@@ -36,8 +40,10 @@ export function ProgramTemplateDetail({
             textTransform: 'uppercase',
           }}
         >
-          {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk ·{' '}
-          {t.track.toUpperCase()}
+          <span>
+            {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk
+          </span>
+          <TrackChip track={t.track} />
         </div>
         <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>{t.name}</h2>
         <p style={{ margin: 0, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{t.description}</p>

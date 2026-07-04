@@ -1,3 +1,5 @@
+import type { ProgramTrack } from '../programTracks';
+
 export type ProgramTemplate = {
   id: string;
   slug: string;
@@ -5,7 +7,7 @@ export type ProgramTemplate = {
   description: string;
   weeks: number;
   days_per_week: number;
-  track: 'beginner' | 'intermediate' | 'advanced';
+  track: ProgramTrack;
   version: number;
   structure?: ProgramTemplateStructure;
 };
@@ -53,12 +55,21 @@ export type UserProgramRecord = {
   has_live_run?: boolean;
 };
 
-export async function listProgramTemplates(): Promise<ProgramTemplate[]> {
-  const res = await apiFetch('/api/program-templates', {});
+export async function listProgramTemplates(track?: ProgramTrack): Promise<ProgramTemplate[]> {
+  const qs = track ? `?track=${encodeURIComponent(track)}` : '';
+  const res = await apiFetch(`/api/program-templates${qs}`, {});
   // API wraps the list in { templates: [...] } — the detail and fork
   // endpoints return bare bodies, but list endpoints leave room for pagination.
   const body = await jsonOrThrow<{ templates: ProgramTemplate[] }>(res);
   return body.templates;
+}
+
+/** Templates state their equipment floor as a trailing "Equipment minimum: X."
+ *  sentence (see api/src/seed/programTemplates.ts) — pull it out so the
+ *  catalog can show it as a scannable line instead of the full paragraph. */
+export function extractEquipment(description: string): string | null {
+  const m = description.match(/Equipment minimum:\s*([^.]+)\.?/i);
+  return m ? m[1].trim() : null;
 }
 
 export async function getProgramTemplate(slug: string): Promise<ProgramTemplate> {
