@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { ProgramTemplateDetail } from './ProgramTemplateDetail';
 import * as api from '../../lib/api/programs';
 
@@ -42,7 +43,11 @@ describe('<ProgramTemplateDetail>', () => {
     } as any);
   });
   it('renders 4 day cards with day_offset → weekday labels', async () => {
-    render(<ProgramTemplateDetail slug="upper-lower-4-day" onFork={vi.fn()} />);
+    render(
+      <MemoryRouter>
+        <ProgramTemplateDetail slug="upper-lower-4-day" onFork={vi.fn()} />
+      </MemoryRouter>,
+    );
     expect(await screen.findByText(/Upper Heavy/)).toBeInTheDocument();
     expect(screen.getByText(/Lower Heavy/)).toBeInTheDocument();
     expect(screen.getByText(/Upper Volume/)).toBeInTheDocument();

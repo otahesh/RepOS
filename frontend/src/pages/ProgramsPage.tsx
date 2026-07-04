@@ -1,13 +1,19 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ProgramCatalog } from '../components/programs/ProgramCatalog';
 import { MyLibrary } from '../components/programs/MyLibrary';
 import { TOKENS, FONTS } from '../tokens';
+import { PROGRAM_TRACKS, type ProgramTrack } from '../lib/programTracks';
 
 // Programs page: My Programs library (top) + template catalog (bottom).
 // Restart from Past tab sends user back to the fork-wizard detail page so
 // they can rename / customize before restarting.
 export default function ProgramsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const trackParam = searchParams.get('track');
+  const initialTrack = PROGRAM_TRACKS.includes(trackParam as ProgramTrack)
+    ? (trackParam as ProgramTrack)
+    : undefined;
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 32 }}>
       <div style={{ padding: '24px 24px 0' }}>
@@ -32,7 +38,10 @@ export default function ProgramsPage() {
             Pick a template to customize and fork into your library.
           </p>
         </div>
-        <ProgramCatalog onPick={(slug) => navigate(`/programs/${slug}`)} />
+        <ProgramCatalog
+          onPick={(slug) => navigate(`/programs/${slug}`)}
+          initialTrack={initialTrack}
+        />
       </section>
     </div>
   );
