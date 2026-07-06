@@ -12,6 +12,7 @@ import { ExercisePickerDemo } from './components/library/ExercisePickerDemo';
 import TodayPage from './pages/TodayPage';
 import ProgramsPage from './pages/ProgramsPage';
 import ProgramDetailPage from './pages/ProgramDetailPage';
+import DraftProgramPage from './pages/DraftProgramPage';
 import MyProgramPage from './pages/MyProgramPage';
 import SettingsInjuriesPage from './pages/SettingsInjuriesPage';
 import SettingsHealthPage from './pages/SettingsHealthPage';
@@ -50,6 +51,7 @@ function AppInner() {
             <Route index element={<TodayPage />} />
             <Route path="programs" element={<ProgramsPage />} />
             <Route path="programs/:slug" element={<ProgramDetailPage />} />
+            <Route path="programs/draft/:userProgramId" element={<DraftProgramPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
             <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobileGate />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />

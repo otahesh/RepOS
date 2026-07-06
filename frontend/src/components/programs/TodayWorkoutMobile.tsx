@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
@@ -39,7 +39,10 @@ export function TodayWorkoutMobile({
       <div style={{ padding: 16, color: 'rgba(255,255,255,0.7)' }}>
         {'No active '}
         <Term k="mesocycle" />
-        {'. Pick a program on desktop.'}
+        {'. '}
+        <Link to="/programs" style={{ color: '#4D8DFF' }}>
+          Browse programs
+        </Link>
       </div>
     );
   if (data.state === 'rest')

@@ -136,12 +136,32 @@ describe('<MyLibrary>', () => {
     expect(screen.queryByText('Old Program')).not.toBeInTheDocument();
   });
 
-  it('View button on an active program navigates to /today', async () => {
+  it('View on a live-run program navigates to its mesocycle page', async () => {
+    vi.spyOn(api, 'getUserProgram').mockResolvedValue({
+      ...ACTIVE_PROGRAM,
+      effective_name: 'My Full Body',
+      effective_structure: { _v: 1, days: [] },
+      latest_run_id: 'mr-7',
+    } as any);
     renderLibrary();
     await screen.findByText('My Full Body');
 
-    fireEvent.click(screen.getByRole('button', { name: /View/i }));
-    expect(mockNavigate).toHaveBeenCalledWith('/today');
+    fireEvent.click(screen.getByRole('button', { name: /^View$/i }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/my-programs/mr-7'));
+  });
+
+  it('View on a run-less draft opens its customize wizard route', async () => {
+    vi.spyOn(api, 'listMyPrograms').mockResolvedValue([DRAFT_PROGRAM]);
+    vi.spyOn(api, 'getUserProgram').mockResolvedValue({
+      ...DRAFT_PROGRAM,
+      effective_name: 'Draft Block',
+      effective_structure: { _v: 1, days: [] },
+    } as any);
+    renderLibrary();
+    await screen.findByText('Draft Block');
+
+    fireEvent.click(screen.getByRole('button', { name: /^View$/i }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/programs/draft/up-draft'));
   });
 
   it('Past tab triggers a new fetch with includePast=true and shows abandoned programs', async () => {

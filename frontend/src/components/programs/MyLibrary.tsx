@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   listMyPrograms,
   listProgramMesocycles,
+  getUserProgram,
   deleteUserProgram,
   archiveUserProgram,
   unarchiveUserProgram,
@@ -355,9 +356,21 @@ export function MyLibrary({
     }
   }
 
-  function handleOpen(_id: string) {
-    // Active program → live workout page.
-    navigate('/today');
+  async function handleOpen(id: string) {
+    // Live-run program → its mesocycle page; run-less draft → its customize
+    // wizard. (Previously navigated to '/today', a route that doesn't exist —
+    // the catch-all bounced users to the home screen.)
+    try {
+      const detail = await getUserProgram(id);
+      const record = programs?.find((p) => p.id === id);
+      if (record?.has_live_run && detail.latest_run_id) {
+        navigate(`/my-programs/${detail.latest_run_id}`);
+      } else {
+        navigate(`/programs/draft/${id}`);
+      }
+    } catch (e) {
+      pushToast({ severity: 'error', body: `Couldn't open program — ${errMsg(e)}.` });
+    }
   }
 
   async function handleViewRecap(id: string) {
@@ -472,7 +485,7 @@ export function MyLibrary({
               program={p}
               faded={tab !== 'active'}
               busy={busyId === p.id}
-              onOpen={tab === 'active' ? handleOpen : undefined}
+              onOpen={tab === 'active' ? (id) => void handleOpen(id) : undefined}
               onResume={
                 tab === 'past' && p.template_slug
                   ? () => onRestartProgram(p.template_slug!)

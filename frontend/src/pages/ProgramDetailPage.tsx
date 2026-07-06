@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ProgramTemplateDetail } from '../components/programs/ProgramTemplateDetail';
-import { ForkWizard } from '../components/programs/ForkWizard';
 import { forkProgramTemplate, getProgramTemplate, type ProgramTemplate } from '../lib/api/programs';
 import { TOKENS } from '../tokens';
 
-// Detail view + fork flow. Forking creates a draft user_program; the wizard
-// then customizes that draft and starts the mesocycle. Once started we route
-// to the active program view.
+// Detail view + fork flow. Forking creates a draft user_program, then routes
+// to /programs/draft/:id — the wizard page — where the user customizes the
+// draft and starts the mesocycle.
 export default function ProgramDetailPage() {
   const { slug = '' } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const [template, setTemplate] = useState<ProgramTemplate | null>(null);
-  const [draftUserProgramId, setDraftUserProgramId] = useState<string | null>(null);
   const [forking, setForking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -39,23 +37,12 @@ export default function ProgramDetailPage() {
       // is the human-readable template title, not the slug.
       const name = template ? `My ${template.name}` : s;
       const draft = await forkProgramTemplate(s, { name });
-      setDraftUserProgramId(draft.id);
+      navigate(`/programs/draft/${draft.id}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setForking(false);
     }
-  }
-
-  if (draftUserProgramId) {
-    return (
-      <div style={{ color: TOKENS.text }}>
-        <ForkWizard
-          userProgramId={draftUserProgramId}
-          onStarted={(mesocycleRunId) => navigate(`/my-programs/${mesocycleRunId}`)}
-        />
-      </div>
-    );
   }
 
   return (

@@ -72,6 +72,17 @@ describe('<TodayWorkoutMobile>', () => {
     vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(BASE_WORKOUT);
   });
 
+  it('no active run: links to the programs catalog (mobile is first-class)', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue({ state: 'no_active_run' } as never);
+    renderTWM();
+    await screen.findByText(/No active/);
+    expect(screen.getByRole('link', { name: /browse programs/i })).toHaveAttribute(
+      'href',
+      '/programs',
+    );
+    expect(screen.queryByText(/on desktop/i)).not.toBeInTheDocument();
+  });
+
   it('renders day name + sets stacked', async () => {
     renderTWM();
     expect(await screen.findByText(/Upper Heavy/)).toBeInTheDocument();
