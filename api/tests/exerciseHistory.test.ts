@@ -135,6 +135,43 @@ describe('GET /api/exercises/:slug/history', () => {
     expect(body.sessions[0].date).not.toBe('2026-06-01');
   });
 
+  it("groups sessions by the user's local day, not the UTC day", async () => {
+    // 2026-06-02 00:30 UTC = 2026-06-01 7:30pm America/Chicago. With the
+    // user's timezone set to Chicago, this set must land in the June 1
+    // session alongside that day's other sets — not open a June 2 session.
+    await db.query(`UPDATE users SET timezone='America/Chicago' WHERE id=$1`, [userId]);
+    await db.query(
+      `
+      INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir, performed_at)
+      SELECT ps.id, $1, ps.exercise_id, gen_random_uuid(), 6, 145.0, 1, '2026-06-02 00:30:00+00'::timestamptz
+      FROM planned_sets ps JOIN day_workouts dw ON dw.id = ps.day_workout_id
+      WHERE dw.mesocycle_run_id = $2 AND dw.week_idx = 1
+      LIMIT 1`,
+      [userId, runId],
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/exercises/barbell-bench-press/history',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      sessions: { date: string; sets: { weight_lbs: number; reps: number; rir: number }[] }[];
+    }>();
+    const dates = body.sessions.map((s) => s.date);
+    expect(dates).not.toContain('2026-06-02');
+    const june1 = body.sessions.find((s) => s.date === '2026-06-01');
+    expect(june1).toBeDefined();
+    // Same session as the two 10:00 UTC (5:00am Chicago) week-1 sets,
+    // ordered last because its performed_at instant is the latest.
+    expect(june1!.sets).toEqual([
+      { weight_lbs: 135, reps: 8, rir: 2 },
+      { weight_lbs: 135, reps: 8, rir: 2 },
+      { weight_lbs: 145, reps: 6, rir: 1 },
+    ]);
+  });
+
   it('404s an unknown slug', async () => {
     const res = await app.inject({
       method: 'GET',
