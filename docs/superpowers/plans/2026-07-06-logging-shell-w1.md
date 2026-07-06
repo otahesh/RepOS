@@ -480,3 +480,19 @@ Run → pass.
 - Spec coverage: hub ✓ (T4), focus ✓ (T5), set table ✓ (T5), prefill ✓ (T6), last-time ✓ (T5/T6), rest timer ✓ (T6), history endpoint+sheet ✓ (T1/T7), logged-after-reload ✓ (T2), offline queue untouched ✓ (T8 verifies), routes ✓ (T6), no ⓘ in this wave (explicitly deferred to W2).
 - The two stubbed `it` bodies in Task 1 and the five test names in Tasks 4/5 are contracts the implementer writes in full — each lists exact behaviors and selectors, not "write tests".
 - Type consistency: `logged` field name used in T2 (api), T3 (frontend type), T6 (container). `HistorySession` defined T3, consumed T5/T6/T7. `HubBlock` defined T4, built T6.
+
+## Deferred from spec (explicit)
+
+The design spec (`docs/superpowers/specs/2026-07-06-workout-logging-redesign-design.md`, lines 36 and 49) lists three items that this wave-1 plan never tasked out:
+
+- Cardio blocks and the deload button/banner staying on the hub.
+- Suggested substitutions and the mid-session swap affordance (BlockOverflowMenu → MidSessionSwapPicker) on the focus screen.
+- (Skip *did* carry over — it ships as a no-op pending W1.3.5 design, per the code-review follow-ups note at the top of `TodayLoggerMobile.tsx`.)
+
+Investigation at final review confirmed none of the first two existed in the old single-scroll logger either — they live on the `/today` day view today and remain fully available there. No capability is lost by this wave shipping without them; this was a controller scoping decision at final review (2026-07-06), not an oversight.
+
+Candidates for a W1.5 follow-up, alongside the above two items:
+
+- History-fetch failure caching never retries — the container's `histRequested` ref marks a slug as fetched even when `getExerciseHistory` rejects, so a transient failure permanently suppresses prefill/last-time for that exercise for the rest of the session.
+- Same-exercise-in-two-blocks prefill gap — prefill is keyed by slug per fetch, but a workout with the same exercise in two blocks (e.g. a superset) doesn't share/re-derive prefill state between them correctly.
+- Folding muscle/equipment metadata into the today-workout payload to drop the extra `listExercises` fetch the container currently makes solely to label the hub chips and focus header.
