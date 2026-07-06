@@ -203,29 +203,50 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
     }
   });
 
-  it('marks a set logged=true (with weight/reps) once a set_log exists', async () => {
-    const {
-      rows: [ps],
-    } = await db.query(
+  it('carries latest logged weight/reps once a set_log exists', async () => {
+    // Two planned sets from Day A of week 1. dw.day_idx in the ORDER BY breaks
+    // the Day A/Day B tie (both have block_idx 0 / set_idx 0) so the pick is
+    // deterministic instead of physical-row-order.
+    const { rows: pss } = await db.query(
       `SELECT ps.id, ps.exercise_id FROM planned_sets ps
        JOIN day_workouts dw ON dw.id=ps.day_workout_id
-       WHERE dw.mesocycle_run_id=$1 ORDER BY dw.week_idx, ps.block_idx, ps.set_idx LIMIT 1`,
+       WHERE dw.mesocycle_run_id=$1
+       ORDER BY dw.week_idx, dw.day_idx, ps.block_idx, ps.set_idx LIMIT 2`,
       [runId],
     );
+    expect(pss.length).toBe(2);
+    const [ps, ps2] = pss;
     await db.query(
       `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
        VALUES ($1,$2,$3,gen_random_uuid(),8,135.0,2)`,
       [ps.id, userId, ps.exercise_id],
     );
+    // Reps-only (bodyweight-style) log: weight null is legal and must still
+    // read as logged, not unlogged.
+    await db.query(
+      `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
+       VALUES ($1,$2,$3,gen_random_uuid(),12,NULL,2)`,
+      [ps2.id, userId, ps2.exercise_id],
+    );
     try {
       // 2026-05-04 NY = day_idx 0 = Day A (same fixed `now` as the workout-day test above).
       const today = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z'));
       if (today.state !== 'workout') throw new Error('expected workout state');
-      const logged = today.sets.find((s) => s.id === ps.id)!;
-      expect(logged.logged).toEqual({ weight_lbs: 135, reps: 8 });
-      expect(today.sets.filter((s) => s.id !== ps.id).every((s) => s.logged === null)).toBe(true);
+      const logged = today.sets.find((s) => s.id === ps.id);
+      expect(logged).toBeDefined();
+      expect(logged!.logged).toEqual({ weight_lbs: 135, reps: 8 });
+      const repsOnly = today.sets.find((s) => s.id === ps2.id);
+      expect(repsOnly).toBeDefined();
+      expect(repsOnly!.logged).toEqual({ weight_lbs: null, reps: 12 });
+      expect(
+        today.sets
+          .filter((s) => s.id !== ps.id && s.id !== ps2.id)
+          .every((s) => s.logged === null),
+      ).toBe(true);
     } finally {
-      await db.query(`DELETE FROM set_logs WHERE planned_set_id=$1`, [ps.id]);
+      await db.query(`DELETE FROM set_logs WHERE planned_set_id = ANY($1::uuid[])`, [
+        [ps.id, ps2.id],
+      ]);
     }
   });
 });

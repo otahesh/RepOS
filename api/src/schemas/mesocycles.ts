@@ -48,6 +48,14 @@ const TodaySetSchema = z.object({
   target_reps_high: z.number().int().min(1),
   target_rir: z.number().int().min(0),
   rest_sec: z.number().int().min(0),
+  // Latest set_log for this planned set, or null if never logged. Fields pass
+  // through as-is (reps-only bodyweight logs have weight_lbs: null).
+  logged: z
+    .object({
+      weight_lbs: z.number().nullable(),
+      reps: z.number().int().nullable(),
+    })
+    .nullable(),
   suggested_substitution: SuggestedSubstitutionSchema.optional(),
 });
 

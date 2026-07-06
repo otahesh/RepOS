@@ -32,8 +32,10 @@ export type TodayWorkout =
         target_reps_high: number;
         target_rir: number;
         rest_sec: number;
-        /** Latest log for this planned set, or null. Lets the UI show completion after reload. */
-        logged: { weight_lbs: number; reps: number } | null;
+        /** Latest log for this planned set, or null if never logged. Present iff a
+         *  set_log row exists; weight/reps pass through as-is (either may be null —
+         *  e.g. reps-only bodyweight logs). Lets the UI show completion after reload. */
+        logged: { weight_lbs: number | null; reps: number | null } | null;
         suggested_substitution?: { id: string; slug: string; name: string; reason: string };
       }>;
       cardio: Array<{
@@ -103,6 +105,7 @@ export async function getTodayWorkout(
     ex_slug: string;
     ex_name: string;
     ex_required: any;
+    logged_id: string | null;
     logged_weight: number | null;
     logged_reps: number | null;
   }>(
@@ -110,11 +113,12 @@ export async function getTodayWorkout(
             ps.target_reps_low, ps.target_reps_high, ps.target_rir, ps.rest_sec,
             e.id AS ex_id, e.slug AS ex_slug, e.name AS ex_name,
             e.required_equipment AS ex_required,
+            sl.id AS logged_id,
             sl.performed_load_lbs::float AS logged_weight, sl.performed_reps AS logged_reps
      FROM planned_sets ps
      JOIN exercises e ON e.id=ps.exercise_id
      LEFT JOIN LATERAL (
-       SELECT performed_load_lbs, performed_reps FROM set_logs
+       SELECT id, performed_load_lbs, performed_reps FROM set_logs
        WHERE planned_set_id = ps.id ORDER BY performed_at DESC LIMIT 1
      ) sl ON true
      WHERE ps.day_workout_id=$1
@@ -172,9 +176,7 @@ export async function getTodayWorkout(
         target_rir: s.target_rir,
         rest_sec: s.rest_sec,
         logged:
-          s.logged_weight != null && s.logged_reps != null
-            ? { weight_lbs: s.logged_weight, reps: s.logged_reps }
-            : null,
+          s.logged_id != null ? { weight_lbs: s.logged_weight, reps: s.logged_reps } : null,
         ...(suggested ? { suggested_substitution: suggested } : {}),
       };
     }),
