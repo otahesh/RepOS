@@ -59,6 +59,47 @@ export async function exerciseRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
+  app.get<{ Params: { slug: string }; Querystring: { limit?: string } }>(
+    '/exercises/:slug/history',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = requireUserId(req);
+      const limit = Math.min(Math.max(parseInt(req.query.limit ?? '8', 10) || 8, 1), 20);
+      const {
+        rows: [ex],
+      } = await db.query<{ id: string }>(
+        `SELECT id FROM exercises WHERE slug=$1 AND archived_at IS NULL`,
+        [req.params.slug],
+      );
+      if (!ex) {
+        reply.code(404);
+        return { error: 'exercise not found', field: 'slug' };
+      }
+
+      // One session = one calendar day of logs for this user+exercise.
+      const { rows } = await db.query<{
+        date: string;
+        sets: { weight_lbs: number; reps: number; rir: number | null }[];
+      }>(
+        `SELECT to_char(sl.performed_at::date, 'YYYY-MM-DD') AS date,
+                json_agg(json_build_object(
+                  'weight_lbs', sl.performed_load_lbs::float,
+                  'reps', sl.performed_reps,
+                  'rir', sl.performed_rir
+                ) ORDER BY sl.performed_at ASC) AS sets
+         FROM set_logs sl
+         WHERE sl.user_id = $1 AND sl.exercise_id = $2
+         GROUP BY sl.performed_at::date
+         ORDER BY sl.performed_at::date DESC
+         LIMIT $3`,
+        [userId, ex.id, limit],
+      );
+      reply.header('cache-control', 'private, max-age=60');
+      reply.header('vary', 'Authorization');
+      return { sessions: rows };
+    },
+  );
+
   app.get<{ Params: { slug: string } }>(
     '/exercises/:slug/substitutions',
     { preHandler: requireBearerOrCfAccess },
