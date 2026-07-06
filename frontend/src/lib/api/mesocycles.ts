@@ -33,7 +33,7 @@ export type TodaySet = {
   suggested_substitution?: { id: string; slug: string; name: string; reason: string } | null;
   /** Latest log for this planned set, or null if never logged. Fields are
    *  individually nullable — a reps-only bodyweight log has weight_lbs: null. */
-  logged?: { weight_lbs: number | null; reps: number | null } | null;
+  logged: { weight_lbs: number | null; reps: number | null } | null;
 };
 
 export type TodayCardio = {

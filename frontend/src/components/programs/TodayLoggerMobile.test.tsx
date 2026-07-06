@@ -59,6 +59,7 @@ const SET_1: TodaySet = {
   target_reps_high: 8,
   target_rir: 2,
   rest_sec: 180,
+  logged: null,
 };
 
 const SET_2: TodaySet = {

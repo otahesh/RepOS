@@ -35,6 +35,7 @@ const BASE_WORKOUT = {
       target_reps_high: 8,
       target_rir: 2,
       rest_sec: 180,
+      logged: null,
     },
     {
       id: 'ps-2',
@@ -45,6 +46,7 @@ const BASE_WORKOUT = {
       target_reps_high: 8,
       target_rir: 2,
       rest_sec: 180,
+      logged: null,
     },
   ],
   cardio: [],

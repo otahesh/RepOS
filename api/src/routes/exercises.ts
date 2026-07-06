@@ -85,7 +85,9 @@ export async function exerciseRoutes(app: FastifyInstance) {
       // flushes that share a performed_at second stay deterministic.
       const { rows } = await db.query<{
         date: string;
-        sets: { weight_lbs: number; reps: number; rir: number | null }[];
+        // set_logs weight/reps columns are nullable and this query doesn't
+        // filter nulls — a reps-only bodyweight log emits weight_lbs: null.
+        sets: { weight_lbs: number | null; reps: number | null; rir: number | null }[];
       }>(
         `SELECT to_char((sl.performed_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
                 json_agg(json_build_object(

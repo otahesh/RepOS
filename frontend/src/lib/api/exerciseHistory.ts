@@ -9,7 +9,9 @@ import { jsonOrThrow } from './_http';
 
 export { ApiError } from './_http';
 
-export type HistorySet = { weight_lbs: number; reps: number; rir: number | null };
+// set_logs weight/reps columns are nullable and the history SQL doesn't
+// filter nulls — a reps-only bodyweight log emits weight_lbs: null.
+export type HistorySet = { weight_lbs: number | null; reps: number | null; rir: number | null };
 export type HistorySession = { date: string; sets: HistorySet[] };
 
 export async function getExerciseHistory(slug: string, limit = 8): Promise<HistorySession[]> {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getExerciseHistory } from './exerciseHistory';
+import { ApiError, getExerciseHistory } from './exerciseHistory';
 
 describe('getExerciseHistory', () => {
   beforeEach(() => {
@@ -35,6 +35,13 @@ describe('getExerciseHistory', () => {
 
   it('propagates ApiError on non-ok response', async () => {
     (fetch as any).mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'not found' });
-    await expect(getExerciseHistory('unknown-exercise')).rejects.toThrow(/404/);
+    const err = await getExerciseHistory('unknown-exercise').then(
+      () => {
+        throw new Error('expected rejection');
+      },
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(404);
   });
 });
