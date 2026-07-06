@@ -24,7 +24,6 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { Term } from '../components/Term';
 import { DeloadThisWeekButton } from '../components/programs/DeloadThisWeekButton';
 import { DesktopSwapSheet } from '../components/programs/DesktopSwapSheet';
-import { useIsMobile } from '../lib/useIsMobile';
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -45,7 +44,6 @@ export default function MyProgramPage() {
   const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null);
   // [W4.5 / D4] deload confirm dialog gate.
   const [confirmDeload, setConfirmDeload] = useState(false);
-  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!id) return;
@@ -283,30 +281,17 @@ export default function MyProgramPage() {
                 onRemoveSet={(dayIdx, blockIdx, setIdx) =>
                   void handleRemoveSet(dayIdx, blockIdx, setIdx)
                 }
-                onSwap={(dayIdx, blockIdx) => {
-                  // [W4.1] Desktop opens the swap side-sheet. Mobile keeps the
-                  // existing mid-session swap flow (BlockOverflowMenu →
-                  // MidSessionSwapPicker) wired into TodayWorkoutMobile; this
-                  // planning surface is desktop-primary, so on mobile we just
-                  // hint the user toward the live-workout swap.
-                  if (isMobile) {
-                    pushToast({
-                      severity: 'info',
-                      body: 'Swap exercises from the live workout on mobile.',
-                    });
-                  } else {
-                    setSwapTarget({ dayIdx, blockIdx });
-                  }
-                }}
+                onSwap={(dayIdx, blockIdx) => setSwapTarget({ dayIdx, blockIdx })}
               />
             ))}
           </div>
         </section>
       ) : null}
 
-      {/* [W4.1] Desktop swap side-sheet — desktop only. */}
-      {!isMobile &&
-        swapTarget &&
+      {/* [W4.1] Swap side-sheet — all viewports (the sheet clamps to the
+          viewport width; no feature is desktop-exclusive by product decision
+          2026-07-06). */}
+      {swapTarget &&
         up &&
         (() => {
           const block = up.effective_structure.days[swapTarget.dayIdx]?.blocks[swapTarget.blockIdx];
