@@ -175,8 +175,7 @@ export async function getTodayWorkout(
         target_reps_high: s.target_reps_high,
         target_rir: s.target_rir,
         rest_sec: s.rest_sec,
-        logged:
-          s.logged_id != null ? { weight_lbs: s.logged_weight, reps: s.logged_reps } : null,
+        logged: s.logged_id != null ? { weight_lbs: s.logged_weight, reps: s.logged_reps } : null,
         ...(suggested ? { suggested_substitution: suggested } : {}),
       };
     }),

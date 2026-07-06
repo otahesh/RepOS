@@ -239,9 +239,7 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
       expect(repsOnly).toBeDefined();
       expect(repsOnly!.logged).toEqual({ weight_lbs: null, reps: 12 });
       expect(
-        today.sets
-          .filter((s) => s.id !== ps.id && s.id !== ps2.id)
-          .every((s) => s.logged === null),
+        today.sets.filter((s) => s.id !== ps.id && s.id !== ps2.id).every((s) => s.logged === null),
       ).toBe(true);
     } finally {
       await db.query(`DELETE FROM set_logs WHERE planned_set_id = ANY($1::uuid[])`, [
