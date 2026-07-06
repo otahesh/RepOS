@@ -11,7 +11,7 @@
 // production banner contract + the IDB row's rejection_reason.
 
 import { test, expect } from '@playwright/test';
-import { inspectQueue, logSet, seedMesocycle } from './_helpers';
+import { inspectQueue, logSet, openFirstBlock, seedMesocycle } from './_helpers';
 
 test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; banner surfaces', async ({
   page,
@@ -20,6 +20,7 @@ test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; b
   server.setResponder(() => ({ kind: 'orphan' }));
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   await logSet(page, 0, { weight: 135, reps: 6 });

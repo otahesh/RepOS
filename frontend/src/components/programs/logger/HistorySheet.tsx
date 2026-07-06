@@ -134,9 +134,7 @@ export function HistorySheet({ slug, track, onClose }: HistorySheetProps) {
           boxSizing: 'border-box',
         }}
       >
-        <header
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
+        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div
             style={{
               fontFamily: FONTS.mono,

@@ -15,6 +15,7 @@ import {
   goOnline,
   inspectQueue,
   logSet,
+  openFirstBlock,
   seedMesocycle,
   waitForPosts,
   waitForQueueLength,
@@ -60,6 +61,7 @@ test('O2: 3 sets queued offline survive reload, banner surfaces, reconnect flush
   const server = await seedMesocycle(page, { sets: THREE_SETS });
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   // 1) Go offline and log 3 sets — all should land in IDB pending.
@@ -74,7 +76,10 @@ test('O2: 3 sets queued offline survive reload, banner surfaces, reconnect flush
 
   // 2) Reload the page. Route handlers persist across navigation, so the
   // mocked /api/me + /api/mesocycles/today still return; logBuffer.onReconnect
-  // re-mounts via AppShell useEffect.
+  // re-mounts via AppShell useEffect. openFirstBlock already navigated the
+  // browser URL to the focus route (/today/<runId>/log/0) via history.pushState,
+  // so the reload lands directly back in the focus screen — no hub re-tap
+  // needed, since the focus screen fetches its own data independently.
   await page.reload();
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 

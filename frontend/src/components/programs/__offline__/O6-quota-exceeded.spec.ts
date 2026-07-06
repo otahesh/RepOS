@@ -13,7 +13,7 @@
 // W1.3.8.
 
 import { test, expect } from '@playwright/test';
-import { seedMesocycle } from './_helpers';
+import { openFirstBlock, seedMesocycle } from './_helpers';
 
 test('O6: IDB quota exceeded surfaces banner, app does not crash', async ({ page }) => {
   await seedMesocycle(page);
@@ -55,6 +55,7 @@ test('O6: IDB quota exceeded surfaces banner, app does not crash', async ({ page
   });
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   // Try to log a set. The IDB put will fail with QuotaExceededError → the

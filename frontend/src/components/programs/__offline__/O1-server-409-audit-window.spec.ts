@@ -8,7 +8,7 @@
 // comes from the responder, not a real Postgres audit gate.
 
 import { test, expect } from '@playwright/test';
-import { inspectQueue, logSet, seedMesocycle } from './_helpers';
+import { inspectQueue, logSet, openFirstBlock, seedMesocycle } from './_helpers';
 
 test('O1: 409 audit_window_expired surfaces banner + rejected status; row preserved', async ({
   page,
@@ -17,6 +17,7 @@ test('O1: 409 audit_window_expired surfaces banner + rejected status; row preser
   server.setResponder(() => ({ kind: 'audit-expired' }));
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   // Wait for the logger to render its first set row.
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 

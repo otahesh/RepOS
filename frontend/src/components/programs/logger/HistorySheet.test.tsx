@@ -38,9 +38,7 @@ describe('<HistorySheet>', () => {
   it('shows the empty state when there is no history', async () => {
     render(<HistorySheet slug="bb-bench-press" track="intermediate" onClose={() => {}} />);
     await waitFor(() =>
-      expect(
-        screen.getByText('No history yet — first time doing this one.'),
-      ).toBeInTheDocument(),
+      expect(screen.getByText('No history yet — first time doing this one.')).toBeInTheDocument(),
     );
   });
 

@@ -12,9 +12,7 @@ describe('getExerciseHistory', () => {
       ok: true,
       json: async () => ({ sessions }),
     });
-    await expect(getExerciseHistory('incline-dumbbell-bench-press', 8)).resolves.toEqual(
-      sessions,
-    );
+    await expect(getExerciseHistory('incline-dumbbell-bench-press', 8)).resolves.toEqual(sessions);
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/exercises/incline-dumbbell-bench-press/history?limit=8'),
       expect.anything(),

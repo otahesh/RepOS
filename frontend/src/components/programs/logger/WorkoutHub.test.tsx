@@ -10,9 +10,10 @@ const BLOCKS: HubBlock[] = [
 ];
 
 function renderHub(blocks: HubBlock[], onOpenBlock = vi.fn()) {
-  return { onOpenBlock, ...render(
-    <WorkoutHub dayName="Full Body A" blocks={blocks} onOpenBlock={onOpenBlock} />,
-  ) };
+  return {
+    onOpenBlock,
+    ...render(<WorkoutHub dayName="Full Body A" blocks={blocks} onOpenBlock={onOpenBlock} />),
+  };
 }
 
 describe('<WorkoutHub>', () => {

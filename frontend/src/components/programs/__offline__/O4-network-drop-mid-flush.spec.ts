@@ -13,7 +13,7 @@
 // attempts. The final "goOnline" is flipping the responder back to 'created'.
 
 import { test, expect } from '@playwright/test';
-import { inspectQueue, logSet, seedMesocycle, type SeedSet } from './_helpers';
+import { inspectQueue, logSet, openFirstBlock, seedMesocycle, type SeedSet } from './_helpers';
 
 const FIVE_SETS: SeedSet[] = Array.from({ length: 5 }, (_, i) => ({
   id: `ps-${i + 1}`,
@@ -45,6 +45,7 @@ test('O4: network drop mid-flush — 2 sync, 3 retry with growing backoff, recov
   });
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   // Log all 5 sets back-to-back. Logger client-side debounce is 500ms so we
