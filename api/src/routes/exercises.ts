@@ -59,6 +59,56 @@ export async function exerciseRoutes(app: FastifyInstance) {
     return rows[0];
   });
 
+  app.get<{ Params: { slug: string }; Querystring: { limit?: string } }>(
+    '/exercises/:slug/history',
+    { preHandler: requireBearerOrCfAccess },
+    async (req, reply) => {
+      const userId = requireUserId(req);
+      const limit = Math.min(Math.max(parseInt(req.query.limit ?? '8', 10) || 8, 1), 20);
+      const {
+        rows: [ex],
+      } = await db.query<{ id: string }>(
+        `SELECT id FROM exercises WHERE slug=$1 AND archived_at IS NULL`,
+        [req.params.slug],
+      );
+      if (!ex) {
+        reply.code(404);
+        return { error: 'exercise not found', field: 'slug' };
+      }
+
+      // One session = one calendar day of logs for this user+exercise.
+      // Day boundaries resolve in the user's own timezone (users.timezone,
+      // same convention computeUserLocalDate applies in getTodayWorkout) —
+      // a 7:30pm Chicago set must not land on the next UTC day, and a
+      // workout crossing UTC midnight must not split into two sessions.
+      // Set order carries created_at + id tiebreakers so offline-queue
+      // flushes that share a performed_at second stay deterministic.
+      const { rows } = await db.query<{
+        date: string;
+        // set_logs weight/reps columns are nullable and this query doesn't
+        // filter nulls — a reps-only bodyweight log emits weight_lbs: null.
+        sets: { weight_lbs: number | null; reps: number | null; rir: number | null }[];
+      }>(
+        `SELECT to_char((sl.performed_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
+                json_agg(json_build_object(
+                  'weight_lbs', sl.performed_load_lbs::float,
+                  'reps', sl.performed_reps,
+                  'rir', sl.performed_rir
+                ) ORDER BY sl.performed_at ASC, sl.created_at ASC, sl.id ASC) AS sets
+         FROM set_logs sl
+         JOIN users u ON u.id = sl.user_id
+         WHERE sl.user_id = $1 AND sl.exercise_id = $2
+         GROUP BY (sl.performed_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date
+         ORDER BY (sl.performed_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date DESC
+         LIMIT $3`,
+        [userId, ex.id, limit],
+      );
+      reply.header('cache-control', 'private, max-age=60');
+      reply.header('vary', 'Authorization');
+      return { sessions: rows };
+    },
+  );
+
   app.get<{ Params: { slug: string } }>(
     '/exercises/:slug/substitutions',
     { preHandler: requireBearerOrCfAccess },

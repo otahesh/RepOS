@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within, act, fireEvent } from '@testing-library/react';
+import { render, screen, within, act, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import TodayLoggerMobile from './TodayLoggerMobile';
 import { logBuffer } from '../../lib/logBuffer';
 import type { QueueRowStatus } from '../../hooks/useIdbQueueStatus';
@@ -31,14 +31,17 @@ vi.mock('../../hooks/useIdbQueueStatus', () => ({
     crid == null ? 'unknown' : (__mockedQueueStatuses.get(crid) ?? 'pending'),
 }));
 
-const navigateMock = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => navigateMock,
-  };
-});
+// History powers prefill + the last-time line; default is "no history".
+const { getExerciseHistoryMock, listExercisesMock } = vi.hoisted(() => ({
+  getExerciseHistoryMock: vi.fn(),
+  listExercisesMock: vi.fn(),
+}));
+vi.mock('../../lib/api/exerciseHistory', () => ({
+  getExerciseHistory: getExerciseHistoryMock,
+}));
+vi.mock('../../lib/api/exercises', () => ({
+  listExercises: listExercisesMock,
+}));
 
 // ---- Fixtures ---------------------------------------------------------------
 
@@ -59,6 +62,7 @@ const SET_1: TodaySet = {
   target_reps_high: 8,
   target_rir: 2,
   rest_sec: 180,
+  logged: null,
 };
 
 const SET_2: TodaySet = {
@@ -69,12 +73,36 @@ const SET_2: TodaySet = {
 
 const PRELOADED = { run_id: 'mr-1', day: DAY, sets: [SET_1, SET_2] };
 
-function renderLogger(preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED) {
+function renderLogger(
+  preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED,
+  initialPath = '/today/mr-1/log',
+) {
   return render(
-    <MemoryRouter initialEntries={['/today/mr-1/log']}>
-      <TodayLoggerMobile preloaded={preloaded} />
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route
+          path="/today/:mesocycleRunId/log"
+          element={<TodayLoggerMobile preloaded={preloaded} />}
+        />
+        <Route
+          path="/today/:mesocycleRunId/log/:blockIdx"
+          element={<TodayLoggerMobile preloaded={preloaded} />}
+        />
+      </Routes>
     </MemoryRouter>,
   );
+}
+
+/** Render straight at the block-0 focus screen. */
+function renderFocused(preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED) {
+  return renderLogger(preloaded, '/today/mr-1/log/0');
+}
+
+/** Flush pending microtasks (history/meta fetch promises) inside act. */
+async function flush() {
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 // ---- Tests ------------------------------------------------------------------
@@ -83,172 +111,326 @@ describe('<TodayLoggerMobile>', () => {
   beforeEach(() => {
     __mockedQueueStatuses.clear();
     vi.spyOn(logBuffer, 'enqueue').mockResolvedValue('crid-stub');
-    navigateMock.mockReset();
+    getExerciseHistoryMock.mockResolvedValue([]);
+    listExercisesMock.mockResolvedValue([
+      {
+        slug: 'barbell-bench-press',
+        primary_muscle: 'chest',
+        required_equipment: { _v: 1, requires: [{ type: 'barbell' }] },
+      },
+    ]);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('renders the day name + per-set weight/reps/RIR controls', () => {
-    renderLogger();
-    expect(screen.getByText(/Upper Heavy/)).toBeInTheDocument();
-    // Two set rows
-    expect(screen.getByTestId('set-row-0')).toBeInTheDocument();
-    expect(screen.getByTestId('set-row-1')).toBeInTheDocument();
-    // Each row has a weight + reps input + RIR slider
-    expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
-    const sliders = screen.getAllByRole('slider', { name: /RIR/i });
-    expect(sliders.length).toBe(2);
-  });
-
-  it('beginner track: hides RIR sliders and shows a plain-language effort cue', () => {
-    renderLogger({ ...PRELOADED, track: 'beginner' });
-    expect(screen.getByText(/leave 2 reps in the tank/i)).toBeInTheDocument();
-    expect(screen.queryAllByRole('slider', { name: /RIR/i }).length).toBe(0);
-    expect(screen.queryByText(/RIR/)).not.toBeInTheDocument();
-    // Weight/reps logging still fully present.
-    expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
-  });
-
-  it('Log button is disabled until weight + reps are filled', async () => {
-    const user = userEvent.setup();
-    renderLogger();
-    const row = within(screen.getByTestId('set-row-0'));
-    const logBtn = row.getByRole('button', { name: /^log$/i });
-    expect(logBtn).toBeDisabled();
-
-    await user.type(row.getByLabelText(/weight in pounds/i), '185');
-    expect(logBtn).toBeDisabled();
-    await user.type(row.getByLabelText(/Set 1 reps/i), '7');
-    expect(logBtn).not.toBeDisabled();
-  });
-
-  it('Log click calls logBuffer.enqueue with weight/reps/RIR and shows logged affordance', async () => {
-    const user = userEvent.setup();
-    renderLogger();
-    const row = within(screen.getByTestId('set-row-0'));
-
-    await user.type(row.getByLabelText(/weight in pounds/i), '185');
-    await user.type(row.getByLabelText(/Set 1 reps/i), '7');
-    await user.click(row.getByRole('button', { name: /^log$/i }));
-
-    expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
-    const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[0]).toBe('ps-1'); // planned_set_id
-    expect(call[1]).toMatchObject({ weight_lbs: 185, reps: 7, rir: 2 });
-    expect(typeof call[1].performed_at).toBe('string');
-    expect(call[2]).toBe('user-1'); // queueOwnerUserId
-
-    // Row affordance reflects the mocked queue status ('pending' → "Queued offline").
-    expect(
-      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
-        /queued offline/i,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it('shows "Logged · locked" with pointer to Settings when the queue status mock returns "synced"', async () => {
-    __mockedQueueStatuses.set('crid-stub', 'synced');
-    const user = userEvent.setup();
-    renderLogger();
-    const row = within(screen.getByTestId('set-row-0'));
-    await user.type(row.getByLabelText(/weight in pounds/i), '185');
-    await user.type(row.getByLabelText(/Set 1 reps/i), '7');
-    await user.click(row.getByRole('button', { name: /^log$/i }));
-    // Reviewer Important: "Logged" with no further guidance leaves users
-    // confused about why the row's inputs are disabled (the 24h audit
-    // window exists but the inline edit UI ships later). Affordance now
-    // surfaces the lock + points at the right surface.
-    expect(
-      await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
-        /logged · locked/i,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('set-row-0-status')).toHaveTextContent(/edit via settings/i);
-  });
-
-  it('Log button is disabled for 500ms after press (debounce window)', async () => {
-    // We stay on real timers for the input phase (userEvent) and only test the
-    // debounce gate via the second-click contract: a synchronous second click
-    // before any awaits must not cause a second logBuffer.enqueue.
-    const user = userEvent.setup();
-    renderLogger();
-    const row = within(screen.getByTestId('set-row-0'));
-    await user.type(row.getByLabelText(/weight in pounds/i), '185');
-    await user.type(row.getByLabelText(/Set 1 reps/i), '7');
-
-    const logBtn = row.getByRole('button', { name: /^log$/i });
-    // First synchronous click — flips internal debounce flag immediately.
-    fireEvent.click(logBtn);
-    // Second synchronous click in the same tick — must be gated by the
-    // debounce flag (the React state for `logged` hasn't committed yet).
-    fireEvent.click(logBtn);
-    fireEvent.click(logBtn);
-    expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
-
-    // After the row transitions to 'logged' phase the button is also disabled
-    // by canLog=false. End state: the button is disabled.
-    await act(async () => {
-      await Promise.resolve();
+  describe('hub', () => {
+    it('renders the day name and one hub row per block with set counts', async () => {
+      renderLogger();
+      expect(screen.getByText(/Upper Heavy/)).toBeInTheDocument();
+      const row = screen.getByTestId('hub-row-0');
+      expect(row).toHaveTextContent('Barbell Bench Press');
+      expect(row).toHaveTextContent('0/2 sets');
+      // No set rows on the hub — logging happens in the focus screen.
+      expect(screen.queryByTestId('set-row-0')).not.toBeInTheDocument();
+      await flush();
     });
-    expect(logBtn).toBeDisabled();
-  });
 
-  it('RIR slider keyboard: ArrowRight increments, ArrowLeft decrements, Home=0, End=5', async () => {
-    renderLogger();
-    const slider = screen.getAllByRole('slider', { name: /RIR/i })[0];
-    expect(slider).toHaveAttribute('aria-valuenow', '2');
-
-    slider.focus();
-    fireEvent.keyDown(slider, { key: 'ArrowRight' });
-    expect(slider).toHaveAttribute('aria-valuenow', '3');
-
-    fireEvent.keyDown(slider, { key: 'ArrowLeft' });
-    expect(slider).toHaveAttribute('aria-valuenow', '2');
-
-    fireEvent.keyDown(slider, { key: 'End' });
-    expect(slider).toHaveAttribute('aria-valuenow', '5');
-    // Already at max — ArrowRight stays at 5.
-    fireEvent.keyDown(slider, { key: 'ArrowRight' });
-    expect(slider).toHaveAttribute('aria-valuenow', '5');
-
-    fireEvent.keyDown(slider, { key: 'Home' });
-    expect(slider).toHaveAttribute('aria-valuenow', '0');
-    fireEvent.keyDown(slider, { key: 'ArrowLeft' });
-    expect(slider).toHaveAttribute('aria-valuenow', '0');
-  });
-
-  it('RIR slider has the right ARIA attributes', () => {
-    renderLogger();
-    const slider = screen.getAllByRole('slider', { name: /RIR/i })[0];
-    expect(slider).toHaveAttribute('aria-valuemin', '0');
-    expect(slider).toHaveAttribute('aria-valuemax', '5');
-    expect(slider).toHaveAttribute('aria-valuenow', '2');
-    expect(slider).toHaveAttribute('aria-label', expect.stringMatching(/RIR/i));
-  });
-
-  it('status region uses aria-live="polite" for SR announcements', () => {
-    renderLogger();
-    const status = screen.getByTestId('set-row-0-status');
-    expect(status).toHaveAttribute('aria-live', 'polite');
-    expect(status).toHaveAttribute('role', 'status');
-  });
-
-  it("after a successful Log focus moves to the next set's weight input", async () => {
-    const user = userEvent.setup();
-    renderLogger();
-    const row0 = within(screen.getByTestId('set-row-0'));
-    await user.type(row0.getByLabelText(/weight in pounds/i), '185');
-    await user.type(row0.getByLabelText(/Set 1 reps/i), '7');
-    await user.click(row0.getByRole('button', { name: /^log$/i }));
-
-    // setTimeout 0 in the focus handler — wait a microtask for the focus shift.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+    it('counts server-logged sets as done', async () => {
+      renderLogger({
+        ...PRELOADED,
+        sets: [{ ...SET_1, logged: { weight_lbs: 135, reps: 8 } }, SET_2],
+      });
+      expect(screen.getByTestId('hub-row-0')).toHaveTextContent('1/2 sets');
+      await flush();
     });
-    expect(document.activeElement).toBe(screen.getByLabelText(/Set 2 weight in pounds/i));
+
+    it('tapping a hub row opens that block in the focus screen', async () => {
+      const user = userEvent.setup();
+      renderLogger();
+      await user.click(screen.getByTestId('hub-row-0'));
+      expect(await screen.findByTestId('set-row-0')).toBeInTheDocument();
+      expect(screen.getByTestId('set-row-1')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
+      expect(screen.getAllByRole('slider', { name: /RIR/i }).length).toBe(2);
+    });
+
+    it('back from the focus screen returns to the hub', async () => {
+      const user = userEvent.setup();
+      renderFocused();
+      await user.click(screen.getByRole('button', { name: /^back to plan$/i }));
+      expect(screen.getByTestId('hub-row-0')).toBeInTheDocument();
+      expect(screen.queryByTestId('set-row-0')).not.toBeInTheDocument();
+    });
+
+    it('history sheet does not auto-reopen when a different block is later focused', async () => {
+      const user = userEvent.setup();
+      renderLogger({
+        ...PRELOADED,
+        sets: [SET_1, SET_2, { ...SET_1, id: 'ps-3', block_idx: 1, set_idx: 0 }],
+      });
+
+      // Open block 0, open its history sheet.
+      await user.click(screen.getByTestId('hub-row-0'));
+      await user.click(await screen.findByRole('button', { name: /exercise history/i }));
+      expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+
+      // Back to the hub, then open block 1 — the sheet must not follow.
+      await user.click(screen.getByRole('button', { name: /^back to plan$/i }));
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
+      await user.click(screen.getByTestId('hub-row-1'));
+      expect(await screen.findByTestId('set-row-0')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('focus screen', () => {
+    it('beginner track: hides RIR sliders and shows a plain-language effort cue', async () => {
+      renderFocused({ ...PRELOADED, track: 'beginner' });
+      expect(screen.getByText(/leave 2 reps in the tank/i)).toBeInTheDocument();
+      expect(screen.queryAllByRole('slider', { name: /RIR/i }).length).toBe(0);
+      expect(screen.queryByText(/RIR/)).not.toBeInTheDocument();
+      // Weight/reps logging still fully present.
+      expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
+      await flush();
+    });
+
+    it('Log button is disabled until weight + reps are filled', async () => {
+      const user = userEvent.setup();
+      renderFocused();
+      const row = within(screen.getByTestId('set-row-0'));
+      const logBtn = row.getByRole('button', { name: /^log$/i });
+      expect(logBtn).toBeDisabled();
+
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      expect(logBtn).toBeDisabled();
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+      expect(logBtn).not.toBeDisabled();
+    });
+
+    it('Log click calls logBuffer.enqueue with weight/reps/RIR and shows logged affordance', async () => {
+      const user = userEvent.setup();
+      renderFocused();
+      const row = within(screen.getByTestId('set-row-0'));
+
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe('ps-1'); // planned_set_id
+      expect(call[1]).toMatchObject({ weight_lbs: 185, reps: 7, rir: 2 });
+      expect(typeof call[1].performed_at).toBe('string');
+      expect(call[2]).toBe('user-1'); // queueOwnerUserId
+
+      // Row affordance reflects the mocked queue status ('pending' → "Queued offline").
+      expect(
+        await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
+          /queued offline/i,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('shows "Logged · locked" with pointer to Settings when the queue status mock returns "synced"', async () => {
+      __mockedQueueStatuses.set('crid-stub', 'synced');
+      const user = userEvent.setup();
+      renderFocused();
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+      // Reviewer Important: "Logged" with no further guidance leaves users
+      // confused about why the row's inputs are disabled (the 24h audit
+      // window exists but the inline edit UI ships later). Affordance now
+      // surfaces the lock + points at the right surface.
+      expect(
+        await within(screen.getByTestId('set-row-0-status') as HTMLElement).findByText(
+          /logged · locked/i,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('set-row-0-status')).toHaveTextContent(/edit via settings/i);
+    });
+
+    it('Log button is disabled for 500ms after press (debounce window)', async () => {
+      // We stay on real timers for the input phase (userEvent) and only test the
+      // debounce gate via the second-click contract: a synchronous second click
+      // before any awaits must not cause a second logBuffer.enqueue.
+      const user = userEvent.setup();
+      renderFocused();
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+
+      const logBtn = row.getByRole('button', { name: /^log$/i });
+      // First synchronous click — flips internal debounce flag immediately.
+      fireEvent.click(logBtn);
+      // Second synchronous click in the same tick — must be gated by the
+      // debounce flag (the React state for `logged` hasn't committed yet).
+      fireEvent.click(logBtn);
+      fireEvent.click(logBtn);
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+
+      // After the row transitions to 'logged' phase the button is also disabled
+      // by canLog=false. End state: the button is disabled.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(logBtn).toBeDisabled();
+    });
+
+    it('RIR slider keyboard: ArrowRight increments, ArrowLeft decrements, Home=0, End=5', async () => {
+      renderFocused();
+      const slider = screen.getAllByRole('slider', { name: /RIR/i })[0];
+      expect(slider).toHaveAttribute('aria-valuenow', '2');
+
+      slider.focus();
+      fireEvent.keyDown(slider, { key: 'ArrowRight' });
+      expect(slider).toHaveAttribute('aria-valuenow', '3');
+
+      fireEvent.keyDown(slider, { key: 'ArrowLeft' });
+      expect(slider).toHaveAttribute('aria-valuenow', '2');
+
+      fireEvent.keyDown(slider, { key: 'End' });
+      expect(slider).toHaveAttribute('aria-valuenow', '5');
+      // Already at max — ArrowRight stays at 5.
+      fireEvent.keyDown(slider, { key: 'ArrowRight' });
+      expect(slider).toHaveAttribute('aria-valuenow', '5');
+
+      fireEvent.keyDown(slider, { key: 'Home' });
+      expect(slider).toHaveAttribute('aria-valuenow', '0');
+      fireEvent.keyDown(slider, { key: 'ArrowLeft' });
+      expect(slider).toHaveAttribute('aria-valuenow', '0');
+      await flush();
+    });
+
+    it('RIR slider has the right ARIA attributes', async () => {
+      renderFocused();
+      const slider = screen.getAllByRole('slider', { name: /RIR/i })[0];
+      expect(slider).toHaveAttribute('aria-valuemin', '0');
+      expect(slider).toHaveAttribute('aria-valuemax', '5');
+      expect(slider).toHaveAttribute('aria-valuenow', '2');
+      expect(slider).toHaveAttribute('aria-label', expect.stringMatching(/RIR/i));
+      await flush();
+    });
+
+    it('status region uses aria-live="polite" for SR announcements', async () => {
+      renderFocused();
+      const status = screen.getByTestId('set-row-0-status');
+      expect(status).toHaveAttribute('aria-live', 'polite');
+      expect(status).toHaveAttribute('role', 'status');
+      await flush();
+    });
+
+    it("after a successful Log focus moves to the next set's weight input", async () => {
+      const user = userEvent.setup();
+      renderFocused();
+      const row0 = within(screen.getByTestId('set-row-0'));
+      await user.type(row0.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row0.getByLabelText(/Set 1 reps/i), '7');
+      await user.click(row0.getByRole('button', { name: /^log$/i }));
+
+      // setTimeout 0 in the focus handler — wait a microtask for the focus shift.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(document.activeElement).toBe(screen.getByLabelText(/Set 2 weight in pounds/i));
+    });
+
+    it('prefills unlogged sets from last session and shows the last-time line', async () => {
+      getExerciseHistoryMock.mockResolvedValue([
+        { date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] },
+      ]);
+      renderFocused();
+
+      const weight0 = screen.getByLabelText(/Set 1 weight in pounds/i);
+      await waitFor(() => expect(weight0).toHaveValue(25));
+      expect(screen.getByLabelText(/Set 1 reps/i)).toHaveValue(9);
+      // Set 2 has no same-idx history entry — falls back to the session's first set.
+      expect(screen.getByLabelText(/Set 2 weight in pounds/i)).toHaveValue(25);
+      expect(screen.getByLabelText(/Set 2 reps/i)).toHaveValue(9);
+      expect(screen.getByText(/last time: 25 lbs × 9/i)).toBeInTheDocument();
+      expect(getExerciseHistoryMock).toHaveBeenCalledWith('barbell-bench-press', 1);
+    });
+
+    it('does not prefill server-logged sets and seeds only non-null logged values', async () => {
+      getExerciseHistoryMock.mockResolvedValue([
+        { date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] },
+      ]);
+      renderFocused({
+        ...PRELOADED,
+        sets: [{ ...SET_1, logged: { weight_lbs: null, reps: 8 } }, SET_2],
+      });
+
+      // Unlogged set 2 gets the history prefill…
+      await waitFor(() => expect(screen.getByLabelText(/Set 2 weight in pounds/i)).toHaveValue(25));
+      // …while the server-logged set keeps its own values: null weight stays
+      // an empty input (never the string "null"), reps shows the logged 8, and
+      // the row is locked.
+      expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(null);
+      expect(screen.getByLabelText(/Set 1 reps/i)).toHaveValue(8);
+      expect(screen.getByLabelText(/Set 1 reps/i)).toBeDisabled();
+    });
+
+    it('logging a set starts the rest timer at the set rest_sec, rendered m:ss', async () => {
+      vi.useFakeTimers();
+      try {
+        renderFocused();
+        await flush();
+        const row = screen.getByTestId('set-row-0');
+        fireEvent.change(within(row).getByLabelText(/weight in pounds/i), {
+          target: { value: '185' },
+        });
+        fireEvent.change(within(row).getByLabelText(/Set 1 reps/i), {
+          target: { value: '7' },
+        });
+        expect(screen.queryByTestId('rest-timer')).not.toBeInTheDocument();
+        fireEvent.click(within(row).getByRole('button', { name: /^log$/i }));
+        await flush(); // let the enqueue promise resolve → restTimer.start(180)
+
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 3:00');
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 2:59');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rest timer started on the focus screen stays visible after navigating back to the hub', async () => {
+      vi.useFakeTimers();
+      try {
+        renderFocused();
+        await flush();
+        const row = screen.getByTestId('set-row-0');
+        fireEvent.change(within(row).getByLabelText(/weight in pounds/i), {
+          target: { value: '185' },
+        });
+        fireEvent.change(within(row).getByLabelText(/Set 1 reps/i), {
+          target: { value: '7' },
+        });
+        fireEvent.click(within(row).getByRole('button', { name: /^log$/i }));
+        await flush(); // let the enqueue promise resolve → restTimer.start(180)
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 3:00');
+
+        fireEvent.click(screen.getByRole('button', { name: /^back to plan$/i }));
+        expect(screen.getByTestId('hub-row-0')).toBeInTheDocument();
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 3:00');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('⟲ history button opens the HistorySheet dialog', async () => {
+      const user = userEvent.setup();
+      renderFocused();
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /exercise history/i }));
+      expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+    });
   });
 });

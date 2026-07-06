@@ -239,6 +239,34 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
     });
   });
 
+  // GET /api/exercises — fetched unconditionally on mount by TodayLoggerMobile
+  // to populate hub-chip/focus-header muscle metadata. Fire-and-forget +
+  // swallowed on failure, so this mock isn't strictly required for correctness,
+  // but an unmocked call would otherwise hit the `vite preview` static server
+  // (no backend) and log noise. Empty list is fine — metadata is decorative.
+  await page.route('**/api/exercises', async (route: Route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fulfill({ status: 405, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ exercises: [] }),
+    });
+  });
+
+  // GET /api/exercises/:slug/history — fetched lazily when a block is
+  // focused, to power the focus screen's last-time prefill line. Also
+  // fire-and-forget + swallowed on failure; empty sessions is fine.
+  await page.route('**/api/exercises/*/history*', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [] }),
+    });
+  });
+
   // GET /api/mesocycles/today
   await page.route('**/api/mesocycles/today', async (route: Route) => {
     await route.fulfill({
@@ -487,8 +515,26 @@ export async function clearQueueDb(page: Page): Promise<void> {
 // -----------------------------------------------------------------------------
 
 /**
+ * Helper: tap the first exercise block on the hub (day checklist) screen to
+ * navigate into its focus screen, where set rows (`set-row-{idx}`) render.
+ *
+ * The W1 logger shell split the single-scroll logger into a hub
+ * (`/today/:runId/log`, one row per exercise block via `hub-row-{blockIdx}`)
+ * and a per-exercise focus screen (`/today/:runId/log/:blockIdx`, where
+ * `set-row-{idx}` + the `Log` button live). Every O# spec's fixtures put all
+ * sets on block 0, so opening block 0 is always sufficient here.
+ *
+ * Must be called after `page.goto('/today/<runId>/log')` (or any reload that
+ * lands back on the hub route) and before any `set-row-*` selector.
+ */
+export async function openFirstBlock(page: Page): Promise<void> {
+  await page.getByTestId('hub-row-0').click();
+}
+
+/**
  * Helper: log a single set via the mobile logger UI.
- * Assumes the page is on /today/<runId>/log with at least one set rendered.
+ * Assumes the page is on the exercise focus screen with at least one set
+ * rendered (see `openFirstBlock`).
  */
 export async function logSet(
   page: Page,

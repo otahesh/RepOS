@@ -12,7 +12,7 @@
 // exercises the same dedupe path at the logBuffer/responder boundary.
 
 import { test, expect } from '@playwright/test';
-import { inspectQueue, seedMesocycle, waitForPosts } from './_helpers';
+import { inspectQueue, openFirstBlock, seedMesocycle, waitForPosts } from './_helpers';
 
 test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never shows >1 queued', async ({
   page,
@@ -20,6 +20,7 @@ test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never sh
   const server = await seedMesocycle(page);
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   // Fill weight + reps so the Log button is enabled.

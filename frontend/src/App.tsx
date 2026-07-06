@@ -54,6 +54,7 @@ function AppInner() {
             <Route path="programs/draft/:userProgramId" element={<DraftProgramPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
             <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobileGate />} />
+            <Route path="today/:mesocycleRunId/log/:blockIdx" element={<TodayLoggerMobileGate />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />

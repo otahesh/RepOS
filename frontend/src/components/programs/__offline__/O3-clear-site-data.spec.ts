@@ -30,6 +30,7 @@ import {
   clearQueueDb,
   inspectQueue,
   logSet,
+  openFirstBlock,
   seedMesocycle,
   waitForPosts,
   type SeedSet,
@@ -76,6 +77,7 @@ test('O3: clear site data mid-workout — minute-bucket dedupe prevents 4th from
   server.enableMinuteBucketDedupe(true);
 
   await page.goto('/today/run-1/log');
+  await openFirstBlock(page);
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
   // 1) Log 3 sets online — all sync.
@@ -97,6 +99,9 @@ test('O3: clear site data mid-workout — minute-bucket dedupe prevents 4th from
   // 3) Reload — page comes up fresh, no queue. Log the same planned set
   // (ps-1) again. The new CRID + minute-bucket dedupe responder will return
   // 200 deduped: true, so the IDB row is marked synced and the queue drains.
+  // openFirstBlock above already pushed the browser URL to the focus route
+  // (/today/<runId>/log/0), so the reload lands directly back in the focus
+  // screen — no hub re-tap needed.
   await page.reload();
   await expect(page.getByTestId('set-row-0')).toBeVisible();
   await logSet(page, 0, { weight: 140, reps: 6 });
