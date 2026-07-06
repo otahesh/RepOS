@@ -45,6 +45,9 @@ export type UserProgramRecord = {
    *  action can navigate to /programs/:slug without a second round-trip.
    *  Null for programs forked from a template that has since been archived. */
   template_slug: string | null;
+  /** Source template's experience track — beginner programs render
+   *  plain-language effort cues + definitive set counts. */
+  track?: ProgramTrack | null;
   template_version: number | null;
   name: string;
   customizations: Record<string, unknown>;

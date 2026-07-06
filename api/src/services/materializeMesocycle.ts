@@ -1,5 +1,5 @@
 import { db } from '../db/client.js';
-import { computeRamp, distributeWeekTargetAcrossBlocks } from './autoRamp.js';
+import { computeBlockRamp } from './autoRamp.js';
 import { addDaysISO } from './_dateUtil.js';
 import { resolveUserLandmarksWith } from './resolveUserLandmarks.js';
 import type { UserProgramCustomizations } from '../schemas/userProgramCustomizations.js';
@@ -246,62 +246,34 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
     }[] = [];
 
     for (let w = 1; w <= weeks; w++) {
-      // Group blocks across all days in this week by primary_muscle.
-      type GroupBlock = {
-        dayIdx: number;
-        blockIdx: number;
-        block: Block;
-        exerciseId: string;
-        mev: number;
-      };
-      const muscleGroups = new Map<string, GroupBlock[]>();
+      // Per-block sets come from the template author's mev→mav ramp — the
+      // numbers the user saw when they picked the program. The previous
+      // landmark-driven distribution treated per-MUSCLE weekly volumes as the
+      // target and concentrated them into however few blocks a template gave
+      // that muscle (a 2-day beginner template got 23-set row sessions by
+      // week 4). Landmarks stay snapshotted below for MAV/MRV warnings and
+      // the deload cap — they no longer size planned sets.
       for (const d of structure.days) {
+        const dwId = dayIdMap.get(`${w}|${d.idx}`);
+        if (!dwId) continue;
         d.blocks.forEach((b, blockIdx) => {
           if (b.cardio) return;
           const ex = exBySlug.get(b.exercise_slug);
           if (!ex) throw new Error(`exercise slug missing: ${b.exercise_slug}`);
-          const key = ex.primary_muscle_slug;
-          const list = muscleGroups.get(key) ?? [];
-          list.push({ dayIdx: d.idx, blockIdx, block: b, exerciseId: ex.id, mev: b.mev });
-          muscleGroups.set(key, list);
-        });
-      }
-
-      // For each muscle, compute week target from landmarks then distribute.
-      // [C-LANDMARKS-ACTIVE-RUN] Read from the per-user resolved landmarks
-      // (defaults + overrides), NOT the global MUSCLE_LANDMARKS constant.
-      for (const [muscleSlug, blocks] of muscleGroups) {
-        const lm = resolvedLandmarks[muscleSlug];
-        if (!lm) throw new Error(`muscle '${muscleSlug}' has no MEV/MAV/MRV landmarks`);
-        const weekTarget = computeRamp({
-          mev: lm.mev,
-          mav: lm.mav,
-          mrv: lm.mrv,
-          week: w,
-          totalWeeks: weeks,
-        });
-        const dist = distributeWeekTargetAcrossBlocks(
-          blocks.map((b) => ({ blockKey: `${b.dayIdx}|${b.blockIdx}`, mev: b.mev })),
-          weekTarget,
-        );
-        const setsByKey = new Map(dist.map((d) => [d.blockKey, d.sets]));
-        for (const gb of blocks) {
-          const sets = setsByKey.get(`${gb.dayIdx}|${gb.blockIdx}`) ?? 0;
-          const dwId = dayIdMap.get(`${w}|${gb.dayIdx}`);
-          if (!dwId) continue;
+          const sets = computeBlockRamp({ mev: b.mev, mav: b.mav, week: w, totalWeeks: weeks });
           for (let s = 0; s < sets; s++) {
             setRows.push({
               day_workout_id: dwId,
-              block_idx: gb.blockIdx,
+              block_idx: blockIdx,
               set_idx: s,
-              exercise_id: gb.exerciseId,
-              reps_low: gb.block.target_reps_low,
-              reps_high: gb.block.target_reps_high,
-              rir: gb.block.target_rir,
-              rest: gb.block.rest_sec,
+              exercise_id: ex.id,
+              reps_low: b.target_reps_low,
+              reps_high: b.target_reps_high,
+              rir: b.target_rir,
+              rest: b.rest_sec,
             });
           }
-        }
+        });
       }
 
       // Cardio blocks pass through untouched (one row per block per week per day).

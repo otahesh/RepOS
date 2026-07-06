@@ -109,7 +109,7 @@ describe('materializeMesocycle — uses resolveUserLandmarks (W4.2)', () => {
     expect(check.mav).not.toBe(40);
   });
 
-  it('a NEW mesocycle materialized after PATCH uses the overrides', async () => {
+  it('a NEW mesocycle after PATCH snapshots the overrides but sizes sets from the template blocks', async () => {
     // Mark prior run completed so the partial unique index allows another active run.
     const {
       rows: [existing],
@@ -125,7 +125,9 @@ describe('materializeMesocycle — uses resolveUserLandmarks (W4.2)', () => {
       startDate: '2026-07-01',
       startTz: 'UTC',
     });
-    // With chest mev=30 (override), week-1 chest sets should exceed the previous default-MEV-driven count.
+    // Planned sets come from the template's per-block ramp (mev=2 → 2 sets in
+    // week 1) — landmark overrides deliberately do NOT inflate set counts.
+    // The chest mev=30 override would previously have produced a 30-set week.
     const {
       rows: [agg],
     } = await db.query<{ n: string }>(
@@ -136,6 +138,15 @@ describe('materializeMesocycle — uses resolveUserLandmarks (W4.2)', () => {
        WHERE dw.mesocycle_run_id=$1 AND dw.week_idx=1 AND m.slug='chest'`,
       [runId2],
     );
-    expect(parseInt(agg.n, 10)).toBeGreaterThanOrEqual(10); // mev=30 distributed; week-1 ≈ mev
+    expect(parseInt(agg.n, 10)).toBe(2); // template block mev, not landmark mev
+    // ...but the overrides DO land in the run's landmarks_snapshot, where the
+    // MAV/MRV warning chips read them.
+    const {
+      rows: [snap],
+    } = await db.query<{ mev: number }>(
+      `SELECT (landmarks_snapshot -> 'chest' ->> 'mev')::int AS mev FROM mesocycle_runs WHERE id=$1`,
+      [runId2],
+    );
+    expect(snap.mev).toBe(30);
   });
 });

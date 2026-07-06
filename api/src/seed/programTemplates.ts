@@ -1,7 +1,8 @@
 // File: api/src/seed/programTemplates.ts
 // Curated v1 program lineup. Four templates: full-body-2-day, full-body-3-day, upper-lower-4-day, strength-cardio-3-2.
 // Auto-ramp materializer expands these template-week structures across N weeks at run-start.
-// MEV/MAV per block are inputs the materializer reads; do not pre-expand here.
+// MEV/MAV per block are per-session set counts: week 1 materializes at mev, the last
+// accumulation week at mav, deload at round(mev/2). Do not pre-expand here.
 
 import type { ProgramTemplateSeed } from '../schemas/programTemplate.js';
 
@@ -26,7 +27,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-goblet-squat',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 10,
               target_rir: 2,
@@ -35,7 +36,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-bench-press',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 10,
               target_rir: 2,
@@ -44,7 +45,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'chest-supported-dumbbell-row',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -70,7 +71,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-romanian-deadlift',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -79,7 +80,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-shoulder-press-seated',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 10,
               target_rir: 2,
@@ -88,7 +89,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-row-1arm',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -114,7 +115,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-bulgarian-split-squat',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -123,7 +124,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'incline-dumbbell-bench-press',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -151,7 +152,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dead-bug',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -160,7 +161,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'side-plank',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 15,
               target_rir: 2,
@@ -575,9 +576,9 @@ export const programTemplates: ProgramTemplateSeed[] = [
     // RIR 3 on the primary compounds (goblet squat, DB bench, RDL, incline bench)
     // is intentionally one notch more conservative than full-body-3-day's RIR 2:
     // the 2-day is most often a true first-timer's first block, so the prime lifts
-    // stay further from failure during technique acquisition. mev/mav follow the
-    // same 2/4-compound · 2/3-isolation house scale as full-body-3-day — they are
-    // relative volume-distribution weights for the auto-ramp, not absolute set counts.
+    // stay further from failure during technique acquisition. mev/mav are per-block
+    // sets-per-session (mev in week 1, ramping to mav by the last accumulation week);
+    // both beginner tracks hold a uniform 2/3 so a novice always sees 2–3 definitive sets.
     structure: {
       _v: 1,
       days: [
@@ -590,7 +591,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-goblet-squat',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 10,
               target_rir: 3,
@@ -599,7 +600,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-bench-press',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 10,
               target_rir: 3,
@@ -608,7 +609,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'chest-supported-dumbbell-row',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -617,7 +618,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-shoulder-press-seated',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -626,7 +627,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dead-bug',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -643,7 +644,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-romanian-deadlift',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 3,
@@ -652,7 +653,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-reverse-lunge',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -661,7 +662,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'incline-dumbbell-bench-press',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 3,
@@ -670,7 +671,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'dumbbell-row-1arm',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 12,
               target_rir: 2,
@@ -688,7 +689,7 @@ export const programTemplates: ProgramTemplateSeed[] = [
             {
               exercise_slug: 'side-plank',
               mev: 2,
-              mav: 4,
+              mav: 3,
               target_reps_low: 8,
               target_reps_high: 15,
               target_rir: 2,

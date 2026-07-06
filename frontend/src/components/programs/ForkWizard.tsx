@@ -306,6 +306,7 @@ export function ForkWizard({
             <DayCard
               key={d.idx}
               day={d}
+              track={up.track}
               onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
               onRemoveSet={(dayIdx, blockIdx, _setIdx) => void handleRemoveSet(dayIdx, blockIdx)}
               onSwap={(dayIdx, blockIdx) => setSwapTarget({ dayIdx, blockIdx })}

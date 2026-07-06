@@ -1,5 +1,6 @@
 // frontend/src/components/programs/DayCard.tsx
 import { Term } from '../Term';
+import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 
 type Day = {
   idx: number;
@@ -21,15 +22,20 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function DayCard({
   day,
+  track,
   onAddSet,
   onRemoveSet,
   onSwap,
 }: {
   day: Day;
+  /** Program's experience track — beginner renders plain-language effort cues
+   *  and definitive set copy instead of RIR + a bare range. */
+  track?: string | null;
   onAddSet: (dayIdx: number, blockIdx: number) => void;
   onRemoveSet: (dayIdx: number, blockIdx: number, currentSets: number) => void;
   onSwap: (dayIdx: number, blockIdx: number) => void;
 }) {
+  const beginner = isBeginnerTrack(track);
   return (
     <div
       style={{
@@ -84,7 +90,15 @@ export function DayCard({
                   color: 'rgba(255,255,255,0.5)',
                 }}
               >
-                {b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir}
+                {beginner ? (
+                  <>
+                    {b.mev} sets, building to {b.mav} · {effortCue(b.target_rir)}
+                  </>
+                ) : (
+                  <>
+                    {b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir}
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 4 }}>

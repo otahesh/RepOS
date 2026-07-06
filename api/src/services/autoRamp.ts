@@ -24,6 +24,32 @@ export function computeRamp(input: RampInput): number {
   return Math.round(raw);
 }
 
+export type BlockRampInput = {
+  mev: number;
+  mav: number;
+  week: number; // 1-indexed
+  totalWeeks: number; // N (deload is week N)
+};
+
+/**
+ * Per-block sets-per-session ramp, driven by the template author's mev/mav.
+ *
+ *   sets(w) = round( mev + (mav - mev) * (w - 1) / max(N - 2, 1) )  for w in 1..N-1
+ *   sets(N) = max(1, round( mev / 2 ))                              deload
+ *
+ * Week 1 lands exactly on the block's MEV, the last accumulation week (N-1)
+ * exactly on its MAV. This replaces the landmark-driven weekly-muscle
+ * distribution, which concentrated an entire intermediate week's volume into
+ * whatever few blocks a template gave a muscle (23-set sessions in 2-day
+ * templates). Landmarks retain their real job: MAV/MRV warning thresholds.
+ */
+export function computeBlockRamp(input: BlockRampInput): number {
+  const { mev, mav, week, totalWeeks } = input;
+  if (week === totalWeeks) return Math.max(1, Math.round(mev / 2)); // deload
+  const denom = Math.max(totalWeeks - 2, 1);
+  return Math.round(mev + (mav - mev) * ((week - 1) / denom));
+}
+
 export type BlockMev = { blockKey: string; mev: number };
 export type BlockSets = { blockKey: string; sets: number };
 

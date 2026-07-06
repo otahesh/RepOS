@@ -127,7 +127,7 @@ describe('materializeMesocycle (spec §3.3 step list)', () => {
     expect(run.start_tz).toBe('America/New_York');
   });
 
-  it('week 1 sets_count uses MEV; last accumulation week uses MRV-1', async () => {
+  it('per-block ramp: week 1 uses block MEV, last accumulation week uses block MAV, deload halves MEV', async () => {
     const { rows } = await db.query(
       `SELECT dw.week_idx, ps.exercise_id, COUNT(*)::int AS sets
        FROM planned_sets ps
@@ -139,12 +139,21 @@ describe('materializeMesocycle (spec §3.3 step list)', () => {
       [userProgramId],
     );
     expect(rows.length).toBeGreaterThan(0);
-    // Week 1 totals across both blocks should equal chest MEV (10)
+    // Sets come from the template author's per-block mev→mav ramp — NOT from
+    // per-muscle weekly landmarks, which concentrated an entire intermediate
+    // week's volume into single blocks (23-set sessions in 2-day templates).
+    // Week 1 = sum of block MEVs (6 + 4).
     const w1Total = rows.filter((r) => r.week_idx === 1).reduce((s, r) => s + r.sets, 0);
     expect(w1Total).toBe(10);
-    // Week 4 (last accum, N=5) should equal MRV-1 = 21
+    // Week 4 (last accumulation, N=5) = sum of block MAVs (10 + 6).
     const w4Total = rows.filter((r) => r.week_idx === 4).reduce((s, r) => s + r.sets, 0);
-    expect(w4Total).toBe(21);
+    expect(w4Total).toBe(16);
+    // Week 5 (deload) = sum of round(mev/2) per block (3 + 2).
+    const w5Total = rows.filter((r) => r.week_idx === 5).reduce((s, r) => s + r.sets, 0);
+    expect(w5Total).toBe(5);
+    // No single block ever exceeds its authored MAV.
+    const maxPerBlock = Math.max(...rows.map((r) => r.sets));
+    expect(maxPerBlock).toBeLessThanOrEqual(10);
   });
 });
 

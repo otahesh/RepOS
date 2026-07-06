@@ -67,6 +67,9 @@ export type ResolvedUserProgram = {
   status: 'draft' | 'active' | 'completed' | 'archived';
   effective_structure: TemplateStructure;
   latest_run_id?: string;
+  /** Experience track of the source template — drives track-aware UI (e.g.
+   *  beginner programs render plain-language effort cues instead of RIR). */
+  track: string | null;
 };
 
 // ── Implementation ────────────────────────────────────────────────────────────
@@ -89,6 +92,7 @@ export async function resolveUserProgramStructure(
     status: string;
     tpl_name: string | null;
     structure: TemplateStructure | null;
+    track: string | null;
     latest_run_id: string | null;
   }>(
     `SELECT
@@ -100,6 +104,7 @@ export async function resolveUserProgramStructure(
        up.status                  AS status,
        pt.name                    AS tpl_name,
        pt.structure               AS structure,
+       pt.track                   AS track,
        (SELECT mr.id
           FROM mesocycle_runs mr
          WHERE mr.user_program_id = up.id
@@ -194,6 +199,7 @@ export async function resolveUserProgramStructure(
     customizations: row.customizations as Record<string, unknown>,
     status: row.status as ResolvedUserProgram['status'],
     effective_structure: structure,
+    track: row.track,
     ...(row.latest_run_id ? { latest_run_id: row.latest_run_id } : {}),
   };
 }
