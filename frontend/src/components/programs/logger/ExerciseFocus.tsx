@@ -26,6 +26,7 @@ export function ExerciseFocus({
   onOpenHistory,
   onBack,
   onDone,
+  getWeightInputRef,
 }: {
   position: { current: number; total: number };
   exercise: { name: string; muscle: string; equipmentLabel: string; slug: string };
@@ -40,6 +41,9 @@ export function ExerciseFocus({
   onOpenHistory: () => void;
   onBack: () => void;
   onDone: () => void;
+  /** Container-owned focus chain: returns the callback ref for a set's weight
+   *  input so log-then-advance-focus keeps working inside the focus screen. */
+  getWeightInputRef?: (setId: string) => (el: HTMLInputElement | null) => void;
 }) {
   const beginner = isBeginnerTrack(track);
   const lastTimeLine = formatLastTime(lastSession);
@@ -139,7 +143,7 @@ export function ExerciseFocus({
             onInputChange={(patch) => onInputChange(set.id, patch)}
             onLog={() => onLog(set)}
             onSkip={() => onSkip(set.id)}
-            weightInputRef={() => {}}
+            weightInputRef={getWeightInputRef ? getWeightInputRef(set.id) : () => {}}
           />
         ))}
       </div>

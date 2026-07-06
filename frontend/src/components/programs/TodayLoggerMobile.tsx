@@ -1,31 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
-import { Term } from '../Term';
-import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 import {
   getTodayWorkout,
   type TodayDay,
   type TodaySet,
   type TodayWorkoutResponse,
 } from '../../lib/api/mesocycles';
+import { listExercises } from '../../lib/api/exercises';
+import { getExerciseHistory, type HistorySession } from '../../lib/api/exerciseHistory';
+import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
-import { useRestTimer } from '../../hooks/useRestTimer';
-import { SetRow, type RowState, type RowInputs } from './logger/SetRow';
+import { useRestTimer } from './logger/useRestTimer';
+import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
+import { ExerciseFocus } from './logger/ExerciseFocus';
+import type { RowState, RowInputs } from './logger/SetRow';
 
 // =============================================================================
-// TodayLoggerMobile — mobile-first live workout logger.
-// Mounted at /today/:mesocycleRunId/log; entered from TodayWorkoutMobile.
-// Persists set logs through logBuffer → idbQueue (offline-tolerant).
+// TodayLoggerMobile — container for the hub+focus mobile logger.
+// Mounted at /today/:mesocycleRunId/log and /today/:mesocycleRunId/log/:blockIdx;
+// entered from TodayWorkoutMobile. No :blockIdx → WorkoutHub (day checklist);
+// with :blockIdx → ExerciseFocus for that block. The container owns data
+// loading, the per-row state machine, history prefill, and the rest timer.
+// Persists set logs through logBuffer → idbQueue (offline-tolerant) — that
+// machinery is unchanged from the single-scroll logger.
 // =============================================================================
 
 // W1.3.4 code-review follow-ups deferred to W1.3.x cleanup:
 //   - weight upper/lower bound validation (currently server-side only)
 //   - Skip button currently no-op; awaits W1.3.5 design
 //   - quota-error banner needs dismiss/recover affordance (awaits W1.3.8 Settings storage UI)
-//   - inline styles could hoist to module-scope const for GC
-//   - extract RirSlider + NumInput into their own files when reused (W2.x desktop logger)
 
 export interface TodayLoggerMobileProps {
   /**
@@ -104,6 +109,39 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
 }
 
 // -----------------------------------------------------------------------------
+// Exercise metadata — the today-workout payload only carries {id, slug, name}
+// per exercise, but the hub chip + focus header need the primary muscle and an
+// equipment label. Source both from the existing /api/exercises list, keyed by
+// slug. Missing metadata degrades to empty labels rather than blocking logging.
+// -----------------------------------------------------------------------------
+
+type ExerciseMeta = { muscle: string; equipmentLabel: string };
+
+const EQUIPMENT_LABELS: Record<string, string> = {
+  barbell: 'Barbell',
+  flat_bench: 'Flat bench',
+  squat_rack: 'Squat rack',
+  pullup_bar: 'Pull-up bar',
+  dip_station: 'Dip station',
+  cable_stack: 'Cable stack',
+  rowing_erg: 'Rowing erg',
+  treadmill: 'Treadmill',
+  dumbbells: 'Dumbbells',
+  adjustable_bench: 'Adjustable bench',
+  recumbent_bike: 'Recumbent bike',
+  outdoor_walking: 'Outdoors',
+};
+
+function equipmentLabelOf(required: { requires?: unknown[] } | null | undefined): string {
+  const reqs = (required?.requires ?? []) as PredicateT[];
+  if (reqs.length === 0) return 'Bodyweight';
+  const parts = reqs.map((p) =>
+    p.type === 'machine' ? `${p.name} machine` : (EQUIPMENT_LABELS[p.type] ?? p.type),
+  );
+  return [...new Set(parts)].join(' · ');
+}
+
+// -----------------------------------------------------------------------------
 // LoggerInner — split so the data-loading branch up-top can early-return
 // without provoking hook-order issues.
 // -----------------------------------------------------------------------------
@@ -120,6 +158,7 @@ function LoggerInner({
   setQuotaError: (msg: string | null) => void;
 }) {
   const navigate = useNavigate();
+  const { blockIdx: blockIdxParam } = useParams<{ blockIdx?: string }>();
 
   // Group sets by block_idx so the UI shows "exercise → its sets" together.
   const blocks = useMemo(() => {
@@ -136,29 +175,139 @@ function LoggerInner({
   // Flat ordering used for "next set focus" jumps.
   const flatOrder = useMemo(() => blocks.flatMap(([, arr]) => arr.map((s) => s.id)), [blocks]);
 
-  // Per-row state machine + inputs, keyed by planned_set_id.
+  // Per-row state machine + inputs, keyed by planned_set_id. Every set in
+  // data.sets gets an entry up-front — ExerciseFocus/SetRow assume non-null
+  // lookups. Server-logged sets initialize in the 'logged' phase (inputs show
+  // the logged weight × reps, disabled) so completion survives reload; their
+  // sentinel clientRequestId is never in the IDB queue, and idbQueue.getStatus
+  // collapses "absent" to 'synced' — the row correctly reads "Logged · locked".
   const [rowStates, setRowStates] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(data.sets.map((s) => [s.id, { phase: 'input' as const }])),
+    Object.fromEntries(
+      data.sets.map((s) => [
+        s.id,
+        s.logged
+          ? { phase: 'logged' as const, clientRequestId: `server:${s.id}`, loggedAt: 0 }
+          : { phase: 'input' as const },
+      ]),
+    ),
   );
   const [rowInputs, setRowInputs] = useState<Record<string, RowInputs>>(() =>
-    Object.fromEntries(data.sets.map((s) => [s.id, { weight: '', reps: '', rir: s.target_rir }])),
+    Object.fromEntries(
+      data.sets.map((s) => [
+        s.id,
+        {
+          // `logged` fields are individually nullable (reps-only bodyweight
+          // logs) — seed only non-null values, never render "null".
+          weight: s.logged?.weight_lbs != null ? String(s.logged.weight_lbs) : '',
+          reps: s.logged?.reps != null ? String(s.logged.reps) : '',
+          rir: s.target_rir,
+        },
+      ]),
+    ),
   );
 
-  // Most-recently-logged-at drives a single rest-timer instance at the bottom.
-  const [lastLoggedAt, setLastLoggedAt] = useState<number | null>(null);
-  // Rest target = the just-logged set's rest_sec. Falls back to 90s on first mount.
-  const [activeRestSec, setActiveRestSec] = useState<number>(90);
+  // Slug → {muscle, equipmentLabel} for the hub chips + focus header.
+  const [exMeta, setExMeta] = useState<Record<string, ExerciseMeta>>({});
+  useEffect(() => {
+    let cancelled = false;
+    listExercises()
+      .then((list) => {
+        if (cancelled) return;
+        setExMeta(
+          Object.fromEntries(
+            list.map((e) => [
+              e.slug,
+              { muscle: e.primary_muscle, equipmentLabel: equipmentLabelOf(e.required_equipment) },
+            ]),
+          ),
+        );
+      })
+      .catch(() => {
+        // Metadata is decorative — logging works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Focused block (focus screen) — invalid/absent param renders the hub.
+  const focusedEntry = useMemo(() => {
+    if (blockIdxParam == null) return null;
+    const idx = Number(blockIdxParam);
+    if (!Number.isInteger(idx)) return null;
+    return blocks.find(([b]) => b === idx) ?? null;
+  }, [blockIdxParam, blocks]);
+
+  // Last-session history per exercise slug: powers prefill + the last-time
+  // line. Fetched lazily when a block is first focused; the ref dedupes
+  // in-flight/completed fetches so each slug is requested at most once.
+  const [histBySlug, setHistBySlug] = useState<Record<string, HistorySession | null>>({});
+  const histRequested = useRef<Set<string>>(new Set());
+
+  const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
+    setRowInputs((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }, []);
+
+  useEffect(() => {
+    if (!focusedEntry) return;
+    const sets = focusedEntry[1];
+    const slug = sets[0]?.exercise.slug;
+    if (!slug || histRequested.current.has(slug)) return;
+    histRequested.current.add(slug);
+    let cancelled = false;
+    getExerciseHistory(slug, 1)
+      .then((sessions) => {
+        if (cancelled) return;
+        const last = sessions[0] ?? null;
+        setHistBySlug((prev) => ({ ...prev, [slug]: last }));
+        if (!last || last.sets.length === 0) return;
+        // Prefill: seed weight/reps for this block's unlogged, untouched rows
+        // from the same set_idx last session (first set as fallback). Rows the
+        // user already typed in (or logged — logging requires non-empty
+        // inputs) are left alone via the empty-inputs guard. History fields
+        // are individually nullable — seed only non-null values.
+        setRowInputs((prev) => {
+          const next = { ...prev };
+          for (const set of sets) {
+            if (set.logged) continue;
+            const cur = prev[set.id];
+            if (!cur || cur.weight !== '' || cur.reps !== '') continue;
+            const hs = last.sets[set.set_idx] ?? last.sets[0];
+            if (!hs) continue;
+            next[set.id] = {
+              ...cur,
+              weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
+              reps: hs.reps != null ? String(hs.reps) : cur.reps,
+            };
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // History is a nicety — logging must not depend on it.
+        setHistBySlug((prev) => ({ ...prev, [slug]: null }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusedEntry]);
+
+  // History sheet (component lands in Task 7 — state + ⟲ wiring only for now).
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
   // we focus the next set's weight input.
   const weightRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const getWeightInputRef = useCallback(
+    (id: string) => (el: HTMLInputElement | null) => {
+      weightRefs.current[id] = el;
+    },
+    [],
+  );
 
   const setRow = useCallback((id: string, next: RowState) => {
     setRowStates((prev) => ({ ...prev, [id]: next }));
-  }, []);
-
-  const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
-    setRowInputs((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   }, []);
 
   const focusNext = useCallback(
@@ -166,26 +315,22 @@ function LoggerInner({
       const i = flatOrder.indexOf(currentId);
       if (i < 0) return;
       const nextId = flatOrder[i + 1];
-      if (!nextId) {
-        // End of workout — focus the complete CTA via id (rendered below).
-        const cta = document.getElementById('logger-complete-cta');
-        cta?.focus();
-        return;
-      }
-      weightRefs.current[nextId]?.focus();
+      // Next set's input only exists while its block is on screen; end of the
+      // focused block (or of the workout) is a no-op.
+      if (nextId) weightRefs.current[nextId]?.focus();
     },
     [flatOrder],
   );
 
   const handleLog = useCallback(
-    async (set: TodaySet) => {
-      if (!currentUserId) return; // shouldn't happen — AuthGate blocks render
+    async (set: TodaySet): Promise<boolean> => {
+      if (!currentUserId) return false; // shouldn't happen — AuthGate blocks render
       const inputs = rowInputs[set.id];
       const weight = parseFloat(inputs.weight);
       const reps = parseInt(inputs.reps, 10);
       if (!Number.isFinite(weight) || !Number.isFinite(reps) || reps <= 0) {
         // Validation gate — UI surfaces via the disabled CTA; nothing to do.
-        return;
+        return false;
       }
 
       setRow(set.id, { phase: 'logging', clientRequestId: null });
@@ -196,19 +341,15 @@ function LoggerInner({
           { weight_lbs: weight, reps, rir: inputs.rir, performed_at: performedAt },
           currentUserId,
         );
-        const loggedAt = Date.now();
-        setRow(set.id, { phase: 'logged', clientRequestId, loggedAt });
-        setLastLoggedAt(loggedAt);
-        setActiveRestSec(set.rest_sec || 90);
-        // Defer focus shift so React commits the new affordance first; if the
-        // next input doesn't exist yet (rare), the document.getElementById
-        // path catches it.
+        setRow(set.id, { phase: 'logged', clientRequestId, loggedAt: Date.now() });
+        // Defer focus shift so React commits the new affordance first.
         setTimeout(() => focusNext(set.id), 0);
+        return true;
       } catch (err: unknown) {
         if (err instanceof QueueFullError) {
           setQuotaError('Offline queue is full — logs cannot be saved until storage is freed.');
           setRow(set.id, { phase: 'input' });
-          return;
+          return false;
         }
         // Unknown error — surface but leave the user the ability to retry.
         setRow(set.id, { phase: 'input' });
@@ -218,137 +359,110 @@ function LoggerInner({
     [currentUserId, rowInputs, setRow, focusNext, setQuotaError],
   );
 
-  const restTimer = useRestTimer({ lastLoggedAt, targetRestSec: activeRestSec });
+  const restTimer = useRestTimer();
+  const handleLogWithRest = useCallback(
+    async (set: TodaySet) => {
+      const ok = await handleLog(set);
+      if (ok) restTimer.start(set.rest_sec || 90);
+    },
+    [handleLog, restTimer],
+  );
 
-  return (
+  // Hub rows: setsDone counts server-logged sets plus this session's local
+  // (queue-backed) logs.
+  const hubBlocks: HubBlock[] = useMemo(
+    () =>
+      blocks.map(([blockIdx, sets]) => ({
+        blockIdx,
+        exerciseName: sets[0].exercise.name,
+        muscle: exMeta[sets[0].exercise.slug]?.muscle ?? '',
+        setsTotal: sets.length,
+        setsDone: sets.filter((s) => s.logged != null || rowStates[s.id]?.phase === 'logged')
+          .length,
+      })),
+    [blocks, exMeta, rowStates],
+  );
+
+  const quotaBanner = quotaError ? (
     <div
+      role="alert"
       style={{
-        padding: 16,
-        fontFamily: FONTS.ui,
-        color: TOKENS.text,
         maxWidth: 480,
         margin: '0 auto',
-        paddingBottom: 96, // reserve space for the sticky rest-timer footer
+        padding: '16px 16px 0',
+        boxSizing: 'border-box',
       }}
     >
-      <header style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            letterSpacing: 1,
-            color: TOKENS.accent,
-            textTransform: 'uppercase',
-          }}
-        >
-          Week {data.day.week_idx} · Day {data.day.day_idx + 1}
-        </div>
-        <h2 style={{ margin: '4px 0 0', fontSize: 22 }}>{data.day.name}</h2>
-      </header>
-
-      {quotaError ? (
-        <div
-          role="alert"
-          style={{
-            background: 'rgba(255,106,106,0.08)',
-            border: `1px solid ${TOKENS.danger}`,
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 12,
-            color: TOKENS.danger,
-            fontSize: 13,
-          }}
-        >
-          {quotaError}
-        </div>
-      ) : null}
-
-      <ul
+      <div
         style={{
-          listStyle: 'none',
-          padding: 0,
-          margin: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
-        {blocks.map(([blockIdx, sets]) => (
-          <li
-            key={blockIdx}
-            style={{
-              background: TOKENS.surface,
-              border: `1px solid ${TOKENS.line}`,
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{sets[0].exercise.name}</div>
-            <div
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 11,
-                color: TOKENS.textDim,
-                marginTop: 4,
-              }}
-            >
-              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps ·{' '}
-              {isBeginnerTrack(data.track) ? (
-                effortCue(sets[0].target_rir)
-              ) : (
-                <>
-                  <Term k="RIR" compact /> {sets[0].target_rir}
-                </>
-              )}{' '}
-              · {sets[0].rest_sec}s rest
-            </div>
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sets.map((set) => (
-                <SetRow
-                  key={set.id}
-                  set={set}
-                  hideRir={isBeginnerTrack(data.track)}
-                  state={rowStates[set.id]}
-                  inputs={rowInputs[set.id]}
-                  onInputChange={(patch) => setInput(set.id, patch)}
-                  onLog={() => handleLog(set)}
-                  onSkip={() => setRow(set.id, { phase: 'input' })}
-                  weightInputRef={(el) => {
-                    weightRefs.current[set.id] = el;
-                  }}
-                />
-              ))}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <button
-        id="logger-complete-cta"
-        onClick={() => navigate('/')}
-        style={{
-          marginTop: 24,
-          padding: 14,
-          width: '100%',
-          background: TOKENS.accent,
-          border: 'none',
+          background: 'rgba(255,106,106,0.08)',
+          border: `1px solid ${TOKENS.danger}`,
           borderRadius: 8,
-          color: TOKENS.text,
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          fontSize: 14,
-          cursor: 'pointer',
+          padding: 12,
+          color: TOKENS.danger,
+          fontSize: 13,
           fontFamily: FONTS.ui,
         }}
       >
-        Workout complete
-      </button>
+        {quotaError}
+      </div>
+    </div>
+  ) : null;
 
-      {lastLoggedAt !== null ? (
+  if (!focusedEntry) {
+    return (
+      <>
+        {quotaBanner}
+        <WorkoutHub
+          dayName={data.day.name}
+          blocks={hubBlocks}
+          onOpenBlock={(blockIdx) => navigate(`/today/${data.run_id}/log/${blockIdx}`)}
+        />
+      </>
+    );
+  }
+
+  const [focusedIdx, focusedSets] = focusedEntry;
+  const slug = focusedSets[0].exercise.slug;
+  const meta = exMeta[slug];
+  const backToHub = () => navigate(`/today/${data.run_id}/log`);
+
+  return (
+    <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
+      {quotaBanner}
+      <ExerciseFocus
+        position={{
+          current: blocks.findIndex(([b]) => b === focusedIdx) + 1,
+          total: blocks.length,
+        }}
+        exercise={{
+          name: focusedSets[0].exercise.name,
+          muscle: meta?.muscle ?? '',
+          equipmentLabel: meta?.equipmentLabel ?? '',
+          slug,
+        }}
+        sets={focusedSets}
+        track={data.track}
+        rowStates={rowStates}
+        rowInputs={rowInputs}
+        onInputChange={setInput}
+        onLog={handleLogWithRest}
+        onSkip={(setId) => setRow(setId, { phase: 'input' })}
+        lastSession={histBySlug[slug] ?? null}
+        onOpenHistory={() => setHistoryOpen(true)}
+        onBack={backToHub}
+        onDone={backToHub}
+        getWeightInputRef={getWeightInputRef}
+      />
+      {/* HistorySheet mounts here in Task 7 — the ⟲ wiring is already live. */}
+      {historyOpen ? (
+        <div data-testid="history-sheet-placeholder" style={{ display: 'none' }} />
+      ) : null}
+      {restTimer.remaining != null ? (
         <div
           role="status"
           aria-live="polite"
+          data-testid="rest-timer"
           style={{
             position: 'fixed',
             bottom: 12,
@@ -357,21 +471,25 @@ function LoggerInner({
             margin: '0 auto',
             maxWidth: 480,
             padding: '10px 16px',
-            background: restTimer.isOvertime ? TOKENS.surface2 : TOKENS.surface,
-            border: `1px solid ${restTimer.isOvertime ? TOKENS.warn : TOKENS.line}`,
+            boxSizing: 'border-box',
+            background: TOKENS.surface,
+            border: `1px solid ${TOKENS.accent}`,
             borderRadius: 10,
-            color: restTimer.isOvertime ? TOKENS.warn : TOKENS.text,
+            color: TOKENS.text,
             fontFamily: FONTS.mono,
             fontSize: 12,
+            letterSpacing: 1,
             textAlign: 'center',
           }}
         >
-          {restTimer.isOvertime
-            ? `Rest +${Math.abs(restTimer.remainingSec)}s over`
-            : `Rest ${Math.max(0, restTimer.remainingSec)}s`}
+          REST {formatRest(restTimer.remaining)}
         </div>
       ) : null}
     </div>
   );
 }
 
+// m:ss with zero-padded seconds — 180 → "3:00".
+function formatRest(sec: number): string {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
