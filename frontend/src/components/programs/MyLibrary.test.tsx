@@ -358,7 +358,7 @@ describe('<MyLibrary> — delete / archive / restore', () => {
     mockNavigate.mockReset();
   });
 
-  it('Delete on a program requires typing the name, then calls deleteUserProgram', async () => {
+  it('Delete on a program shows a simple confirm (no typed match), then calls deleteUserProgram', async () => {
     const delSpy = vi.spyOn(api, 'deleteUserProgram').mockResolvedValue();
     vi.spyOn(api, 'listMyPrograms').mockResolvedValue([ACTIVE_PROGRAM]);
 
@@ -366,8 +366,8 @@ describe('<MyLibrary> — delete / archive / restore', () => {
     await screen.findByText('My Full Body');
 
     fireEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
-    // Heavy confirm: the typed-confirm field must match the program name exactly.
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My Full Body' } });
+    // Medium confirm: plain are-you-sure — no typed-name friction for gym data.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Delete program/i }));
 
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('up-active'));

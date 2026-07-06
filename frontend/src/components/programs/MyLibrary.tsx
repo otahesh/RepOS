@@ -493,9 +493,12 @@ export function MyLibrary({
         </div>
       )}
 
+      {/* Medium tier by product decision (2026-07-06): gym-program data isn't
+          critical enough to justify typed-name friction — a plain confirm is
+          enough. */}
       <ConfirmDialog
         open={pendingDelete !== null}
-        tier="heavy"
+        tier="medium"
         severity="danger"
         title="Delete this program?"
         body={
@@ -507,7 +510,6 @@ export function MyLibrary({
               }`
             : ''
         }
-        requireTyped={pendingDelete?.name ?? ''}
         confirmLabel="Delete program"
         onConfirm={() => void confirmDelete()}
         onCancel={() => setPendingDelete(null)}
