@@ -381,12 +381,12 @@ describe('<TodayLoggerMobile>', () => {
       }
     });
 
-    it('⟲ history button flips the history-sheet state (sheet lands in Task 7)', async () => {
+    it('⟲ history button opens the HistorySheet dialog', async () => {
       const user = userEvent.setup();
       renderFocused();
-      expect(screen.queryByTestId('history-sheet-placeholder')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /exercise history/i }));
-      expect(screen.getByTestId('history-sheet-placeholder')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
     });
   });
 });

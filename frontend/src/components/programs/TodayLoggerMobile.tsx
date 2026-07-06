@@ -15,6 +15,7 @@ import { logBuffer, QueueFullError } from '../../lib/logBuffer';
 import { useRestTimer } from './logger/useRestTimer';
 import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
 import { ExerciseFocus } from './logger/ExerciseFocus';
+import { HistorySheet } from './logger/HistorySheet';
 import type { RowState, RowInputs } from './logger/SetRow';
 
 // =============================================================================
@@ -293,7 +294,8 @@ function LoggerInner({
     };
   }, [focusedEntry]);
 
-  // History sheet (component lands in Task 7 — state + ⟲ wiring only for now).
+  // History sheet — state owns whether it's mounted; HistorySheet fetches its
+  // own data on mount (see logger/HistorySheet.tsx).
   const [historyOpen, setHistoryOpen] = useState(false);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
@@ -454,9 +456,8 @@ function LoggerInner({
         onDone={backToHub}
         getWeightInputRef={getWeightInputRef}
       />
-      {/* HistorySheet mounts here in Task 7 — the ⟲ wiring is already live. */}
       {historyOpen ? (
-        <div data-testid="history-sheet-placeholder" style={{ display: 'none' }} />
+        <HistorySheet slug={slug} track={data.track} onClose={() => setHistoryOpen(false)} />
       ) : null}
       {restTimer.remaining != null ? (
         <div
