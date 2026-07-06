@@ -12,6 +12,9 @@ export type TodayWorkout =
   | {
       state: 'workout';
       run_id: string;
+      /** Experience track of the source template — beginner runs render
+       *  plain-language effort cues instead of RIR. Null for template-less runs. */
+      track: string | null;
       day: {
         id: string;
         week_idx: number;
@@ -52,10 +55,15 @@ export async function getTodayWorkout(
     start_date: string;
     start_tz: string;
     weeks: number;
+    track: string | null;
   }>(
-    `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS start_date, start_tz, weeks
-     FROM mesocycle_runs WHERE user_id=$1 AND status='active'
-     ORDER BY created_at DESC LIMIT 1`,
+    `SELECT mr.id, to_char(mr.start_date, 'YYYY-MM-DD') AS start_date, mr.start_tz, mr.weeks,
+            pt.track AS track
+     FROM mesocycle_runs mr
+     JOIN user_programs up ON up.id = mr.user_program_id
+     LEFT JOIN program_templates pt ON pt.id = up.template_id
+     WHERE mr.user_id=$1 AND mr.status='active'
+     ORDER BY mr.created_at DESC LIMIT 1`,
     [userId],
   );
   if (!run) return { state: 'no_active_run' };
@@ -161,6 +169,7 @@ export async function getTodayWorkout(
   return {
     state: 'workout',
     run_id: run.id,
+    track: run.track,
     day: {
       id: day.id,
       week_idx: day.week_idx,

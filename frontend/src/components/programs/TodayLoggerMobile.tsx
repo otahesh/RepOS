@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
 import { Term } from '../Term';
+import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 import { useNetworkState } from '../../hooks/useNetworkState';
 import {
   getTodayWorkout,
@@ -33,7 +34,7 @@ export interface TodayLoggerMobileProps {
    * the network. In production this is always undefined and the component
    * fetches its own data on mount.
    */
-  preloaded?: { run_id: string; day: TodayDay; sets: TodaySet[] };
+  preloaded?: { run_id: string; day: TodayDay; sets: TodaySet[]; track?: string | null };
 }
 
 type RowState =
@@ -88,9 +89,12 @@ function affordanceColor(status: QueueRowStatus): string {
 export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps) {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
-  const [data, setData] = useState<{ run_id: string; day: TodayDay; sets: TodaySet[] } | null>(
-    preloaded ?? null,
-  );
+  const [data, setData] = useState<{
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    track?: string | null;
+  } | null>(preloaded ?? null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [quotaError, setQuotaError] = useState<string | null>(null);
 
@@ -101,7 +105,7 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
       .then((res: TodayWorkoutResponse) => {
         if (cancelled) return;
         if (res.state === 'workout') {
-          setData({ run_id: res.run_id, day: res.day, sets: res.sets });
+          setData({ run_id: res.run_id, day: res.day, sets: res.sets, track: res.track });
         } else {
           setLoadError(res.state === 'no_active_run' ? 'No active mesocycle.' : 'Rest day.');
         }
@@ -160,7 +164,7 @@ function LoggerInner({
   quotaError,
   setQuotaError,
 }: {
-  data: { run_id: string; day: TodayDay; sets: TodaySet[] };
+  data: { run_id: string; day: TodayDay; sets: TodaySet[]; track?: string | null };
   currentUserId: string | null;
   quotaError: string | null;
   setQuotaError: (msg: string | null) => void;
@@ -338,14 +342,22 @@ function LoggerInner({
                 marginTop: 4,
               }}
             >
-              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · <Term k="RIR" compact />{' '}
-              {sets[0].target_rir} · {sets[0].rest_sec}s rest
+              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps ·{' '}
+              {isBeginnerTrack(data.track) ? (
+                effortCue(sets[0].target_rir)
+              ) : (
+                <>
+                  <Term k="RIR" compact /> {sets[0].target_rir}
+                </>
+              )}{' '}
+              · {sets[0].rest_sec}s rest
             </div>
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {sets.map((set) => (
                 <SetRow
                   key={set.id}
                   set={set}
+                  hideRir={isBeginnerTrack(data.track)}
                   state={rowStates[set.id]}
                   inputs={rowInputs[set.id]}
                   onInputChange={(patch) => setInput(set.id, patch)}
@@ -419,6 +431,7 @@ function LoggerInner({
 
 function SetRow({
   set,
+  hideRir = false,
   state,
   inputs,
   onInputChange,
@@ -427,6 +440,9 @@ function SetRow({
   weightInputRef,
 }: {
   set: TodaySet;
+  /** Beginner track: the RIR slider is hidden and the logged RIR silently
+   *  keeps the planned target — beginners aren't asked to self-rate. */
+  hideRir?: boolean;
   state: RowState;
   inputs: RowInputs;
   onInputChange: (patch: Partial<RowInputs>) => void;
@@ -521,11 +537,13 @@ function SetRow({
         />
       </div>
 
-      <RirSlider
-        value={inputs.rir}
-        onChange={(rir) => onInputChange({ rir })}
-        disabled={isLogged}
-      />
+      {!hideRir && (
+        <RirSlider
+          value={inputs.rir}
+          onChange={(rir) => onInputChange({ rir })}
+          disabled={isLogged}
+        />
+      )}
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         <button

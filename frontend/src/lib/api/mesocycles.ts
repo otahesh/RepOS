@@ -60,6 +60,9 @@ export type TodayWorkoutResponse =
   | {
       state: 'workout';
       run_id: string;
+      /** Source template's experience track — beginner runs render
+       *  plain-language effort cues instead of RIR. Null for template-less runs. */
+      track?: string | null;
       day: TodayDay;
       sets: TodaySet[];
       cardio: TodayCardio[];

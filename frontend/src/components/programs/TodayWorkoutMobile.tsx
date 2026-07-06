@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
+import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 import { MidSessionSwapSheet } from './MidSessionSwapSheet';
 import { BlockOverflowMenu } from './BlockOverflowMenu';
 import { MidSessionSwapPicker } from './MidSessionSwapPicker';
@@ -145,7 +146,13 @@ export function TodayWorkoutMobile({
                 {'–'}
                 {first.target_reps_high}
                 {' reps · '}
-                <Term k="RIR" compact /> {first.target_rir}
+                {isBeginnerTrack(data.track) ? (
+                  effortCue(first.target_rir)
+                ) : (
+                  <>
+                    <Term k="RIR" compact /> {first.target_rir}
+                  </>
+                )}
                 {' · '}
                 {first.rest_sec}
                 {'s rest'}

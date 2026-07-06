@@ -255,4 +255,16 @@ describe('<ForkWizard>', () => {
       expect(screen.queryByRole('dialog', { name: /swap exercise/i })).not.toBeInTheDocument(),
     );
   });
+
+  it('beginner track: shows plain-language effort cue + definitive set copy, no RIR jargon', async () => {
+    vi.spyOn(upApi, 'getUserProgram').mockResolvedValue({
+      ...program(),
+      track: 'beginner',
+    });
+    renderWizard();
+    await screen.findByText(/Full Body A/);
+    expect(screen.getByText(/leave 2 reps in the tank/i)).toBeInTheDocument();
+    expect(screen.getByText(/8 sets, building to 14/i)).toBeInTheDocument();
+    expect(screen.queryByText(/RIR/)).not.toBeInTheDocument();
+  });
 });

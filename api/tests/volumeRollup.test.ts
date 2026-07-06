@@ -105,7 +105,7 @@ describe('computeVolumeRollup (spec §3.3, §3.4)', () => {
     expect(chest!.mrv).toBe(22);
   });
 
-  it('week 1 chest sums to MEV; week 4 chest sums to MRV-1', async () => {
+  it('week 1 chest sums to block MEVs; week 4 chest sums to block MAVs', async () => {
     const r = await computeVolumeRollup(runId);
     const chestW1 = r.weeks
       .find((w) => w.week_idx === 1)!
@@ -115,10 +115,11 @@ describe('computeVolumeRollup (spec §3.3, §3.4)', () => {
       .muscles.find((m) => m.muscle === 'chest')!;
     // Both bench-press and dumbbell-bench-press have full chest contribution,
     // so the raw planned_sets count and the contribution-weighted count agree.
+    // Per-block ramp: week 1 = 6 + 4 (MEVs), week 4 (last accum) = 10 + 6 (MAVs).
     expect(chestW1.sets).toBeGreaterThanOrEqual(9.5);
     expect(chestW1.sets).toBeLessThanOrEqual(10.5);
-    expect(chestW4.sets).toBeGreaterThanOrEqual(20);
-    expect(chestW4.sets).toBeLessThanOrEqual(22);
+    expect(chestW4.sets).toBeGreaterThanOrEqual(15.5);
+    expect(chestW4.sets).toBeLessThanOrEqual(16.5);
   });
 
   it('cardio emits minutes_by_modality, not strength sets', async () => {

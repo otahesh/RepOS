@@ -277,6 +277,7 @@ export default function MyProgramPage() {
               <DayCard
                 key={d.idx}
                 day={d}
+                track={up.track}
                 onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
                 onRemoveSet={(dayIdx, blockIdx, setIdx) =>
                   void handleRemoveSet(dayIdx, blockIdx, setIdx)

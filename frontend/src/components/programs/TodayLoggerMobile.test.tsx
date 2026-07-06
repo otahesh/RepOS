@@ -69,10 +69,10 @@ const SET_2: TodaySet = {
 
 const PRELOADED = { run_id: 'mr-1', day: DAY, sets: [SET_1, SET_2] };
 
-function renderLogger() {
+function renderLogger(preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED) {
   return render(
     <MemoryRouter initialEntries={['/today/mr-1/log']}>
-      <TodayLoggerMobile preloaded={PRELOADED} />
+      <TodayLoggerMobile preloaded={preloaded} />
     </MemoryRouter>,
   );
 }
@@ -101,6 +101,16 @@ describe('<TodayLoggerMobile>', () => {
     expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
     const sliders = screen.getAllByRole('slider', { name: /RIR/i });
     expect(sliders.length).toBe(2);
+  });
+
+  it('beginner track: hides RIR sliders and shows a plain-language effort cue', () => {
+    renderLogger({ ...PRELOADED, track: 'beginner' });
+    expect(screen.getByText(/leave 2 reps in the tank/i)).toBeInTheDocument();
+    expect(screen.queryAllByRole('slider', { name: /RIR/i }).length).toBe(0);
+    expect(screen.queryByText(/RIR/)).not.toBeInTheDocument();
+    // Weight/reps logging still fully present.
+    expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
   });
 
   it('Log button is disabled until weight + reps are filled', async () => {

@@ -42,7 +42,7 @@ export async function userProgramRoutes(app: FastifyInstance) {
       const include = q.data.include;
       // LEFT JOIN program_templates to carry template_slug through to the client
       // so the fork-wizard "Restart" action can navigate to /programs/:slug.
-      const cols = `up.id, up.template_id, pt.slug AS template_slug, up.template_version,
+      const cols = `up.id, up.template_id, pt.slug AS template_slug, pt.track AS track, up.template_version,
                     up.name, up.customizations, up.status, up.created_at, up.updated_at,
                     EXISTS (
                       SELECT 1 FROM mesocycle_runs mr

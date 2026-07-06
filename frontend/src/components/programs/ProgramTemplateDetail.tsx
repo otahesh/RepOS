@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getProgramTemplate, type ProgramTemplate } from '../../lib/api/programs';
 import { Term } from '../Term';
 import { TrackChip } from './TrackChip';
+import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -97,8 +98,17 @@ export function ProgramTemplateDetail({
                       color: 'rgba(255,255,255,0.5)',
                     }}
                   >
-                    {b.mev}–{b.mav} sets · {b.target_reps_low}–{b.target_reps_high} reps ·{' '}
-                    <Term k="RIR" /> {b.target_rir}
+                    {isBeginnerTrack(t.track) ? (
+                      <>
+                        {b.mev} sets, building to {b.mav} · {b.target_reps_low}–{b.target_reps_high}{' '}
+                        reps · {effortCue(b.target_rir)}
+                      </>
+                    ) : (
+                      <>
+                        {b.mev}–{b.mav} sets · {b.target_reps_low}–{b.target_reps_high} reps ·{' '}
+                        <Term k="RIR" /> {b.target_rir}
+                      </>
+                    )}
                   </span>
                 </li>
               ))}
