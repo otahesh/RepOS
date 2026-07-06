@@ -91,7 +91,7 @@ export function WorkoutHub({
                   >
                     {isDone ? '✓' : isUpNext ? '▶' : ''}
                   </span>
-                  <MuscleChip muscle={block.muscle} />
+                  {block.muscle ? <MuscleChip muscle={block.muscle} /> : null}
                   <span
                     style={{
                       fontWeight: 600,
@@ -178,6 +178,7 @@ export function WorkoutHub({
 function MuscleChip({ muscle }: { muscle: string }) {
   return (
     <span
+      data-testid="muscle-chip"
       style={{
         display: 'inline-block',
         flexShrink: 0,

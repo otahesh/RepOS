@@ -122,4 +122,9 @@ describe('<ExerciseFocus>', () => {
     await user.click(screen.getByRole('button', { name: /exercise history/i }));
     expect(props.onOpenHistory).toHaveBeenCalledTimes(1);
   });
+
+  it('does not render an empty muscle chip when metadata has not loaded yet', () => {
+    render(<ExerciseFocus {...baseProps({ exercise: { ...EXERCISE, muscle: '' } })} />);
+    expect(screen.queryByTestId('muscle-chip')).not.toBeInTheDocument();
+  });
 });

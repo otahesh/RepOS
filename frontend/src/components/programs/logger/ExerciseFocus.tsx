@@ -117,7 +117,7 @@ export function ExerciseFocus({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <MuscleChip muscle={exercise.muscle} />
+          {exercise.muscle ? <MuscleChip muscle={exercise.muscle} /> : null}
           <h2 style={{ margin: 0, fontSize: 20 }}>{exercise.name}</h2>
         </div>
         <div
@@ -212,6 +212,7 @@ export function ExerciseFocus({
 function MuscleChip({ muscle }: { muscle: string }) {
   return (
     <span
+      data-testid="muscle-chip"
       style={{
         display: 'inline-block',
         flexShrink: 0,

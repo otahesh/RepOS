@@ -50,4 +50,12 @@ describe('<WorkoutHub>', () => {
     expect(screen.getByText(/workout complete/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
   });
+
+  it('does not render an empty muscle chip when metadata has not loaded yet', () => {
+    const blocks: HubBlock[] = [
+      { blockIdx: 0, exerciseName: 'Goblet Squat', muscle: '', setsTotal: 2, setsDone: 0 },
+    ];
+    renderHub(blocks);
+    expect(screen.queryByTestId('muscle-chip')).not.toBeInTheDocument();
+  });
 });

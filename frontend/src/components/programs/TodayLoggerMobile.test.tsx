@@ -164,6 +164,26 @@ describe('<TodayLoggerMobile>', () => {
       expect(screen.getByTestId('hub-row-0')).toBeInTheDocument();
       expect(screen.queryByTestId('set-row-0')).not.toBeInTheDocument();
     });
+
+    it('history sheet does not auto-reopen when a different block is later focused', async () => {
+      const user = userEvent.setup();
+      renderLogger({
+        ...PRELOADED,
+        sets: [SET_1, SET_2, { ...SET_1, id: 'ps-3', block_idx: 1, set_idx: 0 }],
+      });
+
+      // Open block 0, open its history sheet.
+      await user.click(screen.getByTestId('hub-row-0'));
+      await user.click(await screen.findByRole('button', { name: /exercise history/i }));
+      expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+
+      // Back to the hub, then open block 1 — the sheet must not follow.
+      await user.click(screen.getByRole('button', { name: /^back to plan$/i }));
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
+      await user.click(screen.getByTestId('hub-row-1'));
+      expect(await screen.findByTestId('set-row-0')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
+    });
   });
 
   describe('focus screen', () => {
@@ -376,6 +396,30 @@ describe('<TodayLoggerMobile>', () => {
           vi.advanceTimersByTime(1000);
         });
         expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 2:59');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rest timer started on the focus screen stays visible after navigating back to the hub', async () => {
+      vi.useFakeTimers();
+      try {
+        renderFocused();
+        await flush();
+        const row = screen.getByTestId('set-row-0');
+        fireEvent.change(within(row).getByLabelText(/weight in pounds/i), {
+          target: { value: '185' },
+        });
+        fireEvent.change(within(row).getByLabelText(/Set 1 reps/i), {
+          target: { value: '7' },
+        });
+        fireEvent.click(within(row).getByRole('button', { name: /^log$/i }));
+        await flush(); // let the enqueue promise resolve → restTimer.start(180)
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 3:00');
+
+        fireEvent.click(screen.getByRole('button', { name: /^back to plan$/i }));
+        expect(screen.getByTestId('hub-row-0')).toBeInTheDocument();
+        expect(screen.getByTestId('rest-timer')).toHaveTextContent('REST 3:00');
       } finally {
         vi.useRealTimers();
       }

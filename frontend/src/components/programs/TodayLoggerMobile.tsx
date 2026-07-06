@@ -295,8 +295,14 @@ function LoggerInner({
   }, [focusedEntry]);
 
   // History sheet — state owns whether it's mounted; HistorySheet fetches its
-  // own data on mount (see logger/HistorySheet.tsx).
+  // own data on mount (see logger/HistorySheet.tsx). Reset whenever the
+  // focused block changes (including back-to-hub, where focusedEntry is
+  // null) so a sheet left open in one block doesn't pop back open when a
+  // different block is later focused.
   const [historyOpen, setHistoryOpen] = useState(false);
+  useEffect(() => {
+    setHistoryOpen(false);
+  }, [focusedEntry]);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
   // we focus the next set's weight input.
@@ -413,14 +419,15 @@ function LoggerInner({
 
   if (!focusedEntry) {
     return (
-      <>
+      <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
         {quotaBanner}
         <WorkoutHub
           dayName={data.day.name}
           blocks={hubBlocks}
           onOpenBlock={(blockIdx) => navigate(`/today/${data.run_id}/log/${blockIdx}`)}
         />
-      </>
+        <RestTimerPill remaining={restTimer.remaining} />
+      </div>
     );
   }
 
@@ -459,33 +466,45 @@ function LoggerInner({
       {historyOpen ? (
         <HistorySheet slug={slug} track={data.track} onClose={() => setHistoryOpen(false)} />
       ) : null}
-      {restTimer.remaining != null ? (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="rest-timer"
-          style={{
-            position: 'fixed',
-            bottom: 12,
-            left: 0,
-            right: 0,
-            margin: '0 auto',
-            maxWidth: 480,
-            padding: '10px 16px',
-            boxSizing: 'border-box',
-            background: TOKENS.surface,
-            border: `1px solid ${TOKENS.accent}`,
-            borderRadius: 10,
-            color: TOKENS.text,
-            fontFamily: FONTS.mono,
-            fontSize: 12,
-            letterSpacing: 1,
-            textAlign: 'center',
-          }}
-        >
-          REST {formatRest(restTimer.remaining)}
-        </div>
-      ) : null}
+      <RestTimerPill remaining={restTimer.remaining} />
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// RestTimerPill — the REST m:ss pill. Rendered on both the hub and focus
+// branches: a set is usually logged right before backing out to the hub to
+// eye the next exercise, and the rest countdown needs to stay visible there
+// too, not just while a block is focused.
+// -----------------------------------------------------------------------------
+
+function RestTimerPill({ remaining }: { remaining: number | null }) {
+  if (remaining == null) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="rest-timer"
+      style={{
+        position: 'fixed',
+        bottom: 12,
+        left: 0,
+        right: 0,
+        margin: '0 auto',
+        maxWidth: 480,
+        padding: '10px 16px',
+        boxSizing: 'border-box',
+        background: TOKENS.surface,
+        border: `1px solid ${TOKENS.accent}`,
+        borderRadius: 10,
+        color: TOKENS.text,
+        fontFamily: FONTS.mono,
+        fontSize: 12,
+        letterSpacing: 1,
+        textAlign: 'center',
+      }}
+    >
+      REST {formatRest(remaining)}
     </div>
   );
 }
