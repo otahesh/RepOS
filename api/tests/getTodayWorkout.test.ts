@@ -202,4 +202,30 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
       }
     }
   });
+
+  it('marks a set logged=true (with weight/reps) once a set_log exists', async () => {
+    const {
+      rows: [ps],
+    } = await db.query(
+      `SELECT ps.id, ps.exercise_id FROM planned_sets ps
+       JOIN day_workouts dw ON dw.id=ps.day_workout_id
+       WHERE dw.mesocycle_run_id=$1 ORDER BY dw.week_idx, ps.block_idx, ps.set_idx LIMIT 1`,
+      [runId],
+    );
+    await db.query(
+      `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_reps, performed_load_lbs, performed_rir)
+       VALUES ($1,$2,$3,gen_random_uuid(),8,135.0,2)`,
+      [ps.id, userId, ps.exercise_id],
+    );
+    try {
+      // 2026-05-04 NY = day_idx 0 = Day A (same fixed `now` as the workout-day test above).
+      const today = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z'));
+      if (today.state !== 'workout') throw new Error('expected workout state');
+      const logged = today.sets.find((s) => s.id === ps.id)!;
+      expect(logged.logged).toEqual({ weight_lbs: 135, reps: 8 });
+      expect(today.sets.filter((s) => s.id !== ps.id).every((s) => s.logged === null)).toBe(true);
+    } finally {
+      await db.query(`DELETE FROM set_logs WHERE planned_set_id=$1`, [ps.id]);
+    }
+  });
 });
