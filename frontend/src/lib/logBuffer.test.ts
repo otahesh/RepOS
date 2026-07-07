@@ -162,6 +162,42 @@ describe('logBuffer', () => {
     void b;
   });
 
+  it('flush omits null rpe/notes from the POST body — API schema is optional-absent, not nullable', async () => {
+    // The logger UI never sets rpe, so rows carry rpe: null in IDB. The server
+    // rejects "rpe": null with 400 (z.number().optional() ≠ nullable) — nulls
+    // must be stripped at the wire, not sent.
+    await seedRow({ rpe: null, notes: null });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('rpe');
+    expect(body).not.toHaveProperty('notes');
+    expect(body.weight_lbs).toBe(100);
+    expect(body.reps).toBe(5);
+    expect(body.rir).toBe(2);
+  });
+
+  it('flush keeps rpe/notes in the POST body when they are set', async () => {
+    await seedRow({ rpe: 8, notes: 'belt on' });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.rpe).toBe(8);
+    expect(body.notes).toBe('belt on');
+  });
+
   it('flush on 201 calls markSynced', async () => {
     await seedRow({ client_request_id: 'x' });
     const synced = vi.spyOn(idbQueue, 'markSynced');

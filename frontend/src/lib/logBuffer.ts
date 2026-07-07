@@ -55,20 +55,24 @@ export function computeBackoffMs(attemptCount: number): number {
 }
 
 async function postSetLog(row: PendingSetLog): Promise<Response> {
+  // IDB rows carry null for unset fields, but the API write schema is
+  // optional-absent (z.number().optional()) — "rpe": null is a 400, so nulls
+  // are stripped at the wire instead of serialized.
+  const payload: Record<string, unknown> = {
+    client_request_id: row.client_request_id,
+    planned_set_id: row.planned_set_id,
+    performed_at: row.performed_at,
+  };
+  if (row.weight_lbs != null) payload.weight_lbs = row.weight_lbs;
+  if (row.reps != null) payload.reps = row.reps;
+  if (row.rir != null) payload.rir = row.rir;
+  if (row.rpe != null) payload.rpe = row.rpe;
+  if (row.notes != null) payload.notes = row.notes;
   return fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({
-      client_request_id: row.client_request_id,
-      planned_set_id: row.planned_set_id,
-      weight_lbs: row.weight_lbs,
-      reps: row.reps,
-      rir: row.rir,
-      rpe: row.rpe,
-      performed_at: row.performed_at,
-      notes: row.notes,
-    }),
+    body: JSON.stringify(payload),
   });
 }
 
