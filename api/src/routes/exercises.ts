@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { findSubstitutions } from '../services/substitutions.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import type { ExerciseListResponse, SubstitutionResponse } from '../schemas/exercises.js';
+import type { ExerciseGuideResponse } from '../schemas/exerciseGuide.js';
 
 export async function exerciseRoutes(app: FastifyInstance) {
   app.get('/exercises', async (_req, reply) => {
@@ -57,6 +58,24 @@ export async function exerciseRoutes(app: FastifyInstance) {
     }
     reply.header('cache-control', 'public, max-age=300, stale-while-revalidate=86400');
     return rows[0];
+  });
+
+  // Setup-card content (W2 logging redesign). Static authored prose — public
+  // cache like /exercises/:slug. 404 when no active guide: the UI hides ⓘ.
+  app.get<{ Params: { slug: string } }>('/exercises/:slug/guide', async (req, reply) => {
+    const { rows } = await db.query(
+      `SELECT e.slug, g.setup_callout, g.setup_facts, g.cues, g.donts, g.media
+       FROM exercise_guides g
+       JOIN exercises e ON e.id = g.exercise_id
+       WHERE e.slug=$1 AND e.archived_at IS NULL AND g.archived_at IS NULL`,
+      [req.params.slug],
+    );
+    if (rows.length === 0) {
+      reply.code(404);
+      return { error: 'guide not found', field: 'slug' };
+    }
+    reply.header('cache-control', 'public, max-age=300, stale-while-revalidate=86400');
+    return rows[0] as ExerciseGuideResponse;
   });
 
   app.get<{ Params: { slug: string }; Querystring: { limit?: string } }>(
