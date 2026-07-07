@@ -257,10 +257,12 @@ function LoggerInner({
     const slug = sets[0]?.exercise.slug;
     if (!slug || histRequested.current.has(slug)) return;
     histRequested.current.add(slug);
-    let cancelled = false;
+    // No cancellation on cleanup: histRequested dedupes forever, so a result
+    // dropped mid-flight (StrictMode re-fire, or any focusedEntry identity
+    // change) would never be refetched. The caches are slug-keyed and the
+    // prefill only touches untouched, unlogged rows, so a late write is safe.
     getExerciseHistory(slug, 1)
       .then((sessions) => {
-        if (cancelled) return;
         const last = sessions[0] ?? null;
         setHistBySlug((prev) => ({ ...prev, [slug]: last }));
         if (!last || last.sets.length === 0) return;
@@ -287,13 +289,9 @@ function LoggerInner({
         });
       })
       .catch(() => {
-        if (cancelled) return;
         // History is a nicety — logging must not depend on it.
         setHistBySlug((prev) => ({ ...prev, [slug]: null }));
       });
-    return () => {
-      cancelled = true;
-    };
   }, [focusedEntry]);
 
   // Setup-card guide per exercise slug: powers the ⓘ button + SetupCardSheet.
@@ -309,19 +307,16 @@ function LoggerInner({
     const slug = focusedEntry[1][0]?.exercise.slug;
     if (!slug || guideRequested.current.has(slug)) return;
     guideRequested.current.add(slug);
-    let cancelled = false;
+    // No cancellation on cleanup — same reasoning as the history effect above:
+    // the ref dedupes forever, so a mid-flight drop would hide ⓘ for the
+    // whole session. Slug-keyed cache writes are safe whenever they land.
     getExerciseGuide(slug)
       .then((guide) => {
-        if (cancelled) return;
         setGuideBySlug((prev) => ({ ...prev, [slug]: guide }));
       })
       .catch(() => {
-        if (cancelled) return;
         setGuideBySlug((prev) => ({ ...prev, [slug]: null }));
       });
-    return () => {
-      cancelled = true;
-    };
   }, [focusedEntry]);
 
   // Bottom sheets — a single state slot so "both sheets open" is

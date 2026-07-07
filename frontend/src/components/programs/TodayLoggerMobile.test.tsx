@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, act, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -112,6 +113,24 @@ function renderLogger(
 /** Render straight at the block-0 focus screen. */
 function renderFocused(preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED) {
   return renderLogger(preloaded, '/today/mr-1/log/0');
+}
+
+/** Render the block-0 focus screen under StrictMode — dev double-invokes
+ *  effects (mount → cleanup → re-mount), which is also a proxy for any
+ *  prod re-render that re-fires the lazy-fetch effects mid-flight. */
+function renderFocusedStrict() {
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={['/today/mr-1/log/0']}>
+        <Routes>
+          <Route
+            path="/today/:mesocycleRunId/log/:blockIdx"
+            element={<TodayLoggerMobile preloaded={PRELOADED} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </StrictMode>,
+  );
 }
 
 /** Flush pending microtasks (history/meta fetch promises) inside act. */
@@ -498,6 +517,25 @@ describe('<TodayLoggerMobile>', () => {
       fireEvent.click(screen.getByRole('button', { name: /exercise history/i }));
       expect(screen.queryByRole('dialog', { name: /how to set up/i })).not.toBeInTheDocument();
       expect(await screen.findByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('StrictMode resilience (effect re-fire mid-fetch must not drop results)', () => {
+    it('ⓘ still appears when the guide fetch resolves after an effect re-fire', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocusedStrict();
+      expect(
+        await screen.findByRole('button', { name: /how to do this exercise/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('history prefill + last-time line still land after an effect re-fire', async () => {
+      getExerciseHistoryMock.mockResolvedValue([
+        { date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] },
+      ]);
+      renderFocusedStrict();
+      await waitFor(() => expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(25));
+      expect(screen.getByText(/last time: 25 lbs × 9/i)).toBeInTheDocument();
     });
   });
 });
