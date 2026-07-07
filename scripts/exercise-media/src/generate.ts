@@ -13,6 +13,7 @@ import { buildPrompt, type Frame } from './prompt.js';
 import { positionOverrides, sceneOverrides } from './promptOverrides.js';
 import { generateImage, listImageModels } from './gemini.js';
 import { renderContactSheet, type SheetEntry } from './contactSheet.js';
+import { arg, has } from './cliArgs.js';
 
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 const CALL_SPACING_MS = 2000; // stay far from per-minute rate limits
@@ -21,15 +22,6 @@ type StagingManifest = Record<
   string, // "<slug>-<frame>"
   { model: string; generatedAt: string; prompt: string; file: string }
 >;
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  if (i < 0) return undefined;
-  const value = process.argv[i + 1];
-  if (!value || value.startsWith('--')) throw new Error(`--${name} needs a value`);
-  return value;
-}
-const has = (name: string) => process.argv.includes(`--${name}`);
 
 async function main(): Promise<void> {
   fs.mkdirSync(STAGING_DIR, { recursive: true });
