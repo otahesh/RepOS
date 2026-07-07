@@ -27,7 +27,7 @@ vi.mock('../../auth', () => ({
 
 // Force the queue-status hook to return a deterministic value per test so we
 // don't couple to its internal 500ms interval. Per-row keyed by clientRequestId
-// so W1.3.5 (LogBufferRecovery banner) can assert mixed-status rendering.
+// so W1.3.5 (SyncStatusPill, née LogBufferRecovery) can assert mixed-status rendering.
 const __mockedQueueStatuses = new Map<string, QueueRowStatus>();
 vi.mock('../../hooks/useIdbQueueStatus', () => ({
   useIdbQueueStatus: (crid: string | null) =>

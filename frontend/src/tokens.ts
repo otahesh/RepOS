@@ -31,8 +31,8 @@ export const TOKENS = {
   // trigger or they paint behind the modal's opaque backdrop and vanish.
   // (Transient toasts in ToastHost render higher still, by design.)
   zModal: {
+    zPill: 90, // SyncStatusPill — BELOW zSheet so bottom sheets always cover it
     zSheet: 100, // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
-    zBanner: 1000, // LogBufferRecovery
     zOverlay: 1500, // OnboardingOverlay, ParQGate
     zAuth: 2000, // SessionExpiredBanner
     zPopover: 2500, // Term help popover — above every modal surface, below toasts

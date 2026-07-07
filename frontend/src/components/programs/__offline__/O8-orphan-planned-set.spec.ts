@@ -2,18 +2,18 @@
 //
 // Master plan W1.3.6.9: server returns 404 for a planned_set that no longer
 // exists; idbQueue must mark the row rejected with reason planned_set_deleted;
-// banner surfaces the rejection so user can review.
+// pill surfaces the rejection so user can review.
 //
-// Master plan suggests per-reason banner copy ("…original workout no longer
-// exists"). The current LogBufferRecovery uses the generic
+// Master plan suggests per-reason pill copy ("…original workout no longer
+// exists"). The current SyncStatusPill uses the generic
 // "⚠ N sets rejected — review" copy regardless of reason; the per-reason
 // detail surfaces in /settings/storage (W1.3.8). This spec asserts the
-// production banner contract + the IDB row's rejection_reason.
+// production pill contract + the IDB row's rejection_reason.
 
 import { test, expect } from '@playwright/test';
 import { inspectQueue, logSet, openFirstBlock, seedMesocycle } from './_helpers';
 
-test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; banner surfaces', async ({
+test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; pill surfaces', async ({
   page,
 }) => {
   const server = await seedMesocycle(page);
@@ -39,7 +39,7 @@ test('O8: 404 on POST → row marked rejected with reason planned_set_deleted; b
   expect(rows).toHaveLength(1);
   expect(rows[0].rejection_reason).toBe('planned_set_deleted');
 
-  // Banner surfaces the rejection. The clickable banner renders as a <Link>
+  // Pill surfaces the rejection. The clickable pill renders as a <Link>
   // (role=link), not a button.
   await expect(page.getByRole('link', { name: /1 sets? rejected/i })).toBeVisible({
     timeout: 2000,

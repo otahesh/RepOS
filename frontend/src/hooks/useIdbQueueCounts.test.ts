@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useIdbQueueCounts } from './useIdbQueueCounts';
 import { idbQueue, type PendingSetLog } from '../lib/idbQueue';
+import { MAX_ATTEMPTS } from '../lib/logBuffer';
 
 function mkItem(over: Partial<PendingSetLog> = {}): PendingSetLog {
   return {
@@ -41,6 +42,7 @@ describe('useIdbQueueCounts', () => {
         pending: 0,
         syncing: 0,
         rejected: 0,
+        stalled: 0,
         oldestPendingCreatedAt: null,
       });
     });
@@ -102,6 +104,26 @@ describe('useIdbQueueCounts', () => {
       },
       { timeout: 2500 },
     );
+  });
+
+  it('counts pending rows at the attempt cap as stalled (subset of pending)', async () => {
+    await idbQueue.enqueue(mkItem({ client_request_id: 'stuck-1', attempt_count: MAX_ATTEMPTS }));
+    await idbQueue.enqueue(
+      mkItem({ client_request_id: 'stuck-2', attempt_count: MAX_ATTEMPTS + 3 }),
+    );
+    await idbQueue.enqueue(mkItem({ client_request_id: 'healthy', attempt_count: 2 }));
+
+    const { result } = renderHook(() => useIdbQueueCounts());
+    await waitFor(() => expect(result.current.pending).toBe(3));
+    expect(result.current.stalled).toBe(2);
+  });
+
+  it('stalled is 0 when no pending row has hit the cap', async () => {
+    await idbQueue.enqueue(mkItem({ client_request_id: 'p-1', attempt_count: MAX_ATTEMPTS - 1 }));
+
+    const { result } = renderHook(() => useIdbQueueCounts());
+    await waitFor(() => expect(result.current.pending).toBe(1));
+    expect(result.current.stalled).toBe(0);
   });
 
   it('clears the interval on unmount', () => {

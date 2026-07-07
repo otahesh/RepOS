@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
-import { logBuffer, computeBackoffMs } from './logBuffer';
+import { logBuffer, computeBackoffMs, MAX_ATTEMPTS } from './logBuffer';
 
 // Cross-file isolation: Vitest's restoreMocks only undoes vi.spyOn/vi.fn spies,
 // not direct binding replacements or Object.defineProperty mutations. Save the
@@ -257,6 +257,102 @@ describe('logBuffer', () => {
     expect(rejected).toHaveBeenCalledWith('x', 'audit_window_expired');
   });
 
+  it('flush on 400 calls markRejected with other — terminal, never retried', async () => {
+    // The W1 rpe:null regression: a schema-validation 400 burned all 5
+    // attempts and left the row permanently "queued". Identical payload can
+    // never succeed on retry, so 4xx (minus 401/408/429) is terminal.
+    await seedRow({ client_request_id: 'x' });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ error: 'validation_failed' }),
+    });
+    await logBuffer.flush();
+    expect(rejected).toHaveBeenCalledWith('x', 'other');
+    expect(await idbQueue.peekPending()).toHaveLength(0);
+  });
+
+  it('flush on 422 calls markRejected with other', async () => {
+    await seedRow({ client_request_id: 'x' });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).toHaveBeenCalledWith('x', 'other');
+  });
+
+  it('flush on 408 leaves row pending and bumps attempt_count (transient)', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 408,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on 429 leaves row pending and bumps attempt_count (transient)', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on plain 401 (non-CFAccess) leaves row pending and bumps attempt_count', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on unknown 409 (not audit_window_expired) still retries as transient', async () => {
+    // Guards the 409 carve-out: the terminal-4xx branch must not swallow the
+    // defensive unknown-409 retry path.
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ error: 'some_future_conflict' }),
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
   it('flush on 404 calls markRejected with planned_set_deleted', async () => {
     await seedRow({ client_request_id: 'x' });
     const rejected = vi.spyOn(idbQueue, 'markRejected');
@@ -386,6 +482,59 @@ describe('logBuffer', () => {
     await Promise.all([p1, p2]);
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // retryStalled — recovery path for attempt-capped rows
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('MAX_ATTEMPTS is exported for consumers (pill/settings stalled detection)', () => {
+    expect(MAX_ATTEMPTS).toBe(5);
+  });
+
+  it('retryStalled re-arms capped rows (attempt_count 0, next_attempt_at 0) and returns count', async () => {
+    setOnline(false); // isolate re-arm from the flush kick
+    await seedRow({
+      client_request_id: 'stuck',
+      attempt_count: MAX_ATTEMPTS,
+      next_attempt_at: Date.now() + 60_000,
+    });
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(1);
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(0);
+    expect(rows[0].next_attempt_at).toBe(0);
+  });
+
+  it('retryStalled leaves non-capped rows untouched', async () => {
+    setOnline(false);
+    await seedRow({
+      client_request_id: 'healthy',
+      attempt_count: 2,
+      next_attempt_at: 12345,
+    });
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(0);
+    const rows = await idbQueue.peekPending();
+    expect(rows[0].attempt_count).toBe(2);
+    expect(rows[0].next_attempt_at).toBe(12345);
+  });
+
+  it('retryStalled triggers a flush when online and rows were re-armed', async () => {
+    setOnline(true);
+    await seedRow({ client_request_id: 'stuck', attempt_count: MAX_ATTEMPTS });
+    const flushSpy = vi.spyOn(logBuffer, 'flush').mockResolvedValue(undefined);
+    await logBuffer.retryStalled();
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retryStalled with no stalled rows does not flush', async () => {
+    setOnline(true);
+    const flushSpy = vi.spyOn(logBuffer, 'flush').mockResolvedValue(undefined);
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(0);
+    expect(flushSpy).not.toHaveBeenCalled();
   });
 
   // ─────────────────────────────────────────────────────────────────────

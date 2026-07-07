@@ -5,13 +5,17 @@
  *   • POST /api/set-logs transport
  *   • Exponential backoff with ±25% jitter, cap 30s
  *   • Status mapping: 200/201 → markSynced, 409 audit_window_expired and 404
- *     planned_set_deleted → markRejected, 5xx + network errors → leave pending
- *     and bump attempt_count, 401 + CFAccess → leave pending without bumping
- *     and emit a window event so W1.3.7 can surface the re-auth banner.
+ *     planned_set_deleted → markRejected, other 4xx except 401/408/429 →
+ *     markRejected('other') — an identical payload can never pass a schema
+ *     rejection, so retrying only burns the attempt cap. 5xx + network errors
+ *     + plain 401/408/429 → leave pending and bump attempt_count, 401 +
+ *     CFAccess → leave pending without bumping and emit a window event so
+ *     W1.3.7 can surface the re-auth banner.
  *
- * Attempt cap discipline: rows with attempt_count >= 5 are SKIPPED (not
- * auto-rejected). User-entered training data is sacred; the W1.3.5
- * LogBufferRecovery banner will surface stalled rows so the user can decide.
+ * Attempt cap discipline: rows with attempt_count >= MAX_ATTEMPTS are SKIPPED
+ * (not auto-rejected). User-entered training data is sacred; the SyncStatusPill
+ * surfaces stalled rows so the user can decide, and retryStalled() re-arms
+ * them from /settings/storage.
  *
  * Reentrancy: flush() is guarded by a module-private isFlushing flag so the
  * online-event listener firing twice (or enqueue+online racing) collapses to a
@@ -35,7 +39,9 @@ export interface EnqueueFields {
 }
 
 const ENDPOINT = '/api/set-logs';
-const MAX_ATTEMPTS = 5;
+// Exported so the sync pill and /settings/storage agree with the flusher on
+// what "stalled" means (pending && attempt_count >= MAX_ATTEMPTS).
+export const MAX_ATTEMPTS = 5;
 const BACKOFF_CAP_SECONDS = 30;
 
 function mintClientRequestId(): string {
@@ -161,7 +167,17 @@ async function flushOnce(): Promise<void> {
       break;
     }
 
-    // 5xx or anything else → transient, retry next tick.
+    if (res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status)) {
+      // Terminal client error (e.g. schema-validation 400): the identical
+      // payload can never succeed, so retrying only burns the attempt cap and
+      // strands the row as permanently "queued". Reject so /settings/storage
+      // surfaces it. 401 (session), 408 (timeout), 429 (rate limit) stay
+      // transient — those can succeed on retry.
+      await idbQueue.markRejected(row.client_request_id, 'other');
+      continue;
+    }
+
+    // 5xx, plain 401/408/429, or anything else → transient, retry next tick.
     await bumpAttempt(row);
   }
 }
@@ -229,6 +245,31 @@ export const logBuffer = {
       if (timer !== undefined) clearTimeout(timer);
       isFlushing = false;
     }
+  },
+
+  /**
+   * Re-arm attempt-capped pending rows (attempt_count → 0, next_attempt_at →
+   * 0) so the next flush tick retries them, then kick a flush if online.
+   * Recovery affordance for rows that burned their cap on a since-fixed
+   * server error. Returns the number of rows re-armed.
+   */
+  async retryStalled(): Promise<number> {
+    const pending = await idbQueue.peekPending();
+    const stalled = pending.filter((r) => r.attempt_count >= MAX_ATTEMPTS);
+    const now = Date.now();
+    for (const row of stalled) {
+      await idbQueue.enqueue({
+        ...row,
+        attempt_count: 0,
+        next_attempt_at: 0,
+        updated_at: now,
+      });
+    }
+    if (stalled.length > 0 && navigator.onLine) {
+      // Fire-and-forget; the reentrancy guard collapses overlapping flushes.
+      void logBuffer.flush();
+    }
+    return stalled.length;
   },
 
   onReconnect(): () => void {
