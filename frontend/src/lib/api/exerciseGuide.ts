@@ -7,6 +7,8 @@
 import { apiFetch } from '../../auth';
 import { ApiError, jsonOrThrow } from './_http';
 
+export { ApiError } from './_http';
+
 export type ExerciseGuide = {
   slug: string;
   setup_callout: string;

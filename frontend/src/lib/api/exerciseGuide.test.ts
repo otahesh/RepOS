@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getExerciseGuide } from './exerciseGuide';
+import { ApiError, getExerciseGuide } from './exerciseGuide';
 
 const GUIDE = {
   slug: 'incline-dumbbell-bench-press',
@@ -34,7 +34,14 @@ describe('getExerciseGuide', () => {
 
   it('throws on non-404 errors', async () => {
     mockFetch(500, { error: 'boom' });
-    await expect(getExerciseGuide('x')).rejects.toThrow();
+    await expect(getExerciseGuide('x')).rejects.toThrow(ApiError);
+  });
+
+  it('returns null on 404 with a non-JSON body (infra 404)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<html>not found</html>', { status: 404 }),
+    );
+    await expect(getExerciseGuide('no-guide')).resolves.toBeNull();
   });
 
   it('URL-encodes the slug', async () => {
