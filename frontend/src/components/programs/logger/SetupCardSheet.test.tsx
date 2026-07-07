@@ -49,4 +49,19 @@ describe('SetupCardSheet', () => {
     fireEvent.click(screen.getByText('Cue one'));
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('initial focus lands inside the dialog, and closing restores it', () => {
+    const trigger = document.createElement('button');
+    trigger.textContent = 'Trigger';
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const { unmount } = render(
+      <SetupCardSheet exerciseName="X" guide={GUIDE} onClose={() => {}} />,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    unmount();
+    expect(document.activeElement).toBe(trigger);
+    document.body.removeChild(trigger);
+  });
 });

@@ -61,6 +61,9 @@ describe('exercise guide seed adapter', () => {
     expect(adapter.validate([{ ...GUIDE, donts: [...GUIDE.donts, 'a third'] }]).success).toBe(
       false,
     );
+    expect(
+      adapter.validate([{ ...GUIDE, cues: [GUIDE.cues[0], GUIDE.cues[0], GUIDE.cues[2]] }]).success,
+    ).toBe(false);
   });
 
   it('upserts, is idempotent on re-run, and archives dropped entries', async () => {

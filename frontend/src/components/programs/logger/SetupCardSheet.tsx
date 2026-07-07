@@ -195,8 +195,8 @@ export function SetupCardSheet({ exerciseName, guide, onClose }: SetupCardSheetP
           <ul
             style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}
           >
-            {guide.cues.map((cue) => (
-              <li key={cue} style={{ fontSize: 14, lineHeight: 1.4 }}>
+            {guide.cues.map((cue, i) => (
+              <li key={i} style={{ fontSize: 14, lineHeight: 1.4 }}>
                 {cue}
               </li>
             ))}
@@ -208,8 +208,8 @@ export function SetupCardSheet({ exerciseName, guide, onClose }: SetupCardSheetP
           <ul
             style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}
           >
-            {guide.donts.map((dont) => (
-              <li key={dont} style={{ fontSize: 14, lineHeight: 1.4, color: TOKENS.textDim }}>
+            {guide.donts.map((dont, i) => (
+              <li key={i} style={{ fontSize: 14, lineHeight: 1.4, color: TOKENS.textDim }}>
                 {dont}
               </li>
             ))}
