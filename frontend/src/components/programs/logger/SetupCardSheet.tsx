@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { TOKENS, FONTS } from '../../../tokens';
+import { overlaySetupFactChips } from '../../../lib/setupFactLabels';
 import type { ExerciseGuide } from '../../../lib/api/exerciseGuide';
 
 // =============================================================================
@@ -9,8 +10,10 @@ import type { ExerciseGuide } from '../../../lib/api/exerciseGuide';
 // (it needed it to decide ⓘ visibility), so this receives data as a prop —
 // deliberately unlike HistorySheet, which self-fetches.
 //
-// W2: media is always {} — the photo slot renders a placeholder. W3 wires
-// committed WebP photos + app-rendered annotation tags from setup_facts.
+// W3: media carries committed WebP start/end photos. The photo slot renders
+// the active frame with numeric setup_facts overlaid as annotation chips, a
+// Start/End toggle when both frames exist, and falls back to the placeholder
+// when no media is authored yet or the image fails to load.
 //
 // Focus management mirrors HistorySheet.tsx:55-96 verbatim: capture the
 // pre-mount focus target, steer initial focus into the dialog, trap
@@ -26,6 +29,13 @@ export type SetupCardSheetProps = {
 export function SetupCardSheet({ exerciseName, guide, onClose }: SetupCardSheetProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  const [frame, setFrame] = useState<'start' | 'end'>('start');
+  const [imgFailed, setImgFailed] = useState(false);
+  const availableFrames = (['start', 'end'] as const).filter((f) => guide.media[f]);
+  const activeFrame = availableFrames.includes(frame) ? frame : availableFrames[0];
+  const photoSrc = activeFrame ? guide.media[activeFrame] : undefined;
+  const factChips = overlaySetupFactChips(guide.setup_facts);
 
   // Capture pre-mount focus + steer initial focus into the dialog. Restore
   // on unmount. Mirrors HistorySheet.tsx:55-64.
@@ -142,36 +152,118 @@ export function SetupCardSheet({ exerciseName, guide, onClose }: SetupCardSheetP
           </button>
         </header>
 
-        {/* Photo slot — placeholder until W3 lands committed photos. */}
-        {guide.media.start ? (
-          <img
-            src={guide.media.start}
-            alt={`${exerciseName} setup position`}
-            style={{ width: '100%', borderRadius: 12, display: 'block' }}
-          />
-        ) : (
-          <div
-            data-testid="setup-photo-placeholder"
-            aria-hidden="true"
-            style={{
-              width: '100%',
-              aspectRatio: '4 / 3',
-              borderRadius: 12,
-              background: TOKENS.surface2,
-              border: `1px dashed ${TOKENS.line}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: TOKENS.textMute,
-              fontFamily: FONTS.mono,
-              fontSize: 11,
-              letterSpacing: 1,
-              textTransform: 'uppercase',
-            }}
-          >
-            Photo coming soon
-          </div>
-        )}
+        {/* Photo block — committed WebP + app-rendered annotation chips (spec §5).
+            Annotations are never baked into images. On load failure the placeholder
+            replaces only the image — the frame toggle stays mounted so picking a
+            frame retries — and the copy is honest ("unavailable", not "coming
+            soon"). Failure copy is AT-visible; the decorative no-photo placeholder
+            stays aria-hidden. */}
+        <div>
+          {photoSrc && !imgFailed ? (
+            <div style={{ position: 'relative' }}>
+              <img
+                src={photoSrc}
+                alt={`${exerciseName} — ${activeFrame} position`}
+                onError={() => setImgFailed(true)}
+                style={{
+                  width: '100%',
+                  aspectRatio: '4 / 3',
+                  objectFit: 'cover',
+                  borderRadius: 12,
+                  display: 'block',
+                }}
+              />
+              {factChips.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 8,
+                    bottom: 8,
+                    right: 8,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                  }}
+                >
+                  {factChips.map((chip) => (
+                    <span
+                      key={chip}
+                      style={{
+                        background: 'rgba(10,13,18,0.78)',
+                        border: `1px solid ${TOKENS.line}`,
+                        borderRadius: 6,
+                        padding: '3px 8px',
+                        fontFamily: FONTS.mono,
+                        fontSize: 10,
+                        letterSpacing: 1,
+                        textTransform: 'uppercase',
+                        color: TOKENS.text,
+                      }}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              data-testid="setup-photo-placeholder"
+              aria-hidden={imgFailed ? undefined : true}
+              style={{
+                width: '100%',
+                aspectRatio: '4 / 3',
+                borderRadius: 12,
+                background: TOKENS.surface2,
+                border: `1px dashed ${TOKENS.line}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: TOKENS.textMute,
+                fontFamily: FONTS.mono,
+                fontSize: 11,
+                letterSpacing: 1,
+                textTransform: 'uppercase',
+              }}
+            >
+              {imgFailed ? 'Photo unavailable' : 'Photo coming soon'}
+            </div>
+          )}
+          {availableFrames.length === 2 && (
+            <div
+              role="group"
+              aria-label="Setup photo"
+              style={{ display: 'flex', gap: 6, marginTop: 8 }}
+            >
+              {availableFrames.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  aria-pressed={activeFrame === f}
+                  onClick={() => {
+                    setFrame(f);
+                    setImgFailed(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: 44,
+                    borderRadius: 6,
+                    border: `1px solid ${activeFrame === f ? TOKENS.accent : TOKENS.line}`,
+                    background: activeFrame === f ? 'rgba(77,141,255,0.12)' : 'transparent',
+                    color: activeFrame === f ? TOKENS.accent : TOKENS.textDim,
+                    fontFamily: FONTS.mono,
+                    fontSize: 10,
+                    letterSpacing: 1,
+                    textTransform: 'uppercase',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {f === 'start' ? 'Start' : 'End'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <section aria-label="Set up">
           <SectionLabel>Set up</SectionLabel>
