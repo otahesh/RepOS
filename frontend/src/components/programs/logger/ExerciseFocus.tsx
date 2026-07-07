@@ -76,6 +76,8 @@ export function ExerciseFocus({
             aria-label="Back to plan"
             onClick={onBack}
             style={{
+              flex: 1,
+              textAlign: 'left',
               minHeight: 44,
               padding: '8px 4px',
               background: 'none',
@@ -101,7 +103,11 @@ export function ExerciseFocus({
           >
             {position.current} OF {position.total}
           </span>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+          {/* flex: 1 on both side slots keeps "N OF M" truly centered whether
+              or not the async-loaded ⓘ button renders. */}
+          <div
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
+          >
             {onOpenGuide ? (
               <button
                 type="button"

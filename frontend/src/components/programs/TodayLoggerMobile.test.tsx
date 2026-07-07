@@ -6,6 +6,7 @@ import TodayLoggerMobile from './TodayLoggerMobile';
 import { logBuffer } from '../../lib/logBuffer';
 import type { QueueRowStatus } from '../../hooks/useIdbQueueStatus';
 import type { TodayDay, TodaySet } from '../../lib/api/mesocycles';
+import type { ExerciseGuide } from '../../lib/api/exerciseGuide';
 
 // ---- Mocks ------------------------------------------------------------------
 
@@ -32,15 +33,21 @@ vi.mock('../../hooks/useIdbQueueStatus', () => ({
 }));
 
 // History powers prefill + the last-time line; default is "no history".
-const { getExerciseHistoryMock, listExercisesMock } = vi.hoisted(() => ({
+// Guides power the ⓘ setup card; default is "no guide" (ⓘ hidden) so the
+// pre-existing tests are undisturbed.
+const { getExerciseHistoryMock, listExercisesMock, getExerciseGuideMock } = vi.hoisted(() => ({
   getExerciseHistoryMock: vi.fn(),
   listExercisesMock: vi.fn(),
+  getExerciseGuideMock: vi.fn(),
 }));
 vi.mock('../../lib/api/exerciseHistory', () => ({
   getExerciseHistory: getExerciseHistoryMock,
 }));
 vi.mock('../../lib/api/exercises', () => ({
   listExercises: listExercisesMock,
+}));
+vi.mock('../../lib/api/exerciseGuide', () => ({
+  getExerciseGuide: getExerciseGuideMock,
 }));
 
 // ---- Fixtures ---------------------------------------------------------------
@@ -72,6 +79,15 @@ const SET_2: TodaySet = {
 };
 
 const PRELOADED = { run_id: 'mr-1', day: DAY, sets: [SET_1, SET_2] };
+
+const GUIDE: ExerciseGuide = {
+  slug: 'barbell-bench-press',
+  setup_callout: 'Feet flat, slight arch, shoulder blades pinched together on the bench.',
+  setup_facts: {},
+  cues: ['Cue A', 'Cue B', 'Cue C'],
+  donts: ['Mistake A', 'Mistake B'],
+  media: {},
+};
 
 function renderLogger(
   preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED,
@@ -112,6 +128,7 @@ describe('<TodayLoggerMobile>', () => {
     __mockedQueueStatuses.clear();
     vi.spyOn(logBuffer, 'enqueue').mockResolvedValue('crid-stub');
     getExerciseHistoryMock.mockResolvedValue([]);
+    getExerciseGuideMock.mockResolvedValue(null);
     listExercisesMock.mockResolvedValue([
       {
         slug: 'barbell-bench-press',
@@ -431,6 +448,56 @@ describe('<TodayLoggerMobile>', () => {
       expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /exercise history/i }));
       expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('setup card (ⓘ) wiring', () => {
+    it('shows ⓘ once the guide loads, and opens the setup card', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      const btn = await screen.findByRole('button', { name: /how to do this exercise/i });
+      fireEvent.click(btn);
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      expect(screen.getByText('Cue A')).toBeInTheDocument();
+    });
+
+    it('hides ⓘ when the exercise has no guide (404 → null)', async () => {
+      getExerciseGuideMock.mockResolvedValue(null);
+      renderFocused();
+      await waitFor(() => expect(getExerciseGuideMock).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /how to do this exercise/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('hides ⓘ when the guide fetch fails — guides are a nicety, logging must not depend on them', async () => {
+      getExerciseGuideMock.mockRejectedValue(new Error('network down'));
+      renderFocused();
+      await waitFor(() => expect(getExerciseGuideMock).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /how to do this exercise/i }),
+      ).not.toBeInTheDocument();
+      // Logging UI is intact:
+      expect(screen.getAllByRole('button', { name: /^log$/i }).length).toBeGreaterThan(0);
+    });
+
+    it('closes the setup card when leaving the focus screen', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      fireEvent.click(await screen.findByRole('button', { name: /how to do this exercise/i }));
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^back to plan$/i }));
+      expect(screen.queryByRole('dialog', { name: /how to set up/i })).not.toBeInTheDocument();
+    });
+
+    it('opening history closes the guide sheet (one sheet at a time)', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      fireEvent.click(await screen.findByRole('button', { name: /how to do this exercise/i }));
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /exercise history/i }));
+      expect(screen.queryByRole('dialog', { name: /how to set up/i })).not.toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
     });
   });
 });
