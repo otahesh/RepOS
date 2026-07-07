@@ -6,7 +6,7 @@ import { db } from '../src/db/client.js';
 type App = Awaited<ReturnType<typeof buildApp>>;
 
 let app: App;
-let withGuideId: string, withoutGuideId: string, archivedGuideId: string;
+let withGuideId: string, withoutGuideId: string, archivedGuideId: string, archivedExId: string;
 
 async function mkEx(slug: string): Promise<string> {
   // Crash-cruft pre-clean (shared repos_test DB).
@@ -28,6 +28,8 @@ beforeAll(async () => {
   withGuideId = await mkEx('test-guide-route-yes');
   withoutGuideId = await mkEx('test-guide-route-no');
   archivedGuideId = await mkEx('test-guide-route-archived');
+  archivedExId = await mkEx('test-guide-route-ex-archived');
+  await db.query(`UPDATE exercises SET archived_at=now() WHERE id=$1`, [archivedExId]);
   await db.query(
     `INSERT INTO exercise_guides (exercise_id, setup_callout, setup_facts, cues, donts, media, archived_at)
      VALUES ($1, 'Bench: 30 degrees. Feet flat, slight arch, shoulder blades pinched together.',
@@ -37,15 +39,19 @@ beforeAll(async () => {
             ($2, 'Archived guide callout text long enough to satisfy the length check.',
              '{}'::jsonb,
              ARRAY['cue one here','cue two here','cue three here'],
-             ARRAY['mistake one here','mistake two here'], '{}'::jsonb, now())`,
-    [withGuideId, archivedGuideId],
+             ARRAY['mistake one here','mistake two here'], '{}'::jsonb, now()),
+            ($3, 'Active guide on a retired exercise; long enough to satisfy the length check.',
+             '{}'::jsonb,
+             ARRAY['cue one here','cue two here','cue three here'],
+             ARRAY['mistake one here','mistake two here'], '{}'::jsonb, NULL)`,
+    [withGuideId, archivedGuideId, archivedExId],
   );
 });
 
 afterAll(async () => {
   // Restore state: guides cascade with their exercises.
   await db.query(`DELETE FROM exercises WHERE id = ANY($1::uuid[])`, [
-    [withGuideId, withoutGuideId, archivedGuideId],
+    [withGuideId, withoutGuideId, archivedGuideId, archivedExId],
   ]);
   await app.close();
   await db.end();
@@ -83,6 +89,14 @@ describe('GET /api/exercises/:slug/guide', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/exercises/test-guide-route-archived/guide',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s for an archived exercise with an active guide', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/exercises/test-guide-route-ex-archived/guide',
     });
     expect(res.statusCode).toBe(404);
   });
