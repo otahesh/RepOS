@@ -545,10 +545,10 @@ export const exerciseGuides: ExerciseGuideSeed[] = [
   {
     exercise_slug: 'barbell-back-squat',
     setup_callout:
-      'Bar sits on your upper traps, not your neck. Grip just outside your shoulders, elbows pointed down. Feet shoulder-width, toes out about 20°. Take a big breath and brace before every rep.',
+      "Bar sits on your upper traps, not your neck. Grip just outside your shoulders, elbows pointed down. Feet shoulder-width, toes out about 20°. Take a big breath and brace before every rep. Set the rack's safety arms just below your bottom position.",
     setup_facts: { toe_angle_deg: 20, stance: 'shoulder-width' },
     cues: [
-      'Brace your core before each rep, not during it',
+      'Brace your core before the rep starts, and hold it until you stand up',
       'Sit down between your heels with your chest proud',
       'Drive the floor apart as you stand up',
     ],

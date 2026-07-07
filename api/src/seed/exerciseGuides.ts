@@ -25,10 +25,10 @@ export const exerciseGuides: ExerciseGuideSeed[] = [
   {
     exercise_slug: 'barbell-back-squat',
     setup_callout:
-      'Bar sits on your upper traps, not your neck. Grip just outside your shoulders, elbows pointed down. Feet shoulder-width, toes out about 20°. Take a big breath and brace before every rep.',
+      "Bar sits on your upper traps, not your neck. Grip just outside your shoulders, elbows pointed down. Feet shoulder-width, toes out about 20°. Take a big breath and brace before every rep. Set the rack's safety arms just below your bottom position.",
     setup_facts: { toe_angle_deg: 20, stance: 'shoulder-width' },
     cues: [
-      'Brace your core before each rep, not during it',
+      'Brace your core before the rep starts, and hold it until you stand up',
       'Sit down between your heels with your chest proud',
       'Drive the floor apart as you stand up',
     ],
@@ -528,7 +528,7 @@ export const exerciseGuides: ExerciseGuideSeed[] = [
   {
     exercise_slug: 'dumbbell-standing-calf-raise',
     setup_callout:
-      'Hold a dumbbell in one hand and rest the other hand on a rack or wall for balance. For a deeper stretch, stand with the balls of your feet on a plate or step edge. Full range beats heavy weight — all the way up, all the way down.',
+      'Hold a dumbbell in one hand and rest the other hand on a rack or wall for balance. For a deeper stretch, stand with the balls of your feet on a plate or step edge. Swap the dumbbell to the other hand halfway through the set. Full range beats heavy weight — all the way up, all the way down.',
     setup_facts: {},
     cues: [
       'Rise as high onto the balls of your feet as you can',
@@ -584,7 +584,7 @@ export const exerciseGuides: ExerciseGuideSeed[] = [
     cues: [
       'Set your shoulders back before the first step',
       'Keep your hips level — no dipping toward the weight',
-      'Switch hands each lap and match your steps',
+      'Switch hands each lap and keep your steps even on both sides',
     ],
     donts: [
       'Shrugging the loaded shoulder up toward your ear',
