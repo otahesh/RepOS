@@ -6,6 +6,9 @@ import { db } from '../src/db/client.js';
 let exerciseId: string;
 
 beforeAll(async () => {
+  // Crash-cruft pre-clean: a killed prior run can leave the fixture exercise
+  // behind (shared repos_test DB) — clear it before inserting.
+  await db.query(`DELETE FROM exercises WHERE slug='test-guide-schema-ex'`);
   const {
     rows: [ex],
   } = await db.query<{ id: string }>(
@@ -50,12 +53,14 @@ describe('exercise_guides schema (migration 080)', () => {
   });
 
   it('rejects cues count other than 3', async () => {
-    await expect(insertGuide({ cues: ['only', 'two'] })).rejects.toThrow();
-    await expect(insertGuide({ cues: ['1', '2', '3', '4'] })).rejects.toThrow();
+    // Pin to the intended constraint: Postgres names it exercise_guides_cues_check.
+    await expect(insertGuide({ cues: ['only', 'two'] })).rejects.toThrow(/cues/);
+    await expect(insertGuide({ cues: ['1', '2', '3', '4'] })).rejects.toThrow(/cues/);
   });
 
   it('rejects donts count other than 2', async () => {
-    await expect(insertGuide({ donts: ['just one'] })).rejects.toThrow();
+    // Pin to the intended constraint: Postgres names it exercise_guides_donts_check.
+    await expect(insertGuide({ donts: ['just one'] })).rejects.toThrow(/donts/);
   });
 
   it('cascades when the exercise is deleted', async () => {
