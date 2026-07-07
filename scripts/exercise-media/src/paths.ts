@@ -19,8 +19,8 @@ export function readGeminiKey(): string {
   const envPath = path.join(REPO_ROOT, '.env');
   if (fs.existsSync(envPath)) {
     for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
-      const m = line.match(/^GEMINI_API_KEY=["']?([^"'\r]+?)["']?\s*$/);
-      if (m) return m[1];
+      const m = line.match(/^GEMINI_API_KEY=(?:"([^"\r]*)"|'([^'\r]*)'|([^\s#\r]+))/);
+      if (m) return m[1] ?? m[2] ?? m[3];
     }
   }
   throw new Error(

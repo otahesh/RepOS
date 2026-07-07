@@ -43,6 +43,7 @@ export async function generateImage(opts: {
     // transient as a 503 — over an 88-image batch one WILL happen. Retry them
     // with the same backoff instead of failing the image.
     let res: Response | undefined;
+    let networkErr: Error | undefined;
     try {
       res = await fetch(`${API_BASE}/${opts.model}:generateContent`, {
         method: 'POST',
@@ -60,15 +61,18 @@ export async function generateImage(opts: {
         }),
       });
     } catch (err) {
+      networkErr = err as Error;
       if (attempt + 1 >= max) {
         throw new Error(
-          `Gemini network failure after ${max} attempts on ${opts.model}: ${(err as Error).message}`,
+          `Gemini network failure after ${max} attempts on ${opts.model}: ${networkErr.message}`,
         );
       }
     }
     if (res?.ok) return extractImage(await res.json());
+    // Read the response body once (it's a stream) and reuse it for both the
+    // fail-fast throw below and the retry warning.
+    const detail = res ? (await res.text().catch(() => '')).slice(0, 400) : '';
     if (res) {
-      const detail = (await res.text().catch(() => '')).slice(0, 400);
       if (!isRetryable(res.status) || attempt + 1 >= max) {
         throw new Error(
           `Gemini ${res.status} on ${opts.model} (attempt ${attempt + 1}/${max}): ${detail}. ` +
@@ -77,7 +81,10 @@ export async function generateImage(opts: {
       }
     }
     const wait = backoffMs(attempt);
-    console.warn(`  retryable failure; waiting ${Math.round(wait / 1000)}s…`);
+    const cause = res
+      ? `retryable ${res.status} (${detail.slice(0, 120)})`
+      : `retryable network error (${(networkErr?.message ?? '').slice(0, 120)})`;
+    console.warn(`  ${cause}; waiting ${Math.round(wait / 1000)}s…`);
     await new Promise((r) => setTimeout(r, wait));
   }
 }
