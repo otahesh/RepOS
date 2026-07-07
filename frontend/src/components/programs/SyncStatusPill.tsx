@@ -120,6 +120,9 @@ function InnerPill(): JSX.Element | null {
     position: 'fixed' as const,
     // Clear of the home-indicator on notched phones; bottom-right so it never
     // covers the set rows or the Log buttons the way the old banner did.
+    // ToastHost shares this corner at zIndex 9999 — a transient toast covering
+    // the pill for a few seconds is deliberate precedence (tokens.ts: toasts
+    // render above every modal surface by design).
     right: 16,
     bottom: 'calc(16px + env(safe-area-inset-bottom))',
     zIndex: TOKENS.zModal.zPill,

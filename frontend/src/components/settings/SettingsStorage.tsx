@@ -251,7 +251,7 @@ export default function SettingsStorage(): JSX.Element {
           label="Rejected"
           count={rejected}
           testId="rejected"
-          caption="Server refused these (deleted plan, audit window closed). Safe to clear."
+          caption="Server refused these (deleted plan, audit window closed, or data it couldn't accept). Safe to clear."
           action={clearButton}
         />
       </div>
