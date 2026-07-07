@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { exercises } from '../../src/seed/exercises.js';
 import { exerciseGuides } from '../../src/seed/exerciseGuides.js';
+import { exerciseMedia } from '../../src/seed/exerciseMediaManifest.js';
 import { ExerciseGuideSeedSchema } from '../../src/schemas/exerciseGuide.js';
 
 describe('exercise guide seed content', () => {
@@ -29,9 +30,9 @@ describe('exercise guide seed content', () => {
     }
   });
 
-  it('media stays empty until W3 lands photos', () => {
+  it('media is {} without a manifest entry, and exactly the manifest entry with one', () => {
     for (const g of exerciseGuides) {
-      expect(g.media).toEqual({});
+      expect(g.media).toEqual(exerciseMedia[g.exercise_slug] ?? {});
     }
   });
 
