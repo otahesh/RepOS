@@ -10,12 +10,14 @@ import {
 } from '../../lib/api/mesocycles';
 import { listExercises } from '../../lib/api/exercises';
 import { getExerciseHistory, type HistorySession } from '../../lib/api/exerciseHistory';
+import { getExerciseGuide, type ExerciseGuide } from '../../lib/api/exerciseGuide';
 import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
 import { useRestTimer } from './logger/useRestTimer';
 import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
 import { ExerciseFocus } from './logger/ExerciseFocus';
 import { HistorySheet } from './logger/HistorySheet';
+import { SetupCardSheet } from './logger/SetupCardSheet';
 import type { RowState, RowInputs } from './logger/SetRow';
 
 // =============================================================================
@@ -255,10 +257,12 @@ function LoggerInner({
     const slug = sets[0]?.exercise.slug;
     if (!slug || histRequested.current.has(slug)) return;
     histRequested.current.add(slug);
-    let cancelled = false;
+    // No cancellation on cleanup: histRequested dedupes forever, so a result
+    // dropped mid-flight (StrictMode re-fire, or any focusedEntry identity
+    // change) would never be refetched. The caches are slug-keyed and the
+    // prefill only touches untouched, unlogged rows, so a late write is safe.
     getExerciseHistory(slug, 1)
       .then((sessions) => {
-        if (cancelled) return;
         const last = sessions[0] ?? null;
         setHistBySlug((prev) => ({ ...prev, [slug]: last }));
         if (!last || last.sets.length === 0) return;
@@ -285,23 +289,48 @@ function LoggerInner({
         });
       })
       .catch(() => {
-        if (cancelled) return;
         // History is a nicety — logging must not depend on it.
         setHistBySlug((prev) => ({ ...prev, [slug]: null }));
       });
-    return () => {
-      cancelled = true;
-    };
   }, [focusedEntry]);
 
-  // History sheet — state owns whether it's mounted; HistorySheet fetches its
-  // own data on mount (see logger/HistorySheet.tsx). Reset whenever the
-  // focused block changes (including back-to-hub, where focusedEntry is
-  // null) so a sheet left open in one block doesn't pop back open when a
-  // different block is later focused.
-  const [historyOpen, setHistoryOpen] = useState(false);
+  // Setup-card guide per exercise slug: powers the ⓘ button + SetupCardSheet.
+  // Fetched lazily when a block is first focused; the ref dedupes
+  // in-flight/completed fetches so each slug is requested at most once.
+  // null (no guide on the server, or fetch failed) hides ⓘ — guides are a
+  // nicety and logging must not depend on them.
+  const [guideBySlug, setGuideBySlug] = useState<Record<string, ExerciseGuide | null>>({});
+  const guideRequested = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    setHistoryOpen(false);
+    if (!focusedEntry) return;
+    const slug = focusedEntry[1][0]?.exercise.slug;
+    if (!slug || guideRequested.current.has(slug)) return;
+    guideRequested.current.add(slug);
+    // No cancellation on cleanup — same reasoning as the history effect above:
+    // the ref dedupes forever, so a mid-flight drop would hide ⓘ for the
+    // whole session. Slug-keyed cache writes are safe whenever they land.
+    getExerciseGuide(slug)
+      .then((guide) => {
+        setGuideBySlug((prev) => ({ ...prev, [slug]: guide }));
+      })
+      .catch(() => {
+        setGuideBySlug((prev) => ({ ...prev, [slug]: null }));
+      });
+  }, [focusedEntry]);
+
+  // Bottom sheets — a single state slot so "both sheets open" is
+  // unrepresentable (each sheet installs a document-level Escape listener at
+  // the same z-index; two independent booleans could close both with one
+  // keypress). State owns whether a sheet is mounted; HistorySheet fetches
+  // its own data on mount (see logger/HistorySheet.tsx) while SetupCardSheet
+  // receives the already-fetched guide. Reset whenever the focused block
+  // changes (including back-to-hub, where focusedEntry is null) so a sheet
+  // left open in one block doesn't pop back open when a different block is
+  // later focused.
+  const [openSheet, setOpenSheet] = useState<'history' | 'guide' | null>(null);
+  useEffect(() => {
+    setOpenSheet(null);
   }, [focusedEntry]);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
@@ -434,6 +463,7 @@ function LoggerInner({
   const [focusedIdx, focusedSets] = focusedEntry;
   const slug = focusedSets[0].exercise.slug;
   const meta = exMeta[slug];
+  const guide = guideBySlug[slug] ?? null;
   const backToHub = () => navigate(`/today/${data.run_id}/log`);
 
   return (
@@ -458,13 +488,21 @@ function LoggerInner({
         onLog={handleLogWithRest}
         onSkip={(setId) => setRow(setId, { phase: 'input' })}
         lastSession={histBySlug[slug] ?? null}
-        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenHistory={() => setOpenSheet('history')}
+        onOpenGuide={guide ? () => setOpenSheet('guide') : null}
         onBack={backToHub}
         onDone={backToHub}
         getWeightInputRef={getWeightInputRef}
       />
-      {historyOpen ? (
-        <HistorySheet slug={slug} track={data.track} onClose={() => setHistoryOpen(false)} />
+      {openSheet === 'history' ? (
+        <HistorySheet slug={slug} track={data.track} onClose={() => setOpenSheet(null)} />
+      ) : null}
+      {openSheet === 'guide' && guide ? (
+        <SetupCardSheet
+          exerciseName={focusedSets[0].exercise.name}
+          guide={guide}
+          onClose={() => setOpenSheet(null)}
+        />
       ) : null}
       <RestTimerPill remaining={restTimer.remaining} />
     </div>

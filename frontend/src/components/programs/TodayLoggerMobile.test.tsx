@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, act, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,6 +7,8 @@ import TodayLoggerMobile from './TodayLoggerMobile';
 import { logBuffer } from '../../lib/logBuffer';
 import type { QueueRowStatus } from '../../hooks/useIdbQueueStatus';
 import type { TodayDay, TodaySet } from '../../lib/api/mesocycles';
+import type { ExerciseGuide } from '../../lib/api/exerciseGuide';
+import type { HistorySession } from '../../lib/api/exerciseHistory';
 
 // ---- Mocks ------------------------------------------------------------------
 
@@ -32,15 +35,21 @@ vi.mock('../../hooks/useIdbQueueStatus', () => ({
 }));
 
 // History powers prefill + the last-time line; default is "no history".
-const { getExerciseHistoryMock, listExercisesMock } = vi.hoisted(() => ({
+// Guides power the ⓘ setup card; default is "no guide" (ⓘ hidden) so the
+// pre-existing tests are undisturbed.
+const { getExerciseHistoryMock, listExercisesMock, getExerciseGuideMock } = vi.hoisted(() => ({
   getExerciseHistoryMock: vi.fn(),
   listExercisesMock: vi.fn(),
+  getExerciseGuideMock: vi.fn(),
 }));
 vi.mock('../../lib/api/exerciseHistory', () => ({
   getExerciseHistory: getExerciseHistoryMock,
 }));
 vi.mock('../../lib/api/exercises', () => ({
   listExercises: listExercisesMock,
+}));
+vi.mock('../../lib/api/exerciseGuide', () => ({
+  getExerciseGuide: getExerciseGuideMock,
 }));
 
 // ---- Fixtures ---------------------------------------------------------------
@@ -73,6 +82,15 @@ const SET_2: TodaySet = {
 
 const PRELOADED = { run_id: 'mr-1', day: DAY, sets: [SET_1, SET_2] };
 
+const GUIDE: ExerciseGuide = {
+  slug: 'barbell-bench-press',
+  setup_callout: 'Feet flat, slight arch, shoulder blades pinched together on the bench.',
+  setup_facts: {},
+  cues: ['Cue A', 'Cue B', 'Cue C'],
+  donts: ['Mistake A', 'Mistake B'],
+  media: {},
+};
+
 function renderLogger(
   preloaded: typeof PRELOADED & { track?: string | null } = PRELOADED,
   initialPath = '/today/mr-1/log',
@@ -98,6 +116,24 @@ function renderFocused(preloaded: typeof PRELOADED & { track?: string | null } =
   return renderLogger(preloaded, '/today/mr-1/log/0');
 }
 
+/** Render the block-0 focus screen under StrictMode — dev double-invokes
+ *  effects (mount → cleanup → re-mount), which is also a proxy for any
+ *  prod re-render that re-fires the lazy-fetch effects mid-flight. */
+function renderFocusedStrict() {
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={['/today/mr-1/log/0']}>
+        <Routes>
+          <Route
+            path="/today/:mesocycleRunId/log/:blockIdx"
+            element={<TodayLoggerMobile preloaded={PRELOADED} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </StrictMode>,
+  );
+}
+
 /** Flush pending microtasks (history/meta fetch promises) inside act. */
 async function flush() {
   await act(async () => {
@@ -112,6 +148,7 @@ describe('<TodayLoggerMobile>', () => {
     __mockedQueueStatuses.clear();
     vi.spyOn(logBuffer, 'enqueue').mockResolvedValue('crid-stub');
     getExerciseHistoryMock.mockResolvedValue([]);
+    getExerciseGuideMock.mockResolvedValue(null);
     listExercisesMock.mockResolvedValue([
       {
         slug: 'barbell-bench-press',
@@ -356,6 +393,31 @@ describe('<TodayLoggerMobile>', () => {
       expect(getExerciseHistoryMock).toHaveBeenCalledWith('barbell-bench-press', 1);
     });
 
+    it('late-resolving history never clobbers input the user typed while it was in flight', async () => {
+      // With effect-cancellation removed (StrictMode fix), the empty-inputs
+      // guard is the only thing standing between a slow /exercise-history
+      // response and silent overwrite of user-typed data. Pin it.
+      let resolveHistory!: (v: HistorySession[]) => void;
+      getExerciseHistoryMock.mockReturnValue(
+        new Promise<HistorySession[]>((r) => {
+          resolveHistory = r;
+        }),
+      );
+      const user = userEvent.setup();
+      renderFocused();
+
+      // User types into Set 1 while the history fetch is still pending.
+      await user.type(screen.getByLabelText(/Set 1 weight in pounds/i), '135');
+      await user.type(screen.getByLabelText(/Set 1 reps/i), '5');
+
+      resolveHistory([{ date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] }]);
+      // Untouched Set 2 receives the prefill…
+      await waitFor(() => expect(screen.getByLabelText(/Set 2 weight in pounds/i)).toHaveValue(25));
+      // …while the user's typed values survive.
+      expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(135);
+      expect(screen.getByLabelText(/Set 1 reps/i)).toHaveValue(5);
+    });
+
     it('does not prefill server-logged sets and seeds only non-null logged values', async () => {
       getExerciseHistoryMock.mockResolvedValue([
         { date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] },
@@ -431,6 +493,75 @@ describe('<TodayLoggerMobile>', () => {
       expect(screen.queryByRole('dialog', { name: /exercise history/i })).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /exercise history/i }));
       expect(screen.getByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('setup card (ⓘ) wiring', () => {
+    it('shows ⓘ once the guide loads, and opens the setup card', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      const btn = await screen.findByRole('button', { name: /how to do this exercise/i });
+      fireEvent.click(btn);
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      expect(screen.getByText('Cue A')).toBeInTheDocument();
+    });
+
+    it('hides ⓘ when the exercise has no guide (404 → null)', async () => {
+      getExerciseGuideMock.mockResolvedValue(null);
+      renderFocused();
+      await waitFor(() => expect(getExerciseGuideMock).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /how to do this exercise/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('hides ⓘ when the guide fetch fails — guides are a nicety, logging must not depend on them', async () => {
+      getExerciseGuideMock.mockRejectedValue(new Error('network down'));
+      renderFocused();
+      await waitFor(() => expect(getExerciseGuideMock).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /how to do this exercise/i }),
+      ).not.toBeInTheDocument();
+      // Logging UI is intact:
+      expect(screen.getAllByRole('button', { name: /^log$/i }).length).toBeGreaterThan(0);
+    });
+
+    it('closes the setup card when leaving the focus screen', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      fireEvent.click(await screen.findByRole('button', { name: /how to do this exercise/i }));
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^back to plan$/i }));
+      expect(screen.queryByRole('dialog', { name: /how to set up/i })).not.toBeInTheDocument();
+    });
+
+    it('opening history closes the guide sheet (one sheet at a time)', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocused();
+      fireEvent.click(await screen.findByRole('button', { name: /how to do this exercise/i }));
+      expect(await screen.findByRole('dialog', { name: /how to set up/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /exercise history/i }));
+      expect(screen.queryByRole('dialog', { name: /how to set up/i })).not.toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: /exercise history/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('StrictMode resilience (effect re-fire mid-fetch must not drop results)', () => {
+    it('ⓘ still appears when the guide fetch resolves after an effect re-fire', async () => {
+      getExerciseGuideMock.mockResolvedValue(GUIDE);
+      renderFocusedStrict();
+      expect(
+        await screen.findByRole('button', { name: /how to do this exercise/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('history prefill + last-time line still land after an effect re-fire', async () => {
+      getExerciseHistoryMock.mockResolvedValue([
+        { date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] },
+      ]);
+      renderFocusedStrict();
+      await waitFor(() => expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(25));
+      expect(screen.getByText(/last time: 25 lbs × 9/i)).toBeInTheDocument();
     });
   });
 });

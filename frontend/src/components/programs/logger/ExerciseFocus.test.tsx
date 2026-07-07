@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ExerciseFocus } from './ExerciseFocus';
 import type { RowState, RowInputs } from './SetRow';
@@ -64,6 +64,7 @@ function baseProps(overrides: Partial<Parameters<typeof ExerciseFocus>[0]> = {})
     onOpenHistory: vi.fn(),
     onBack: vi.fn(),
     onDone: vi.fn(),
+    onOpenGuide: null as (() => void) | null,
     ...overrides,
   };
 }
@@ -76,8 +77,9 @@ describe('<ExerciseFocus>', () => {
     expect(screen.getByRole('heading', { name: 'Barbell Bench Press' })).toBeInTheDocument();
     expect(screen.getByText('Barbell')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /exercise history/i })).toBeInTheDocument();
-    // No wave-2 info button.
-    expect(screen.queryByRole('button', { name: /^info$/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /how to do this exercise/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders a SetRow per set with prefilled inputs from rowInputs', () => {
@@ -126,5 +128,27 @@ describe('<ExerciseFocus>', () => {
   it('does not render an empty muscle chip when metadata has not loaded yet', () => {
     render(<ExerciseFocus {...baseProps({ exercise: { ...EXERCISE, muscle: '' } })} />);
     expect(screen.queryByTestId('muscle-chip')).not.toBeInTheDocument();
+  });
+});
+
+describe('ⓘ how-to button', () => {
+  it('renders and fires when onOpenGuide is provided', () => {
+    const onOpenGuide = vi.fn();
+    render(<ExerciseFocus {...baseProps({ onOpenGuide })} />);
+    const btn = screen.getByRole('button', { name: /how to do this exercise/i });
+    fireEvent.click(btn);
+    expect(onOpenGuide).toHaveBeenCalledTimes(1);
+  });
+
+  it('is absent when onOpenGuide is null (no guide → hide ⓘ, per spec)', () => {
+    render(<ExerciseFocus {...baseProps({ onOpenGuide: null })} />);
+    expect(
+      screen.queryByRole('button', { name: /how to do this exercise/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('history button still renders alongside ⓘ', () => {
+    render(<ExerciseFocus {...baseProps({ onOpenGuide: vi.fn() })} />);
+    expect(screen.getByRole('button', { name: /exercise history/i })).toBeInTheDocument();
   });
 });
