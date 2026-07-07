@@ -27,6 +27,7 @@ export function ExerciseFocus({
   onBack,
   onDone,
   getWeightInputRef,
+  onOpenGuide,
 }: {
   position: { current: number; total: number };
   exercise: { name: string; muscle: string; equipmentLabel: string; slug: string };
@@ -44,6 +45,8 @@ export function ExerciseFocus({
   /** Container-owned focus chain: returns the callback ref for a set's weight
    *  input so log-then-advance-focus keeps working inside the focus screen. */
   getWeightInputRef?: (setId: string) => (el: HTMLInputElement | null) => void;
+  /** null = no guide exists for this exercise → ⓘ is hidden (spec §4). */
+  onOpenGuide?: (() => void) | null;
 }) {
   const beginner = isBeginnerTrack(track);
   const lastTimeLine = formatLastTime(lastSession);
@@ -98,22 +101,42 @@ export function ExerciseFocus({
           >
             {position.current} OF {position.total}
           </span>
-          <button
-            type="button"
-            aria-label="Exercise history"
-            onClick={onOpenHistory}
-            style={{
-              minWidth: 44,
-              minHeight: 44,
-              background: 'none',
-              border: 'none',
-              color: TOKENS.textDim,
-              fontSize: 18,
-              cursor: 'pointer',
-            }}
-          >
-            ⟲
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {onOpenGuide ? (
+              <button
+                type="button"
+                aria-label="How to do this exercise"
+                onClick={onOpenGuide}
+                style={{
+                  minWidth: 44,
+                  minHeight: 44,
+                  background: 'none',
+                  border: 'none',
+                  color: TOKENS.textDim,
+                  fontSize: 18,
+                  cursor: 'pointer',
+                }}
+              >
+                ⓘ
+              </button>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Exercise history"
+              onClick={onOpenHistory}
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                background: 'none',
+                border: 'none',
+                color: TOKENS.textDim,
+                fontSize: 18,
+                cursor: 'pointer',
+              }}
+            >
+              ⟲
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
