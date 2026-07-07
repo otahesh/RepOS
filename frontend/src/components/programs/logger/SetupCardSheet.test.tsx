@@ -65,3 +65,83 @@ describe('SetupCardSheet', () => {
     document.body.removeChild(trigger);
   });
 });
+
+const MEDIA_GUIDE: ExerciseGuide = {
+  ...GUIDE,
+  media: {
+    start: '/exercise-media/incline-dumbbell-bench-press-start.webp',
+    end: '/exercise-media/incline-dumbbell-bench-press-end.webp',
+  },
+};
+
+describe('SetupCardSheet photos (W3)', () => {
+  it('renders the start photo with annotation chips instead of the placeholder', () => {
+    render(
+      <SetupCardSheet
+        exerciseName="Incline DB Bench Press"
+        guide={MEDIA_GUIDE}
+        onClose={() => {}}
+      />,
+    );
+    const img = screen.getByRole('img', { name: /start position/i });
+    expect(img).toHaveAttribute('src', MEDIA_GUIDE.media.start);
+    expect(screen.getByText('bench 30°')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-photo-placeholder')).not.toBeInTheDocument();
+  });
+
+  it('toggles between start and end frames', () => {
+    render(
+      <SetupCardSheet
+        exerciseName="Incline DB Bench Press"
+        guide={MEDIA_GUIDE}
+        onClose={() => {}}
+      />,
+    );
+    const endBtn = screen.getByRole('button', { name: /end/i });
+    expect(endBtn).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(endBtn);
+    expect(endBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('img', { name: /end position/i })).toHaveAttribute(
+      'src',
+      MEDIA_GUIDE.media.end,
+    );
+  });
+
+  it('shows no toggle when only the start frame exists', () => {
+    render(
+      <SetupCardSheet
+        exerciseName="X"
+        guide={{ ...GUIDE, media: { start: '/exercise-media/x-start.webp' } }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole('img', { name: /start position/i })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /setup photo/i })).not.toBeInTheDocument();
+  });
+
+  it('image load failure shows "Photo unavailable" but keeps the toggle usable', () => {
+    render(<SetupCardSheet exerciseName="X" guide={MEDIA_GUIDE} onClose={() => {}} />);
+    fireEvent.error(screen.getByRole('img', { name: /start position/i }));
+    expect(screen.getByText(/photo unavailable/i)).toBeInTheDocument();
+    // Recovery path: the toggle stays mounted; picking a frame retries the img.
+    const endBtn = screen.getByRole('button', { name: /end/i });
+    fireEvent.click(endBtn);
+    expect(screen.getByRole('img', { name: /end position/i })).toHaveAttribute(
+      'src',
+      MEDIA_GUIDE.media.end,
+    );
+  });
+
+  it('overlays only numeric facts — prose facts stay out of the photo', () => {
+    render(
+      <SetupCardSheet
+        exerciseName="X"
+        guide={{ ...MEDIA_GUIDE, setup_facts: { stance: 'shoulder-width' } }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole('img', { name: /start position/i })).toBeInTheDocument();
+    expect(screen.queryByText('stance: shoulder-width')).not.toBeInTheDocument();
+    expect(screen.queryByText('bench 30°')).not.toBeInTheDocument();
+  });
+});
