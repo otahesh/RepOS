@@ -183,6 +183,24 @@ describe('logBuffer', () => {
     expect(body.rir).toBe(2);
   });
 
+  it('flush omits every null optional — a reps-only bodyweight row sends no weight_lbs/rir', async () => {
+    await seedRow({ weight_lbs: null, rir: null, rpe: null, notes: null, reps: 12 });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('weight_lbs');
+    expect(body).not.toHaveProperty('rir');
+    expect(body).not.toHaveProperty('rpe');
+    expect(body).not.toHaveProperty('notes');
+    expect(body.reps).toBe(12);
+  });
+
   it('flush keeps rpe/notes in the POST body when they are set', async () => {
     await seedRow({ rpe: 8, notes: 'belt on' });
     (fetch as any).mockResolvedValueOnce({

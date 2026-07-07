@@ -8,6 +8,7 @@ import { logBuffer } from '../../lib/logBuffer';
 import type { QueueRowStatus } from '../../hooks/useIdbQueueStatus';
 import type { TodayDay, TodaySet } from '../../lib/api/mesocycles';
 import type { ExerciseGuide } from '../../lib/api/exerciseGuide';
+import type { HistorySession } from '../../lib/api/exerciseHistory';
 
 // ---- Mocks ------------------------------------------------------------------
 
@@ -390,6 +391,31 @@ describe('<TodayLoggerMobile>', () => {
       expect(screen.getByLabelText(/Set 2 reps/i)).toHaveValue(9);
       expect(screen.getByText(/last time: 25 lbs × 9/i)).toBeInTheDocument();
       expect(getExerciseHistoryMock).toHaveBeenCalledWith('barbell-bench-press', 1);
+    });
+
+    it('late-resolving history never clobbers input the user typed while it was in flight', async () => {
+      // With effect-cancellation removed (StrictMode fix), the empty-inputs
+      // guard is the only thing standing between a slow /exercise-history
+      // response and silent overwrite of user-typed data. Pin it.
+      let resolveHistory!: (v: HistorySession[]) => void;
+      getExerciseHistoryMock.mockReturnValue(
+        new Promise<HistorySession[]>((r) => {
+          resolveHistory = r;
+        }),
+      );
+      const user = userEvent.setup();
+      renderFocused();
+
+      // User types into Set 1 while the history fetch is still pending.
+      await user.type(screen.getByLabelText(/Set 1 weight in pounds/i), '135');
+      await user.type(screen.getByLabelText(/Set 1 reps/i), '5');
+
+      resolveHistory([{ date: '2026-06-30', sets: [{ weight_lbs: 25, reps: 9, rir: 2 }] }]);
+      // Untouched Set 2 receives the prefill…
+      await waitFor(() => expect(screen.getByLabelText(/Set 2 weight in pounds/i)).toHaveValue(25));
+      // …while the user's typed values survive.
+      expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(135);
+      expect(screen.getByLabelText(/Set 1 reps/i)).toHaveValue(5);
     });
 
     it('does not prefill server-logged sets and seeds only non-null logged values', async () => {
