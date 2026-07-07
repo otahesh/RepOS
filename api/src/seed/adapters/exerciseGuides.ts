@@ -56,10 +56,10 @@ export function makeExerciseGuideAdapter(
         [
           g.exercise_slug,
           g.setup_callout,
-          JSON.stringify(g.setup_facts),
+          JSON.stringify(g.setup_facts ?? {}),
           g.cues,
           g.donts,
-          JSON.stringify(g.media),
+          JSON.stringify(g.media ?? {}),
           seedKey,
           generation,
         ],

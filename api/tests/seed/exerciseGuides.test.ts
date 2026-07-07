@@ -25,8 +25,10 @@ const GUIDE: ExerciseGuideSeed = {
 
 beforeAll(async () => {
   // Crash-cruft pre-clean: a killed prior run can leave the fixture exercise
-  // behind (shared repos_test DB) — clear it before inserting.
+  // and its _seed_meta hash behind (shared repos_test DB) — a stale hash would
+  // short-circuit the first runSeed as hash_unchanged. Clear both.
   await db.query(`DELETE FROM exercises WHERE slug=$1`, [SLUG]);
+  await db.query(`DELETE FROM _seed_meta WHERE key=$1`, [SEED_KEY]);
   const {
     rows: [ex],
   } = await db.query<{ id: string }>(
