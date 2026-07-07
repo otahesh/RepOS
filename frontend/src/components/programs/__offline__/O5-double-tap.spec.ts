@@ -14,7 +14,7 @@
 import { test, expect } from '@playwright/test';
 import { inspectQueue, openFirstBlock, seedMesocycle, waitForPosts } from './_helpers';
 
-test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never shows >1 queued', async ({
+test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, pill never shows >1 queued', async ({
   page,
 }) => {
   const server = await seedMesocycle(page);
@@ -30,8 +30,8 @@ test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never sh
 
   const logBtn = row.getByRole('button', { name: /^Log$/ });
 
-  // Observe banner copy throughout: count how often "2 sets queued" appears.
-  // We poll for any flash of the banner with a 2-queued count.
+  // Observe pill copy throughout: count how often "2 sets queued" appears.
+  // We poll for any flash of the pill with a 2-queued count.
   let everSawTwoQueued = false;
   const watchInterval = setInterval(async () => {
     try {
@@ -61,7 +61,7 @@ test('O5: double-tap within 500ms → exactly 1 IDB row, 1 POST, banner never sh
   await waitForPosts(server, 1, page);
   expect(server.posted).toHaveLength(1);
 
-  // The banner never flashed 2 sets queued during the interaction.
+  // The pill never flashed 2 sets queued during the interaction.
   expect(everSawTwoQueued).toBe(false);
 
   // IDB state: at most one row was ever created. Synced rows are deleted, so

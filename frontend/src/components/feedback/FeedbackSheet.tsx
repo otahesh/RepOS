@@ -2,8 +2,8 @@
 // Beta W7 — modal wrapper around FeedbackForm, opened from the Topbar bug-button.
 // Autofills the current route so the engineer sees where the user was.
 //
-// zIndex: TOKENS.zModal.zOverlay (panel C-Z). Deliberately above zBanner so the
-// LogBufferRecovery banner cannot paint over an open feedback modal.
+// zIndex: TOKENS.zModal.zOverlay (panel C-Z). Deliberately above zPill so the
+// SyncStatusPill cannot paint over an open feedback modal.
 // A11y: ESC closes, focus trap, initial focus into the dialog, return focus to
 // the trigger on close — via focus-trap-react, mirroring ConfirmDialog.
 import { useEffect, useRef } from 'react';

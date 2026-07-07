@@ -4,7 +4,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { RouteErrorBoundary } from './RouteErrorBoundary';
 import { useIsMobile } from '../../lib/useIsMobile';
-import { LogBufferRecovery } from '../programs/LogBufferRecovery';
+import { SyncStatusPill } from '../programs/SyncStatusPill';
 import { SessionExpiredBanner } from '../auth/SessionExpiredBanner';
 import { ToastHost } from '../common/ToastHost';
 import { MaintenanceBanner } from '../maintenance/MaintenanceBanner';
@@ -119,7 +119,7 @@ export default function AppShell() {
       >
         <Topbar onToggleSidebar={toggleDrawer} mobileOpen={mobileOpen} triggerRef={triggerRef} />
         <MaintenanceBanner />
-        <LogBufferRecovery />
+        <SyncStatusPill />
         <SessionExpiredBanner />
         <main
           style={{
@@ -178,7 +178,7 @@ export default function AppShell() {
       >
         <Topbar />
         <MaintenanceBanner />
-        <LogBufferRecovery />
+        <SyncStatusPill />
         <SessionExpiredBanner />
         <main
           style={{

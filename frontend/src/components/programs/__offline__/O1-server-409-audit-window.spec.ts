@@ -1,7 +1,7 @@
 // O1 — Server returns 409 audit_window_expired on a queued set.
 //
 // Master plan W1.3.6.2: queued set is rejected by server with
-// `audit_window_expired`; LogBufferRecovery surfaces it as a clickable banner;
+// `audit_window_expired`; SyncStatusPill surfaces it as a clickable pill;
 // the IDB row keeps status='rejected' so the user can review (never silent drop).
 //
 // Mocked-backend (page.route()) translation per /goal condition (3): the 409
@@ -10,7 +10,7 @@
 import { test, expect } from '@playwright/test';
 import { inspectQueue, logSet, openFirstBlock, seedMesocycle } from './_helpers';
 
-test('O1: 409 audit_window_expired surfaces banner + rejected status; row preserved', async ({
+test('O1: 409 audit_window_expired surfaces pill + rejected status; row preserved', async ({
   page,
 }) => {
   const server = await seedMesocycle(page);
@@ -39,8 +39,8 @@ test('O1: 409 audit_window_expired surfaces banner + rejected status; row preser
   expect(rows[0].status).toBe('rejected');
   expect(rows[0].rejection_reason).toBe('audit_window_expired');
 
-  // LogBufferRecovery banner surfaces rejected count; useIdbQueueCounts polls
-  // at 1000ms so allow up to the poll window plus a tick. The clickable banner
+  // SyncStatusPill surfaces rejected count; useIdbQueueCounts polls
+  // at 1000ms so allow up to the poll window plus a tick. The clickable pill
   // renders as a <Link> (role=link), not a button — a11y change in the component.
   await expect(page.getByRole('link', { name: /1 sets? rejected/i })).toBeVisible({
     timeout: 2000,

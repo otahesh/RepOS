@@ -465,7 +465,7 @@ export async function inspectQueue(page: Page): Promise<PendingSetLogRow[]> {
  * WAITS for the app's Dexie instance to create `RepOSLogQueue` (v2, with the
  * `pendingSetLogs` store) before opening it with no explicit version — so we
  * inherit the app's schema rather than creating a divergent v1. The caller must
- * therefore navigate to a banner-bearing route (e.g. `/`) first so
+ * therefore navigate to a pill-bearing route (e.g. `/`) first so
  * useIdbQueueCounts opens the DB.
  */
 export async function seedQueueRow(page: Page, row: PendingSetLogRow): Promise<void> {

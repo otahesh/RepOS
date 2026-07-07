@@ -1,7 +1,7 @@
 // O2 — Page reload mid-queue.
 //
 // Master plan W1.3.6.3: with 3 sets queued offline, reloading the page must
-// surface the banner ("3 sets queued"), and on reconnect all 3 must flush
+// surface the pill ("3 sets queued"), and on reconnect all 3 must flush
 // with NO double-submit.
 //
 // Mocked-backend (page.route()) translation per /goal condition (3): rather
@@ -55,7 +55,7 @@ const THREE_SETS: SeedSet[] = [
   },
 ];
 
-test('O2: 3 sets queued offline survive reload, banner surfaces, reconnect flushes all 3 with no dupes', async ({
+test('O2: 3 sets queued offline survive reload, pill surfaces, reconnect flushes all 3 with no dupes', async ({
   page,
 }) => {
   const server = await seedMesocycle(page, { sets: THREE_SETS });
@@ -83,8 +83,8 @@ test('O2: 3 sets queued offline survive reload, banner surfaces, reconnect flush
   await page.reload();
   await expect(page.getByTestId('set-row-0')).toBeVisible();
 
-  // After reload while still offline, LogBufferRecovery surfaces the offline
-  // pending banner. useIdbQueueCounts polls at 1000ms; allow up to 2000ms.
+  // After reload while still offline, SyncStatusPill surfaces the offline
+  // pending pill. useIdbQueueCounts polls at 1000ms; allow up to 2000ms.
   await expect(page.getByText(/OFFLINE.*3 sets queued/i)).toBeVisible({ timeout: 2000 });
 
   // Queue must still have the 3 rows.

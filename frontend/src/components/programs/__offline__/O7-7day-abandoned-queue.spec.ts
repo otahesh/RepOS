@@ -1,19 +1,19 @@
 // O7 — Queue abandoned 7+ days.
 //
 // Master plan W1.3.6.8: a pre-existing pending row whose created_at is ≥7
-// days old must surface the staleness banner with copy
+// days old must surface the staleness pill with copy
 // "<N> set queued · <N> days old · flush or clear?". The user gets a chooser
 // (flush vs clear) so a stale row doesn't silently re-flush at the wrong time.
 //
 // The "flush or clear" chooser UI lives behind /settings/storage (W1.3.8); this
-// spec asserts the staleness banner surfaces and is clickable to that target.
+// spec asserts the staleness pill surfaces and is clickable to that target.
 
 import { test, expect } from '@playwright/test';
 import { inspectQueue, seedMesocycle, seedQueueRow, type PendingSetLogRow } from './_helpers';
 
 const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
 
-test('O7: pending row aged 8 days surfaces staleness banner with day count + click target', async ({
+test('O7: pending row aged 8 days surfaces staleness pill with day count + click target', async ({
   page,
 }) => {
   await seedMesocycle(page);
@@ -48,14 +48,14 @@ test('O7: pending row aged 8 days surfaces staleness banner with day count + cli
   await seedQueueRow(page, stale);
 
   // useIdbQueueCounts polls at 1000ms; allow up to 2500ms for the staleness
-  // banner to render.
+  // pill to render.
   await expect(page.getByText(/1 set queued · 8 days old · flush or clear/i)).toBeVisible({
     timeout: 2500,
   });
 
-  // Banner is clickable — renders as a <Link> (role=link) to /settings/storage.
-  const banner = page.getByRole('link', { name: /1 set queued · 8 days old · flush or clear/i });
-  await expect(banner).toBeVisible();
+  // Pill is clickable — renders as a <Link> (role=link) to /settings/storage.
+  const pill = page.getByRole('link', { name: /1 set queued · 8 days old · flush or clear/i });
+  await expect(pill).toBeVisible();
 
   // Row is still in the queue — staleness DOES NOT auto-purge.
   const rows = await inspectQueue(page);
