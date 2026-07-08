@@ -14,6 +14,12 @@ test('every guide maps to an exercise with name, equipment list, and callout', (
   }
 });
 
+test('gait/cardio exercises are excluded — no photos for walking or biking', () => {
+  const slugs = listExerciseInfo().map((i) => i.slug);
+  assert.ok(!slugs.includes('outdoor-walking-z2'), 'walking should be excluded');
+  assert.ok(!slugs.includes('recumbent-bike-steady-state'), 'bike should be excluded');
+});
+
 test('a known exercise resolves with humanized equipment', () => {
   const incline = listExerciseInfo().find((i) => i.slug === 'incline-dumbbell-bench-press');
   assert.ok(incline);
