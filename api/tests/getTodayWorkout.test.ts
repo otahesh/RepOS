@@ -93,13 +93,20 @@ afterAll(async () => {
   await db.end();
 });
 
-describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
-  it('before run start → no_active_run', async () => {
+describe('getTodayWorkout (sequence semantics)', () => {
+  it('before run start → week 1 day 0 offered with pacing ahead', async () => {
+    // Early training is allowed: the sequence has no start-date gate.
     const r = await getTodayWorkout(userId, new Date('2026-05-03T18:00:00Z')); // Sun NY
-    expect(r.state).toBe('no_active_run');
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
+      expect(r.day.week_idx).toBe(1);
+      expect(r.day.day_idx).toBe(0);
+      expect(r.pacing).toEqual({ status: 'ahead', suggested_date: '2026-05-04' });
+      expect(r.completed_today).toBe(false);
+    }
   });
 
-  it('workout day → state=workout with sets attached', async () => {
+  it('workout day → state=workout with sets attached, pacing on_pace', async () => {
     // 2026-05-04 NY = day_idx 0 = Day A
     const r = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z')); // Mon noon NY
     expect(r.state).toBe('workout');
@@ -107,23 +114,46 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
       expect(r.day.kind).toBe('strength');
       expect(r.sets.length).toBeGreaterThan(0);
       expect(r.run_id).toBe(runId);
+      expect(r.pacing).toEqual({ status: 'on_pace', suggested_date: '2026-05-04' });
+      expect(r.completed_today).toBe(false);
     }
   });
 
-  it('rest day (no row, but in window) → state=rest', async () => {
-    // 2026-05-05 NY → not in template (day_offsets = 0,2)
+  it('day after an incomplete workout → same workout still offered, behind by 1', async () => {
+    // 2026-05-05 NY: no day scheduled, but Day A (05-04) is still planned →
+    // the sequence offers it (was state=rest under date semantics).
     const r = await getTodayWorkout(userId, new Date('2026-05-05T16:00:00Z'));
-    expect(r.state).toBe('rest');
-    if (r.state === 'rest') {
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
       expect(r.run_id).toBe(runId);
-      expect(r.scheduled_date).toBe('2026-05-05');
+      expect(r.day.week_idx).toBe(1);
+      expect(r.day.day_idx).toBe(0);
+      expect(r.pacing).toEqual({ status: 'behind', days_behind: 1, suggested_date: '2026-05-04' });
     }
   });
 
-  it('after run end → no_active_run', async () => {
-    // 5 weeks * 7 days = 35 days starting 05-04 → ends 06-07. Pick 06-15.
+  it('earliest incomplete workout offered when its scheduled_date is past (behind by 3)', async () => {
+    // 2026-05-07 NY: Day A (05-04) and Day B (05-06) both still planned →
+    // earliest (week 1, day 0) wins; days_behind measured from ITS date.
+    const r = await getTodayWorkout(userId, new Date('2026-05-07T16:00:00Z'));
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
+      expect(r.day.week_idx).toBe(1);
+      expect(r.day.day_idx).toBe(0);
+      expect(r.pacing).toEqual({ status: 'behind', days_behind: 3, suggested_date: '2026-05-04' });
+    }
+  });
+
+  it('past the old calendar window → earliest incomplete still offered (no window gate)', async () => {
+    // 5 weeks * 7 days = 35 days starting 05-04 → old window ended 06-07.
+    // Sequence semantics: the run ends by completion, not by date.
     const r = await getTodayWorkout(userId, new Date('2026-06-15T16:00:00Z'));
-    expect(r.state).toBe('no_active_run');
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
+      expect(r.day.week_idx).toBe(1);
+      expect(r.day.day_idx).toBe(0);
+      expect(r.pacing.status).toBe('behind');
+    }
   });
 
   it('DST spring-forward day still resolves once', async () => {
@@ -140,8 +170,8 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
 
       const before = await getTodayWorkout(u2.id, new Date('2026-03-08T06:00:00Z')); // 01:00 EST
       const after = await getTodayWorkout(u2.id, new Date('2026-03-08T08:00:00Z')); // 04:00 EDT
-      expect(before.state === 'workout' || before.state === 'rest').toBe(true);
-      expect(after.state).toBe(before.state);
+      expect(before.state).toBe('workout');
+      expect(after.state).toBe('workout');
       if (before.state === 'workout' && after.state === 'workout') {
         expect(after.day.id).toBe(before.day.id);
       }
@@ -154,8 +184,11 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
     // Caller passes start_tz, not the user's current device tz, so even if
     // we fed Pacific instant the resolved date is NY.
     const r = await getTodayWorkout(userId, new Date('2026-05-04T03:00:00Z')); // 23:00 May-3 NY
-    // 2026-05-03 NY is before run start (05-04) → no_active_run
-    expect(r.state).toBe('no_active_run');
+    // 2026-05-03 NY is one day before Day A's scheduled_date → ahead
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
+      expect(r.pacing).toEqual({ status: 'ahead', suggested_date: '2026-05-04' });
+    }
   });
 
   it('leap-year boundary (Feb 29 → Mar 1) resolves correctly', async () => {
@@ -170,14 +203,25 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
 
       const feb29 = await getTodayWorkout(u3.id, new Date('2028-02-29T12:00:00Z'));
       const mar1 = await getTodayWorkout(u3.id, new Date('2028-03-01T12:00:00Z'));
-      expect(feb29.state).toBe('workout'); // day_offset 0
-      expect(mar1.state).toBe('rest'); // day_offset 2 falls on 03-02
+      expect(feb29.state).toBe('workout'); // day_offset 0, on pace
+      if (feb29.state === 'workout') {
+        expect(feb29.pacing).toEqual({ status: 'on_pace', suggested_date: '2028-02-29' });
+      }
+      // Day 0 (02-29) still planned on 03-01 → still offered, leap-day math = 1 day behind
+      expect(mar1.state).toBe('workout');
+      if (mar1.state === 'workout') {
+        expect(mar1.pacing).toEqual({
+          status: 'behind',
+          days_behind: 1,
+          suggested_date: '2028-02-29',
+        });
+      }
     } finally {
       await cleanupUser(u3.id);
     }
   });
 
-  it('between runs (run completed, none active) → no_active_run', async () => {
+  it('truly nothing (user has no runs at all) → no_active_run', async () => {
     const u5 = await mkUser({ prefix: 'vitest.today.between' });
     try {
       const r = await getTodayWorkout(u5.id, new Date('2026-05-04T16:00:00Z'));
@@ -245,6 +289,119 @@ describe('getTodayWorkout (spec §3.3 corrected pseudocode)', () => {
       await db.query(`DELETE FROM set_logs WHERE planned_set_id = ANY($1::uuid[])`, [
         [ps.id, ps2.id],
       ]);
+    }
+  });
+});
+
+describe('getTodayWorkout (sequence progression + completion)', () => {
+  /** Dedicated user + materialized run (start 2026-05-04, NY) so status
+   *  mutations never leak into the shared file-scope fixture run. */
+  async function mkRun(prefix: string): Promise<{ uid: string; rid: string }> {
+    const u = await mkUser({ prefix, equipment_profile: { _v: 1 } });
+    const up = await mkUserProgram({ userId: u.id, templateId, name: `${prefix} run` });
+    const r = await materializeMesocycle({
+      userProgramId: up.id,
+      startDate: '2026-05-04',
+      startTz: 'America/New_York',
+    });
+    return { uid: u.id, rid: r.run_id };
+  }
+
+  it('completing day 0 advances to day 1 the same day, completed_today=true', async () => {
+    const { uid, rid } = await mkRun('vitest.today.advance');
+    try {
+      await db.query(
+        `UPDATE day_workouts SET status='completed', completed_at='2026-05-04T17:00:00Z'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
+        [rid],
+      );
+      const r = await getTodayWorkout(uid, new Date('2026-05-04T18:00:00Z')); // still Mon NY
+      expect(r.state).toBe('workout');
+      if (r.state === 'workout') {
+        expect(r.day.week_idx).toBe(1);
+        expect(r.day.day_idx).toBe(1);
+        expect(r.day.scheduled_date).toBe('2026-05-06');
+        expect(r.pacing).toEqual({ status: 'ahead', suggested_date: '2026-05-06' });
+        expect(r.completed_today).toBe(true);
+      }
+    } finally {
+      await cleanupUser(uid);
+    }
+  });
+
+  it('completed_today=false when the last completion was a previous local day', async () => {
+    const { uid, rid } = await mkRun('vitest.today.stale');
+    try {
+      await db.query(
+        `UPDATE day_workouts SET status='completed', completed_at='2026-05-04T17:00:00Z'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
+        [rid],
+      );
+      const r = await getTodayWorkout(uid, new Date('2026-05-05T16:00:00Z')); // Tue NY
+      expect(r.state).toBe('workout');
+      if (r.state === 'workout') {
+        expect(r.day.day_idx).toBe(1);
+        expect(r.completed_today).toBe(false);
+      }
+    } finally {
+      await cleanupUser(uid);
+    }
+  });
+
+  it('skipped day is passed over — next planned day offered', async () => {
+    const { uid, rid } = await mkRun('vitest.today.skip');
+    try {
+      await db.query(
+        `UPDATE day_workouts SET status='skipped'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
+        [rid],
+      );
+      const r = await getTodayWorkout(uid, new Date('2026-05-04T16:00:00Z'));
+      expect(r.state).toBe('workout');
+      if (r.state === 'workout') {
+        expect(r.day.week_idx).toBe(1);
+        expect(r.day.day_idx).toBe(1);
+        expect(r.completed_today).toBe(false);
+      }
+    } finally {
+      await cleanupUser(uid);
+    }
+  });
+
+  it('all day workouts terminal on an active run → mesocycle_complete (case a)', async () => {
+    const { uid, rid } = await mkRun('vitest.today.done');
+    try {
+      await db.query(
+        `UPDATE day_workouts SET status='completed', completed_at=now()
+         WHERE mesocycle_run_id=$1`,
+        [rid],
+      );
+      const r = await getTodayWorkout(uid, new Date('2026-06-01T16:00:00Z'));
+      expect(r).toEqual({ state: 'mesocycle_complete', run_id: rid });
+    } finally {
+      await cleanupUser(uid);
+    }
+  });
+
+  it('no active run but latest run is completed → mesocycle_complete (case b)', async () => {
+    const { uid, rid } = await mkRun('vitest.today.finished');
+    try {
+      await db.query(`UPDATE mesocycle_runs SET status='completed' WHERE id=$1`, [rid]);
+      const r = await getTodayWorkout(uid, new Date('2026-06-10T16:00:00Z'));
+      expect(r).toEqual({ state: 'mesocycle_complete', run_id: rid });
+    } finally {
+      await cleanupUser(uid);
+    }
+  });
+
+  it('no active run and latest run abandoned → no_active_run', async () => {
+    const { uid, rid } = await mkRun('vitest.today.abandoned');
+    try {
+      await db.query(`UPDATE mesocycle_runs SET status='abandoned' WHERE id=$1`, [rid]);
+      const r = await getTodayWorkout(uid, new Date('2026-06-10T16:00:00Z'));
+      expect(r.state).toBe('no_active_run');
+    } finally {
+      await cleanupUser(uid);
     }
   });
 });

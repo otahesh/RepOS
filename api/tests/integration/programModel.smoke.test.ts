@@ -183,7 +183,7 @@ describe('program model v1 smoke — golden path', () => {
     expect(todayRes.statusCode).toBe(200);
     const todayBody = todayRes.json<{ state: string }>();
     // state must be one of the three valid values.
-    expect(['workout', 'rest', 'no_active_run']).toContain(todayBody.state);
+    expect(['workout', 'mesocycle_complete', 'no_active_run']).toContain(todayBody.state);
 
     // ── 5. Volume rollup ──────────────────────────────────────────────────────
     const rollupRes = await app.inject({
