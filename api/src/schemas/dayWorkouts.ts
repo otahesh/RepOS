@@ -16,7 +16,3 @@ export const DayWorkoutCompleteSchema = z.object({
     .optional(),
 });
 export type DayWorkoutComplete = z.infer<typeof DayWorkoutCompleteSchema>;
-
-// :id param guard — one canonical UUID-param validator (see idParams.ts).
-export { UuidParamSchema as IdParamSchema } from './idParams.js';
-export type { UuidParam as IdParam } from './idParams.js';

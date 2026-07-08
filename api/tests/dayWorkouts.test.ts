@@ -571,4 +571,39 @@ describe('run lifecycle', () => {
       await app.close();
     }
   });
+
+  it('self-heals a crashed half-commit: idempotent complete retry closes the stranded run', async () => {
+    const app = await build();
+    try {
+      const seed = await seedBackdatedRun();
+
+      // Simulate a crash between the day_workout UPDATE and the run close:
+      // every workout terminal, but the run is still active.
+      await db.query(
+        `UPDATE day_workouts SET status='completed', completed_at=now()
+         WHERE mesocycle_run_id=$1`,
+        [seed.mesocycleRunId],
+      );
+      expect((await runState(seed.mesocycleRunId)).status).toBe('active');
+
+      // The retry hits the idempotent already-completed branch — it must
+      // still run the lifecycle close and report run_completed.
+      const resp = await app.inject({
+        method: 'POST',
+        url: `/api/day-workouts/${seed.dayWorkoutId}/complete`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {},
+      });
+      expect(resp.statusCode).toBe(200);
+      expect(resp.json().status).toBe('completed');
+      expect(resp.json().run_completed).toBe(true);
+
+      const run = await runState(seed.mesocycleRunId);
+      expect(run.status).toBe('completed');
+      expect(run.finished_at).not.toBeNull();
+      expect(await userProgramStatus(seed.userProgramId)).toBe('completed');
+    } finally {
+      await app.close();
+    }
+  });
 });
