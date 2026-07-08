@@ -1,8 +1,10 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { PoolClient } from 'pg';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { db } from '../db/client.js';
 import { computeUserLocalDate } from '../services/userLocalDate.js';
-import { DayWorkoutCompleteSchema, IdParamSchema } from '../schemas/dayWorkouts.js';
+import { DayWorkoutCompleteSchema } from '../schemas/dayWorkouts.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 
 // ---------------------------------------------------------------------------
 // Sequence-workouts Task 2 — day-workout status routes.
@@ -21,6 +23,12 @@ import { DayWorkoutCompleteSchema, IdParamSchema } from '../schemas/dayWorkouts.
 // (same contract as setLogs.ts). A malformed :id also 404s — a non-UUID can
 // never name an existing row, and a distinct 400 would only add a shape to
 // probe.
+//
+// Atomicity: every handler runs its load + mutation + run-lifecycle writes in
+// ONE transaction (precedent: /mesocycles/:id/abandon). The load takes
+// FOR UPDATE on both the day_workout and its run, so concurrent mutations on
+// the same workout/run serialize at the load and the status checks below it
+// are race-free (no check-then-act window).
 //
 // Run lifecycle: when a complete/skip leaves the run with zero
 // planned/in_progress rows, the run flips to status='completed'
@@ -42,39 +50,51 @@ type DayWorkoutJoinRow = {
   user_id: string;
 };
 
-type StatusResponse = {
-  id: string;
-  status: string;
-  completed_at: Date | string | null;
-  run_completed: boolean;
-};
+const NOT_FOUND = { error: 'day_workout not found' } as const;
+const ANOTHER_ACTIVE = {
+  error: 'another program is active — abandon it first',
+  field: 'run',
+} as const;
 
-/** Load the day workout + its run, or null when the id is unknown OR owned by
- *  someone else (callers translate null to the single 404 shape). */
-async function loadDayWorkout(id: string, userId: string): Promise<DayWorkoutJoinRow | null> {
+/** Load the day workout + its run FOR UPDATE (both rows locked), or null when
+ *  the id is unknown OR owned by someone else (callers translate null to the
+ *  single 404 shape). Must run inside a transaction. */
+async function loadDayWorkoutForUpdate(
+  client: PoolClient,
+  id: string,
+  userId: string,
+): Promise<DayWorkoutJoinRow | null> {
   const {
     rows: [row],
-  } = await db.query<DayWorkoutJoinRow>(
+  } = await client.query<DayWorkoutJoinRow>(
     `SELECT dw.id, dw.status, dw.completed_at, dw.mesocycle_run_id,
             mr.status AS run_status, mr.start_tz,
             to_char(mr.start_date, 'YYYY-MM-DD') AS start_date,
             mr.user_program_id, mr.user_id
      FROM day_workouts dw
      JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
-     WHERE dw.id = $1`,
+     WHERE dw.id = $1
+     FOR UPDATE OF dw, mr`,
     [id],
   );
   if (!row || row.user_id !== userId) return null;
   return row;
 }
 
-/** After a complete/skip: close the run iff no open (planned/in_progress)
- *  workouts remain. The NOT EXISTS guard lives inside the UPDATE so the
- *  count-check and the flip are a single atomic statement — two concurrent
- *  "last workout" mutations can't both miss the zero-count. Returns true when
- *  THIS call closed the run. */
-async function closeRunIfSequenceDone(runId: string, userProgramId: string): Promise<boolean> {
-  const { rowCount } = await db.query(
+/** Close the run iff no open (planned/in_progress) workouts remain, flipping
+ *  the owning user_program with it. Runs on the handler's transaction client
+ *  so the workout mutation, the run flip, and the program flip commit (or
+ *  roll back) together. Returns true when THIS call closed the run.
+ *
+ *  Also invoked from the idempotent early-return branches of complete/skip:
+ *  a crash after a previous request's workout UPDATE but before its run
+ *  close would otherwise strand an active run with zero open workouts — the
+ *  retry lands on the idempotent branch and heals it here. */
+async function closeRunIfSequenceDone(
+  client: PoolClient,
+  run: Pick<DayWorkoutJoinRow, 'mesocycle_run_id' | 'user_program_id'>,
+): Promise<boolean> {
+  const { rowCount } = await client.query(
     `UPDATE mesocycle_runs
         SET status='completed', finished_at=now(), updated_at=now()
       WHERE id = $1 AND status = 'active'
@@ -82,37 +102,37 @@ async function closeRunIfSequenceDone(runId: string, userProgramId: string): Pro
           SELECT 1 FROM day_workouts
           WHERE mesocycle_run_id = $1 AND status IN ('planned','in_progress')
         )`,
-    [runId],
+    [run.mesocycle_run_id],
   );
   if (rowCount !== 1) return false;
-  await db.query(`UPDATE user_programs SET status='completed', updated_at=now() WHERE id = $1`, [
-    userProgramId,
-  ]);
+  await client.query(
+    `UPDATE user_programs SET status='completed', updated_at=now() WHERE id = $1`,
+    [run.user_program_id],
+  );
   return true;
 }
 
-/** Shared prologue: auth state + :id validation + ownership load. Returns the
- *  row, or null after having written the error response. */
-async function resolveDayWorkout(
-  req: FastifyRequest,
+/** Safe rollback for catch paths — a dead connection's ROLLBACK failure must
+ *  not mask the original error (matches the abandon handler's pattern). */
+async function rollbackQuietly(client: PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {
+    /* already rolled back / connection dead */
+  }
+}
+
+function sendStatus(
   reply: FastifyReply,
-): Promise<DayWorkoutJoinRow | null> {
-  const userId = req.userId;
-  if (!userId) {
-    await reply.code(500).send({ error: 'auth_state_missing' });
-    return null;
-  }
-  const idParse = IdParamSchema.safeParse(req.params);
-  if (!idParse.success) {
-    await reply.code(404).send({ error: 'day_workout not found' });
-    return null;
-  }
-  const row = await loadDayWorkout(idParse.data.id, userId);
-  if (!row) {
-    await reply.code(404).send({ error: 'day_workout not found' });
-    return null;
-  }
-  return row;
+  row: { id: string; status: string; completed_at: Date | string | null },
+  runCompleted: boolean,
+) {
+  return reply.code(200).send({
+    id: row.id,
+    status: row.status,
+    completed_at: row.completed_at,
+    run_completed: runCompleted,
+  });
 }
 
 export async function dayWorkoutsRoutes(app: FastifyInstance) {
@@ -120,19 +140,10 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
     '/day-workouts/:id/complete',
     { preHandler: [requireBearerOrCfAccess] },
     async (req, reply) => {
-      const row = await resolveDayWorkout(req, reply);
-      if (!row) return;
-
-      // Idempotent: already completed → return the existing row unchanged.
-      // completed_at does NOT move even if a different completed_on is sent.
-      if (row.status === 'completed') {
-        return reply.code(200).send({
-          id: row.id,
-          status: row.status,
-          completed_at: row.completed_at,
-          run_completed: false,
-        } satisfies StatusResponse);
-      }
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      const idParse = UuidParamSchema.safeParse(req.params);
+      if (!idParse.success) return reply.code(404).send(NOT_FOUND);
 
       const parse = DayWorkoutCompleteSchema.safeParse(req.body ?? {});
       if (!parse.success) {
@@ -143,52 +154,75 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
       }
       const completedOn = parse.data.completed_on;
 
-      if (completedOn) {
-        // Range checks in the run's own timezone — a device in another tz
-        // must not shift what "today" or "the program start" means.
-        const todayLocal = computeUserLocalDate(row.start_tz);
-        if (completedOn > todayLocal) {
-          return reply
-            .code(400)
-            .send({ error: 'completed_on cannot be in the future', field: 'completed_on' });
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const row = await loadDayWorkoutForUpdate(client, idParse.data.id, userId);
+        if (!row) {
+          await client.query('ROLLBACK');
+          return reply.code(404).send(NOT_FOUND);
         }
-        if (completedOn < row.start_date) {
-          return reply
-            .code(400)
-            .send({ error: 'completed_on is before the program started', field: 'completed_on' });
+
+        // Idempotent: already completed → return the existing row unchanged.
+        // completed_at does NOT move even if a different completed_on is
+        // sent. Still run the lifecycle close (self-heal, see helper doc).
+        if (row.status === 'completed') {
+          const runCompleted = await closeRunIfSequenceDone(client, row);
+          await client.query('COMMIT');
+          return sendStatus(reply, row, runCompleted);
         }
+
+        if (completedOn) {
+          // Range checks in the run's own timezone — a device in another tz
+          // must not shift what "today" or "the program start" means.
+          const todayLocal = computeUserLocalDate(row.start_tz);
+          if (completedOn > todayLocal) {
+            await client.query('ROLLBACK');
+            return reply
+              .code(400)
+              .send({ error: 'completed_on cannot be in the future', field: 'completed_on' });
+          }
+          if (completedOn < row.start_date) {
+            await client.query('ROLLBACK');
+            return reply.code(400).send({
+              error: 'completed_on is before the program started',
+              field: 'completed_on',
+            });
+          }
+        }
+
+        // Noon-local storage for backfilled dates: `timestamp AT TIME ZONE tz`
+        // interprets the naive noon wall-clock in the run's tz and yields a
+        // timestamptz — round-tripping through computeUserLocalDate always
+        // lands back on the requested calendar date (midnight would straddle
+        // DST/TZ edges).
+        const {
+          rows: [updated],
+        } = completedOn
+          ? await client.query<{ id: string; status: string; completed_at: Date }>(
+              `UPDATE day_workouts
+                  SET status='completed',
+                      completed_at = ($2 || ' 12:00:00')::timestamp AT TIME ZONE $3
+                WHERE id = $1
+                RETURNING id, status, completed_at`,
+              [row.id, completedOn, row.start_tz],
+            )
+          : await client.query<{ id: string; status: string; completed_at: Date }>(
+              `UPDATE day_workouts SET status='completed', completed_at = now()
+                WHERE id = $1
+                RETURNING id, status, completed_at`,
+              [row.id],
+            );
+
+        const runCompleted = await closeRunIfSequenceDone(client, row);
+        await client.query('COMMIT');
+        return sendStatus(reply, updated, runCompleted);
+      } catch (e) {
+        await rollbackQuietly(client);
+        throw e;
+      } finally {
+        client.release();
       }
-
-      // Noon-local storage for backfilled dates: `timestamp AT TIME ZONE tz`
-      // interprets the naive noon wall-clock in the run's tz and yields a
-      // timestamptz — round-tripping through computeUserLocalDate always
-      // lands back on the requested calendar date (midnight would straddle
-      // DST/TZ edges).
-      const {
-        rows: [updated],
-      } = completedOn
-        ? await db.query<{ id: string; status: string; completed_at: Date }>(
-            `UPDATE day_workouts
-                SET status='completed',
-                    completed_at = ($2 || ' 12:00:00')::timestamp AT TIME ZONE $3
-              WHERE id = $1
-              RETURNING id, status, completed_at`,
-            [row.id, completedOn, row.start_tz],
-          )
-        : await db.query<{ id: string; status: string; completed_at: Date }>(
-            `UPDATE day_workouts SET status='completed', completed_at = now()
-              WHERE id = $1
-              RETURNING id, status, completed_at`,
-            [row.id],
-          );
-
-      const runCompleted = await closeRunIfSequenceDone(row.mesocycle_run_id, row.user_program_id);
-      return reply.code(200).send({
-        id: updated.id,
-        status: updated.status,
-        completed_at: updated.completed_at,
-        run_completed: runCompleted,
-      } satisfies StatusResponse);
     },
   );
 
@@ -196,40 +230,54 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
     '/day-workouts/:id/skip',
     { preHandler: [requireBearerOrCfAccess] },
     async (req, reply) => {
-      const row = await resolveDayWorkout(req, reply);
-      if (!row) return;
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      const idParse = UuidParamSchema.safeParse(req.params);
+      if (!idParse.success) return reply.code(404).send(NOT_FOUND);
 
-      if (row.status === 'skipped') {
-        return reply.code(200).send({
-          id: row.id,
-          status: row.status,
-          completed_at: row.completed_at,
-          run_completed: false,
-        } satisfies StatusResponse);
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const row = await loadDayWorkoutForUpdate(client, idParse.data.id, userId);
+        if (!row) {
+          await client.query('ROLLBACK');
+          return reply.code(404).send(NOT_FOUND);
+        }
+
+        // Idempotent — and self-healing, same as complete's branch.
+        if (row.status === 'skipped') {
+          const runCompleted = await closeRunIfSequenceDone(client, row);
+          await client.query('COMMIT');
+          return sendStatus(reply, row, runCompleted);
+        }
+        if (row.status === 'completed') {
+          // Completion carries data (a stamp, possibly logs) — silently
+          // downgrading it to skipped would orphan that. Force the explicit
+          // reopen path first. Race-free: the row is locked FOR UPDATE.
+          await client.query('ROLLBACK');
+          return reply
+            .code(409)
+            .send({ error: 'already completed — reopen first', field: 'status' });
+        }
+
+        const {
+          rows: [updated],
+        } = await client.query<{ id: string; status: string; completed_at: Date | null }>(
+          `UPDATE day_workouts SET status='skipped'
+            WHERE id = $1
+            RETURNING id, status, completed_at`,
+          [row.id],
+        );
+
+        const runCompleted = await closeRunIfSequenceDone(client, row);
+        await client.query('COMMIT');
+        return sendStatus(reply, updated, runCompleted);
+      } catch (e) {
+        await rollbackQuietly(client);
+        throw e;
+      } finally {
+        client.release();
       }
-      if (row.status === 'completed') {
-        // Completion carries data (a stamp, possibly logs) — silently
-        // downgrading it to skipped would orphan that. Force the explicit
-        // reopen path first.
-        return reply.code(409).send({ error: 'already completed — reopen first', field: 'status' });
-      }
-
-      const {
-        rows: [updated],
-      } = await db.query<{ id: string; status: string; completed_at: Date | null }>(
-        `UPDATE day_workouts SET status='skipped'
-          WHERE id = $1
-          RETURNING id, status, completed_at`,
-        [row.id],
-      );
-
-      const runCompleted = await closeRunIfSequenceDone(row.mesocycle_run_id, row.user_program_id);
-      return reply.code(200).send({
-        id: updated.id,
-        status: updated.status,
-        completed_at: updated.completed_at,
-        run_completed: runCompleted,
-      } satisfies StatusResponse);
     },
   );
 
@@ -237,40 +285,35 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
     '/day-workouts/:id/reopen',
     { preHandler: [requireBearerOrCfAccess] },
     async (req, reply) => {
-      const row = await resolveDayWorkout(req, reply);
-      if (!row) return;
+      const userId = req.userId;
+      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      const idParse = UuidParamSchema.safeParse(req.params);
+      if (!idParse.success) return reply.code(404).send(NOT_FOUND);
 
-      // Idempotent: planned/in_progress are already open.
-      if (row.status === 'planned' || row.status === 'in_progress') {
-        return reply.code(200).send({
-          id: row.id,
-          status: row.status,
-          completed_at: row.completed_at,
-          run_completed: false,
-        } satisfies StatusResponse);
-      }
-
-      // Reopen + (maybe) run re-activation must be atomic: reopening the only
-      // workout of a completed run and NOT re-activating the run would strand
-      // a planned row on a closed run.
       const client = await db.connect();
       try {
         await client.query('BEGIN');
-        // Lock the run row so a concurrent reopen/complete on the same run
-        // serializes here.
-        const {
-          rows: [run],
-        } = await client.query<{ status: string }>(
-          `SELECT status FROM mesocycle_runs WHERE id = $1 FOR UPDATE`,
-          [row.mesocycle_run_id],
-        );
+        const row = await loadDayWorkoutForUpdate(client, idParse.data.id, userId);
+        if (!row) {
+          await client.query('ROLLBACK');
+          return reply.code(404).send(NOT_FOUND);
+        }
 
+        // Idempotent: planned/in_progress are already open — nothing to write.
+        if (row.status === 'planned' || row.status === 'in_progress') {
+          await client.query('ROLLBACK');
+          return sendStatus(reply, row, false);
+        }
+
+        // Reopen + (maybe) run re-activation are atomic: reopening the only
+        // workout of a completed run and NOT re-activating the run would
+        // strand a planned row on a closed run.
         await client.query(
           `UPDATE day_workouts SET status='planned', completed_at=NULL WHERE id = $1`,
           [row.id],
         );
 
-        if (run.status === 'completed') {
+        if (row.run_status === 'completed') {
           // The lifecycle flip closed this run; reopening a workout un-closes
           // it — but only if the one-active-run-per-user slot is free.
           const { rows: others } = await client.query(
@@ -280,9 +323,7 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
           );
           if (others.length > 0) {
             await client.query('ROLLBACK');
-            return reply
-              .code(409)
-              .send({ error: 'another program is active — abandon it first', field: 'run' });
+            return reply.code(409).send(ANOTHER_ACTIVE);
           }
           await client.query(
             `UPDATE mesocycle_runs
@@ -297,28 +338,20 @@ export async function dayWorkoutsRoutes(app: FastifyInstance) {
         }
 
         await client.query('COMMIT');
+        return sendStatus(reply, { id: row.id, status: 'planned', completed_at: null }, false);
       } catch (err) {
-        await client.query('ROLLBACK');
+        await rollbackQuietly(client);
         // A run activated between our existence-check and the UPDATE trips
         // idx_meso_one_active_per_user — same user-facing condition as the
         // explicit check above, so same 409.
         const pgErr = err as { code?: string; constraint?: string };
         if (pgErr.code === '23505' && pgErr.constraint === 'idx_meso_one_active_per_user') {
-          return reply
-            .code(409)
-            .send({ error: 'another program is active — abandon it first', field: 'run' });
+          return reply.code(409).send(ANOTHER_ACTIVE);
         }
         throw err;
       } finally {
         client.release();
       }
-
-      return reply.code(200).send({
-        id: row.id,
-        status: 'planned',
-        completed_at: null,
-        run_completed: false,
-      } satisfies StatusResponse);
     },
   );
 }
