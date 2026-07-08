@@ -22,10 +22,18 @@ const TodayNoActiveRunSchema = z.object({
   state: z.literal('no_active_run'),
 });
 
-const TodayRestSchema = z.object({
-  state: z.literal('rest'),
+// All day workouts finished (or the latest run itself is completed) — dates
+// are pacing hints under sequence semantics, so there is no 'rest' state.
+const TodayMesocycleCompleteSchema = z.object({
+  state: z.literal('mesocycle_complete'),
   run_id: z.string().uuid(),
-  scheduled_date: z.string(), // YYYY-MM-DD
+});
+
+const TodayPacingSchema = z.object({
+  status: z.enum(['ahead', 'on_pace', 'behind']),
+  // Whole days past the offered day's scheduled_date; present only when behind.
+  days_behind: z.number().int().min(1).optional(),
+  suggested_date: z.string(), // YYYY-MM-DD — the offered day's scheduled_date
 });
 
 const SuggestedSubstitutionSchema = z.object({
@@ -85,13 +93,15 @@ const TodayWorkoutSchema = z.object({
   state: z.literal('workout'),
   run_id: z.string().uuid(),
   day: TodayDaySchema,
+  pacing: TodayPacingSchema,
+  completed_today: z.boolean(),
   sets: z.array(TodaySetSchema),
   cardio: z.array(TodayCardioSchema),
 });
 
 export const TodayWorkoutResponseSchema = z.union([
   TodayNoActiveRunSchema,
-  TodayRestSchema,
+  TodayMesocycleCompleteSchema,
   TodayWorkoutSchema,
 ]);
 

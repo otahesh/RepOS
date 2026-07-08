@@ -136,26 +136,35 @@ describe('GET /api/mesocycles/today', () => {
     expect(body.day.scheduled_date).toBe('2026-05-04');
   });
 
-  it('returns state:rest on an off-day inside the run window', async () => {
-    // Move time forward to Tuesday, which is a rest day for Mon/Wed/Fri.
+  it('keeps offering the earliest incomplete workout on an off-day (sequence semantics)', async () => {
+    // Move time forward to Tuesday — no day scheduled, but Monday's workout is
+    // still planned, so the sequence offers it with pacing behind by 1.
     vi.setSystemTime(new Date('2026-05-05T15:00:00.000Z'));
     try {
       const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
       expect(r.statusCode).toBe(200);
       const body = r.json<any>();
-      expect(body.state).toBe('rest');
+      expect(body.state).toBe('workout');
       expect(body.run_id).toBe(runId);
+      expect(body.day.scheduled_date).toBe('2026-05-04');
+      expect(body.pacing).toEqual({
+        status: 'behind',
+        days_behind: 1,
+        suggested_date: '2026-05-04',
+      });
     } finally {
       vi.setSystemTime(new Date('2026-05-04T15:00:00.000Z'));
     }
   });
 
-  it('returns state:no_active_run when no active run exists', async () => {
+  it('returns state:mesocycle_complete when the latest run is completed', async () => {
     await db.query(`UPDATE mesocycle_runs SET status='completed' WHERE id=$1`, [runId]);
     try {
       const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
       expect(r.statusCode).toBe(200);
-      expect(r.json<any>().state).toBe('no_active_run');
+      const body = r.json<any>();
+      expect(body.state).toBe('mesocycle_complete');
+      expect(body.run_id).toBe(runId);
     } finally {
       await db.query(`UPDATE mesocycle_runs SET status='active' WHERE id=$1`, [runId]);
     }

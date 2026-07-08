@@ -3,12 +3,19 @@ import { db } from '../db/client.js';
 import { computeUserLocalDate } from './userLocalDate.js';
 import { findSubstitutions } from './substitutions.js';
 import { allPredicatesSatisfied } from './_equipmentPredicate.js';
-import { addDaysISO } from './_dateUtil.js';
 import type { PredicateT } from '../schemas/predicate.js';
+
+export type TodayPacing = {
+  status: 'ahead' | 'on_pace' | 'behind';
+  /** Whole days past the offered day's scheduled_date. Present only when behind. */
+  days_behind?: number;
+  /** The offered day's scheduled_date — the plan's pacing hint, not a gate. */
+  suggested_date: string;
+};
 
 export type TodayWorkout =
   | { state: 'no_active_run' }
-  | { state: 'rest'; run_id: string; scheduled_date: string }
+  | { state: 'mesocycle_complete'; run_id: string }
   | {
       state: 'workout';
       run_id: string;
@@ -23,6 +30,10 @@ export type TodayWorkout =
         name: string;
         scheduled_date: string;
       };
+      pacing: TodayPacing;
+      /** True when the run already has a day workout completed on the user's
+       *  current local day — lets the UI frame the next workout as optional. */
+      completed_today: boolean;
       sets: Array<{
         id: string;
         block_idx: number;
@@ -58,10 +69,9 @@ export async function getTodayWorkout(
     id: string;
     start_date: string;
     start_tz: string;
-    weeks: number;
     track: string | null;
   }>(
-    `SELECT mr.id, to_char(mr.start_date, 'YYYY-MM-DD') AS start_date, mr.start_tz, mr.weeks,
+    `SELECT mr.id, to_char(mr.start_date, 'YYYY-MM-DD') AS start_date, mr.start_tz,
             pt.track AS track
      FROM mesocycle_runs mr
      JOIN user_programs up ON up.id = mr.user_program_id
@@ -70,12 +80,24 @@ export async function getTodayWorkout(
      ORDER BY mr.created_at DESC LIMIT 1`,
     [userId],
   );
-  if (!run) return { state: 'no_active_run' };
+  if (!run) {
+    // No active run: if the user's most recent run finished, surface the
+    // completion state (transient until Task 2's lifecycle keeps it brief).
+    const {
+      rows: [latest],
+    } = await db.query<{ id: string; status: string }>(
+      `SELECT id, status FROM mesocycle_runs
+       WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,
+      [userId],
+    );
+    if (latest?.status === 'completed') return { state: 'mesocycle_complete', run_id: latest.id };
+    return { state: 'no_active_run' };
+  }
 
   const todayLocal = computeUserLocalDate(run.start_tz, now);
-  const lastDate = addDaysISO(run.start_date, run.weeks * 7 - 1);
-  if (todayLocal < run.start_date || todayLocal > lastDate) return { state: 'no_active_run' };
 
+  // Sequence semantics: today's workout is the earliest not-yet-finished day,
+  // regardless of calendar date. Dates are pacing hints, not gates.
   const {
     rows: [day],
   } = await db.query<{
@@ -88,10 +110,33 @@ export async function getTodayWorkout(
   }>(
     `SELECT id, week_idx, day_idx, kind, name, to_char(scheduled_date, 'YYYY-MM-DD') AS scheduled_date
      FROM day_workouts
-     WHERE mesocycle_run_id=$1 AND scheduled_date=$2::date`,
-    [run.id, todayLocal],
+     WHERE mesocycle_run_id=$1 AND status IN ('planned','in_progress')
+     ORDER BY week_idx, day_idx LIMIT 1`,
+    [run.id],
   );
-  if (!day) return { state: 'rest', run_id: run.id, scheduled_date: todayLocal };
+  if (!day) return { state: 'mesocycle_complete', run_id: run.id };
+
+  const pacing: TodayPacing = { status: 'on_pace', suggested_date: day.scheduled_date };
+  if (day.scheduled_date > todayLocal) {
+    pacing.status = 'ahead';
+  } else if (day.scheduled_date < todayLocal) {
+    pacing.status = 'behind';
+    pacing.days_behind = Math.round(
+      (Date.parse(`${todayLocal}T00:00:00Z`) - Date.parse(`${day.scheduled_date}T00:00:00Z`)) /
+        86_400_000,
+    );
+  }
+
+  const {
+    rows: [lastCompleted],
+  } = await db.query<{ last_completed_at: Date | null }>(
+    `SELECT MAX(completed_at) AS last_completed_at
+     FROM day_workouts WHERE mesocycle_run_id=$1 AND status='completed'`,
+    [run.id],
+  );
+  const completedToday =
+    lastCompleted?.last_completed_at != null &&
+    computeUserLocalDate(run.start_tz, lastCompleted.last_completed_at) === todayLocal;
 
   const { rows: setRows } = await db.query<{
     id: string;
@@ -193,6 +238,8 @@ export async function getTodayWorkout(
       name: day.name,
       scheduled_date: day.scheduled_date,
     },
+    pacing,
+    completed_today: completedToday,
     sets,
     cardio: cardioRows.map((c) => ({
       id: c.id,
