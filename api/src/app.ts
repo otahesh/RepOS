@@ -19,6 +19,7 @@ import { plannedSetRoutes } from './routes/plannedSets.js';
 import { recoveryFlagRoutes } from './routes/recoveryFlags.js';
 import { setLogsRoutes } from './routes/setLogs.js';
 import { dayWorkoutsRoutes } from './routes/dayWorkouts.js';
+import { workoutHistoryRoutes } from './routes/workoutHistory.js';
 import { userInjuriesRoutes } from './routes/userInjuries.js';
 import { accountRoutes } from './routes/account.js';
 import { authSignoutRoutes } from './routes/authSignout.js';
@@ -75,6 +76,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(syncRoutes, { prefix: '/api/health' });
   await app.register(setLogsRoutes, { prefix: '/api' });
   await app.register(dayWorkoutsRoutes, { prefix: '/api' });
+  await app.register(workoutHistoryRoutes, { prefix: '/api' });
   await app.register(userInjuriesRoutes, { prefix: '/api' });
   await app.register(accountRoutes, { prefix: '/api' });
   await app.register(authSignoutRoutes, { prefix: '/api' });
