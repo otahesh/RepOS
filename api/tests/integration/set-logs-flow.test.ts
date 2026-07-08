@@ -84,6 +84,77 @@ describe('POST /api/set-logs — happy path', () => {
   });
 });
 
+describe('POST /api/set-logs — day-workout status flip (sequence-workouts)', () => {
+  it('flips the owning day_workout planned → in_progress on the first set log', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const { rows: before } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(before[0].status).toBe('planned');
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '99999999-9999-4999-8999-999999999999',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 135,
+          reps: 5,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+
+      const { rows: after } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(after[0].status).toBe('in_progress');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('leaves a completed day_workout untouched (backfill scenario)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      await db.query(`UPDATE day_workouts SET status = 'completed' WHERE id = $1`, [
+        seed.dayWorkoutId,
+      ]);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 135,
+          reps: 5,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+
+      const { rows: after } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(after[0].status).toBe('completed');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('POST /api/set-logs — idempotency', () => {
   it('returns prior row + deduped:true on identical client_request_id', async () => {
     const app = await build();
