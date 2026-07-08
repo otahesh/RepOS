@@ -2,4 +2,173 @@
 // Source of truth: the committed files in frontend/public/exercise-media/.
 // api/tests/seed/exerciseMediaManifest.test.ts enforces both directions.
 
-export const exerciseMedia: Record<string, { start?: string; end?: string }> = {};
+export const exerciseMedia: Record<string, { start?: string; end?: string }> = {
+  'ab-wheel-rollout': {
+    start: '/exercise-media/ab-wheel-rollout-start.webp',
+    end: '/exercise-media/ab-wheel-rollout-end.webp',
+  },
+  'barbell-back-squat': {
+    start: '/exercise-media/barbell-back-squat-start.webp',
+    end: '/exercise-media/barbell-back-squat-end.webp',
+  },
+  'barbell-bench-press': {
+    start: '/exercise-media/barbell-bench-press-start.webp',
+    end: '/exercise-media/barbell-bench-press-end.webp',
+  },
+  'barbell-bent-over-row': {
+    start: '/exercise-media/barbell-bent-over-row-start.webp',
+    end: '/exercise-media/barbell-bent-over-row-end.webp',
+  },
+  'barbell-overhead-press-standing': {
+    start: '/exercise-media/barbell-overhead-press-standing-start.webp',
+    end: '/exercise-media/barbell-overhead-press-standing-end.webp',
+  },
+  'barbell-romanian-deadlift': {
+    start: '/exercise-media/barbell-romanian-deadlift-start.webp',
+    end: '/exercise-media/barbell-romanian-deadlift-end.webp',
+  },
+  'cable-crunch': {
+    start: '/exercise-media/cable-crunch-start.webp',
+    end: '/exercise-media/cable-crunch-end.webp',
+  },
+  'cable-face-pull': {
+    start: '/exercise-media/cable-face-pull-start.webp',
+    end: '/exercise-media/cable-face-pull-end.webp',
+  },
+  'cable-pallof-press': {
+    start: '/exercise-media/cable-pallof-press-start.webp',
+    end: '/exercise-media/cable-pallof-press-end.webp',
+  },
+  'cable-tricep-pressdown': {
+    start: '/exercise-media/cable-tricep-pressdown-start.webp',
+    end: '/exercise-media/cable-tricep-pressdown-end.webp',
+  },
+  'cable-woodchop-high-to-low': {
+    start: '/exercise-media/cable-woodchop-high-to-low-start.webp',
+    end: '/exercise-media/cable-woodchop-high-to-low-end.webp',
+  },
+  'chest-supported-dumbbell-row': {
+    start: '/exercise-media/chest-supported-dumbbell-row-start.webp',
+    end: '/exercise-media/chest-supported-dumbbell-row-end.webp',
+  },
+  'conventional-deadlift': {
+    start: '/exercise-media/conventional-deadlift-start.webp',
+    end: '/exercise-media/conventional-deadlift-end.webp',
+  },
+  'dead-bug': {
+    start: '/exercise-media/dead-bug-start.webp',
+    end: '/exercise-media/dead-bug-end.webp',
+  },
+  'dumbbell-bench-press': {
+    start: '/exercise-media/dumbbell-bench-press-start.webp',
+    end: '/exercise-media/dumbbell-bench-press-end.webp',
+  },
+  'dumbbell-bulgarian-split-squat': {
+    start: '/exercise-media/dumbbell-bulgarian-split-squat-start.webp',
+    end: '/exercise-media/dumbbell-bulgarian-split-squat-end.webp',
+  },
+  'dumbbell-curl': {
+    start: '/exercise-media/dumbbell-curl-start.webp',
+    end: '/exercise-media/dumbbell-curl-end.webp',
+  },
+  'dumbbell-farmers-carry': {
+    start: '/exercise-media/dumbbell-farmers-carry-start.webp',
+    end: '/exercise-media/dumbbell-farmers-carry-end.webp',
+  },
+  'dumbbell-goblet-squat': {
+    start: '/exercise-media/dumbbell-goblet-squat-start.webp',
+    end: '/exercise-media/dumbbell-goblet-squat-end.webp',
+  },
+  'dumbbell-hammer-curl': {
+    start: '/exercise-media/dumbbell-hammer-curl-start.webp',
+    end: '/exercise-media/dumbbell-hammer-curl-end.webp',
+  },
+  'dumbbell-hip-thrust': {
+    start: '/exercise-media/dumbbell-hip-thrust-start.webp',
+    end: '/exercise-media/dumbbell-hip-thrust-end.webp',
+  },
+  'dumbbell-lateral-raise': {
+    start: '/exercise-media/dumbbell-lateral-raise-start.webp',
+    end: '/exercise-media/dumbbell-lateral-raise-end.webp',
+  },
+  'dumbbell-overhead-carry': {
+    start: '/exercise-media/dumbbell-overhead-carry-start.webp',
+    end: '/exercise-media/dumbbell-overhead-carry-end.webp',
+  },
+  'dumbbell-rear-delt-raise': {
+    start: '/exercise-media/dumbbell-rear-delt-raise-start.webp',
+    end: '/exercise-media/dumbbell-rear-delt-raise-end.webp',
+  },
+  'dumbbell-reverse-lunge': {
+    start: '/exercise-media/dumbbell-reverse-lunge-start.webp',
+    end: '/exercise-media/dumbbell-reverse-lunge-end.webp',
+  },
+  'dumbbell-romanian-deadlift': {
+    start: '/exercise-media/dumbbell-romanian-deadlift-start.webp',
+    end: '/exercise-media/dumbbell-romanian-deadlift-end.webp',
+  },
+  'dumbbell-rotational-chop': {
+    start: '/exercise-media/dumbbell-rotational-chop-start.webp',
+    end: '/exercise-media/dumbbell-rotational-chop-end.webp',
+  },
+  'dumbbell-row-1arm': {
+    start: '/exercise-media/dumbbell-row-1arm-start.webp',
+    end: '/exercise-media/dumbbell-row-1arm-end.webp',
+  },
+  'dumbbell-shoulder-press-seated': {
+    start: '/exercise-media/dumbbell-shoulder-press-seated-start.webp',
+    end: '/exercise-media/dumbbell-shoulder-press-seated-end.webp',
+  },
+  'dumbbell-skull-crusher': {
+    start: '/exercise-media/dumbbell-skull-crusher-start.webp',
+    end: '/exercise-media/dumbbell-skull-crusher-end.webp',
+  },
+  'dumbbell-standing-calf-raise': {
+    start: '/exercise-media/dumbbell-standing-calf-raise-start.webp',
+    end: '/exercise-media/dumbbell-standing-calf-raise-end.webp',
+  },
+  'dumbbell-suitcase-carry': {
+    start: '/exercise-media/dumbbell-suitcase-carry-start.webp',
+    end: '/exercise-media/dumbbell-suitcase-carry-end.webp',
+  },
+  'dumbbell-walking-lunge': {
+    start: '/exercise-media/dumbbell-walking-lunge-start.webp',
+    end: '/exercise-media/dumbbell-walking-lunge-end.webp',
+  },
+  'hanging-leg-raise': {
+    start: '/exercise-media/hanging-leg-raise-start.webp',
+    end: '/exercise-media/hanging-leg-raise-end.webp',
+  },
+  'incline-dumbbell-bench-press': {
+    start: '/exercise-media/incline-dumbbell-bench-press-start.webp',
+    end: '/exercise-media/incline-dumbbell-bench-press-end.webp',
+  },
+  'lat-pulldown-machine': {
+    start: '/exercise-media/lat-pulldown-machine-start.webp',
+    end: '/exercise-media/lat-pulldown-machine-end.webp',
+  },
+  'leg-curl-machine': {
+    start: '/exercise-media/leg-curl-machine-start.webp',
+    end: '/exercise-media/leg-curl-machine-end.webp',
+  },
+  'leg-extension-machine': {
+    start: '/exercise-media/leg-extension-machine-start.webp',
+    end: '/exercise-media/leg-extension-machine-end.webp',
+  },
+  pullup: {
+    start: '/exercise-media/pullup-start.webp',
+    end: '/exercise-media/pullup-end.webp',
+  },
+  'side-plank': {
+    start: '/exercise-media/side-plank-start.webp',
+    end: '/exercise-media/side-plank-end.webp',
+  },
+  'slingshot-bench-press': {
+    start: '/exercise-media/slingshot-bench-press-start.webp',
+    end: '/exercise-media/slingshot-bench-press-end.webp',
+  },
+  'suitcase-carry': {
+    start: '/exercise-media/suitcase-carry-start.webp',
+    end: '/exercise-media/suitcase-carry-end.webp',
+  },
+};
