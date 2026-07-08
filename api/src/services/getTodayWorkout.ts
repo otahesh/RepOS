@@ -67,11 +67,10 @@ export async function getTodayWorkout(
     rows: [run],
   } = await db.query<{
     id: string;
-    start_date: string;
     start_tz: string;
     track: string | null;
   }>(
-    `SELECT mr.id, to_char(mr.start_date, 'YYYY-MM-DD') AS start_date, mr.start_tz,
+    `SELECT mr.id, mr.start_tz,
             pt.track AS track
      FROM mesocycle_runs mr
      JOIN user_programs up ON up.id = mr.user_program_id
