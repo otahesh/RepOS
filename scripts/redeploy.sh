@@ -12,7 +12,8 @@
 #   ssh unraid /mnt/user/appdata/repos/repos-redeploy.sh rollback rollback-20260626T161549Z  # specific tag
 #
 # Redeploy flow: tag rollback point -> pull :latest -> verify target SHA -> backup
-# DB (integrity-checked) -> stop+rm+run -> wait healthy -> verify (SHA, rows, /health).
+# DB (integrity-checked) -> stop+rm+run -> wait healthy -> verify (SHA, rows, /health)
+# -> prune rollback-* tags beyond the newest $ROLLBACK_KEEP (default 3).
 #
 # Safety: the destructive stop+rm+run only runs AFTER the image pull AND a verified
 # DB backup both succeed, so any earlier failure leaves the old container running.
@@ -31,6 +32,7 @@ APPDATA="${REPOS_APPDATA:-/mnt/user/appdata/repos}"
 ENV_FILE="${REPOS_ENV_FILE:-${APPDATA}/.env}"
 CONFIG_MOUNT="${REPOS_CONFIG_MOUNT:-${APPDATA}/config:/config}"
 HEALTH_TIMEOUT="${REPOS_HEALTH_TIMEOUT:-90}"   # seconds to wait for "healthy"
+ROLLBACK_KEEP="${REPOS_ROLLBACK_KEEP:-3}"      # rollback-* tags retained after a deploy
 
 # ---- helpers ---------------------------------------------------------------
 log()  { printf '\n\033[1;34m=== %s ===\033[0m\n' "$*"; }
@@ -145,13 +147,20 @@ fi
 
 verify
 
+# Prune only AFTER a verified-healthy deploy: a failed deploy must leave every
+# rollback point in place for the human deciding how far back to go. Timestamped
+# tag names sort chronologically, so `sort -r | tail -n +N` is oldest-first
+# beyond the keep window. `|| true`: pruning is housekeeping, never a deploy failure.
+log "PRUNE ROLLBACK TAGS (keep newest ${ROLLBACK_KEEP})"
+docker images "$IMAGE_REPO" --format '{{.Tag}}' | grep '^rollback-' | sort -r \
+  | tail -n "+$((ROLLBACK_KEEP + 1))" \
+  | xargs -r -n1 -I{} sh -c "docker rmi '${IMAGE_REPO}:{}' >/dev/null && echo 'pruned {}'" || true
+ok "retained: $(docker images "$IMAGE_REPO" --format '{{.Tag}}' | grep -c '^rollback-') rollback tag(s)"
+
 log "REDEPLOY COMPLETE"
 ok "live APP_SHA=$(docker exec "$CONTAINER" sh -lc 'echo "$APP_SHA"')  |  rollback tag=rollback-${TS}"
 echo "Outside-in check (run from a LAN host or the dev mac, NOT the Unraid host — macvlan):"
 echo "    curl -sI https://repos.jpmtech.com   # expect: HTTP/2 302 -> jpmtech.cloudflareaccess.com"
-echo
-echo "Old rollback-* image tags accumulate over time; prune manually when desired:"
-echo "    docker images ${IMAGE_REPO} --format '{{.Tag}}' | grep '^rollback-'"
 
 # ---- install (reference) ---------------------------------------------------
 # To (re)install this script onto the Unraid box from the dev mac:
