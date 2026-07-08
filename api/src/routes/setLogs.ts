@@ -112,12 +112,26 @@ export async function setLogsRoutes(app: FastifyInstance) {
         // deduped replay. Only fires from 'planned'; a set log against an
         // in_progress/completed/skipped day workout leaves status untouched
         // (the completed case is the backfill scenario).
-        await db.query(
-          `UPDATE day_workouts dw SET status = 'in_progress'
-         FROM planned_sets ps
-         WHERE ps.id = $1 AND dw.id = ps.day_workout_id AND dw.status = 'planned'`,
-          [body.planned_set_id],
-        );
+        //
+        // Failure is swallowed deliberately: the set_log INSERT above has
+        // already committed, so throwing here would 500 a request whose
+        // write actually persisted — a spurious failure for the user. The
+        // flip is a best-effort status hint that self-heals: the next set
+        // log against the same day_workout re-runs this UPDATE (the
+        // WHERE status='planned' guard keeps the retry idempotent).
+        try {
+          await db.query(
+            `UPDATE day_workouts dw SET status = 'in_progress'
+           FROM planned_sets ps
+           WHERE ps.id = $1 AND dw.id = ps.day_workout_id AND dw.status = 'planned'`,
+            [body.planned_set_id],
+          );
+        } catch (err) {
+          req.log.warn(
+            { err, planned_set_id: body.planned_set_id },
+            'day_workout status flip failed',
+          );
+        }
         return reply.code(201).send({ deduped: false, set_log: insert.rows[0] });
       }
 
