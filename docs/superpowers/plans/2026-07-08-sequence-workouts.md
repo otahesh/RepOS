@@ -31,7 +31,7 @@ Behavior to implement (spec §1):
 - Active run selection unchanged.
 - Day selection becomes: `SELECT ... FROM day_workouts WHERE mesocycle_run_id=$1 AND status IN ('planned','in_progress') ORDER BY week_idx, day_idx LIMIT 1`.
 - Delete the `todayLocal < run.start_date || todayLocal > lastDate` gate entirely (early training allowed; run ends by completion).
-- No pending day → new state `{ state: 'mesocycle_complete', run_id }` (replaces `rest`, which is removed from the union).
+- `rest` is removed from the union, replaced by `{ state: 'mesocycle_complete', run_id }`, returned in TWO cases: (a) an active run with no `planned`/`in_progress` rows left (transient — Task 2's lifecycle flip normally closes the run at the same moment), and (b) no active run but the user's most recent run has `status='completed'` (so the finished-program framing survives the flip). Truly nothing → `no_active_run` as today.
 - Workout state gains:
   - `pacing: { status: 'ahead' | 'on_pace' | 'behind', days_behind?: number, suggested_date: string }` — compare the selected day's `scheduled_date` to `computeUserLocalDate(run.start_tz, now)`. `days_behind` (only when behind) = whole-day difference computed via `Date.UTC` parsing of the two ISO dates. `suggested_date` = the day's `scheduled_date`.
   - `completed_today: boolean` — true when the run has any `completed` day workout whose `completed_at`, converted with `computeUserLocalDate(run.start_tz, completed_at)`, equals today. Fetch `MAX(completed_at)` in one query; compute in JS.
@@ -53,7 +53,7 @@ Behavior to implement (spec §1):
 
 **Files:**
 - Create: `api/src/routes/dayWorkouts.ts`, `api/src/schemas/dayWorkouts.ts`
-- Modify: `api/src/index.ts` (register route module beside the other route registrations — read how `setLogsRoutes` is registered and mirror it)
+- Modify: `api/src/app.ts` (ALL route registration lives here, lines ~59-83 — register beside `setLogsRoutes`; `index.ts` has none)
 - Test: `api/tests/dayWorkouts.test.ts`
 
 Contract (spec §2):
@@ -62,10 +62,12 @@ Contract (spec §2):
 - `POST /api/day-workouts/:id/reopen` — from `completed` or `skipped` → `planned`, `completed_at=NULL`. Idempotent on already-planned (200).
 - All: `requireBearerOrCfAccess`; ownership via `JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id AND mr.user_id = $userId`; unknown/foreign id → 404 (single shape, no existence oracle — copy the IDOR comment pattern from `setLogs.ts`).
 - `completed_on` validation: zod `z.string().regex(/^\d{4}-\d{2}-\d{2}$/)` then route-level: reject > user-local today (`computeUserLocalDate(run.start_tz)`) → 400 `{ error: 'completed_on cannot be in the future', field: 'completed_on' }`; reject < run `start_date` → 400 `{ error: 'completed_on is before the program started', field: 'completed_on' }`.
-- Timestamp SQL for the noon-local rule: `completed_at = ($2 || ' 12:00:00')::timestamp AT TIME ZONE $3` (`$3` = run.start_tz).
-- Response for all three: the updated row `{ id, status, completed_at }`.
+- Timestamp SQL for the noon-local rule: `completed_at = ($2 || ' 12:00:00')::timestamp AT TIME ZONE $3` (`$3` = run.start_tz; direction verified — `timestamp AT TIME ZONE tz` yields timestamptz).
+- **Run lifecycle (spec §1 "run ends when every workout is terminal"):** after complete/skip commits, count the run's remaining `planned`/`in_progress` rows; at zero, set `mesocycle_runs.status='completed', finished_at=now()` (enum value exists — no migration) and the owning `user_programs.status='completed'`. This unblocks starting the next mesocycle (partial unique index `idx_meso_one_active_per_user` only constrains `active`) and feeds recap-stats' `finished_at` PR cutoff.
+- **Reopen on a completed (non-active) run:** if no other active run exists, re-activate it (`status='active'`, `finished_at=NULL`, user_program back to `'active'`); if another active run exists → 409 `{ error: 'another program is active — abandon it first', field: 'run' }`. Wrap the reopen + reactivation in a transaction; a concurrent 23505 from the partial index maps to the same 409.
+- Response for all three: the updated row `{ id, status, completed_at }` plus `run_completed: boolean` (true when this mutation closed the run — the frontend uses it to celebrate/navigate).
 
-- [ ] **Step 1:** Read `api/tests/setLogs.test.ts` for the fixture/auth test pattern (how it builds a user + run + day + CF-Access-or-bearer harness). Write failing tests: complete happy path; complete with `completed_on` yesterday (assert stored `completed_at` date matches); idempotent complete keeps original stamp; future `completed_on` 400; pre-run-start `completed_on` 400; skip; skip-after-complete 409; reopen from completed clears `completed_at`; reopen from skipped; foreign-user id 404; unknown id 404.
+- [ ] **Step 1:** Read `api/tests/setLogs.test.ts` for the fixture/auth test pattern (how it builds a user + run + day + CF-Access-or-bearer harness). Write failing tests: complete happy path; complete with `completed_on` yesterday (assert stored `completed_at` date matches); idempotent complete keeps original stamp; future `completed_on` 400; pre-run-start `completed_on` 400; skip; skip-after-complete 409; reopen from completed clears `completed_at`; reopen from skipped; foreign-user id 404; unknown id 404; **lifecycle: completing the last workout flips the run + user_program to completed with finished_at set (`run_completed: true`); reopening a workout of that completed run re-activates it; reopen 409s when a different active run exists**.
 - [ ] **Step 2:** Run the test file — FAIL (404 route not found).
 - [ ] **Step 3:** Implement schema + routes + registration.
 - [ ] **Step 4:** Test file green, then full `npm test`, lint/prettier.
@@ -91,15 +93,16 @@ WHERE ps.id = $plannedSetId AND dw.id = ps.day_workout_id AND dw.status = 'plann
 ## Task 4: Workout history endpoint
 
 **Files:**
-- Modify: `api/src/routes/workouts.ts` (read it first — it currently has one POST; add the GET beside it) — or if it's unrelated in purpose, create `api/src/routes/workoutHistory.ts` + register.
+- Create: `api/src/routes/workoutHistory.ts` + register in `api/src/app.ts`. Do NOT touch `api/src/routes/workouts.ts` — that is Apple Health workout ingestion registered under the `/api/health` prefix; adding the GET there would yield `/api/health/workouts/history`.
 - Test: `api/tests/workoutHistory.test.ts`
 
-Contract (spec §4): `GET /api/workouts/history?limit=20&cursor=<ISO completed_at of last item>`.
-- Rows: the requesting user's `day_workouts` with `status IN ('completed','skipped')` across ALL their runs. Keyset pagination: `WHERE (completed_at, dw.id) < ($cursor, $cursorId)` ordered `completed_at DESC NULLS LAST, dw.id DESC` (skipped rows have NULL `completed_at` — order them after dated rows via `NULLS LAST`; cursor is `<completed_at ISO>|<id>`, both parts required).
+Contract (spec §4): `GET /api/workouts/history?limit=20&cursor=...`.
+- Rows: the requesting user's `day_workouts` with `status IN ('completed','skipped')` across ALL their runs.
+- **NULL-safe keyset** (skipped rows have NULL `completed_at`; a raw row-comparison cursor breaks on them): order and paginate on `sort_ts = COALESCE(completed_at, '-infinity'::timestamptz)` — `ORDER BY sort_ts DESC, dw.id DESC`, page with `WHERE (COALESCE(completed_at,'-infinity'::timestamptz), dw.id) < ($cursorTs, $cursorId)`. Cursor encodes `<sort_ts ISO or '-infinity'>|<id>`.
 - `limit` clamped 1..50, default 20.
 - Item shape:
 ```json
-{ "id": "...", "name": "Lower A", "kind": "strength", "week_idx": 0, "day_idx": 0,
+{ "id": "...", "name": "Lower A", "kind": "strength", "week_idx": 1, "day_idx": 0,
   "status": "completed", "completed_at": "...", "scheduled_date": "2026-07-06",
   "exercises": [ { "slug": "leg-curl-machine", "name": "Leg Curl (Machine)",
     "sets": [ { "weight_lbs": 90, "reps": 10, "rir": 2, "performed_at": "..." } ] } ] }
@@ -113,7 +116,7 @@ Contract (spec §4): `GET /api/workouts/history?limit=20&cursor=<ISO completed_a
 ## Task 5: Invariant tests
 
 **Files:**
-- Modify: the existing invariant suite (grep `invariant` under `api/tests/` — the media↔manifest assertions live there; extend the same file)
+- Create: `api/tests/dayWorkoutInvariants.test.ts` (the existing "invariant" assertions live in `api/tests/seed/exerciseMediaManifest.test.ts` — a seed-content suite with no run/day fixtures; wrong home for route-driven status invariants)
 
 - [ ] **Step 1:** Add: `every completed day_workout has completed_at` (assert the complete route can't produce a violation — insert via route from Task 2's fixtures, then `SELECT count(*) FROM day_workouts WHERE status='completed' AND completed_at IS NULL` = 0); `reopen clears completed_at` (no `planned` row carries a stamp).
 - [ ] **Step 2:** Run invariant file + full suite. **Step 3:** Commit: `test(api): day-workout status invariants`
@@ -141,7 +144,9 @@ Behavior (spec §1/§7):
 - **SKIP** action beside START (confirm dialog: "Skip <name>? It won't count toward your program. You can reopen it later from history.") → `skipDayWorkout(day.id)` → refetch today.
 - When `pacing.status === 'behind'`: secondary action **LOG PAST WORKOUT** → date picker (native `<input type="date">`, max = today, min = run start if available) → navigate to `/today/<run_id>/log?for=<date>`.
 
-- [ ] **Step 1:** Extend the two component test files (read them first; follow existing render/mocking style): pacing chip renders each status; completed_today shows START ANYWAY; skip calls the client and refetches; mesocycle_complete links to history; behind state shows LOG PAST WORKOUT.
+- **Defensive pacing render:** the chip renders only when `pacing` is present (`data.pacing?.status`). Two hermetic mocks return the old shape and are NOT type-checked JSON: `frontend/src/components/programs/__offline__/_helpers.ts:270-283` and `frontend/playwright/w3-injury-swap-flow.spec.ts:128` — update both to include `pacing` + `completed_today` in this task (the w3 spec is a required CI job; an unguarded `pacing.status` takes it down with a TypeError).
+
+- [ ] **Step 1:** Extend the two component test files (read them first; follow existing render/mocking style): pacing chip renders each status; chip absent when `pacing` missing; completed_today shows START ANYWAY; skip calls the client and refetches; mesocycle_complete links to history; behind state shows LOG PAST WORKOUT.
 - [ ] **Step 2:** Run component tests — FAIL. **Step 3:** Implement. **Step 4:** Green + `npx tsc --noEmit` clean + `npm run validate` (catches term-coverage + page-reachability gates). **Step 5:** Commit: `feat(frontend): sequence today — pacing chip, skip, start-anyway, log-past entry`
 
 ## Task 8: Logger completion + backfill mode
@@ -151,23 +156,24 @@ Behavior (spec §1/§7):
 
 Behavior (spec §2/§3):
 - Read `?for=YYYY-MM-DD` from the URL (`useSearchParams`). When present: persistent banner at the top of the logger: "Logging for <weekday, Mon DD>" (JetBrains Mono date, amber accent); every set-log POST adds `performed_at` = that date at 12:00 user-local (construct with the user's tz from `useCurrentUser`, fall back to browser tz).
-- DONE button ("DONE → BACK TO PLAN") now calls `completeDayWorkout(day.id, { completed_on: forDate ?? undefined })` before navigating; on failure show the existing error-banner pattern with the server's message (never generic).
-- If every planned set is already logged when the last Log lands, do NOT auto-complete — completion stays on DONE (explicit event, spec §2).
+- **Completion lives at the WORKOUT level, not the exercise level.** `ExerciseFocus`'s "DONE → BACK TO PLAN" (`logger/ExerciseFocus.tsx:211-231`) stays exactly what it is — `onDone={backToHub}`, per-exercise navigation back to the checklist. Do NOT attach completion there (it would terminally complete the day after the first exercise). Instead, in `logger/WorkoutHub.tsx` replace the passive "Workout complete" banner (`WorkoutHub.tsx:125-144`) with an active **FINISH WORKOUT** CTA that is always available (spec §2 allows partial completion — confirm dialog when unlogged sets remain: "N sets unlogged. Finish anyway?"), calls `completeDayWorkout(day.id, { completed_on: forDate ?? undefined })`, and on success navigates back to the today screen (celebrate when the response has `run_completed: true`).
+- On completion failure, show the existing error-banner pattern with the server's message (never generic); do not navigate.
+- Fix `TodayLoggerMobile.tsx:68`: the ternary's else-branch currently renders `'Rest day.'` — with `rest` gone this silently shows for `mesocycle_complete` (compiles clean; tsc won't catch it). Change to "Program complete." + back link.
 
-- [ ] **Step 1:** Extend logger tests (use the `preloaded` test hatch): DONE calls complete with no date normally; with `?for=` the banner renders, set-log payloads carry `performed_at`, DONE passes `completed_on`; complete failure surfaces error and does not navigate.
+- [ ] **Step 1:** Extend logger tests (use the `preloaded` test hatch): FINISH WORKOUT in the hub calls complete (no date normally); confirm dialog when sets are unlogged; with `?for=` the banner renders, set-log payloads carry `performed_at`, FINISH passes `completed_on`; complete failure surfaces error and does not navigate; `mesocycle_complete` load state shows "Program complete."
 - [ ] **Step 2:** Run — FAIL. **Step 3:** Implement. **Step 4:** Green + tsc + lint. **Step 5:** Commit: `feat(frontend): logger completes day workout; backfill mode stamps chosen date`
 
 ## Task 9: History page
 
 **Files:**
 - Create: `frontend/src/components/history/WorkoutHistoryPage.tsx` (+ test)
-- Modify: `frontend/src/App.tsx` (route `path="history"`), `frontend/src/components/AppShell.tsx` (nav entry "History" — read how existing nav items are declared), `frontend/src/components/programs/MyProgramPage.tsx` (link "Past workouts →")
+- Modify: `frontend/src/App.tsx` (route `path="history"`), `frontend/src/components/layout/Sidebar.tsx:31-40` (nav entries live here as `{ name, icon, to }` — add "History"; `layout/AppShell.tsx` is the shell, not the nav), `frontend/src/pages/MyProgramPage.tsx` (link "Past workouts →")
 
 Behavior (spec §4/§7):
 - Fetch via `getWorkoutHistory`; skeleton loaders while loading; "No workouts yet — your finished sessions land here." empty state.
 - Item card: name, kind badge, completed date (Mono), `SKIPPED` badge (amber) for skipped, expandable set detail (exercise name + `weight×reps @RIR` lines, Mono). REOPEN action on each terminal workout → `reopenDayWorkout` → refetch (this is the backfill entry for a wrongly-skipped day: reopen, then it's next in sequence).
 - "Load more" button when `next_cursor` (no infinite scroll).
-- Mobile: single column list. Desktop (`useIsMobile() === false`): group items under week headings (`WEEK <week_idx+1>`), two-column grid. Same data, same actions.
+- Mobile: single column list. Desktop (`useIsMobile() === false`): group items under week headings (`WEEK <week_idx>` — week_idx is 1-indexed in this codebase; day_idx is 0-indexed), two-column grid. Same data, same actions.
 
 - [ ] **Step 1:** Failing tests: renders items with sets; skipped badge; reopen calls client + refetches; load-more appends; empty state. Reachability: add the route + nav THEN run `node scripts/check-page-reachability.mjs` (it gates `npm run validate`).
 - [ ] **Step 2:** Run — FAIL. **Step 3:** Implement. **Step 4:** Green + `npm run validate`. **Step 5:** Commit: `feat(frontend): workout history page with reopen + load more`
