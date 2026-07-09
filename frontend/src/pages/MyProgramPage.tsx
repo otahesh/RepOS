@@ -18,7 +18,7 @@ import {
   patchUserProgram,
   type UserProgramDetail,
 } from '../lib/api/userPrograms';
-import { TOKENS } from '../tokens';
+import { TOKENS, FONTS } from '../tokens';
 import { pushToast } from '../components/common/ToastHost';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { Term } from '../components/Term';
@@ -248,7 +248,7 @@ export default function MyProgramPage() {
           to="/history"
           style={{
             fontSize: 13,
-            fontFamily: 'Inter Tight',
+            fontFamily: FONTS.ui,
             color: TOKENS.accent,
             textDecoration: 'none',
           }}

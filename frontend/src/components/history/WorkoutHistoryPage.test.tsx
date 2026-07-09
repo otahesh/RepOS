@@ -3,14 +3,23 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
-vi.mock('../../lib/api/workoutHistory');
-vi.mock('../../lib/api/dayWorkouts');
+// Mock only the network functions; keep the real ApiError re-export so the
+// component's `err instanceof ApiError` branch fires against genuine instances.
+vi.mock('../../lib/api/workoutHistory', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api/workoutHistory')>()),
+  getWorkoutHistory: vi.fn(),
+}));
+vi.mock('../../lib/api/dayWorkouts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api/dayWorkouts')>()),
+  reopenDayWorkout: vi.fn(),
+}));
 vi.mock('../common/ToastHost', () => ({ pushToast: vi.fn() }));
 vi.mock('../../lib/useIsMobile', () => ({ useIsMobile: vi.fn() }));
 
 import WorkoutHistoryPage from './WorkoutHistoryPage';
 import {
   getWorkoutHistory,
+  ApiError,
   type WorkoutHistoryPage as HistoryPageT,
 } from '../../lib/api/workoutHistory';
 import { reopenDayWorkout } from '../../lib/api/dayWorkouts';
@@ -145,8 +154,11 @@ describe('WorkoutHistoryPage', () => {
     await waitFor(() => expect(getHistory.mock.calls.length).toBeGreaterThan(callsBefore));
   });
 
-  it('surfaces an actionable error (toast) when reopen fails', async () => {
-    reopen.mockRejectedValue(Object.assign(new Error('HTTP 500'), { status: 500 }));
+  it('surfaces the server recovery message in the toast when reopen fails (409)', async () => {
+    // Backend returns an actionable instruction the user must see verbatim.
+    reopen.mockRejectedValue(
+      new ApiError(409, { error: 'another program is active — abandon it first' }, 'raw'),
+    );
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('Upper A');
@@ -156,7 +168,9 @@ describe('WorkoutHistoryPage', () => {
     await waitFor(() => expect(toast).toHaveBeenCalled());
     const arg = toast.mock.calls[toast.mock.calls.length - 1]?.[0];
     expect(arg?.severity).toBe('error');
-    expect(arg?.body).toMatch(/reopen/i);
+    // The server's instruction — not a bare "HTTP 409" — must reach the user.
+    expect(arg?.body).toMatch(/abandon it first/i);
+    expect(arg?.body).not.toMatch(/HTTP 409/);
   });
 
   it('loads more and appends the next page, carrying the cursor', async () => {
@@ -180,6 +194,18 @@ describe('WorkoutHistoryPage', () => {
     await screen.findByText('Upper A');
     expect(screen.getByText(/^week\s*2$/i)).toBeInTheDocument();
     expect(screen.getByText(/^week\s*1$/i)).toBeInTheDocument();
+  });
+
+  it('merges same-week items across pages under a single WEEK heading (desktop)', async () => {
+    // PAGE1 has a week-1 item (Lower A); PAGE2 (loaded via cursor) adds another
+    // week-1 item (Conditioning). Grouping must span pages — one WEEK 1 heading.
+    mobile.mockReturnValue(false);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Upper A');
+    await user.click(screen.getByRole('button', { name: /load more/i }));
+    await screen.findByText('Conditioning');
+    expect(screen.getAllByText(/^week\s*1$/i)).toHaveLength(1);
   });
 
   it('renders a flat list with NO week headings on mobile (same items + actions)', async () => {
