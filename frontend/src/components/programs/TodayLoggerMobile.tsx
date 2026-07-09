@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
+import { completeDayWorkout } from '../../lib/api/dayWorkouts';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { pushToast } from '../common/ToastHost';
 import {
   getTodayWorkout,
   type TodayDay,
@@ -65,7 +68,12 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
         if (res.state === 'workout') {
           setData({ run_id: res.run_id, day: res.day, sets: res.sets, track: res.track });
         } else {
-          setLoadError(res.state === 'no_active_run' ? 'No active mesocycle.' : 'Rest day.');
+          // Sequence-workouts: `today` is workout | mesocycle_complete |
+          // no_active_run — there is NO rest state. The else-branch is
+          // mesocycle_complete (rest is gone); it must never say "Rest day."
+          setLoadError(
+            res.state === 'no_active_run' ? 'No active mesocycle.' : 'Program complete.',
+          );
         }
       })
       .catch((err: unknown) => {
@@ -105,6 +113,7 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
     <LoggerInner
       data={data}
       currentUserId={user?.id ?? null}
+      currentUserTz={user?.timezone ?? null}
       quotaError={quotaError}
       setQuotaError={setQuotaError}
     />
@@ -152,16 +161,34 @@ function equipmentLabelOf(required: { requires?: unknown[] } | null | undefined)
 function LoggerInner({
   data,
   currentUserId,
+  currentUserTz,
   quotaError,
   setQuotaError,
 }: {
   data: { run_id: string; day: TodayDay; sets: TodaySet[]; track?: string | null };
   currentUserId: string | null;
+  currentUserTz: string | null;
   quotaError: string | null;
   setQuotaError: (msg: string | null) => void;
 }) {
   const navigate = useNavigate();
   const { blockIdx: blockIdxParam } = useParams<{ blockIdx?: string }>();
+  const [searchParams] = useSearchParams();
+
+  // Backfill mode: /today/:run/log?for=YYYY-MM-DD stamps every set log AND the
+  // day-workout completion at the chosen past date rather than "now". Guard the
+  // shape so a garbage `?for=` can't slip a malformed date into a POST body.
+  const forParam = searchParams.get('for');
+  const forDate = forParam && /^\d{4}-\d{2}-\d{2}$/.test(forParam) ? forParam : null;
+  // Backfill is a MODE, so `?for=` must survive every hub↔focus hop inside the
+  // logger — otherwise tapping an exercise would silently drop back to "now".
+  const logSearch = forDate ? `?for=${forDate}` : '';
+
+  // Workout-level completion (FINISH WORKOUT in the hub). Not per-exercise —
+  // completing terminally closes the whole day workout (spec §2/§3).
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
   // Group sets by block_idx so the UI shows "exercise → its sets" together.
   const blocks = useMemo(() => {
@@ -371,7 +398,12 @@ function LoggerInner({
       }
 
       setRow(set.id, { phase: 'logging', clientRequestId: null });
-      const performedAt = new Date().toISOString();
+      // Backfill mode stamps the chosen date at 12:00 user-local (noon keeps the
+      // sample well clear of a midnight DST/tz date-flip); live logging stamps
+      // now. `performed_at` is what the server buckets the set into a day by.
+      const performedAt = forDate
+        ? zonedNoonISO(forDate, currentUserTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
+        : new Date().toISOString();
       try {
         const clientRequestId = await logBuffer.enqueue(
           set.id,
@@ -393,7 +425,7 @@ function LoggerInner({
         throw err;
       }
     },
-    [currentUserId, rowInputs, setRow, focusNext, setQuotaError],
+    [currentUserId, currentUserTz, forDate, rowInputs, setRow, focusNext, setQuotaError],
   );
 
   const restTimer = useRestTimer();
@@ -419,6 +451,41 @@ function LoggerInner({
       })),
     [blocks, exMeta, rowStates],
   );
+
+  // Sets neither server-logged nor logged this session — drives the
+  // "N sets unlogged. Finish anyway?" confirm before a partial completion.
+  const unloggedCount = useMemo(
+    () => hubBlocks.reduce((n, b) => n + (b.setsTotal - b.setsDone), 0),
+    [hubBlocks],
+  );
+
+  // Terminal, workout-level completion. `completed_on` backfills the chosen
+  // date in backfill mode; omitted otherwise (server stamps now()). On success
+  // we return to the today screen; a run-closing completion celebrates. On
+  // failure we surface the server's own message and stay put — never silent,
+  // never generic, never a navigation that loses the error.
+  const doFinish = useCallback(async () => {
+    setFinishing(true);
+    setCompleteError(null);
+    try {
+      const res = await completeDayWorkout(data.day.id, { completed_on: forDate ?? undefined });
+      if (res.run_completed) {
+        pushToast({
+          severity: 'success',
+          body: 'MESOCYCLE COMPLETE. You finished the program — review it in history.',
+        });
+      }
+      navigate('/');
+    } catch (err: unknown) {
+      setCompleteError(err instanceof Error ? err.message : String(err));
+      setFinishing(false);
+    }
+  }, [data.day.id, forDate, navigate]);
+
+  const requestFinish = useCallback(() => {
+    if (unloggedCount > 0) setConfirmFinish(true);
+    else void doFinish();
+  }, [unloggedCount, doFinish]);
 
   const quotaBanner = quotaError ? (
     <div
@@ -446,14 +513,82 @@ function LoggerInner({
     </div>
   ) : null;
 
+  // Backfill banner — a persistent mode indicator shown on BOTH the hub and the
+  // focus screen (it's a mode for the whole logger session, not one screen).
+  const backfillBanner = forDate ? (
+    <div
+      role="status"
+      style={{ maxWidth: 480, margin: '0 auto', padding: '16px 16px 0', boxSizing: 'border-box' }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          background: 'rgba(245,181,68,0.1)',
+          border: `1px solid ${TOKENS.warn}`,
+          borderRadius: 8,
+          padding: '10px 12px',
+          color: TOKENS.warn,
+          fontFamily: FONTS.ui,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>Logging for </span>
+        <span style={{ fontFamily: FONTS.mono, fontWeight: 700, letterSpacing: 0.3 }}>
+          {formatBackfillDate(forDate)}
+        </span>
+      </div>
+    </div>
+  ) : null;
+
+  // Completion-failure banner — server message verbatim, mirrors the quota
+  // banner's danger treatment. Completion only fires from the hub.
+  const completeErrorBanner = completeError ? (
+    <div
+      role="alert"
+      style={{ maxWidth: 480, margin: '0 auto', padding: '16px 16px 0', boxSizing: 'border-box' }}
+    >
+      <div
+        style={{
+          background: 'rgba(255,106,106,0.08)',
+          border: `1px solid ${TOKENS.danger}`,
+          borderRadius: 8,
+          padding: 12,
+          color: TOKENS.danger,
+          fontSize: 13,
+          fontFamily: FONTS.ui,
+        }}
+      >
+        {`Couldn't finish workout — ${completeError}`}
+      </div>
+    </div>
+  ) : null;
+
   if (!focusedEntry) {
     return (
       <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
+        {backfillBanner}
         {quotaBanner}
+        {completeErrorBanner}
         <WorkoutHub
           dayName={data.day.name}
           blocks={hubBlocks}
-          onOpenBlock={(blockIdx) => navigate(`/today/${data.run_id}/log/${blockIdx}`)}
+          onOpenBlock={(blockIdx) => navigate(`/today/${data.run_id}/log/${blockIdx}${logSearch}`)}
+          onFinish={requestFinish}
+          finishing={finishing}
+        />
+        <ConfirmDialog
+          open={confirmFinish}
+          tier="medium"
+          title={`${unloggedCount} set${unloggedCount === 1 ? '' : 's'} unlogged.`}
+          body="This day will be marked complete with only the sets you've logged. Finish anyway?"
+          confirmLabel={finishing ? 'Finishing…' : 'Finish Anyway'}
+          onConfirm={() => {
+            setConfirmFinish(false);
+            void doFinish();
+          }}
+          onCancel={() => setConfirmFinish(false)}
         />
         <RestTimerPill remaining={restTimer.remaining} />
       </div>
@@ -464,10 +599,11 @@ function LoggerInner({
   const slug = focusedSets[0].exercise.slug;
   const meta = exMeta[slug];
   const guide = guideBySlug[slug] ?? null;
-  const backToHub = () => navigate(`/today/${data.run_id}/log`);
+  const backToHub = () => navigate(`/today/${data.run_id}/log${logSearch}`);
 
   return (
     <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
+      {backfillBanner}
       {quotaBanner}
       <ExerciseFocus
         position={{
@@ -550,4 +686,62 @@ function RestTimerPill({ remaining }: { remaining: number | null }) {
 // m:ss with zero-padded seconds — 180 → "3:00".
 function formatRest(sec: number): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+// -----------------------------------------------------------------------------
+// Backfill date helpers.
+//
+// small-icu discipline (project_alpine_smallicu): build every date string from
+// numeric `formatToParts` fields — never `.format()`'s locale-sensitive layout,
+// which Alpine small-icu silently reshapes. These read the same regardless of
+// the runtime ICU build.
+// -----------------------------------------------------------------------------
+
+// Offset (ms, +east) of `tz` at instant `at` — the wall-clock-minus-UTC diff.
+function tzOffsetMs(tz: string, at: Date): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const p = Object.fromEntries(dtf.formatToParts(at).map((x) => [x.type, x.value]));
+  const asUTC = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour) % 24, // small-icu can render midnight as "24"
+    Number(p.minute),
+    Number(p.second),
+  );
+  return asUTC - at.getTime();
+}
+
+// ISO instant for `dateStr` (YYYY-MM-DD) at 12:00 in `tz`. Noon keeps the sample
+// far from any midnight tz/DST date-flip, so the server buckets it on the day
+// the user chose. DST never transitions at noon, so a single offset correction
+// is exact.
+function zonedNoonISO(dateStr: string, tz: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const noonAsUTC = Date.UTC(y, m - 1, d, 12, 0, 0);
+  const offset = tzOffsetMs(tz, new Date(noonAsUTC));
+  return new Date(noonAsUTC - offset).toISOString();
+}
+
+// "Sunday, Jul 5" — weekday + short month + day, tz-independent (the date is a
+// bare calendar day, read as UTC midnight so no local shift moves it).
+function formatBackfillDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.weekday}, ${p.month} ${p.day}`;
 }
