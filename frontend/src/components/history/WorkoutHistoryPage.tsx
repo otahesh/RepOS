@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { useIsMobile } from '../../lib/useIsMobile';
-import { getWorkoutHistory, type HistoryItem, type HistorySet } from '../../lib/api/workoutHistory';
+import { useCurrentUser } from '../../auth';
+import {
+  getWorkoutHistory,
+  ApiError,
+  type HistoryItem,
+  type HistorySet,
+} from '../../lib/api/workoutHistory';
 import { reopenDayWorkout } from '../../lib/api/dayWorkouts';
 import { pushToast } from '../common/ToastHost';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -24,6 +30,11 @@ import Icon from '../Icon';
 
 export default function WorkoutHistoryPage() {
   const isMobile = useIsMobile();
+  const { user } = useCurrentUser();
+  // Display completion instants in the user's own zone. Fall back to the
+  // runtime zone if the user record hasn't loaded (never guess UTC — a
+  // late-night workout must not read as the next/previous day).
+  const tz = user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const [items, setItems] = useState<HistoryItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +54,12 @@ export default function WorkoutHistoryPage() {
         // finished session, not a wall of collapsed rows.
         setExpanded(page.items[0] ? new Set([page.items[0].id]) : new Set());
       })
-      .catch((err: { status?: number }) => {
+      .catch((err: unknown) => {
+        const msg = serverMessage(err);
+        const status = err instanceof ApiError ? err.status : undefined;
         setError(
           `Couldn't load history — GET /api/workouts/history${
-            err?.status ? ` returned HTTP ${err.status}` : ' failed (network)'
+            msg ? `: ${msg}` : status ? ` returned HTTP ${status}` : ' failed (network)'
           }.`,
         );
       });
@@ -64,10 +77,13 @@ export default function WorkoutHistoryPage() {
       setItems((prev) => [...(prev ?? []), ...page.items]);
       setNextCursor(page.next_cursor);
     } catch (err) {
-      const status = (err as { status?: number })?.status;
+      const msg = serverMessage(err);
+      const status = err instanceof ApiError ? err.status : undefined;
       pushToast({
         severity: 'error',
-        body: `Couldn't load more history${status ? ` — HTTP ${status}` : ''}. Try again.`,
+        body: `Couldn't load more history${
+          msg ? ` — ${msg}` : status ? ` — HTTP ${status}` : ''
+        }. Try again.`,
       });
     } finally {
       setLoadingMore(false);
@@ -94,12 +110,15 @@ export default function WorkoutHistoryPage() {
       // so refetch from the top rather than surgically splicing.
       load();
     } catch (err) {
-      const status = (err as { status?: number })?.status;
+      // Surface the server's recovery instruction (e.g. 409 "another program is
+      // active — abandon it first"), not a bare status the user can't act on.
+      const msg = serverMessage(err);
+      const status = err instanceof ApiError ? err.status : undefined;
       setReopenTarget(null);
       pushToast({
         severity: 'error',
-        body: `Couldn't reopen "${target.name}" — POST /api/day-workouts/${target.id}/reopen${
-          status ? ` returned HTTP ${status}` : ' failed (network)'
+        body: `Couldn't reopen "${target.name}"${
+          msg ? ` — ${msg}` : status ? ` — HTTP ${status}` : ' — request failed (network)'
         }.`,
       });
     } finally {
@@ -178,6 +197,7 @@ export default function WorkoutHistoryPage() {
                 <HistoryCard
                   key={item.id}
                   item={item}
+                  tz={tz}
                   open={expanded.has(item.id)}
                   onToggle={() => toggle(item.id)}
                   onReopen={() => setReopenTarget(item)}
@@ -211,6 +231,7 @@ export default function WorkoutHistoryPage() {
                     <HistoryCard
                       key={item.id}
                       item={item}
+                      tz={tz}
                       open={expanded.has(item.id)}
                       onToggle={() => toggle(item.id)}
                       onReopen={() => setReopenTarget(item)}
@@ -276,20 +297,58 @@ function groupByWeek(items: HistoryItem[]): Array<[number, HistoryItem[]]> {
   return [...groups.entries()];
 }
 
-function displayDate(item: HistoryItem): string {
-  // completed_at is an ISO timestamp; scheduled_date is already YYYY-MM-DD.
-  // formatSessionDate expects a YYYY-MM-DD string (small-icu-safe formatter).
-  const raw = item.completed_at ?? item.scheduled_date;
-  return formatSessionDate(raw.slice(0, 10));
+// The server returns a recovery instruction in ApiError.body.error (e.g. a 409
+// "another program is active — abandon it first"). Surface it verbatim rather
+// than a bare status code the user can't act on.
+function serverMessage(err: unknown): string | null {
+  if (err instanceof ApiError && err.body && typeof err.body === 'object' && 'error' in err.body) {
+    return String((err.body as { error: unknown }).error);
+  }
+  return null;
+}
+
+function displayDate(item: HistoryItem, tz: string): string {
+  // completed_at is an instant — localize it to the user's zone so a session
+  // finished near local midnight shows the LOCAL calendar day, not the UTC one
+  // (repo rule: never derive/display a UTC-shifted date). scheduled_date is a
+  // bare DATE with no drift, so the UTC-midnight formatter is exact for it.
+  return item.completed_at
+    ? formatZonedDate(item.completed_at, tz)
+    : formatSessionDate(item.scheduled_date);
+}
+
+// Same small-icu-safe discipline as formatSessionDate (project_alpine_smallicu):
+// assemble the label from numeric `formatToParts` fields, never `.format()`'s
+// locale-reshaped layout. Here the parts are computed in `tz`, and the year is
+// shown only when it differs from the current year in that same zone.
+function formatZonedDate(iso: string, tz: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const yearOf = (at: Date): string | undefined =>
+    new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: tz })
+      .formatToParts(at)
+      .find((p) => p.type === 'year')?.value;
+  const includeYear = yearOf(d) !== yearOf(now);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: includeYear ? 'numeric' : undefined,
+    timeZone: tz,
+  }).formatToParts(d);
+  const month = parts.find((p) => p.type === 'month')?.value ?? '';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '';
+  const year = parts.find((p) => p.type === 'year')?.value;
+  return year ? `${month} ${day}, ${year}` : `${month} ${day}`;
 }
 
 function HistoryCard({
   item,
+  tz,
   open,
   onToggle,
   onReopen,
 }: {
   item: HistoryItem;
+  tz: string;
   open: boolean;
   onToggle: () => void;
   onReopen: () => void;
@@ -345,7 +404,7 @@ function HistoryCard({
             {skipped && <SkippedBadge />}
           </div>
           <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
-            {displayDate(item)}
+            {displayDate(item, tz)}
           </span>
         </div>
         <span
