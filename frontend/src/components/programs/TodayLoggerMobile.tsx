@@ -401,9 +401,22 @@ function LoggerInner({
       // Backfill mode stamps the chosen date at 12:00 user-local (noon keeps the
       // sample well clear of a midnight DST/tz date-flip); live logging stamps
       // now. `performed_at` is what the server buckets the set into a day by.
-      const performedAt = forDate
-        ? zonedNoonISO(forDate, currentUserTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
-        : new Date().toISOString();
+      //
+      // Clamp to min(noon, now): the set-log POST schema bounds performed_at at
+      // now + 5min (api/src/schemas/setLogs.ts) — a TIMESTAMP-granularity check.
+      // Picking TODAY before ~noon local makes noon-local a few hours in the
+      // FUTURE → the POST 400s and logBuffer terminally rejects the row, yet the
+      // completion route validates completed_on at DATE granularity and still
+      // marks the day complete → silent training-data loss. Collapsing a
+      // today-pick to `now` clears the bound while staying today-local (same
+      // day bucket); past days are unaffected (their noon is always < now).
+      let performedAt = new Date().toISOString();
+      if (forDate) {
+        const noonMs = Date.parse(
+          zonedNoonISO(forDate, currentUserTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
+        );
+        performedAt = new Date(Math.min(noonMs, Date.now())).toISOString();
+      }
       try {
         const clientRequestId = await logBuffer.enqueue(
           set.id,
@@ -583,7 +596,7 @@ function LoggerInner({
           tier="medium"
           title={`${unloggedCount} set${unloggedCount === 1 ? '' : 's'} unlogged.`}
           body="This day will be marked complete with only the sets you've logged. Finish anyway?"
-          confirmLabel={finishing ? 'Finishing…' : 'Finish Anyway'}
+          confirmLabel="Finish Anyway"
           onConfirm={() => {
             setConfirmFinish(false);
             void doFinish();
