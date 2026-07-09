@@ -7,6 +7,7 @@ import * as mesoApi from '../../lib/api/mesocycles';
 import * as plannedApi from '../../lib/api/plannedSets';
 import * as exApi from '../../lib/api/exercises';
 import * as dayApi from '../../lib/api/dayWorkouts';
+import * as toast from '../common/ToastHost';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -166,6 +167,26 @@ describe('<TodayWorkoutMobile>', () => {
     await user.click(within(dialog).getByRole('button', { name: /skip/i }));
     expect(skipSpy).toHaveBeenCalledWith('dw-1');
     await vi.waitFor(() => expect(getSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it('SKIP failure surfaces an error toast (not silently swallowed)', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(BASE_WORKOUT);
+    vi.spyOn(dayApi, 'skipDayWorkout').mockRejectedValue(new Error('run not active'));
+    const toastSpy = vi.spyOn(toast, 'pushToast').mockReturnValue('t-1');
+    const user = userEvent.setup();
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    await user.click(screen.getByRole('button', { name: /^skip$/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /skip/i }));
+    await vi.waitFor(() =>
+      expect(toastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: 'error',
+          body: expect.stringMatching(/run not active/i),
+        }),
+      ),
+    );
   });
 
   it('behind: LOG PAST WORKOUT reveals a date picker that navigates to the backfill logger', async () => {

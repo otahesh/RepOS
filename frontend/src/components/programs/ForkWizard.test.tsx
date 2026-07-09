@@ -148,6 +148,19 @@ describe('<ForkWizard>', () => {
     expect(screen.getByRole('button', { name: /view today/i })).toBeInTheDocument();
   });
 
+  it('mesocycle_complete is NOT a conflict — Start stays enabled, no banner', async () => {
+    // A finished run is not active. Treating it as a conflict would strand a
+    // user who just completed a program (Start disabled + Abandon 409 loop).
+    vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValue({
+      state: 'mesocycle_complete',
+      run_id: 'mr-done',
+    });
+    renderWizard();
+    await screen.findByText(/Full Body A/);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start mesocycle/i })).not.toBeDisabled();
+  });
+
   it('Abandon clears the conflict and re-enables Start', async () => {
     const today = vi
       .spyOn(msApi, 'getTodayWorkout')

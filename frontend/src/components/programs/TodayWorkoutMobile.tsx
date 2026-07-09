@@ -11,6 +11,7 @@ import { DeloadThisWeekButton } from './DeloadThisWeekButton';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PacingChip } from './PacingChip';
 import { formatSessionDate } from './logger/HistorySheet';
+import { pushToast } from '../common/ToastHost';
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
@@ -85,6 +86,12 @@ export function TodayWorkoutMobile({
       await skipDayWorkout(day.id);
       setConfirmSkip(false);
       fetchToday();
+    } catch (e) {
+      pushToast({
+        severity: 'error',
+        body: `Skip failed — ${e instanceof Error ? e.message : String(e)}.`,
+      });
+      setConfirmSkip(false);
     } finally {
       setSkipping(false);
     }
