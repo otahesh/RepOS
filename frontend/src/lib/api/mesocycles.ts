@@ -57,9 +57,19 @@ export type TodayDay = {
   day_idx: number;
 };
 
+export type TodayPacing = {
+  status: 'ahead' | 'on_pace' | 'behind';
+  /** Whole days past the offered day's scheduled_date. Present only when behind. */
+  days_behind?: number;
+  /** The offered day's scheduled_date — a pacing hint, not a gate. */
+  suggested_date: string;
+};
+
 export type TodayWorkoutResponse =
   | { state: 'no_active_run' }
-  | { state: 'rest'; run_id: string; scheduled_date: string }
+  // All day workouts finished (or the latest run itself is completed) — dates
+  // are pacing hints under sequence semantics, so there is no 'rest' state.
+  | { state: 'mesocycle_complete'; run_id: string }
   | {
       state: 'workout';
       run_id: string;
@@ -67,6 +77,10 @@ export type TodayWorkoutResponse =
        *  plain-language effort cues instead of RIR. Null for template-less runs. */
       track?: string | null;
       day: TodayDay;
+      pacing: TodayPacing;
+      /** True when the run already has a day workout completed on the user's
+       *  current local day — lets the UI frame the next workout as optional. */
+      completed_today: boolean;
       sets: TodaySet[];
       cardio: TodayCardio[];
     };
