@@ -672,6 +672,9 @@ describe('<TodayLoggerMobile>', () => {
 
   describe('backfill mode (?for=YYYY-MM-DD)', () => {
     it('shows the "Logging for <date>" banner on the focus screen and stamps performed_at at noon user-local', async () => {
+      // Freeze "now" well after the picked day so the min(noon, now) clamp keeps
+      // the past-date sample at noon-local (real runner clock is unrelated).
+      vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-06T00:00:00.000Z'));
       const user = userEvent.setup();
       renderLogger(PRELOADED, '/today/mr-1/log/0?for=2026-07-05');
       expect(screen.getByText(/logging for/i)).toBeInTheDocument();
@@ -686,6 +689,28 @@ describe('<TodayLoggerMobile>', () => {
       const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
       // noon 2026-07-05 in America/New_York (EDT, UTC-4) === 16:00Z.
       expect(call[1].performed_at).toBe('2026-07-05T16:00:00.000Z');
+    });
+
+    it('a TODAY pick before noon clamps performed_at to now (never a future stamp the POST rejects)', async () => {
+      // now = 2026-07-09 09:00 in America/New_York (EDT) === 13:00Z. Noon-local
+      // is 16:00Z — three hours in the FUTURE, which the set-log POST schema
+      // (performed_at <= now + 5min) would 400 and terminally reject, while the
+      // DATE-granularity completion would still mark the day done → data loss.
+      vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-09T13:00:00.000Z'));
+      const user = userEvent.setup();
+      renderLogger(PRELOADED, '/today/mr-1/log/0?for=2026-07-09');
+
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      const performedMs = Date.parse(call[1].performed_at);
+      // Clamped to now (13:00Z), NOT the future noon (16:00Z) — passes the bound.
+      expect(call[1].performed_at).toBe('2026-07-09T13:00:00.000Z');
+      expect(performedMs).toBeLessThanOrEqual(Date.now() + 5 * 60 * 1000);
     });
 
     it('banner also renders on the hub view (mode persists across hub↔focus)', async () => {
