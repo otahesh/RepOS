@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ProgramPage } from '../components/programs/ProgramPage';
 import { DayCard } from '../components/programs/DayCard';
 import { ScheduleWarnings, type ScheduleWarning } from '../components/programs/ScheduleWarnings';
@@ -243,6 +243,20 @@ export default function MyProgramPage() {
 
   return (
     <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ padding: '0 24px', display: 'flex', justifyContent: 'flex-end' }}>
+        <Link
+          to="/history"
+          style={{
+            fontSize: 13,
+            fontFamily: 'Inter Tight',
+            color: TOKENS.accent,
+            textDecoration: 'none',
+          }}
+        >
+          Past workouts →
+        </Link>
+      </div>
+
       <ProgramPage key={reloadTick} mesocycleRunId={id} />
 
       {/* W2.6 — manual mid-meso deload (active runs only). */}

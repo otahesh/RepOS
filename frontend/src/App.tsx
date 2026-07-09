@@ -14,6 +14,7 @@ import ProgramsPage from './pages/ProgramsPage';
 import ProgramDetailPage from './pages/ProgramDetailPage';
 import DraftProgramPage from './pages/DraftProgramPage';
 import MyProgramPage from './pages/MyProgramPage';
+import WorkoutHistoryPage from './components/history/WorkoutHistoryPage';
 import SettingsInjuriesPage from './pages/SettingsInjuriesPage';
 import SettingsHealthPage from './pages/SettingsHealthPage';
 import SettingsProgramPrefsPage from './pages/SettingsProgramPrefsPage';
@@ -53,6 +54,7 @@ function AppInner() {
             <Route path="programs/:slug" element={<ProgramDetailPage />} />
             <Route path="programs/draft/:userProgramId" element={<DraftProgramPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
+            <Route path="history" element={<WorkoutHistoryPage />} />
             <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobileGate />} />
             <Route path="today/:mesocycleRunId/log/:blockIdx" element={<TodayLoggerMobileGate />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />

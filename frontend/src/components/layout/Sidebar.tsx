@@ -21,7 +21,7 @@ function monogram(displayName: string | null | undefined, email: string): string
 
 type NavItem = {
   name: string;
-  icon: 'flame' | 'dumbbell' | 'settings';
+  icon: 'flame' | 'dumbbell' | 'clock' | 'settings';
   to: string;
   exact?: boolean;
   matchPrefixes?: string[];
@@ -35,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
     to: '/programs',
     matchPrefixes: ['/programs', '/my-programs'],
   },
+  { name: 'History', icon: 'clock', to: '/history' },
   // I-MOBILE-SIGNOUT-PATH (W6 D7): Settings nav now lands on /settings/account
   // (Account is the W6 owner-wave entry and first in SETTINGS_SECTIONS).
   { name: 'Settings', icon: 'settings', to: '/settings/account', matchPrefixes: ['/settings'] },
