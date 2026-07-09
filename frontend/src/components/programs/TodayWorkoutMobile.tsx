@@ -345,6 +345,7 @@ export function TodayWorkoutMobile({
             type="date"
             aria-label="Log a past workout — date"
             value={pastDate}
+            min={data.start_date}
             max={todayISO()}
             onChange={(e) => setPastDate(e.target.value)}
             style={{

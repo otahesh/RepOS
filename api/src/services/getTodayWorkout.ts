@@ -22,6 +22,9 @@ export type TodayWorkout =
       /** Experience track of the source template — beginner runs render
        *  plain-language effort cues instead of RIR. Null for template-less runs. */
       track: string | null;
+      /** The run's start_date (YYYY-MM-DD, run tz). Floors the backfill date
+       *  picker so a user can't stamp set-logs before the program started. */
+      start_date: string;
       day: {
         id: string;
         week_idx: number;
@@ -68,9 +71,11 @@ export async function getTodayWorkout(
   } = await db.query<{
     id: string;
     start_tz: string;
+    start_date: string;
     track: string | null;
   }>(
     `SELECT mr.id, mr.start_tz,
+            to_char(mr.start_date, 'YYYY-MM-DD') AS start_date,
             pt.track AS track
      FROM mesocycle_runs mr
      JOIN user_programs up ON up.id = mr.user_program_id
@@ -229,6 +234,7 @@ export async function getTodayWorkout(
     state: 'workout',
     run_id: run.id,
     track: run.track,
+    start_date: run.start_date,
     day: {
       id: day.id,
       week_idx: day.week_idx,

@@ -76,6 +76,9 @@ export type TodayWorkoutResponse =
       /** Source template's experience track — beginner runs render
        *  plain-language effort cues instead of RIR. Null for template-less runs. */
       track?: string | null;
+      /** The run's start_date (YYYY-MM-DD). Floors the backfill date picker so a
+       *  user can't stamp set-logs before the program started. */
+      start_date: string;
       day: TodayDay;
       pacing: TodayPacing;
       /** True when the run already has a day workout completed on the user's
