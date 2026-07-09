@@ -134,6 +134,8 @@ test('inj-swap: chip → today → swap → demoted candidate click-through', as
           week_idx: 1,
           day_idx: 0,
         },
+        pacing: { status: 'on_pace', suggested_date: '2026-01-01' },
+        completed_today: false,
         sets: [
           {
             id: PLANNED_SET_ID,
