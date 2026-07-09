@@ -37,8 +37,9 @@ const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}Z$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Parse `<ts ISO or '-infinity'>|<uuid>`; null on any malformation. The ts
- *  regex is deliberately strict (what we emit is what we accept) so nothing
- *  un-parseable ever reaches the ::timestamptz cast. */
+ *  regex validates SHAPE only — field ranges (month 99, day 99, hour 99) are
+ *  left to the ::timestamptz cast, whose overflow SQLSTATEs the handler maps
+ *  back to the same 400. This keeps the two validators from disagreeing. */
 function parseCursor(raw: string): { ts: string; id: string } | null {
   const sep = raw.indexOf('|');
   if (sep === -1) return null;
@@ -114,8 +115,10 @@ export async function workoutHistoryRoutes(app: FastifyInstance) {
     }
     params.push(limit);
 
-    const { rows: days } = await db.query<HistoryDayRow>(
-      `SELECT dw.id, dw.name, dw.kind, dw.week_idx, dw.day_idx, dw.status,
+    let days: HistoryDayRow[];
+    try {
+      ({ rows: days } = await db.query<HistoryDayRow>(
+        `SELECT dw.id, dw.name, dw.kind, dw.week_idx, dw.day_idx, dw.status,
                 dw.completed_at,
                 to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
                 to_char(dw.completed_at AT TIME ZONE 'UTC',
@@ -126,8 +129,20 @@ export async function workoutHistoryRoutes(app: FastifyInstance) {
            ${cursorPredicate}
          ORDER BY COALESCE(dw.completed_at, '-infinity'::timestamptz) DESC, dw.id DESC
          LIMIT $${params.length}`,
-      params,
-    );
+        params,
+      ));
+    } catch (err) {
+      // A shape-valid but out-of-range cursor timestamp (e.g. month 99) passes
+      // the regex pre-filter and overflows the only ::timestamptz cast in this
+      // query. Map those two SQLSTATEs — invalid_datetime_format (22007) and
+      // datetime_field_overflow (22008) — to the same 400 the regex path
+      // returns; rethrow anything else untouched.
+      const code = (err as { code?: string }).code;
+      if (cursor && (code === '22007' || code === '22008')) {
+        return reply.code(400).send({ error: 'invalid cursor', field: 'cursor' });
+      }
+      throw err;
+    }
 
     // One query for the whole page's set logs. Exercise identity comes from
     // planned_sets.exercise_id (what the set was performed against, incl.

@@ -325,6 +325,9 @@ describe('GET /api/workouts/history', () => {
         'garbage|also-garbage',
         '2026-01-01T00:00:00.000Z|not-a-uuid',
         '01/01/2026|4b4b4b4b-0000-0000-0000-000000000000',
+        // Shape-valid but out of range: passes the digit regex, overflows the
+        // ::timestamptz cast — must be 400, not a 500 from the DB.
+        '2026-99-99T00:00:00.000000Z|4b4b4b4b-0000-0000-0000-000000000000',
       ]) {
         const resp = await get(app, s.bearer, `?cursor=${encodeURIComponent(bad)}`);
         expect(resp.statusCode).toBe(400);
