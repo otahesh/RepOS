@@ -43,6 +43,8 @@ const ALL_KEYS: TermKey[] = [
   'soft_gate',
   'manual_deload',
   'advisory_mode',
+  // sequence-workouts addition
+  'pacing',
 ];
 
 describe('TERMS dictionary', () => {

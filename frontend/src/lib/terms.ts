@@ -46,7 +46,8 @@ export type TermKey =
   | 'intro_week'
   | 'soft_gate'
   | 'manual_deload'
-  | 'advisory_mode';
+  | 'advisory_mode'
+  | 'pacing';
 
 export const TERMS: Record<TermKey, TermDef> = {
   RIR: {
@@ -322,6 +323,13 @@ export const TERMS: Record<TermKey, TermDef> = {
       'A user-triggered deload that rewrites the remaining weeks of your mesocycle to lighter sets at RIR 4.',
     whyMatters:
       'Use it when life pushes back — sick, slept badly, joint cranky. Undoable for 24 hours.',
+  },
+  pacing: {
+    short: 'pacing',
+    full: 'Pacing',
+    plain: 'Pacing compares your progress to the original plan dates. It never blocks training.',
+    whyMatters:
+      'Dates are hints, not gates. Fall behind and RepOS simply offers the next workout when you return — you never lose a day.',
   },
 };
 

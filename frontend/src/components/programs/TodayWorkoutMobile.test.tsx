@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { TodayWorkoutMobile } from './TodayWorkoutMobile';
 import * as mesoApi from '../../lib/api/mesocycles';
 import * as plannedApi from '../../lib/api/plannedSets';
 import * as exApi from '../../lib/api/exercises';
+import * as dayApi from '../../lib/api/dayWorkouts';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -25,6 +26,8 @@ const BASE_WORKOUT = {
   state: 'workout' as const,
   run_id: 'mr-1',
   day: { id: 'dw-1', kind: 'strength' as const, name: 'Upper Heavy', week_idx: 1, day_idx: 0 },
+  pacing: { status: 'on_pace' as const, suggested_date: '2026-05-05' },
+  completed_today: false,
   sets: [
     {
       id: 'ps-1',
@@ -71,6 +74,7 @@ const WORKOUT_WITH_SUB = {
 describe('<TodayWorkoutMobile>', () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    vi.restoreAllMocks();
     vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(BASE_WORKOUT);
   });
 
@@ -83,6 +87,16 @@ describe('<TodayWorkoutMobile>', () => {
       '/programs',
     );
     expect(screen.queryByText(/on desktop/i)).not.toBeInTheDocument();
+  });
+
+  it('mesocycle_complete: program-complete copy links to /history', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue({
+      state: 'mesocycle_complete',
+      run_id: 'mr-1',
+    });
+    renderTWM();
+    expect(await screen.findByText(/program complete/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /history/i })).toHaveAttribute('href', '/history');
   });
 
   it('renders day name + sets stacked', async () => {
@@ -101,6 +115,72 @@ describe('<TodayWorkoutMobile>', () => {
     renderTWM();
     await user.click(await screen.findByRole('button', { name: /start workout/i }));
     expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log');
+  });
+
+  it('renders the ON PACE pacing chip', async () => {
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    expect(within(screen.getByTestId('pacing-chip')).getByText(/on pace/i)).toBeInTheDocument();
+  });
+
+  it('renders no pacing chip when pacing is absent (defensive)', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue({
+      state: 'workout',
+      run_id: 'mr-1',
+      day: BASE_WORKOUT.day,
+      completed_today: false,
+      sets: [],
+      cardio: [],
+    } as unknown as mesoApi.TodayWorkoutResponse);
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    expect(screen.queryByTestId('pacing-chip')).not.toBeInTheDocument();
+  });
+
+  it('completed_today: shows START ANYWAY that navigates to the logger', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue({
+      ...BASE_WORKOUT,
+      completed_today: true,
+    });
+    const user = userEvent.setup();
+    renderTWM();
+    expect(await screen.findByText(/done for today/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /start anyway/i }));
+    expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log');
+  });
+
+  it('SKIP confirms then calls skipDayWorkout and refetches', async () => {
+    const getSpy = vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue(BASE_WORKOUT);
+    const skipSpy = vi.spyOn(dayApi, 'skipDayWorkout').mockResolvedValue({
+      id: 'dw-1',
+      status: 'skipped',
+      completed_at: null,
+      run_completed: false,
+    });
+    const user = userEvent.setup();
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    await user.click(screen.getByRole('button', { name: /^skip$/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/won't count toward your program/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /skip/i }));
+    expect(skipSpy).toHaveBeenCalledWith('dw-1');
+    await vi.waitFor(() => expect(getSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it('behind: LOG PAST WORKOUT reveals a date picker that navigates to the backfill logger', async () => {
+    vi.spyOn(mesoApi, 'getTodayWorkout').mockResolvedValue({
+      ...BASE_WORKOUT,
+      pacing: { status: 'behind', days_behind: 2, suggested_date: '2026-05-03' },
+    });
+    const user = userEvent.setup();
+    renderTWM();
+    await screen.findByText(/Upper Heavy/);
+    await user.click(screen.getByRole('button', { name: /log past workout/i }));
+    const dateInput = screen.getByLabelText(/date/i) as HTMLInputElement;
+    expect(dateInput.value).toBe('2026-05-03');
+    await user.click(screen.getByRole('button', { name: /^log$/i }));
+    expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log?for=2026-05-03');
   });
 
   it('renders suggested-sub Swap button when substitution present', async () => {

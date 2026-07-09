@@ -78,6 +78,22 @@ const EXERCISES = [
   },
 ];
 
+// A minimal "active run exists" today response. ForkWizard.readActiveRun only
+// reads run_id, but the mock must satisfy TodayWorkoutResponse — the
+// sequence-workouts type change removed the old 'rest' state, so an active run
+// is now the 'workout' state.
+function activeRun(runId: string): msApi.TodayWorkoutResponse {
+  return {
+    state: 'workout',
+    run_id: runId,
+    day: { id: 'dw-1', kind: 'strength', name: 'Day 1', week_idx: 1, day_idx: 0 },
+    pacing: { status: 'on_pace', suggested_date: '2026-05-05' },
+    completed_today: false,
+    sets: [],
+    cardio: [],
+  };
+}
+
 describe('<ForkWizard>', () => {
   beforeEach(() => {
     vi.spyOn(upApi, 'getUserProgram').mockResolvedValue(program());
@@ -123,11 +139,7 @@ describe('<ForkWizard>', () => {
   });
 
   it('shows conflict banner + disables Start when an active run exists elsewhere', async () => {
-    vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValue({
-      state: 'rest',
-      run_id: 'mr-existing',
-      scheduled_date: '2026-05-05',
-    });
+    vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValue(activeRun('mr-existing'));
     renderWizard();
     expect(await screen.findByRole('alert')).toHaveTextContent(/already have an active/i);
     const startBtn = screen.getByRole('button', { name: /start mesocycle/i });
@@ -137,11 +149,9 @@ describe('<ForkWizard>', () => {
   });
 
   it('Abandon clears the conflict and re-enables Start', async () => {
-    const today = vi.spyOn(msApi, 'getTodayWorkout').mockResolvedValueOnce({
-      state: 'rest',
-      run_id: 'mr-existing',
-      scheduled_date: '2026-05-05',
-    });
+    const today = vi
+      .spyOn(msApi, 'getTodayWorkout')
+      .mockResolvedValueOnce(activeRun('mr-existing'));
     const user = userEvent.setup();
     renderWizard();
     await screen.findByRole('alert');
@@ -167,11 +177,7 @@ describe('<ForkWizard>', () => {
     const user = userEvent.setup();
     renderWizard();
     await screen.findByText(/Full Body A/);
-    today.mockResolvedValueOnce({
-      state: 'rest',
-      run_id: 'mr-race',
-      scheduled_date: '2026-05-05',
-    });
+    today.mockResolvedValueOnce(activeRun('mr-race'));
     await user.click(screen.getByRole('button', { name: /start mesocycle/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/already have an active/i);
     // Critical: no raw HTTP blob in the surfaced error

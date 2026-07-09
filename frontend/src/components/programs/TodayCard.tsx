@@ -1,73 +1,230 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
+import { skipDayWorkout } from '../../lib/api/dayWorkouts';
 import { Term } from '../Term';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { PacingChip } from './PacingChip';
+import { formatSessionDate } from './logger/HistorySheet';
+
+// Local wall-clock "today" (YYYY-MM-DD) — the max a past-workout backfill can
+// target. Uses the browser's local date, not UTC, so a late-evening user can't
+// pick "tomorrow".
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
+}
 
 export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string) => void }) {
+  const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
-  useEffect(() => {
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [logPastOpen, setLogPastOpen] = useState(false);
+  const [pastDate, setPastDate] = useState('');
+
+  const fetchToday = useCallback(() => {
     getTodayWorkout()
       .then(setData)
       .catch(() => setData(null));
   }, []);
+
+  useEffect(() => {
+    fetchToday();
+  }, [fetchToday]);
+
   if (!data) return <div style={card('rgba(255,255,255,0.5)')}>Loading…</div>;
   if (data.state === 'no_active_run')
     return <div style={card('rgba(255,255,255,0.5)')}>Pick a program to get started.</div>;
-  if (data.state === 'rest')
+  if (data.state === 'mesocycle_complete')
     return (
       <div style={card('#6BE28B')}>
-        <strong>Rest day.</strong>
+        <strong>Program complete.</strong>
         <br />
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>
-          Eat. Sleep. Tomorrow&apos;s a workout.
+          {'Review it in '}
+          <Link to="/history" style={{ color: '#4D8DFF' }}>
+            history
+          </Link>
+          {'.'}
         </span>
       </div>
     );
-  const { day, sets } = data;
+
+  const { day, sets, pacing, completed_today, run_id } = data;
+  const behind = pacing?.status === 'behind';
+
+  async function handleSkip() {
+    setSkipping(true);
+    try {
+      await skipDayWorkout(day.id);
+      setConfirmSkip(false);
+      fetchToday();
+    } finally {
+      setSkipping(false);
+    }
+  }
+
   return (
     <div style={card('#4D8DFF')}>
       <div
         style={{
-          fontFamily: 'JetBrains Mono',
-          fontSize: 11,
-          letterSpacing: 1,
-          color: '#4D8DFF',
-          textTransform: 'uppercase',
-          marginBottom: 4,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 8,
         }}
       >
-        Week {day.week_idx} · Day {day.day_idx + 1}
+        <div
+          style={{
+            fontFamily: 'JetBrains Mono',
+            fontSize: 11,
+            letterSpacing: 1,
+            color: '#4D8DFF',
+            textTransform: 'uppercase',
+            marginBottom: 4,
+          }}
+        >
+          Week {day.week_idx} · Day {day.day_idx + 1}
+        </div>
+        {pacing?.status ? <PacingChip pacing={pacing} /> : null}
       </div>
-      <h3 style={{ margin: '0 0 8px', fontSize: 18, color: '#fff' }}>{day.name}</h3>
-      <div
-        style={{
-          fontFamily: 'JetBrains Mono',
-          fontSize: 11,
-          color: 'rgba(255,255,255,0.6)',
-          marginBottom: 12,
-        }}
-      >
-        {sets.length} <Term k="working_set" compact />
-        {'s'}
-      </div>
-      <button
-        onClick={() => onStart(data.run_id, day.id)}
-        style={{
-          padding: '12px 18px',
-          width: '100%',
-          background: '#4D8DFF',
-          border: 'none',
-          borderRadius: 6,
-          color: '#fff',
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          cursor: 'pointer',
-        }}
-      >
-        {'Start Workout'}
+
+      {completed_today ? (
+        <>
+          <h3 style={{ margin: '0 0 4px', fontSize: 18, color: '#6BE28B' }}>Done for today.</h3>
+          <div
+            style={{
+              fontSize: 13,
+              color: 'rgba(255,255,255,0.7)',
+              marginBottom: 12,
+            }}
+          >
+            Next up: {day.name}
+            {pacing?.suggested_date
+              ? ` (suggested ${formatSessionDate(pacing.suggested_date)})`
+              : ''}
+          </div>
+        </>
+      ) : (
+        <>
+          <h3 style={{ margin: '0 0 8px', fontSize: 18, color: '#fff' }}>{day.name}</h3>
+          <div
+            style={{
+              fontFamily: 'JetBrains Mono',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.6)',
+              marginBottom: 12,
+            }}
+          >
+            {sets.length} <Term k="working_set" compact />
+            {'s'}
+          </div>
+        </>
+      )}
+
+      <button onClick={() => onStart(run_id, day.id)} style={primaryBtn}>
+        {completed_today ? 'Start Anyway' : 'Start Workout'}
       </button>
+
+      <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+        <button onClick={() => setConfirmSkip(true)} style={textBtn('rgba(255,255,255,0.6)')}>
+          Skip
+        </button>
+        {behind && !logPastOpen ? (
+          <button
+            onClick={() => {
+              setPastDate(pacing.suggested_date);
+              setLogPastOpen(true);
+            }}
+            style={textBtn('#F5B544')}
+          >
+            Log Past Workout
+          </button>
+        ) : null}
+      </div>
+
+      {behind && logPastOpen ? (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+          <input
+            type="date"
+            aria-label="Log a past workout — date"
+            value={pastDate}
+            max={todayISO()}
+            onChange={(e) => setPastDate(e.target.value)}
+            style={{
+              background: '#0A0D12',
+              border: '1px solid rgba(255,255,255,0.14)',
+              borderRadius: 6,
+              color: '#fff',
+              fontFamily: 'JetBrains Mono',
+              fontSize: 13,
+              padding: '6px 8px',
+            }}
+          />
+          <button
+            onClick={() => navigate(`/today/${run_id}/log?for=${pastDate}`)}
+            disabled={!pastDate}
+            style={{
+              padding: '6px 14px',
+              background: pastDate ? '#F5B544' : 'rgba(245,181,68,0.3)',
+              border: 'none',
+              borderRadius: 6,
+              color: '#0A0D12',
+              fontWeight: 600,
+              letterSpacing: 1,
+              textTransform: 'uppercase',
+              fontSize: 12,
+              cursor: pastDate ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Log
+          </button>
+        </div>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmSkip}
+        tier="medium"
+        severity="danger"
+        title={`Skip ${day.name}?`}
+        body="It won't count toward your program. You can reopen it later from history."
+        confirmLabel={skipping ? 'Skipping…' : 'Skip'}
+        onConfirm={() => void handleSkip()}
+        onCancel={() => setConfirmSkip(false)}
+      />
     </div>
   );
+}
+
+const primaryBtn: React.CSSProperties = {
+  padding: '12px 18px',
+  width: '100%',
+  background: '#4D8DFF',
+  border: 'none',
+  borderRadius: 6,
+  color: '#fff',
+  fontWeight: 600,
+  letterSpacing: 1,
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+};
+
+function textBtn(color: string): React.CSSProperties {
+  return {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    color,
+    fontFamily: 'Inter Tight',
+    fontSize: 12,
+    fontWeight: 600,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+  };
 }
 
 function card(accent: string): React.CSSProperties {

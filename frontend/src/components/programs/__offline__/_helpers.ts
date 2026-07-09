@@ -276,6 +276,8 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
         state: 'workout',
         run_id: runId,
         day,
+        pacing: { status: 'on_pace', suggested_date: '2026-01-01' },
+        completed_today: false,
         sets,
         cardio: [],
       }),
