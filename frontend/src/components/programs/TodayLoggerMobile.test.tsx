@@ -37,10 +37,20 @@ vi.mock('../../hooks/useIdbQueueStatus', () => ({
 // History powers prefill + the last-time line; default is "no history".
 // Guides power the ⓘ setup card; default is "no guide" (ⓘ hidden) so the
 // pre-existing tests are undisturbed.
-const { getExerciseHistoryMock, listExercisesMock, getExerciseGuideMock } = vi.hoisted(() => ({
+const {
+  getExerciseHistoryMock,
+  listExercisesMock,
+  getExerciseGuideMock,
+  completeDayWorkoutMock,
+  getTodayWorkoutMock,
+  pushToastMock,
+} = vi.hoisted(() => ({
   getExerciseHistoryMock: vi.fn(),
   listExercisesMock: vi.fn(),
   getExerciseGuideMock: vi.fn(),
+  completeDayWorkoutMock: vi.fn(),
+  getTodayWorkoutMock: vi.fn(),
+  pushToastMock: vi.fn(),
 }));
 vi.mock('../../lib/api/exerciseHistory', () => ({
   getExerciseHistory: getExerciseHistoryMock,
@@ -50,6 +60,17 @@ vi.mock('../../lib/api/exercises', () => ({
 }));
 vi.mock('../../lib/api/exerciseGuide', () => ({
   getExerciseGuide: getExerciseGuideMock,
+}));
+vi.mock('../../lib/api/dayWorkouts', () => ({
+  completeDayWorkout: completeDayWorkoutMock,
+}));
+// getTodayWorkout is only reached when the logger is rendered WITHOUT the
+// `preloaded` test hatch (the load-state branch). preloaded tests never call it.
+vi.mock('../../lib/api/mesocycles', () => ({
+  getTodayWorkout: getTodayWorkoutMock,
+}));
+vi.mock('../common/ToastHost', () => ({
+  pushToast: pushToastMock,
 }));
 
 // ---- Fixtures ---------------------------------------------------------------
@@ -98,6 +119,8 @@ function renderLogger(
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
+        {/* Sentinel for the today screen so completion navigation is observable. */}
+        <Route path="/" element={<div>today-screen</div>} />
         <Route
           path="/today/:mesocycleRunId/log"
           element={<TodayLoggerMobile preloaded={preloaded} />}
@@ -156,6 +179,18 @@ describe('<TodayLoggerMobile>', () => {
         required_equipment: { _v: 1, requires: [{ type: 'barbell' }] },
       },
     ]);
+    completeDayWorkoutMock.mockResolvedValue({
+      id: 'dw-1',
+      status: 'completed',
+      completed_at: '2026-07-05T16:00:00.000Z',
+      run_completed: false,
+    });
+    getTodayWorkoutMock.mockResolvedValue({
+      state: 'workout',
+      run_id: 'mr-1',
+      day: DAY,
+      sets: [SET_1, SET_2],
+    });
   });
 
   afterEach(() => {
@@ -562,6 +597,136 @@ describe('<TodayLoggerMobile>', () => {
       renderFocusedStrict();
       await waitFor(() => expect(screen.getByLabelText(/Set 1 weight in pounds/i)).toHaveValue(25));
       expect(screen.getByText(/last time: 25 lbs × 9/i)).toBeInTheDocument();
+    });
+  });
+
+  // ---- Workout-level completion + backfill mode -----------------------------
+
+  // Both sets logged → the hub reads "all done" and FINISH completes cleanly.
+  const ALL_LOGGED = {
+    ...PRELOADED,
+    sets: [
+      { ...SET_1, logged: { weight_lbs: 135, reps: 8 } },
+      { ...SET_2, logged: { weight_lbs: 135, reps: 8 } },
+    ],
+  };
+
+  describe('FINISH WORKOUT (workout-level completion)', () => {
+    it('with all sets logged, completes with no date and returns to the today screen', async () => {
+      const user = userEvent.setup();
+      renderLogger(ALL_LOGGED);
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      await waitFor(() => expect(completeDayWorkoutMock).toHaveBeenCalledTimes(1));
+      expect(completeDayWorkoutMock).toHaveBeenCalledWith('dw-1', { completed_on: undefined });
+      expect(await screen.findByText('today-screen')).toBeInTheDocument();
+    });
+
+    it('with unlogged sets, confirms before completing and only completes on confirm', async () => {
+      const user = userEvent.setup();
+      renderLogger(); // both sets unlogged
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/2 sets unlogged/i);
+      expect(completeDayWorkoutMock).not.toHaveBeenCalled();
+      await user.click(within(dialog).getByRole('button', { name: /finish anyway/i }));
+      await waitFor(() => expect(completeDayWorkoutMock).toHaveBeenCalledTimes(1));
+    });
+
+    it('cancelling the confirm dialog does not complete', async () => {
+      const user = userEvent.setup();
+      renderLogger();
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(completeDayWorkoutMock).not.toHaveBeenCalled();
+    });
+
+    it('celebrates when the response reports the run finished', async () => {
+      completeDayWorkoutMock.mockResolvedValue({
+        id: 'dw-1',
+        status: 'completed',
+        completed_at: '2026-07-05T16:00:00.000Z',
+        run_completed: true,
+      });
+      const user = userEvent.setup();
+      renderLogger(ALL_LOGGED);
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      await waitFor(() => expect(pushToastMock).toHaveBeenCalled());
+      expect(pushToastMock.mock.calls[0][0]).toMatchObject({ severity: 'success' });
+    });
+
+    it('completion failure surfaces the server message and does NOT navigate away', async () => {
+      completeDayWorkoutMock.mockRejectedValue(
+        new Error('Day already completed on another device.'),
+      );
+      const user = userEvent.setup();
+      renderLogger(ALL_LOGGED);
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      expect(
+        await screen.findByText(/Day already completed on another device/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('today-screen')).not.toBeInTheDocument();
+      expect(screen.getByTestId('hub-row-0')).toBeInTheDocument();
+    });
+  });
+
+  describe('backfill mode (?for=YYYY-MM-DD)', () => {
+    it('shows the "Logging for <date>" banner on the focus screen and stamps performed_at at noon user-local', async () => {
+      const user = userEvent.setup();
+      renderLogger(PRELOADED, '/today/mr-1/log/0?for=2026-07-05');
+      expect(screen.getByText(/logging for/i)).toBeInTheDocument();
+      expect(screen.getByText('Sunday, Jul 5')).toBeInTheDocument();
+
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/weight in pounds/i), '185');
+      await user.type(row.getByLabelText(/Set 1 reps/i), '7');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      // noon 2026-07-05 in America/New_York (EDT, UTC-4) === 16:00Z.
+      expect(call[1].performed_at).toBe('2026-07-05T16:00:00.000Z');
+    });
+
+    it('banner also renders on the hub view (mode persists across hub↔focus)', async () => {
+      renderLogger(PRELOADED, '/today/mr-1/log?for=2026-07-05');
+      expect(screen.getByText(/logging for/i)).toBeInTheDocument();
+      expect(screen.getByText('Sunday, Jul 5')).toBeInTheDocument();
+    });
+
+    it('mode survives navigation: tapping a hub row keeps ?for= and the banner', async () => {
+      const user = userEvent.setup();
+      renderLogger(PRELOADED, '/today/mr-1/log?for=2026-07-05');
+      await user.click(screen.getByTestId('hub-row-0'));
+      // Now on the focus screen — the backfill banner must still be present.
+      expect(await screen.findByTestId('set-row-0')).toBeInTheDocument();
+      expect(screen.getByText(/logging for/i)).toBeInTheDocument();
+      expect(screen.getByText('Sunday, Jul 5')).toBeInTheDocument();
+    });
+
+    it('FINISH passes completed_on = the chosen date', async () => {
+      const user = userEvent.setup();
+      renderLogger(ALL_LOGGED, '/today/mr-1/log?for=2026-07-05');
+      await user.click(screen.getByRole('button', { name: /finish workout/i }));
+      await waitFor(() =>
+        expect(completeDayWorkoutMock).toHaveBeenCalledWith('dw-1', { completed_on: '2026-07-05' }),
+      );
+    });
+  });
+
+  describe('load-state branch', () => {
+    it('mesocycle_complete shows "Program complete." not "Rest day."', async () => {
+      getTodayWorkoutMock.mockResolvedValue({ state: 'mesocycle_complete' });
+      render(
+        <MemoryRouter initialEntries={['/today/mr-1/log']}>
+          <Routes>
+            <Route path="/" element={<div>today-screen</div>} />
+            <Route path="/today/:mesocycleRunId/log" element={<TodayLoggerMobile />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText(/program complete\./i)).toBeInTheDocument();
+      expect(screen.queryByText(/rest day/i)).not.toBeInTheDocument();
     });
   });
 });

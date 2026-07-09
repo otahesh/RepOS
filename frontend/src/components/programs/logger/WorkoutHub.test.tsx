@@ -9,10 +9,18 @@ const BLOCKS: HubBlock[] = [
   { blockIdx: 2, exerciseName: 'Chest-Supported Row', muscle: 'back', setsTotal: 2, setsDone: 0 },
 ];
 
-function renderHub(blocks: HubBlock[], onOpenBlock = vi.fn()) {
+function renderHub(blocks: HubBlock[], onOpenBlock = vi.fn(), onFinish = vi.fn()) {
   return {
     onOpenBlock,
-    ...render(<WorkoutHub dayName="Full Body A" blocks={blocks} onOpenBlock={onOpenBlock} />),
+    onFinish,
+    ...render(
+      <WorkoutHub
+        dayName="Full Body A"
+        blocks={blocks}
+        onOpenBlock={onOpenBlock}
+        onFinish={onFinish}
+      />,
+    ),
   };
 }
 
@@ -44,11 +52,33 @@ describe('<WorkoutHub>', () => {
     expect(onOpenBlock).toHaveBeenCalledWith(2);
   });
 
-  it('all done → complete banner, no continue', () => {
+  it('all done → FINISH WORKOUT is the primary action, no continue', () => {
     const allDone = BLOCKS.map((b) => ({ ...b, setsDone: b.setsTotal }));
     renderHub(allDone);
-    expect(screen.getByText(/workout complete/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /finish workout/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
+  });
+
+  it('FINISH WORKOUT is always available (spec §2 partial completion) and reports intent', async () => {
+    const user = userEvent.setup();
+    const { onFinish } = renderHub(BLOCKS); // not all done
+    // Both continue and finish are present, but finish never targets a block.
+    expect(screen.getByRole('button', { name: /continue/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /finish workout/i }));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('FINISH WORKOUT shows a busy label and is disabled while finishing', () => {
+    render(
+      <WorkoutHub
+        dayName="Full Body A"
+        blocks={BLOCKS}
+        onOpenBlock={vi.fn()}
+        onFinish={vi.fn()}
+        finishing
+      />,
+    );
+    expect(screen.getByRole('button', { name: /finishing/i })).toBeDisabled();
   });
 
   it('does not render an empty muscle chip when metadata has not loaded yet', () => {

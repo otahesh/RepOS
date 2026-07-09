@@ -18,10 +18,16 @@ export function WorkoutHub({
   dayName,
   blocks,
   onOpenBlock,
+  onFinish,
+  finishing = false,
 }: {
   dayName: string;
   blocks: HubBlock[];
   onOpenBlock: (blockIdx: number) => void;
+  /** Complete the whole day workout (workout-level, not per-exercise). */
+  onFinish: () => void;
+  /** True while the completion request is in flight. */
+  finishing?: boolean;
 }) {
   const firstUnfinishedIdx = blocks.findIndex((b) => b.setsDone < b.setsTotal);
   const allDone = firstUnfinishedIdx === -1;
@@ -122,27 +128,10 @@ export function WorkoutHub({
         })}
       </ul>
 
-      {allDone ? (
-        <div
-          style={{
-            marginTop: 24,
-            padding: 14,
-            width: '100%',
-            boxSizing: 'border-box',
-            textAlign: 'center',
-            background: 'rgba(107,226,139,0.1)',
-            border: `1px solid ${TOKENS.good}`,
-            borderRadius: 8,
-            color: TOKENS.good,
-            fontWeight: 600,
-            letterSpacing: 1,
-            textTransform: 'uppercase',
-            fontSize: 14,
-          }}
-        >
-          Workout complete
-        </div>
-      ) : (
+      {/* CONTINUE keeps the per-exercise flow moving. Rendered only while
+          work remains, and stays the accent primary so it never competes
+          with FINISH for "the obvious next tap". */}
+      {!allDone ? (
         <button
           type="button"
           aria-label="Continue workout"
@@ -165,7 +154,35 @@ export function WorkoutHub({
         >
           {`Continue → ${firstUnfinished!.exerciseName}`}
         </button>
-      )}
+      ) : null}
+
+      {/* FINISH WORKOUT is workout-level and ALWAYS available — spec §2 allows
+          partial completion. When everything is logged it's the green primary;
+          while sets remain it's a green outline so CONTINUE stays the primary. */}
+      <button
+        type="button"
+        onClick={onFinish}
+        disabled={finishing}
+        style={{
+          marginTop: allDone ? 24 : 10,
+          padding: 14,
+          width: '100%',
+          boxSizing: 'border-box',
+          background: allDone ? TOKENS.good : 'transparent',
+          border: `1px solid ${TOKENS.good}`,
+          borderRadius: 8,
+          color: allDone ? TOKENS.bg : TOKENS.good,
+          fontWeight: 600,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          fontSize: 14,
+          cursor: finishing ? 'not-allowed' : 'pointer',
+          opacity: finishing ? 0.6 : 1,
+          fontFamily: FONTS.ui,
+        }}
+      >
+        {finishing ? 'Finishing…' : 'Finish Workout'}
+      </button>
     </div>
   );
 }
