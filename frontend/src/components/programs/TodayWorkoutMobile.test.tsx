@@ -26,6 +26,7 @@ function renderTWM(props: { onStart?: (runId: string, dayId: string) => void } =
 const BASE_WORKOUT = {
   state: 'workout' as const,
   run_id: 'mr-1',
+  start_date: '2026-05-01',
   day: { id: 'dw-1', kind: 'strength' as const, name: 'Upper Heavy', week_idx: 1, day_idx: 0 },
   pacing: { status: 'on_pace' as const, suggested_date: '2026-05-05' },
   completed_today: false,
@@ -200,6 +201,10 @@ describe('<TodayWorkoutMobile>', () => {
     await user.click(screen.getByRole('button', { name: /log past workout/i }));
     const dateInput = screen.getByLabelText(/date/i) as HTMLInputElement;
     expect(dateInput.value).toBe('2026-05-03');
+    // Picker is floored at the run's start_date so a user can't pick a date
+    // before the program started (which would orphan set-logs — the complete
+    // route rejects completed_on < start_date but set-log POSTs would persist).
+    expect(dateInput.min).toBe('2026-05-01');
     await user.click(screen.getByRole('button', { name: /^log$/i }));
     expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log?for=2026-05-03');
   });

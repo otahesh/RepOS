@@ -86,6 +86,7 @@ function activeRun(runId: string): msApi.TodayWorkoutResponse {
   return {
     state: 'workout',
     run_id: runId,
+    start_date: '2026-05-04',
     day: { id: 'dw-1', kind: 'strength', name: 'Day 1', week_idx: 1, day_idx: 0 },
     pacing: { status: 'on_pace', suggested_date: '2026-05-05' },
     completed_today: false,

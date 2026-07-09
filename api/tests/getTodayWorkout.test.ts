@@ -119,6 +119,17 @@ describe('getTodayWorkout (sequence semantics)', () => {
     }
   });
 
+  it('exposes the run start_date (floors the backfill picker)', async () => {
+    // The run was materialized with start_date = 2026-05-04; the workout
+    // response must surface it so the client can floor the past-workout picker
+    // and prevent orphaned pre-start set-logs.
+    const r = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z'));
+    expect(r.state).toBe('workout');
+    if (r.state === 'workout') {
+      expect(r.start_date).toBe('2026-05-04');
+    }
+  });
+
   it('day after an incomplete workout → same workout still offered, behind by 1', async () => {
     // 2026-05-05 NY: no day scheduled, but Day A (05-04) is still planned →
     // the sequence offers it (was state=rest under date semantics).

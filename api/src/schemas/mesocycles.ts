@@ -92,6 +92,11 @@ const TodayDaySchema = z.object({
 const TodayWorkoutSchema = z.object({
   state: z.literal('workout'),
   run_id: z.string().uuid(),
+  // Source template's experience track; the service always returns it (null for
+  // template-less runs). Optional here for backward-compat with mirror callers.
+  track: z.string().nullable().optional(),
+  // Run start_date (YYYY-MM-DD). Floors the backfill date picker client-side.
+  start_date: z.string(),
   day: TodayDaySchema,
   pacing: TodayPacingSchema,
   completed_today: z.boolean(),
