@@ -1,29 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { skipDayWorkout } from '../../lib/api/dayWorkouts';
 import { Term } from '../Term';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PacingChip } from './PacingChip';
 import { formatSessionDate } from './logger/HistorySheet';
-
-// Local wall-clock "today" (YYYY-MM-DD) — the max a past-workout backfill can
-// target. Uses the browser's local date, not UTC, so a late-evening user can't
-// pick "tomorrow".
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate(),
-  ).padStart(2, '0')}`;
-}
+import { pushToast } from '../common/ToastHost';
 
 export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string) => void }) {
-  const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [skipping, setSkipping] = useState(false);
-  const [logPastOpen, setLogPastOpen] = useState(false);
-  const [pastDate, setPastDate] = useState('');
 
   const fetchToday = useCallback(() => {
     getTodayWorkout()
@@ -62,6 +50,12 @@ export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string)
       await skipDayWorkout(day.id);
       setConfirmSkip(false);
       fetchToday();
+    } catch (e) {
+      pushToast({
+        severity: 'error',
+        body: `Skip failed — ${e instanceof Error ? e.message : String(e)}.`,
+      });
+      setConfirmSkip(false);
     } finally {
       setSkipping(false);
     }
@@ -133,57 +127,23 @@ export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string)
         <button onClick={() => setConfirmSkip(true)} style={textBtn('rgba(255,255,255,0.6)')}>
           Skip
         </button>
-        {behind && !logPastOpen ? (
+        {behind ? (
           <button
-            onClick={() => {
-              setPastDate(pacing.suggested_date);
-              setLogPastOpen(true);
-            }}
+            onClick={() =>
+              // Desktop has no logger during Beta (mirrors handleDesktopStart's
+              // toast). Backfill logging happens on the mobile logger; a raw
+              // navigate here would silently bounce off TodayLoggerMobileGate.
+              pushToast({
+                severity: 'info',
+                body: 'Backfill logging is on mobile during Beta. Open RepOS on your phone to log a past workout.',
+              })
+            }
             style={textBtn('#F5B544')}
           >
             Log Past Workout
           </button>
         ) : null}
       </div>
-
-      {behind && logPastOpen ? (
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-          <input
-            type="date"
-            aria-label="Log a past workout — date"
-            value={pastDate}
-            max={todayISO()}
-            onChange={(e) => setPastDate(e.target.value)}
-            style={{
-              background: '#0A0D12',
-              border: '1px solid rgba(255,255,255,0.14)',
-              borderRadius: 6,
-              color: '#fff',
-              fontFamily: 'JetBrains Mono',
-              fontSize: 13,
-              padding: '6px 8px',
-            }}
-          />
-          <button
-            onClick={() => navigate(`/today/${run_id}/log?for=${pastDate}`)}
-            disabled={!pastDate}
-            style={{
-              padding: '6px 14px',
-              background: pastDate ? '#F5B544' : 'rgba(245,181,68,0.3)',
-              border: 'none',
-              borderRadius: 6,
-              color: '#0A0D12',
-              fontWeight: 600,
-              letterSpacing: 1,
-              textTransform: 'uppercase',
-              fontSize: 12,
-              cursor: pastDate ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Log
-          </button>
-        </div>
-      ) : null}
 
       <ConfirmDialog
         open={confirmSkip}

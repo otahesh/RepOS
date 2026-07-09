@@ -54,7 +54,11 @@ export function ForkWizard({
   }, [userProgramId]);
 
   function readActiveRun(today: TodayWorkoutResponse): ConflictState {
-    return today.state === 'no_active_run' ? null : { runId: today.run_id };
+    // Only an in-progress 'workout' run is a real conflict. 'mesocycle_complete'
+    // is a finished run (the server's active_run_exists guard is active-only, and
+    // /abandon rejects non-active runs) — treating it as a conflict would strand
+    // a user who just finished a program: Start disabled, Abandon 409s in a loop.
+    return today.state === 'workout' ? { runId: today.run_id } : null;
   }
 
   async function refreshActiveRun() {

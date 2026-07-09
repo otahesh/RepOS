@@ -5,12 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { TodayCard } from './TodayCard';
 import * as api from '../../lib/api/mesocycles';
 import * as dayApi from '../../lib/api/dayWorkouts';
-
-const navigateMock = vi.fn();
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-  return { ...actual, useNavigate: () => navigateMock };
-});
+import * as toast from '../common/ToastHost';
 
 function renderCard(onStart: (runId: string, dayId: string) => void = vi.fn()) {
   return render(
@@ -37,7 +32,6 @@ function workout(overrides: Partial<api.TodayWorkoutResponse & Record<string, un
 
 describe('<TodayCard>', () => {
   beforeEach(() => {
-    navigateMock.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -139,18 +133,40 @@ describe('<TodayCard>', () => {
     await vi.waitFor(() => expect(getSpy).toHaveBeenCalledTimes(2));
   });
 
-  it('behind: LOG PAST WORKOUT reveals a date picker that navigates to the backfill logger', async () => {
+  it('SKIP failure surfaces an error toast (not silently swallowed)', async () => {
+    vi.spyOn(api, 'getTodayWorkout').mockResolvedValue(workout());
+    vi.spyOn(dayApi, 'skipDayWorkout').mockRejectedValue(new Error('run not active'));
+    const toastSpy = vi.spyOn(toast, 'pushToast').mockReturnValue('t-1');
+    const user = userEvent.setup();
+    renderCard();
+    await screen.findByText(/Upper Heavy/);
+    await user.click(screen.getByRole('button', { name: /^skip$/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /skip/i }));
+    await vi.waitFor(() =>
+      expect(toastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: 'error',
+          body: expect.stringMatching(/run not active/i),
+        }),
+      ),
+    );
+  });
+
+  it('behind (desktop): LOG PAST WORKOUT points the user to the mobile logger via toast', async () => {
     vi.spyOn(api, 'getTodayWorkout').mockResolvedValue(
       workout({ pacing: { status: 'behind', days_behind: 2, suggested_date: '2026-05-03' } }),
     );
+    const toastSpy = vi.spyOn(toast, 'pushToast').mockReturnValue('t-1');
     const user = userEvent.setup();
     renderCard();
     await screen.findByText(/Upper Heavy/);
     await user.click(screen.getByRole('button', { name: /log past workout/i }));
-    const dateInput = screen.getByLabelText(/date/i) as HTMLInputElement;
-    expect(dateInput.value).toBe('2026-05-03');
-    await user.click(screen.getByRole('button', { name: /^log$/i }));
-    expect(navigateMock).toHaveBeenCalledWith('/today/mr-1/log?for=2026-05-03');
+    expect(toastSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'info', body: expect.stringMatching(/mobile/i) }),
+    );
+    // Desktop has no date picker — the affordance is discoverable, the action is a toast.
+    expect(screen.queryByLabelText(/date/i)).not.toBeInTheDocument();
   });
 
   it('behind is the only state that offers LOG PAST WORKOUT', async () => {
