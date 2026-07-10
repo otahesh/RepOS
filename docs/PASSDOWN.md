@@ -6,6 +6,22 @@ entries first. Referenced by `docs/runbooks/beta-cutover-checklist.md`,
 
 ---
 
+## Post-deploy smoke live firing (G13) — 2026-07-10 — GREEN
+
+One-time infra + first live firing completed:
+- CF Access service token `repos-post-deploy-smoke`
+  (id `964010ab-fedb-412e-9d48-a36ae705b174`) minted via API; Service Auth
+  policy ("post-deploy-smoke service token", `non_identity`, precedence 2)
+  appended to the whole-host `repos` Access app (existing "Owner Only"
+  allow policy untouched). Outside-in check with the token: `GET /` → 200.
+- Repo secrets `CF_ACCESS_SVC_CLIENT_ID` / `CF_ACCESS_SVC_CLIENT_SECRET` set.
+- `post-deploy-smoke` workflow_dispatch against deployed
+  `e03562e9278eee9f23e1baeef0028abe4fd66130` → **success, zero failed steps**
+  (302 whole-host gate, 401 public API, bundle fingerprint match):
+  https://github.com/otahesh/RepOS/actions/runs/29123394516
+- Standing procedure: fire after every prod recreate with `expected_sha` =
+  the deployed full SHA (`docs/runbooks/beta-cutover-checklist.md` §W8.7).
+
 ## Feedback prod smoke (G12) — 2026-07-10 — GREEN
 
 Submitted as the non-admin perf user over the bearer path against prod
