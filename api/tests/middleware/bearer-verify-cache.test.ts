@@ -88,6 +88,16 @@ describe('bearer verified-token cache', () => {
     expect((await get(token)).statusCode).toBe(401);
   });
 
+  it('rejects a LIKE-wildcard prefix without matching any token', async () => {
+    const { token } = await mintToken('cache-wildcard');
+    expect((await get(token)).statusCode).toBe(200);
+    const [, secret] = token.split('.');
+    // `%` would match every stored `<prefix>:<hash>` composite if it reached
+    // the LIKE pattern un-validated.
+    expect((await get(`%.${secret}`)).statusCode).toBe(401);
+    expect((await get(`________________.${secret}`)).statusCode).toBe(401);
+  });
+
   it('same prefix with a wrong secret is never served from the cache', async () => {
     const { token } = await mintToken('cache-wrong-secret');
     expect((await get(token)).statusCode).toBe(200); // populate cache
