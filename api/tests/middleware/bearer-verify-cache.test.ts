@@ -88,6 +88,25 @@ describe('bearer verified-token cache', () => {
     expect((await get(token)).statusCode).toBe(401);
   });
 
+  it('debounces last_used_at touches to one write per window', async () => {
+    const { id, token } = await mintToken('cache-touch-debounce');
+    expect((await get(token)).statusCode).toBe(200);
+    const {
+      rows: [a],
+    } = await db.query(`SELECT last_used_at FROM device_tokens WHERE id = $1`, [id]);
+    // Age the timestamp inside the debounce window; a per-request write
+    // (the pre-fix behavior) would overwrite it on the next request.
+    await db.query(
+      `UPDATE device_tokens SET last_used_at = now() - interval '5 seconds' WHERE id = $1`,
+      [id],
+    );
+    expect((await get(token)).statusCode).toBe(200);
+    const {
+      rows: [b],
+    } = await db.query(`SELECT last_used_at FROM device_tokens WHERE id = $1`, [id]);
+    expect(new Date(b.last_used_at).getTime()).toBeLessThan(new Date(a.last_used_at).getTime());
+  });
+
   it('rejects a LIKE-wildcard prefix without matching any token', async () => {
     const { token } = await mintToken('cache-wildcard');
     expect((await get(token)).statusCode).toBe(200);

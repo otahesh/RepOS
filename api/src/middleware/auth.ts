@@ -38,9 +38,17 @@ function getDummyHash(): Promise<string> {
 // An in-place `UPDATE token_hash` on a live id would let the OLD token serve
 // from cache for up to the TTL; don't add that path without keying the cache
 // on the hash as well.
-const verifiedTokenCache = new Map<string, { tokenId: string; expiresAt: number }>();
+const verifiedTokenCache = new Map<
+  string,
+  { tokenId: string; expiresAt: number; lastTouchedAt: number }
+>();
 const VERIFIED_CACHE_TTL_MS = 10 * 60_000;
 const VERIFIED_CACHE_MAX = 512;
+// last_used_at is an ops signal ("is this token still alive before I revoke
+// it"), not an audit log — one write per minute per token is plenty. The
+// per-request UPDATE serialized concurrent requests sharing a token on a
+// single row lock (measured in the 2026-07-10 G9 run).
+const LAST_USED_TOUCH_MS = 60_000;
 
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const header = req.headers.authorization;
@@ -107,13 +115,18 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     verifiedTokenCache.set(cacheKey, {
       tokenId: String(row.id),
       expiresAt: Date.now() + VERIFIED_CACHE_TTL_MS,
+      lastTouchedAt: 0,
     });
   }
 
-  await db.query(`UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`, [
-    clientIp(req),
-    row.id,
-  ]);
+  const entry = verifiedTokenCache.get(cacheKey);
+  if (entry && Date.now() - entry.lastTouchedAt >= LAST_USED_TOUCH_MS) {
+    entry.lastTouchedAt = Date.now();
+    await db.query(
+      `UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`,
+      [clientIp(req), row.id],
+    );
+  }
   req.userId = row.user_id as string;
   // Empty array (rather than undefined) on the bearer path so requireScope
   // can distinguish "bearer with zero scopes" (403) from "no bearer used,
