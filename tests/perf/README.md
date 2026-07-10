@@ -77,11 +77,19 @@ container) and verify `rate=10r/s` is back. Real clients each have their own
 IP, so the per-IP limit never binds a legitimate 25-user load.
 
 ## Cold-cache discipline (the recap-stats test that matters)
-Before the **recap-stats** run, force a cold plan/buffer cache. On the Unraid
-box, restart Postgres inside the container (see `reference_unraid_redeploy` for
-the recreate recipe) or `docker exec RepOS sv restart postgres` (the s6 service
-name is `postgres` — confirmed in `docker/root/etc/s6-overlay/s6-rc.d/postgres`).
-Run recap-stats FIRST after restart so its p95 is genuinely cold.
+Before the **recap-stats** run, force a cold plan/buffer cache. **Stop the API
+service first**: `s6-svc -r /run/service/postgres` alone sends a SMART
+shutdown, which waits for the API's pooled connections — on 2026-07-10 this
+left Postgres in "shutting down" (rejecting every new connection → mass 500s)
+for an entire 32-minute run. The safe sequence:
+
+```
+docker exec RepOS sh -c "s6-svc -d /run/service/api && s6-svc -r /run/service/postgres \
+  && sleep 5 && s6-svc -u /run/service/api"
+```
+
+Then wait for `GET /health` → 200 and one authed 200 before starting. Run
+recap-stats FIRST after restart so its p95 is genuinely cold.
 
 ## Destructive / stateful scripts — opt in
 - `post-user-program-start.js` materializes a mesocycle and 409s on a

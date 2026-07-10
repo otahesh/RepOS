@@ -1,0 +1,142 @@
+[
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/health/sync/status",
+  "p95_budget_ms": 100,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:10:11.425Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 59.278,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/health/weight?range=30d",
+  "p95_budget_ms": 250,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:07:01.157Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 150.30769999999998,
+    "req_failed_rate": 1.59675539304134e-05,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/mesocycles/:id/recap-stats",
+  "p95_budget_ms": 800,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:00:40.585Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 231.52184999999997,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/mesocycles/:id/volume-rollup",
+  "p95_budget_ms": 500,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:16:31.979Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 343.54479999999995,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/mesocycles/today",
+  "p95_budget_ms": 200,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:03:50.868Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 378.28425,
+    "req_failed_rate": 0,
+    "passed_p95_budget": false
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "GET /api/user-programs?include=past",
+  "p95_budget_ms": 400,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:13:21.721Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 81.82114999999999,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "PATCH /api/planned-sets/:id",
+  "p95_budget_ms": 150,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:19:42.219Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 221.278,
+    "req_failed_rate": 0,
+    "passed_p95_budget": false
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "POST /api/health/weight",
+  "p95_budget_ms": 200,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:26:02.730Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 61.602,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "POST /api/planned-sets/:id/substitute",
+  "p95_budget_ms": 300,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:22:52.471Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 206.67749999999998,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ },
+ {
+  "schema": "repos.perf.baseline/1",
+  "endpoint": "POST /api/user-programs/:id/start",
+  "p95_budget_ms": 2000,
+  "base_url": "http://192.168.88.65",
+  "ran_at": "2026-07-10T20:29:12.957Z",
+  "scenarios": {
+   "combined": {
+    "p95_ms": 146.3008,
+    "req_failed_rate": 0,
+    "passed_p95_budget": true
+   }
+  }
+ }
+]
