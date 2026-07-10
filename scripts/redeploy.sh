@@ -41,8 +41,11 @@ die()  { printf '\n\033[1;31mFATAL: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # Recreate the container from an image ref ($1) with the canonical run config.
 run_container() {
+  # --memory/--cpus match docker/scripts/rollback.sh (G10 recipe) so a routine
+  # redeploy doesn't silently drop the prod resource caps.
   docker run -d --name "$CONTAINER" --restart unless-stopped \
     --network "$NETWORK" --ip "$IP" \
+    --memory=2g --cpus=2 \
     -v "$CONFIG_MOUNT" \
     --env-file "$ENV_FILE" \
     "$1" >/dev/null
