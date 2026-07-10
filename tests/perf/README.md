@@ -59,6 +59,23 @@ defaults to 3001). The k6 lib defaults `BASE_URL` to `http://127.0.0.1:3001`.
   point `MESO_ID`/`PS_ID`/`UP_ID` at the alpha tester's own resources.
 - `BASE_URL=https://repos.jpmtech.com TOKEN=... MESO_ID=... k6 run get-mesocycle-recap-stats.js`
 
+## nginx per-IP rate limit — MUST bypass for the run (found 2026-07-10)
+`docker/nginx/repos.conf` throttles `/api` at **10 r/s per client IP,
+burst=20** (`limit_req zone=api`). All k6 VUs share the load-generator's IP,
+so a 25-VU run trips the limiter by design: the first firing showed 82%
+req_failed and a 4.1s p95 that measured the DoS shield, not the app. Before a
+run, raise the zone rate in the RUNNING container (ephemeral — a container
+recreate restores the baked config):
+
+```
+docker exec RepOS sh -lc "sed -i 's|zone=api:10m   rate=10r/s|zone=api:10m   rate=2000r/s|' \
+  /etc/nginx/http.d/default.conf && nginx -t && nginx -s reload"
+```
+
+Restore afterwards with the reverse sed + `nginx -s reload` (or recreate the
+container) and verify `rate=10r/s` is back. Real clients each have their own
+IP, so the per-IP limit never binds a legitimate 25-user load.
+
 ## Cold-cache discipline (the recap-stats test that matters)
 Before the **recap-stats** run, force a cold plan/buffer cache. On the Unraid
 box, restart Postgres inside the container (see `reference_unraid_redeploy` for

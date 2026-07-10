@@ -40,6 +40,7 @@ echo "$DRY_OUT" | grep -q -- '--memory=2g' || { echo "FAIL: DRY_RUN recipe missi
 echo "$DRY_OUT" | grep -q -- '--cpus=2' || { echo "FAIL: DRY_RUN recipe missing --cpus=2 cap"; exit 1; }
 echo "$DRY_OUT" | grep -q -- '--network br0' || { echo "FAIL: DRY_RUN recipe missing --network br0"; exit 1; }
 echo "$DRY_OUT" | grep -q -- '--ip 192.168.88.65' || { echo "FAIL: DRY_RUN recipe missing pinned IP"; exit 1; }
+echo "$DRY_OUT" | grep -q -- 'grep -v .^APP_SHA=' || { echo "FAIL: DRY_RUN recipe does not strip stale APP_SHA from captured env"; exit 1; }
 echo "✓ DRY_RUN prints the capped :sha recipe without touching ssh/docker"
 
 echo "✓ rollback.test.sh PASS"

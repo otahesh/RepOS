@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import argon2 from 'argon2';
+import { createHash } from 'node:crypto';
 import { db } from '../db/client.js';
 import { clientIp } from '../utils/clientIp.js';
 
@@ -23,6 +24,24 @@ function getDummyHash(): Promise<string> {
   return dummyHashPromise;
 }
 
+// Verified-token cache (G9 finding, 2026-07-10): argon2.verify costs
+// ~50–100ms of CPU per call, capping the whole API at ~16 req/s on the 2-CPU
+// prod box. A token that has already passed argon2 is remembered by
+// sha256(full token) and skips ONLY the re-verify. The DB prefix lookup below
+// still runs on every request and enforces `revoked_at IS NULL`, so
+// revocation takes effect on the very next request; the cached entry must
+// also match the row id the lookup returned, so a rotated row can't be
+// served from a stale entry.
+//
+// INVARIANT the cache depends on: a device_tokens row's secret is immutable
+// for its id — rotation is always mint-new-row + revoke-old-row (tokens.ts).
+// An in-place `UPDATE token_hash` on a live id would let the OLD token serve
+// from cache for up to the TTL; don't add that path without keying the cache
+// on the hash as well.
+const verifiedTokenCache = new Map<string, { tokenId: string; expiresAt: number }>();
+const VERIFIED_CACHE_TTL_MS = 10 * 60_000;
+const VERIFIED_CACHE_MAX = 512;
+
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -38,13 +57,23 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const prefix = token.slice(0, dotIdx);
   const secret = token.slice(dotIdx + 1);
 
+  // Reject anything but 16 lowercase hex BEFORE the LIKE query: `%`/`_` in an
+  // unvalidated prefix act as SQL wildcards (`%.x` would range-scan every
+  // active token). Pay the dummy-verify so this path is timing-identical to
+  // an unknown-prefix miss.
+  if (!/^[0-9a-f]{16}$/.test(prefix)) {
+    await argon2.verify(await getDummyHash(), secret).catch(() => false);
+    return reply.code(401).send();
+  }
+
   // Look up by prefix — at most one row; no table scan. `scopes` is pulled
   // alongside id/user_id so requireScope (api/src/middleware/scope.ts) can
   // gate writes without a second DB round-trip.
   const { rows } = await db.query(
     `SELECT id, user_id, token_hash, scopes
      FROM device_tokens
-     WHERE token_hash LIKE $1 AND revoked_at IS NULL`,
+     WHERE token_hash LIKE $1 AND revoked_at IS NULL
+     ORDER BY id LIMIT 1`,
     [`${prefix}:%`],
   );
 
@@ -60,8 +89,25 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   // Strip the "<prefix>:" prefix from the stored composite to get the bare argon2 hash
   const storedHash = row.token_hash.slice(prefix.length + 1);
 
-  if (!(await argon2.verify(storedHash, secret))) {
-    return reply.code(401).send();
+  const cacheKey = createHash('sha256').update(token).digest('hex');
+  const cached = verifiedTokenCache.get(cacheKey);
+  const cacheHit =
+    cached !== undefined && cached.tokenId === String(row.id) && cached.expiresAt > Date.now();
+
+  if (!cacheHit) {
+    if (!(await argon2.verify(storedHash, secret))) {
+      return reply.code(401).send();
+    }
+    // Bounded: evict the oldest entry (Map preserves insertion order) rather
+    // than grow without limit under many distinct tokens.
+    if (verifiedTokenCache.size >= VERIFIED_CACHE_MAX) {
+      const oldest = verifiedTokenCache.keys().next().value;
+      if (oldest !== undefined) verifiedTokenCache.delete(oldest);
+    }
+    verifiedTokenCache.set(cacheKey, {
+      tokenId: String(row.id),
+      expiresAt: Date.now() + VERIFIED_CACHE_TTL_MS,
+    });
   }
 
   await db.query(`UPDATE device_tokens SET last_used_at = now(), last_used_ip = $1 WHERE id = $2`, [
