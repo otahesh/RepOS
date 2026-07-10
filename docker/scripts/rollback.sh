@@ -63,8 +63,9 @@ print_recipe() {
   cat <<RECIPE
 # 1. pull the pinned image on the host
 ssh ${UNRAID_SSH} docker pull ${IMAGE}
-# 2. capture the existing container env (don't lose secrets)
-ssh ${UNRAID_SSH} "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' > /tmp/repos.env"
+# 2. capture the existing container env (don't lose secrets) — but drop the
+#    old image's baked APP_SHA so the pinned image's own value shows through
+ssh ${UNRAID_SSH} "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > /tmp/repos.env"
 # 3. stop + remove (volumes on /mnt/user/appdata/repos/config survive)
 ssh ${UNRAID_SSH} "docker stop ${CONTAINER} && docker rm ${CONTAINER}"
 # 4. recreate, pinned to ${IMAGE}, env-preserving, with resource caps
@@ -88,7 +89,11 @@ fi
 echo "→ Rolling ${CONTAINER} back to ${IMAGE} on ${UNRAID_SSH}..."
 
 ssh "${UNRAID_SSH}" docker pull "${IMAGE}"
-ssh "${UNRAID_SSH}" "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' > /tmp/repos.env"
+# Drop the captured APP_SHA: it's baked into each image, and carrying the old
+# one over via --env-file masks the pinned image's own APP_SHA — during the
+# 2026-07-10 G10 dry-fire this made the rolled-back container report the NEW
+# sha, defeating the operator's verification signal.
+ssh "${UNRAID_SSH}" "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > /tmp/repos.env"
 ssh "${UNRAID_SSH}" "docker stop ${CONTAINER} && docker rm ${CONTAINER}"
 ssh "${UNRAID_SSH}" docker run -d \
   --name "${CONTAINER}" \
