@@ -12,24 +12,29 @@ import { logBuffer } from '../../lib/logBuffer';
 import { useCurrentUser } from '../../auth';
 import { OnboardingOverlay } from '../onboarding/OnboardingOverlay';
 import { ParQGate } from '../onboarding/ParQGate';
+import { BetaDisclaimer } from '../onboarding/BetaDisclaimer';
 import { getParQStatus } from '../../lib/api/parQ';
 
-// W2 (panel C-MOUNT) — derived state machine that mounts ONE of the two
-// AppShell overlays (or neither) as a sibling of <Outlet>. Onboarding always
-// precedes PAR-Q; never both at once.
+// W2 (panel C-MOUNT) — derived state machine that mounts ONE of the AppShell
+// overlays (or none) as a sibling of <Outlet>. Disclaimer precedes onboarding
+// precedes PAR-Q; never two at once.
 //   1. user data still loading → render nothing.
-//   2. !onboarding_completed_at → OnboardingOverlay only.
-//   3. else PAR-Q needs_prompt  → ParQGate only.
-//   4. else                     → neither.
+//   2. !beta_disclaimer_ack_at → BetaDisclaimer only (G14 — the user must
+//      know they're on Beta software before anything else).
+//   3. !onboarding_completed_at → OnboardingOverlay only.
+//   4. else PAR-Q needs_prompt  → ParQGate only.
+//   5. else                     → neither.
 // Each overlay's onComplete advances the local gate state without a full
 // /api/me re-bootstrap.
 function useOnboardingGate(): React.ReactNode {
   const { user } = useCurrentUser();
+  const [disclaimerAcked, setDisclaimerAcked] = useState<boolean | null>(null);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [parQNeedsPrompt, setParQNeedsPrompt] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!user) return;
+    setDisclaimerAcked(!!user.beta_disclaimer_ack_at);
     setOnboardingDone(!!user.onboarding_completed_at);
   }, [user]);
 
@@ -53,6 +58,8 @@ function useOnboardingGate(): React.ReactNode {
   }, [refreshParQ]);
 
   if (!user) return null;
+  if (disclaimerAcked === false)
+    return <BetaDisclaimer onComplete={() => setDisclaimerAcked(true)} />;
   if (onboardingDone === false) return <OnboardingOverlay onComplete={reloadOnboarding} />;
   if (onboardingDone && parQNeedsPrompt) return <ParQGate onComplete={reloadParQ} />;
   return null;

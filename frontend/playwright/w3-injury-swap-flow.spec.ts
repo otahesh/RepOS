@@ -35,7 +35,7 @@ const USER = {
   display_name: 'Tester',
   timezone: 'America/New_York',
   // Past timestamp so the W2 OnboardingOverlay (z-1500) does not cover the page.
-  onboarding_completed_at: '2026-01-01T00:00:00Z',
+  onboarding_completed_at: '2026-01-01T00:00:00Z', beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
 };
 
 const PLANNED_SET_ID = 'ps-bs-0';

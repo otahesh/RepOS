@@ -47,6 +47,7 @@ export interface SeedOptions {
     display_name: string | null;
     timezone: string;
     onboarding_completed_at?: string | null;
+    beta_disclaimer_ack_at?: string | null;
   };
 }
 
@@ -96,6 +97,7 @@ const DEFAULT_USER = {
   // Past timestamp so AppShell.useOnboardingGate does NOT mount the full-viewport
   // OnboardingOverlay (z-1500) over the logger — added when the W2 gate landed.
   onboarding_completed_at: '2026-01-01T00:00:00Z',
+  beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
 };
 
 const DEFAULT_DAY: SeedDay = {
