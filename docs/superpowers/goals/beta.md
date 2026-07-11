@@ -2,7 +2,7 @@
 
 > Operating dashboard for the alpha→Beta transition. Source-of-truth for *what's true right now*; the master plan is `docs/superpowers/plans/2026-05-11-repos-beta.md`. When this file conflicts with the master plan, the master plan wins — correct this file.
 
-**Last updated:** 2026-07-11 (**supervised browser block executed — G3 + G5 GREEN; all 15 build-time gates now green.** Eight defects found and fixed same-day (PRs #51–#56 + two prod env gaps): the W3 recovery-flag UI had never been built, sign-out-everywhere never actually signed the browser out, the Backups page had never worked in prod (nginx slash-redirect), and the W5 restore had never been executable in prod (scripts-path mismatch). Full narrative + DR timestamps in `docs/PASSDOWN.md`. Prod on `3fa7bc5`, healthy, smoke green. **Next: G14/G15 cutover-day paperwork and the cutover itself. Watch tonight's 03:15 UTC nightly backup (intermittent integrity-check failure, 2 of ~45 nights).**)
+**Last updated:** 2026-07-11 (**MILESTONE 1 EXECUTED — Beta cutover complete. All G1–G15 green.** G14 closed by building the missing first-run Beta disclaimer (PR #58, surfaced + acked live) on top of the verified PAR-Q row and documented contact path; G15 closed with exit-criteria review + weekly cadence (review #1 recorded in PASSDOWN; operator adds the recurring calendar entry). Cutover sign-off + post-cutover scaling plan (N=1 → N=5 → N=10) in PASSDOWN. Prod on `bc026fc`, healthy, smoke green. **Next: Milestone 2 — the alpha tester completes one full mesocycle end-to-end on production with no Sev-1 (~4 training weeks). Weekly Beta reviews each Friday.**)
 ---
 
 ## Done predicate (the actual goal condition)
@@ -57,9 +57,9 @@ Until Milestone 2 lands the system is "Beta-launched" but not "Beta-validated." 
 [x] W7 — In-app feedback loop — merged (PR #20); G12 `[~]` pending prod smoke
 [x] W8 — Beta entry gates (build-now) — merged to `main` (PR #22 @ `e4765e1`); W8.5 branch protection + G1 done; cutover-window gates remain
 ─── MILESTONE 1 (Beta cutover authorized) ───
-[ ] CUT — Execute first-cohort cutover                           after W8 green
+[x] CUT — Executed 2026-07-11 (sign-off in PASSDOWN)
 ─── MILESTONE 2 (alpha-tester usable-results proof) ───
-[ ] MESO — Alpha-tester completes ≥1 full mesocycle on prod      ~4 training weeks post-cutover
+[~] MESO — IN FLIGHT since 2026-07-11 — alpha tester's active run continues on prod
 ```
 
 Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
@@ -83,8 +83,8 @@ Legend: `[x]` done, `[~]` in-flight, `[ ]` not started.
 | **G11** | All Critical + Important findings from `08-qa.md` §"Pre-Beta security review checklist" closed with PR links; zero deferred to "v1.5 backlog"; any accept-residual-risk has engineering sign-off in writing. | `[x]` (W8/PR #22: all 26 pre-Beta security checklist items closed with file:line evidence; the one real finding — unvalidated `:id` → 500 with raw DB text — fixed across 6 routes via shared `idParams.ts`; zero v1.5 deferrals) | W8.9 ✓ | PR-link checklist in `08-qa.md` |
 | **G12** | Test feedback submission as non-admin user lands in `feedback` table ≤5s; webhook delivery confirmed; triage cadence in `docs/runbooks/beta-triage.md`. Run against prod in pre-cutover window. | `[x]` (2026-07-10 prod smoke: non-admin bearer submit → 201, row via `GET /api/admin/feedback` immediately, `webhook_delivered_at` stamped +5s, Discord 2xx — `FEEDBACK_WEBHOOK_URL` live in prod `.env`) | done | PASSDOWN §G12 |
 | **G13** | GH Actions post-deploy job pings `repos.jpmtech.com`, verifies 302→CF Access, `/api/health/sync/status`→401 from public, bundle hash matches build artifact, fails deploy on mismatch. | `[x]` (2026-07-10: CF Access service token minted + Service Auth policy on the `repos` app; repo secrets set; live `workflow_dispatch` against deployed `e03562e` → **success, all assertions green** — run 29123394516) | done | PASSDOWN §G13 + Actions run |
-| **G14** | First cohort capped at 10 users; each has signed PAR-Q-lite; each has documented contact path; each saw first-run Beta disclaimer. | `[ ]` | cutover-time (post-W7) | `par_q_acknowledgments` rows + comms log in PASSDOWN |
-| **G15** | `docs/runbooks/beta-exit-criteria.md` lists exit conditions per D13; weekly Beta review cadence documented; last review showed no blocking gaps in final 14 days. | `[~]` (W8/PR #22: `beta-exit-criteria.md` authored — D13 floor conditions + weekly cadence, verified by `tests/dr/cutover-docs.test.sh`; **the weekly reviews + final-14-day check run during the Beta period**) | W8 docs ✓ / Beta-period | `docs/runbooks/beta-exit-criteria.md` |
+| **G14** | First cohort capped at 10 users; each has signed PAR-Q-lite; each has documented contact path; each saw first-run Beta disclaimer. | `[x]` (2026-07-11: N=1 cohort; CF Access allow-list caps admission; PAR-Q row verified (v2, 2026-06-26); contact path = beta-triage.md feedback→Discord; first-run disclaimer BUILT this window (PR #58 — it never existed) + surfaced + acked live 17:51 UTC) | done | PASSDOWN §G14 + `par_q_acknowledgments` + `users.beta_disclaimer_ack_at` |
+| **G15** | `docs/runbooks/beta-exit-criteria.md` lists exit conditions per D13; weekly Beta review cadence documented; last review showed no blocking gaps in final 14 days. | `[x]` (cutover scope: doc reviewed 2026-07-11, cadence documented, weekly review #1 recorded in PASSDOWN; the final-14-day clause is the GA-exit check evaluated by the ongoing weekly cadence) | done | PASSDOWN §Weekly Beta review #1 + `docs/runbooks/beta-exit-criteria.md` |
 
 **Beta cutover authorized when every row above is `[x]`.** Any `[ ]` or `[~]` at cutover-review time = Beta slips.
 
