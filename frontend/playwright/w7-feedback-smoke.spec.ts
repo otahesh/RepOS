@@ -12,7 +12,7 @@ import { test, expect, type BrowserContext, type Route } from '@playwright/test'
 // route mock needed — refreshParQ catches a miss and leaves the gate closed.)
 const USER = {
   id: 'user-1', email: 'tester@example.com', display_name: 'Tester', timezone: 'UTC',
-  is_admin: false, onboarding_completed_at: '2026-01-01T00:00:00Z',
+  is_admin: false, onboarding_completed_at: '2026-01-01T00:00:00Z', beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
   par_q_version: 1, par_q_advisory_active: false,
 };
 

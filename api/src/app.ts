@@ -103,11 +103,13 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       onboarding_completed_at: string | null;
       par_q_version: number;
       par_q_advisory_active: boolean;
+      beta_disclaimer_ack_at: string | null;
     }>(
       `SELECT
          to_char(onboarding_completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS onboarding_completed_at,
          par_q_version,
-         par_q_advisory_active
+         par_q_advisory_active,
+         to_char(beta_disclaimer_ack_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS beta_disclaimer_ack_at
        FROM users WHERE id = $1`,
       [userId],
     );
@@ -119,6 +121,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       onboarding_completed_at: u?.onboarding_completed_at ?? null,
       par_q_version: u?.par_q_version ?? 0,
       par_q_advisory_active: u?.par_q_advisory_active ?? false,
+      beta_disclaimer_ack_at: u?.beta_disclaimer_ack_at ?? null,
       is_admin: isAdminEmail(req.userEmail),
     };
   });

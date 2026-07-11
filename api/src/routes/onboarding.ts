@@ -83,4 +83,25 @@ export async function onboardingRoutes(app: FastifyInstance) {
       }
     },
   );
+
+  // G14 — first-run Beta disclaimer ack. Idempotent (COALESCE keeps the
+  // first timestamp); same auth as onboarding-complete.
+  app.post(
+    '/me/beta-disclaimer-ack',
+    { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
+    async (req) => {
+      const userId = requireUserId(req);
+      const {
+        rows: [u],
+      } = await db.query<{ beta_disclaimer_ack_at: string }>(
+        `UPDATE users
+            SET beta_disclaimer_ack_at = COALESCE(beta_disclaimer_ack_at, now())
+          WHERE id = $1
+          RETURNING
+            to_char(beta_disclaimer_ack_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS beta_disclaimer_ack_at`,
+        [userId],
+      );
+      return { beta_disclaimer_ack_at: u.beta_disclaimer_ack_at };
+    },
+  );
 }
