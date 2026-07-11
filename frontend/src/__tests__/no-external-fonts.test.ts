@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 // Vite ?raw imports — the app tsconfig has no node types, so no fs here.
 import indexHtml from '../../index.html?raw';
 import mainTsx from '../main.tsx?raw';
+import viteConfig from '../../vite.config.ts?raw';
 
 // Production CSP is `style-src 'self' 'unsafe-inline'` (docker/nginx/repos.conf)
 // — any external stylesheet is silently blocked in prod and the app falls back
@@ -16,5 +17,9 @@ describe('font self-hosting invariant', () => {
   it('main.tsx imports the self-hosted font faces', () => {
     expect(mainTsx).toMatch(/@fontsource\/inter-tight/);
     expect(mainTsx).toMatch(/@fontsource\/jetbrains-mono/);
+  });
+
+  it('vite does not inline assets as data: URIs (CSP has no font-src/data: allowance)', () => {
+    expect(viteConfig).toMatch(/assetsInlineLimit:\s*0/);
   });
 });
