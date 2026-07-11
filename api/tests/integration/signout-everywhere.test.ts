@@ -119,15 +119,15 @@ describe('POST /api/auth/signout-everywhere', () => {
     });
     expect(r.statusCode).toBe(204);
 
-    // Set-Cookie clears CF_Authorization with Max-Age=0 and the security
-    // attributes set by the production route.
+    // The route must NOT touch the CF_Authorization cookie. The frontend
+    // navigates to /cdn-cgi/access/logout next, and Cloudflare only
+    // terminates the edge session when that request still carries the
+    // cookie — an API-side Max-Age=0 clear made the logout arrive
+    // cookieless, CF errored, and the team-domain SSO silently
+    // re-authenticated the browser (found live 2026-07-11).
     const setCookie = r.headers['set-cookie'];
     const cookieStr = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
-    expect(cookieStr).toMatch(/CF_Authorization=;.*Max-Age=0/i);
-    expect(cookieStr).toMatch(/HttpOnly/i);
-    expect(cookieStr).toMatch(/Secure/i);
-    expect(cookieStr).toMatch(/SameSite=Lax/i);
-    expect(cookieStr).toMatch(/Path=\//i);
+    expect(cookieStr).not.toMatch(/CF_Authorization/i);
 
     // Every previously-valid bearer now 401s on its next API call.
     const postA = await app.inject({

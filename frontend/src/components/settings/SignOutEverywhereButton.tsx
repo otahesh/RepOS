@@ -6,14 +6,14 @@
 //   1. Click opens a MEDIUM-tier ConfirmDialog (no typed-confirm phrase — this
 //      is reversible by re-minting, so it doesn't warrant the heavy tier the
 //      account-delete path uses).
-//   2. Confirm calls signOutEverywhere() (revokes every bearer token + clears
-//      the CF Access cookie server-side, per C-SIGNOUT-CFACCESS-ONLY).
+//   2. Confirm calls signOutEverywhere() (revokes every bearer token, per
+//      C-SIGNOUT-CFACCESS-ONLY; the CF cookie is left intact for step 4).
 //   3. On success it posts a `{ type: 'signout_everywhere' }` message on
 //      BroadcastChannel('repos-auth') BEFORE redirecting (per I-BROADCASTCHANNEL),
 //      so any other RepOS tab in this browser hears the signal via the
 //      AuthProvider listener and redirects itself to the CF Access logout.
-//   4. This tab then redirects to /cdn-cgi/access/logout to tear down its own
-//      CF Access cookie.
+//   4. This tab then redirects to /cdn-cgi/access/logout — the cookie must
+//      still be present on that request for CF to terminate the edge session.
 //
 // BroadcastChannel is wrapped in try/catch — older browsers without it still
 // complete the sign-out + redirect; they just don't get the cross-tab nudge.
