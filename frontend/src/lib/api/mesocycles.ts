@@ -24,6 +24,9 @@ export type TodaySet = {
     id: string;
     slug: string;
     name: string;
+    /** requires: [] on the exercise — the logger captures reps-only. Optional
+     *  so older fixtures/mocks without it still compile (treated as false). */
+    bodyweight?: boolean;
   };
   target_reps_low: number;
   target_reps_high: number;

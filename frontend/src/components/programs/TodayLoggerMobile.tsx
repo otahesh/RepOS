@@ -390,9 +390,12 @@ function LoggerInner({
     async (set: TodaySet): Promise<boolean> => {
       if (!currentUserId) return false; // shouldn't happen — AuthGate blocks render
       const inputs = rowInputs[set.id];
-      const weight = parseFloat(inputs.weight);
+      // Bodyweight movements log reps-only: weight_lbs stays null and
+      // logBuffer omits it from the POST (the API field is optional).
+      const isBodyweight = set.exercise.bodyweight === true;
+      const weight = isBodyweight ? null : parseFloat(inputs.weight);
       const reps = parseInt(inputs.reps, 10);
-      if (!Number.isFinite(weight) || !Number.isFinite(reps) || reps <= 0) {
+      if ((weight !== null && !Number.isFinite(weight)) || !Number.isFinite(reps) || reps <= 0) {
         // Validation gate — UI surfaces via the disabled CTA; nothing to do.
         return false;
       }

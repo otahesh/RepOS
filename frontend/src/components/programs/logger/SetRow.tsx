@@ -107,11 +107,15 @@ export function SetRow({
     onLog();
   };
 
+  // Bodyweight movements (dead bug, planks, yoga-style holds) carry no
+  // external load — the weight input is hidden and reps alone unlock Log.
+  const isBodyweight = set.exercise.bodyweight === true;
+
   const canLog =
     !debounced &&
     !isLogged &&
     !isLogging &&
-    inputs.weight.trim() !== '' &&
+    (isBodyweight || inputs.weight.trim() !== '') &&
     inputs.reps.trim() !== '';
 
   const logLabel = (() => {
@@ -149,20 +153,52 @@ export function SetRow({
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
-        <NumInput
-          label="Weight"
-          unit="lb"
-          value={inputs.weight}
-          onChange={(v) => onInputChange({ weight: v })}
-          inputRef={weightInputRef}
-          ariaLabel={`Set ${set.set_idx + 1} weight in pounds`}
-          disabled={isLogged}
-        />
+        {isBodyweight ? (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              justifyContent: 'flex-end',
+            }}
+          >
+            <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>Load</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '10px 10px',
+                borderRadius: 6,
+                border: `1px solid ${TOKENS.line}`,
+                background: TOKENS.surface,
+                color: TOKENS.textDim,
+                fontFamily: FONTS.mono,
+                fontSize: 13,
+                letterSpacing: 1,
+              }}
+            >
+              BODYWEIGHT
+            </span>
+          </div>
+        ) : (
+          <NumInput
+            label="Weight"
+            unit="lb"
+            value={inputs.weight}
+            onChange={(v) => onInputChange({ weight: v })}
+            inputRef={weightInputRef}
+            ariaLabel={`Set ${set.set_idx + 1} weight in pounds`}
+            disabled={isLogged}
+          />
+        )}
         <NumInput
           label="Reps"
           unit=""
           value={inputs.reps}
           onChange={(v) => onInputChange({ reps: v })}
+          inputRef={isBodyweight ? weightInputRef : undefined}
           ariaLabel={`Set ${set.set_idx + 1} reps`}
           disabled={isLogged}
         />
