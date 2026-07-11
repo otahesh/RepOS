@@ -191,3 +191,72 @@ defect #8 below; DB untouched, maintenance cleared via
 - Env-gap pattern (defects 1, 5, 8): three feature-critical env vars never
   reached prod. Candidate: boot-time env validation warning (log-level) for
   known feature vars, or a `.env.example` sync check in CI.
+
+## G14 + G15 + Beta cutover (Milestone 1) — 2026-07-11
+
+### G14 — Cohort + comms — GREEN
+
+N=1 cohort: jmeyer (jason@jpmtech.com), the alpha tester.
+
+- Cohort cap ≤10: enforced at the edge — the whole-host CF Access app admits
+  only allow-listed identities; 1 user provisioned.
+- PAR-Q-lite: signed — `par_q_acknowledgments` row, version 2, all-No answers,
+  accepted 2026-06-26 15:25 UTC.
+- Contact path: documented in `docs/runbooks/beta-triage.md` (in-app Send
+  feedback → `feedback` table → Discord webhook; Sev tiers + TTA defined).
+- First-run Beta disclaimer: **built this window** (it did not exist — PR #58:
+  `BetaDisclaimer` gate, `users.beta_disclaimer_ack_at`, migration 081, gate
+  order disclaimer → onboarding → PAR-Q). Surfaced live on prod and
+  acknowledged by the cohort: ack stamped 2026-07-11 17:51 UTC.
+
+### G15 — Exit criteria + cadence — GREEN (cutover scope)
+
+- `docs/runbooks/beta-exit-criteria.md` reviewed this window; conditions match
+  D13. The "no blocking gaps in final 14 days" clause is the GA-exit check,
+  evaluated by the weekly cadence during Beta (per the dashboard's
+  done-predicate scope note).
+- Weekly cadence: documented in the runbook; review #1 recorded below.
+  Calendar entry: operator action — add a weekly Friday ~09:05 ET recurring
+  event (agent-side calendar write was permission-blocked).
+
+### Weekly Beta review #1 — 2026-07-11
+
+1. 30 days no Sev-1: **IN PROGRESS** — clock anchored at 2026-07-06 (W1
+   set-log 400 regression resolution, the last Sev-1-class incident). No
+   Sev-1 since.
+2. Zero Sev-2 in final 14 days: **GREEN today** — all 8 defects found in the
+   browser block were fixed same-day; nothing open.
+3. Zero PAR-Q-bypass: **GREEN** — none observed; gate order now enforces
+   disclaimer → onboarding → PAR-Q before any workout surface.
+4. DR dry-fire within 30 days: **GREEN** — 2026-07-11 rehearsal (this
+   PASSDOWN, §DR dry-fire).
+5. No outstanding Important security findings: **GREEN** — G11 closed; the
+   PR #51 adversarial review's 4 Important findings all landed pre-merge.
+6. ≥5 users full mesocycle + feedback: **RED (expected)** — GA signal; cohort
+   is N=1 as of today.
+
+### Post-cutover scaling plan (per master-plan risk row)
+
+- **N=1** (jmeyer) for the first 48h — watch: nightly backup integrity,
+  sync pill, set-log flow, recovery-flag noise.
+- **N=5** mid-week-1 — provision via CF Access allow-list; each new user gets
+  the first-run disclaimer + PAR-Q automatically (both are now product gates,
+  not manual steps); record each in the comms log here.
+- **N=10** end-of-week-1 — cap per G14. Any Sev-1 pauses cohort growth and
+  resets the exit-criteria clock.
+
+### Cutover sign-off — Milestone 1 EXECUTED 2026-07-11
+
+- CF Access default-on: live since W0, re-verified continuously (every
+  post-deploy smoke asserts the 302 challenge; last: run 29162240816 sha
+  `bc026fc`).
+- Alpha data: wiped at W0 per the split-cutover SQL
+  (`scripts/cutover/001-placeholder-to-jmeyer.sql`; weight history preserved
+  via reattribution — G8 evidence). Lifting data created since is the alpha
+  tester's own on-product data; the Milestone-2 mesocycle starts from the
+  user's current active run.
+- Alpha tester CF-provisioned, PAR-Q-signed, disclaimer-acked: all verified
+  above.
+- **All G1–G15 green. Beta cutover authorized AND executed — the system is
+  live on production for the Beta cohort. Milestone 2 (one full mesocycle
+  end-to-end with no Sev-1) begins now.**
