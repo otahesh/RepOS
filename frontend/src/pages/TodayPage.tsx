@@ -4,6 +4,7 @@ import { TodayCard } from '../components/programs/TodayCard';
 import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile';
 import MobileWeightChip from '../components/MobileWeightChip';
 import DesktopDashboard from '../components/dashboard/DesktopDashboard';
+import { RecoveryFlagBanner } from '../components/dashboard/RecoveryFlagBanner';
 import { pushToast } from '../components/common/ToastHost';
 
 // Desktop TodayCard's onStart still routes through this placeholder until the
@@ -22,6 +23,9 @@ export default function TodayPage() {
   if (isMobile) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, color: TOKENS.text }}>
+        <div style={{ padding: '0 16px' }}>
+          <RecoveryFlagBanner />
+        </div>
         <TodayWorkoutMobile />
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-start' }}>
           <MobileWeightChip />
@@ -32,6 +36,7 @@ export default function TodayPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, color: TOKENS.text }}>
+      <RecoveryFlagBanner />
       <TodayCard onStart={handleDesktopStart} />
       <DesktopDashboard />
     </div>
