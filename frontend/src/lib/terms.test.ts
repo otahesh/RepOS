@@ -45,6 +45,8 @@ const ALL_KEYS: TermKey[] = [
   'advisory_mode',
   // sequence-workouts addition
   'pacing',
+  // W3 recovery-flag advisory surface (stalled-PR message)
+  'pr',
 ];
 
 describe('TERMS dictionary', () => {
