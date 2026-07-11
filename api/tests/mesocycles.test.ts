@@ -136,6 +136,34 @@ describe('GET /api/mesocycles/today', () => {
     expect(body.day.scheduled_date).toBe('2026-05-04');
   });
 
+  it('marks each set exercise with a bodyweight flag (requires: [] → true)', async () => {
+    // Inject a dead-bug planned set (requires: []) into today's day_workout so
+    // both variants are present regardless of template composition.
+    const t0 = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
+    const dayId = t0.json<any>().day.id;
+    const {
+      rows: [deadBug],
+    } = await db.query(`SELECT id FROM exercises WHERE slug='dead-bug'`);
+    const {
+      rows: [ps],
+    } = await db.query(
+      `INSERT INTO planned_sets (day_workout_id, exercise_id, block_idx, set_idx,
+                                 target_reps_low, target_reps_high, target_rir, rest_sec)
+       VALUES ($1, $2, 98, 0, 8, 12, 2, 60) RETURNING id`,
+      [dayId, deadBug.id],
+    );
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/mesocycles/today', headers: auth() });
+      const sets = r.json<any>().sets;
+      const bw = sets.find((s: any) => s.id === ps.id);
+      expect(bw.exercise.bodyweight).toBe(true);
+      const loaded = sets.find((s: any) => s.exercise.slug === 'dumbbell-goblet-squat');
+      expect(loaded.exercise.bodyweight).toBe(false);
+    } finally {
+      await db.query(`DELETE FROM planned_sets WHERE id=$1`, [ps.id]);
+    }
+  });
+
   it('keeps offering the earliest incomplete workout on an off-day (sequence semantics)', async () => {
     // Move time forward to Tuesday — no day scheduled, but Monday's workout is
     // still planned, so the sequence offers it with pacing behind by 1.

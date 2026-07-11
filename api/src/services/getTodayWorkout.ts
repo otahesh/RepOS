@@ -41,7 +41,9 @@ export type TodayWorkout =
         id: string;
         block_idx: number;
         set_idx: number;
-        exercise: { id: string; slug: string; name: string };
+        // bodyweight: required_equipment.requires is empty — the logger
+        // captures reps-only for these (no meaningful external load).
+        exercise: { id: string; slug: string; name: string; bodyweight: boolean };
         target_reps_low: number;
         target_reps_high: number;
         target_rir: number;
@@ -219,7 +221,12 @@ export async function getTodayWorkout(
         id: s.id,
         block_idx: s.block_idx,
         set_idx: s.set_idx,
-        exercise: { id: s.ex_id, slug: s.ex_slug, name: s.ex_name },
+        exercise: {
+          id: s.ex_id,
+          slug: s.ex_slug,
+          name: s.ex_name,
+          bodyweight: predicates.length === 0,
+        },
         target_reps_low: s.target_reps_low,
         target_reps_high: s.target_reps_high,
         target_rir: s.target_rir,

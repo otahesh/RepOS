@@ -258,6 +258,39 @@ describe('<TodayLoggerMobile>', () => {
     });
   });
 
+  describe('bodyweight movements (reps-only logging)', () => {
+    const BW_SET: TodaySet = {
+      ...SET_1,
+      id: 'ps-bw',
+      exercise: { id: 'e-bw', slug: 'dead-bug', name: 'Dead Bug', bodyweight: true },
+    };
+    const BW_PRELOADED = { run_id: 'mr-1', day: DAY, sets: [BW_SET] };
+
+    it('hides the weight input and shows a bodyweight chip', async () => {
+      renderFocused(BW_PRELOADED);
+      expect(screen.queryByLabelText(/weight in pounds/i)).not.toBeInTheDocument();
+      expect(screen.getByText(/bodyweight/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Set 1 reps/i)).toBeInTheDocument();
+      await flush();
+    });
+
+    it('enables Log with reps alone and enqueues without a weight', async () => {
+      const user = userEvent.setup();
+      renderFocused(BW_PRELOADED);
+      const row = within(screen.getByTestId('set-row-0'));
+      const logBtn = row.getByRole('button', { name: /^log$/i });
+      expect(logBtn).toBeDisabled();
+      await user.type(row.getByLabelText(/Set 1 reps/i), '12');
+      expect(logBtn).not.toBeDisabled();
+      await user.click(logBtn);
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe('ps-bw');
+      expect(call[1]).toMatchObject({ weight_lbs: null, reps: 12, rir: 2 });
+      await flush();
+    });
+  });
+
   describe('focus screen', () => {
     it('beginner track: hides RIR sliders and shows a plain-language effort cue', async () => {
       renderFocused({ ...PRELOADED, track: 'beginner' });
