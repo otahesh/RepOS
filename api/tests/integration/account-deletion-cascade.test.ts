@@ -340,14 +340,12 @@ describe('DELETE /api/me — full cascade', () => {
     });
     expect(r.statusCode).toBe(204);
 
-    // Set-Cookie clears CF_Authorization — same shape as signout-everywhere.
+    // Must NOT touch the CF_Authorization cookie — same contract as
+    // signout-everywhere: the follow-up /cdn-cgi/access/logout navigation
+    // needs the cookie intact for CF to terminate the edge session.
     const setCookie = r.headers['set-cookie'];
     const cookieStr = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
-    expect(cookieStr).toMatch(/CF_Authorization=;.*Max-Age=0/i);
-    expect(cookieStr).toMatch(/HttpOnly/i);
-    expect(cookieStr).toMatch(/Secure/i);
-    expect(cookieStr).toMatch(/SameSite=Lax/i);
-    expect(cookieStr).toMatch(/Path=\//i);
+    expect(cookieStr).not.toMatch(/CF_Authorization/i);
 
     // users row is gone.
     const { rows: u } = await db.query<{ n: number }>(

@@ -60,13 +60,12 @@ export async function authSignoutRoutes(app: FastifyInstance) {
         client.release();
       }
 
-      // Clear the CF Access cookie on the browser. The CF Access edge also
-      // owns its own session — this Set-Cookie is the local-RepOS half of the
-      // signout. Attributes mirror what CF Access sets on first login.
-      reply.header(
-        'Set-Cookie',
-        'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-      );
+      // Do NOT clear the CF_Authorization cookie here. The frontend navigates
+      // to /cdn-cgi/access/logout after this 204, and Cloudflare only
+      // terminates the Access session when that request still carries the
+      // cookie. Clearing it server-side made the logout arrive cookieless —
+      // CF errored, the edge session survived, and the team-domain SSO
+      // silently re-signed the browser in (found live 2026-07-11).
       req.log.info(
         { event: 'signout_everywhere', userId, revoked_count: rowCount, ip: clientIp(req) },
         'signout_everywhere',

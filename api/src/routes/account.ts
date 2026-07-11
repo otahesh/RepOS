@@ -327,10 +327,9 @@ export async function accountRoutes(app: FastifyInstance) {
       'account_deleted',
     );
 
-    reply.header(
-      'Set-Cookie',
-      'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-    );
+    // Do NOT clear CF_Authorization here — the frontend's follow-up
+    // /cdn-cgi/access/logout navigation needs the cookie intact for CF to
+    // terminate the edge session (same contract as signout-everywhere).
     return reply.code(204).send();
   });
 }
