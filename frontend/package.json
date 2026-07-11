@@ -20,6 +20,8 @@
     "validate": "tsc --noEmit && eslint src && prettier --check \"src/**/*.{ts,tsx}\" && vitest run && node scripts/check-term-coverage.mjs && node scripts/check-page-reachability.mjs && node ../scripts/check-tz-sync.mjs"
   },
   "dependencies": {
+    "@fontsource/inter-tight": "^5.2.7",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@radix-ui/react-popover": "^1.1.17",
     "dexie": "^4.4.4",
     "focus-trap-react": "^12.0.3",
