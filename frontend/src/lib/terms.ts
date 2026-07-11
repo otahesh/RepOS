@@ -47,7 +47,8 @@ export type TermKey =
   | 'soft_gate'
   | 'manual_deload'
   | 'advisory_mode'
-  | 'pacing';
+  | 'pacing'
+  | 'pr';
 
 export const TERMS: Record<TermKey, TermDef> = {
   RIR: {
@@ -323,6 +324,14 @@ export const TERMS: Record<TermKey, TermDef> = {
       'A user-triggered deload that rewrites the remaining weeks of your mesocycle to lighter sets at RIR 4.',
     whyMatters:
       'Use it when life pushes back — sick, slept badly, joint cranky. Undoable for 24 hours.',
+  },
+  pr: {
+    short: 'PR',
+    full: 'PR — Personal Record',
+    plain:
+      'Your best performance on an exercise so far — the heaviest weight for a given rep count.',
+    whyMatters:
+      'PRs are the clearest signal your training is working. A stalled PR across several weeks means recovery or volume needs attention.',
   },
   pacing: {
     short: 'pacing',

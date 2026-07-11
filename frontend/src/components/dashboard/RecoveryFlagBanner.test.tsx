@@ -3,7 +3,11 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import * as api from '../../lib/api/recoveryFlags';
 
 vi.mock('../../lib/api/recoveryFlags');
+vi.mock('../common/ToastHost', () => ({
+  pushToast: vi.fn(),
+}));
 
+import { pushToast } from '../common/ToastHost';
 import { RecoveryFlagBanner } from './RecoveryFlagBanner';
 
 beforeEach(() => {
@@ -36,28 +40,57 @@ describe('RecoveryFlagBanner', () => {
     expect(screen.getAllByRole('status')).toHaveLength(2);
   });
 
-  it('dismisses a flag: calls the API with the flag key and removes the card', async () => {
+  it('dismisses a flag: calls the API with the flag key and removes only that card', async () => {
     (api.listRecoveryFlags as any).mockResolvedValue({
-      flags: [{ flag: 'overreaching', message: 'Heavy week — consider a deload' }],
+      flags: [
+        { flag: 'overreaching', message: 'Heavy week — consider a deload' },
+        {
+          flag: 'bodyweight_crash',
+          message: 'Weight dropping fast — under-fueling will stall progress.',
+        },
+      ],
     });
     (api.dismissRecoveryFlag as any).mockResolvedValue(undefined);
     render(<RecoveryFlagBanner />);
-    const dismiss = await screen.findByRole('button', { name: /dismiss.*week/i });
+    const dismiss = await screen.findByRole('button', { name: /dismiss.*heavy week/i });
     fireEvent.click(dismiss);
     await waitFor(() => expect(api.dismissRecoveryFlag).toHaveBeenCalledWith('overreaching'));
     await waitFor(() => expect(screen.queryByText(/Heavy week/)).not.toBeInTheDocument());
+    // The other advisory must survive.
+    expect(screen.getByText(/under-fueling/)).toBeInTheDocument();
   });
 
-  it('keeps the card when dismiss fails so the user can retry', async () => {
+  it('surfaces a toast and keeps the card when dismiss fails', async () => {
     (api.listRecoveryFlags as any).mockResolvedValue({
       flags: [{ flag: 'overreaching', message: 'Heavy week — consider a deload' }],
     });
     (api.dismissRecoveryFlag as any).mockRejectedValue(new Error('network'));
     render(<RecoveryFlagBanner />);
-    const dismiss = await screen.findByRole('button', { name: /dismiss.*week/i });
+    const dismiss = await screen.findByRole('button', { name: /dismiss.*heavy week/i });
     fireEvent.click(dismiss);
     await waitFor(() => expect(api.dismissRecoveryFlag).toHaveBeenCalled());
     expect(screen.getByText(/Heavy week/)).toBeInTheDocument();
+    expect(pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', body: expect.stringMatching(/dismiss/i) }),
+    );
+    // Button re-enabled so the user can retry.
+    expect(screen.getByRole('button', { name: /dismiss.*heavy week/i })).toBeEnabled();
+  });
+
+  it('disables the dismiss button while the request is in flight', async () => {
+    (api.listRecoveryFlags as any).mockResolvedValue({
+      flags: [{ flag: 'overreaching', message: 'Heavy week — consider a deload' }],
+    });
+    let resolveDismiss!: () => void;
+    (api.dismissRecoveryFlag as any).mockImplementation(
+      () => new Promise<void>((res) => (resolveDismiss = res)),
+    );
+    render(<RecoveryFlagBanner />);
+    const dismiss = await screen.findByRole('button', { name: /dismiss.*heavy week/i });
+    fireEvent.click(dismiss);
+    expect(dismiss).toBeDisabled();
+    resolveDismiss();
+    await waitFor(() => expect(screen.queryByText(/Heavy week/)).not.toBeInTheDocument());
   });
 
   it('renders nothing when the flags fetch fails (advisories never break Today)', async () => {
@@ -67,13 +100,28 @@ describe('RecoveryFlagBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('explains the deload term on the overreaching advisory', async () => {
+  it('wraps the deload term in the overreaching message without duplicating the word', async () => {
     (api.listRecoveryFlags as any).mockResolvedValue({
       flags: [{ flag: 'overreaching', message: 'Heavy week — consider a deload' }],
     });
     render(<RecoveryFlagBanner />);
     await screen.findByText(/Heavy week/);
-    // The Term popover trigger for 'deload' is present.
+    const card = screen.getByRole('status');
+    // The word appears exactly once — as the Term trigger, not appended after it.
+    expect(card.textContent).not.toMatch(/deload\s*deload/i);
     expect(screen.getByRole('button', { name: /deload.*definition/i })).toBeInTheDocument();
+  });
+
+  it('wraps the PR acronym in the stalled-PR message with a definition', async () => {
+    (api.listRecoveryFlags as any).mockResolvedValue({
+      flags: [
+        { flag: 'stalled_pr', message: 'Stalled PR — consider a load drop or rep adjustment' },
+      ],
+    });
+    render(<RecoveryFlagBanner />);
+    await screen.findByText(/Stalled/);
+    expect(
+      screen.getByRole('button', { name: /personal record.*definition/i }),
+    ).toBeInTheDocument();
   });
 });
