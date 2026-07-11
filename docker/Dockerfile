@@ -53,8 +53,14 @@ COPY --from=api-builder      /build/api/node_modules  /app/api/node_modules
 COPY --from=api-builder      /build/api/package.json  /app/api/package.json
 COPY --from=frontend-builder /build/frontend/dist     /app/frontend
 
-# Operational scripts (pre-restore snapshot, cutover SQL) invoked via docker exec.
+# Operational scripts (pre-restore snapshot, cutover SQL) invoked via docker
+# exec AND spawn-detached by the API's restore runner. The runner and
+# run-restore.sh both default to /app/scripts when this env is unset — that
+# mismatch made the W5 on-prod restore silently unexecutable (G5 rehearsal
+# RED, 2026-07-11). Pin the env to the COPY target; guarded by
+# tests/dr/image-scripts-path.test.sh.
 COPY scripts /scripts
+ENV REPOS_SCRIPTS_DIR=/scripts
 
 # nginx config + s6 service tree
 COPY docker/nginx/repos.conf  /etc/nginx/http.d/default.conf
