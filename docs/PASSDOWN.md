@@ -87,3 +87,107 @@ assertion in `tests/dr/rollback.test.sh`). Image pin was verified via
 
 Note: the container now runs with the `--memory=2g --cpus=2` caps (rollback.sh
 recipe), which the plain `redeploy.sh` path does not apply.
+
+## Supervised browser block (G3 + G5) — 2026-07-11 — GREEN (both gates)
+
+Operator: jmeyer (CF Access, jason@jpmtech.com). Agent-driven browser against
+production. Eight defects found; all fixed and deployed same-day (PRs #51–#56
+plus two prod `.env` gaps). Prod ended the window on `3fa7bc5`, healthy,
+post-deploy smoke green (run 29161181834).
+
+### G3 — signed-in flows — GREEN
+
+- (a) unauth → 302 to CF Access: re-verified live.
+- (b) signed-in lands `/`: verified; Today card + weight chart render.
+- Golden journey: mobile logger (`/today/:runId/log`, 390px viewport) logged a
+  set live → `POST /api/set-logs` 201 through the edge (also proves the
+  PR #42 regression fix in prod). Desktop correctly refuses live logging.
+  Onboarding leg N/A (already-onboarded account; covered by CI e2e).
+- Overreaching advisory: fired and rendered live on Today (screenshot
+  `g3-recovery-flag-banner-live.png`, kept off-repo). Data staged via real
+  API logging (3 distinct RIR-0 compound sessions inside 7d); condition 2
+  required a temporary `landmarks_snapshot` tweak (glutes mav 12→3 via psql,
+  reverted) because a 2-day beginner week cannot reach any legal MAV override
+  — evaluator working as designed. DISMISS verified live (only the dismissed
+  card removed). All staged data deleted after; day statuses + snapshot
+  restored; `recovery_flag_events`/dismissal artifacts purged.
+- (c) sign-out clears + re-redirects to CF Access login: verified.
+- (d) sign-out-everywhere: ConfirmDialog → bearers revoked (probe token
+  401 through the edge) → CF Access session terminated → lands on CF
+  sign-in with `logged_out` message. Required defect fix #6 below.
+- (f) bearer mint→use→revoke→401: verified 2026-07-10 (prior window).
+
+### G5 — on-prod restore rehearsal — GREEN
+
+Per `docs/runbooks/dr-dry-fire.md`. First attempt (17:01 UTC) was RED —
+defect #8 below; DB untouched, maintenance cleared via
+`POST /api/maintenance/clear`, fix deployed, rehearsal re-run clean:
+
+```
+## DR dry-fire 2026-07-11
+- Backup taken at: 17:12:36 UTC  (filename: repos-20260711T171235Z.dump.gz,
+  manual, verified_restorable=good, sidecar present)
+- restore-into-ephemeral.sh: GREEN (28 tables, users intact; last-run.txt
+  stamped, committed in PR #56)
+- Restore kicked off at: 17:14:04 UTC (typed-RESTORE, fresh CF JWT)
+- Maintenance flag observed by frontend at: ≤17:14:09 UTC (banner visible at
+  first 4s-poll check; screenshot g5-maintenance-banner-live.png off-repo)
+- pg_restore + migrations completed at: 17:14:08 UTC (sentinel status=ok;
+  pre-restore-20260711T171404Z.sql.gz + sidecar created)
+- /api/maintenance/clear succeeded at: 17:15:28 UTC (204); banner gone
+- Post-clear smoke set-log: 201 (row deleted after — state back to baseline)
+- device_tokens post-restore: zero live bearers (C-DEVICE-TOKENS-RESTORE);
+  iOS Shortcut re-minted 17:16:37 UTC (token id 8) + verified 201 via edge
+- Total downtime (confirm → clear): 84s; DB itself back at +4s
+- Result: GREEN
+```
+
+### Defects found and fixed in this window
+
+1. **`REPOS_ADMIN_EMAILS` missing from prod `.env`** — every CF-Access admin
+   route fail-closed 403 (`admin_check_misconfigured`); the admin path had
+   never been exercised in prod (G12 used X-Admin-Key). Fixed in prod `.env`
+   + container recreate.
+2. **W3 recovery-flag advisory UI never built** — evaluators/API/telemetry
+   shipped tested, but no component called `listRecoveryFlags`; clinical
+   advisories were invisible (a genuine live `bodyweight_crash` included).
+   `RecoveryFlagBanner` on Today, both viewports (PR #51 + review fixes).
+3. **CSP blocked Google Fonts** — prod rendered fallback fonts since the CSP
+   shipped. Self-hosted via @fontsource + guard test (PR #52).
+4. **Vite inlined font subsets as `data:` URIs** — blocked by CSP
+   (`default-src 'self'`, no `font-src`). `assetsInlineLimit: 0` (PR #53).
+5. **`PUBLIC_ORIGIN` missing from prod `.env`** — CSRF origin guard
+   fail-closed 403 on signout-everywhere. Fixed in prod `.env`.
+6. **signout-everywhere/account-delete cleared `CF_Authorization` server-side**
+   — the follow-up `/cdn-cgi/access/logout` arrived cookieless, CF errored,
+   edge session survived, team-domain SSO silently re-signed the browser in.
+   Bearers revoked but browser never signed out. Cookie left intact now;
+   CF logout owns teardown (PR #54).
+7. **nginx implicit slash-redirect broke `GET /api/backups`** — the W5
+   `location /api/backups/` block 301'd the bare path to
+   `http://…/api/backups/` (scheme downgrade; CSP blocked). Root cause of the
+   parked 2026-06-26 "backups page doesn't work" report. Exact-match location
+   + `absolute_redirect off` + guard test (PR #55). NOTE: browsers cache the
+   old 301 — a hard-reload may be needed once per client.
+8. **`REPOS_SCRIPTS_DIR` path mismatch — restore never executable in prod** —
+   runner spawn-detaches `${REPOS_SCRIPTS_DIR:-/app/scripts}/run-restore.sh`
+   (stdio ignored) but the image ships scripts at `/scripts`. First rehearsal:
+   sentinel stuck `running`, API never SIGTERMed, no pg_restore, DB untouched.
+   `ENV REPOS_SCRIPTS_DIR=/scripts` in the Dockerfile + guard test (PR #56).
+
+### Known follow-ups (non-blocking, tracked)
+
+- **Nightly backup integrity check fails intermittently** (2026-06-27 and
+  2026-07-11, 2 of ~45 nights): dump writes "ok", immediate
+  `gunzip|pg_restore -l` fails, bad file correctly deleted + failure recorded.
+  Suspect Unraid FUSE read-after-write on `/mnt/user/appdata`. Candidate fix:
+  retry-once in `repos-backup.sh`. **Watch tonight's 03:15 UTC run.**
+- **Malformed CF login URL for `/api/*` 401s** — `buildLoginUrl()` appends a
+  path to `/cdn-cgi/access/login/<host>`, which CF 404s; during the first
+  restore attempt the SPA bounced to that 404. Frontend/API follow-up.
+- **Transient `invalid_cf_access_jwt` (~4.7s responses) at restore kickoff** —
+  JWKS refresh stall under the kickoff's synchronous spawn work; resolved
+  itself. Watch for recurrence.
+- Env-gap pattern (defects 1, 5, 8): three feature-critical env vars never
+  reached prod. Candidate: boot-time env validation warning (log-level) for
+  known feature vars, or a `.env.example` sync check in CI.
