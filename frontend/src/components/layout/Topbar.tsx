@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { apiFetch } from '../../auth';
 import { useIsMobile } from '../../lib/useIsMobile';
+import { formatWeekdayShortDate } from '../../lib/formatDate';
 import Icon from '../Icon';
 import { FeedbackSheet } from '../feedback/FeedbackSheet';
 
@@ -69,13 +70,7 @@ export default function Topbar({ onToggleSidebar, mobileOpen = false, triggerRef
         : TOKENS.danger
     : TOKENS.textMute;
 
-  const today = new Date()
-    .toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-    .toUpperCase();
+  const today = formatWeekdayShortDate(new Date()).toUpperCase();
 
   return (
     <header

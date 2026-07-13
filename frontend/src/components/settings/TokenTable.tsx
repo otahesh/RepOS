@@ -1,5 +1,6 @@
 import { TOKENS, FONTS } from '../../tokens';
 import Icon from '../Icon';
+import { formatShortDate } from '../../lib/formatDate';
 
 export interface TokenRow {
   id: string;
@@ -16,8 +17,7 @@ interface Props {
 
 function formatDate(isoString: string | null): string {
   if (!isoString) return 'Never';
-  const d = new Date(isoString);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatShortDate(new Date(isoString), { year: true });
 }
 
 export default function TokenTable({ tokens, onRevoke, revoking }: Props) {

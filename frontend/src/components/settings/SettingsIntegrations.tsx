@@ -1,3 +1,4 @@
+import { formatShortDate } from '../../lib/formatDate';
 import { useEffect, useState, useCallback } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { apiFetch, useCurrentUser } from '../../auth';
@@ -24,10 +25,10 @@ const INTEGRATIONS = [
 function formatDateTime(isoString: string | null): string {
   if (!isoString) return '—';
   const d = new Date(isoString);
+  // Time half stays toLocaleTimeString([], …) deliberately: it follows the
+  // user's locale 12h/24h preference, which the shared date lib doesn't own.
   return (
-    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-    ' · ' +
-    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    formatShortDate(d) + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   );
 }
 
