@@ -12,42 +12,11 @@
 import { randomUUID } from 'node:crypto';
 import { db } from '../../src/db/client.js';
 import { buildApp } from '../../src/app.js';
+import { mkUser, cleanupUser, mintBearer, type MkUserOpts } from './user-fixtures.js';
 
-export interface MkUserOpts {
-  /** Tag included in the email for log readability. Default 'vitest'. */
-  prefix?: string;
-  /** equipment_profile JSONB. */
-  equipment_profile?: object;
-  /** users.goal CHECK ∈ (cut|maintain|bulk). */
-  goal?: 'cut' | 'maintain' | 'bulk';
-}
-
-export async function mkUser(opts: MkUserOpts = {}): Promise<{ id: string; email: string }> {
-  const prefix = opts.prefix ?? 'vitest';
-  const email = `${prefix}.${randomUUID()}@repos.test`;
-  const cols = ['email'];
-  const values: unknown[] = [email];
-  const placeholders = ['$1'];
-
-  if (opts.equipment_profile !== undefined) {
-    cols.push('equipment_profile');
-    values.push(JSON.stringify(opts.equipment_profile));
-    placeholders.push(`$${values.length}::jsonb`);
-  }
-  if (opts.goal !== undefined) {
-    cols.push('goal');
-    values.push(opts.goal);
-    placeholders.push(`$${values.length}`);
-  }
-
-  const {
-    rows: [u],
-  } = await db.query<{ id: string; email: string }>(
-    `INSERT INTO users (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING id, email`,
-    values,
-  );
-  return u;
-}
+// User + bearer primitives live in user-fixtures.ts (quality pass Q9);
+// re-exported so this file's existing import sites keep working.
+export { mkUser, cleanupUser, type MkUserOpts };
 
 export interface MkTemplateOpts {
   /** Slug prefix; default 'vitest-tpl'. Final slug = `${prefix}-${uuid}`. */
@@ -135,17 +104,14 @@ export async function mkUserWithProgram(
   try {
     const u = await mkUser({ prefix, goal: 'maintain' });
 
-    // Mint a bearer token with set_logs:write so set-log POSTs pass requireScope.
-    // ADMIN_API_KEY unset in tests → requireAdminKeyOrCfAccess open path.
-    const mint = await app.inject({
-      method: 'POST',
-      url: '/api/tokens',
-      payload: { user_id: u.id, label: `${prefix}-token`, scopes: ['set_logs:write'] },
+    // Mint a bearer with set_logs:write so set-log POSTs pass requireScope.
+    // Via the shared mintBearer primitive (Q9) — the POST /api/tokens route
+    // itself is covered by tokens.test.ts; fixtures don't need the HTTP hop.
+    const { bearer: token } = await mintBearer({
+      userId: u.id,
+      scopes: ['set_logs:write'],
+      label: `${prefix}-token`,
     });
-    if (mint.statusCode !== 201) {
-      throw new Error(`mkUserWithProgram: token mint failed (${mint.statusCode})`);
-    }
-    const token = mint.json<{ token: string }>().token;
     const auth = { authorization: `Bearer ${token}` };
 
     const fork = await app.inject({
@@ -194,11 +160,6 @@ export async function mkUserWithProgram(
   } finally {
     await app.close();
   }
-}
-
-/** Idempotent: ignores undefined ids. Cascades take care of dependent rows. */
-export async function cleanupUser(userId: string | undefined): Promise<void> {
-  if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
 }
 
 export async function cleanupTemplate(templateId: string | undefined): Promise<void> {
