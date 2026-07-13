@@ -748,7 +748,7 @@ export interface UserPairHandle {
   userB: SeedHandle;
 }
 
-async function mkLoneUser(tag: string): Promise<SeedHandle> {
+async function mkLoneUser(tag: string, scopes?: string[]): Promise<SeedHandle> {
   const userTag = randomUUID();
   const email = `pair-${tag}.${userTag}@repos.test`;
   const {
@@ -760,7 +760,7 @@ async function mkLoneUser(tag: string): Promise<SeedHandle> {
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
-    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+    scopes: scopes ?? ['set_logs:write', 'health:recovery:read', 'account:write'],
     label: `pair-${tag}`,
   });
   return {
@@ -774,8 +774,11 @@ async function mkLoneUser(tag: string): Promise<SeedHandle> {
   };
 }
 
-export async function mkUserPair(): Promise<UserPairHandle> {
-  const [userA, userB] = await Promise.all([mkLoneUser('a'), mkLoneUser('b')]);
+// Optional scopes override so callers needing non-default scopes don't
+// discard the pair's bearers and re-mint (the default trio covers the
+// deload/set-log contamination suites).
+export async function mkUserPair(scopes?: string[]): Promise<UserPairHandle> {
+  const [userA, userB] = await Promise.all([mkLoneUser('a', scopes), mkLoneUser('b', scopes)]);
   return { userA, userB };
 }
 

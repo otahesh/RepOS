@@ -19,9 +19,6 @@
  *      return the right shape after three POSTs?". That is best served by a
  *      vitest integration test against the real fastify app + real DB, which
  *      is exactly the pattern in api/tests/integration/set-logs-flow.test.ts.
- *
- * The plan's W3 UI assertion (an overreaching toast on /today) ships as a
- * `test.skip` placeholder until W3.1 lands the evaluator + toast.
  */
 
 import 'dotenv/config';
@@ -127,13 +124,10 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     await app.close();
   });
 
-  // [W3.1 Task 13] Re-enabled. The W1.5 author left this as an
-  // it.skip-with-expected-fail placeholder pending the W3 evaluator landing.
-  // Now that overreachingEvaluator + route registration + telemetry are in
-  // place (Tasks 10–12.5), GET /api/recovery-flags returns the flag whenever
-  // the strict AND-gate conditions hold. seedUserOverreaching seeds exactly
-  // those conditions: 3 RIR-0 compound sessions in 7d + current-week
-  // performed_sets >= MAV. This locks in the cross-wave W1→W3 contract.
+  // GET /api/recovery-flags returns the flag whenever the strict AND-gate
+  // conditions hold. seedUserOverreaching seeds exactly those conditions:
+  // 3 RIR-0 compound sessions in 7d + current-week performed_sets >= MAV.
+  // This locks in the cross-wave W1→W3 contract.
   it('the /today overreaching toast appears after three RIR-0 logs (W3.1)', async () => {
     const app = await build();
     const seed = await seedUserOverreaching();

@@ -291,12 +291,9 @@ describe('set-logs scope enforcement (W1 reviewer matrix Critical)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// W3 Task 4 (FIX-3) — failure-first markers for the new injury scopes.
-// The scope strings land in VALID_SCOPES in this commit, but the routes
-// (/api/user/injuries CRUD) ship in Tasks 5–8. These tests are written now as
-// the failure-first contract; they are .skip-gated and re-enabled in Task 5
-// once the routes exist. Without the skip the route returns 404 (not 403) and
-// the suite goes red on this branch.
+// W3 Task 4 (FIX-3) — scope enforcement for the injury scopes. Written
+// failure-first during W3; live (not skipped) since the /api/user/injuries
+// CRUD routes shipped in Tasks 5–8.
 // ---------------------------------------------------------------------------
 
 describe('user_injuries scope enforcement (W3 Task 4 failure-first)', () => {
