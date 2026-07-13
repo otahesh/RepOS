@@ -157,10 +157,56 @@ export async function mesocycleRoutes(app: FastifyInstance) {
       );
       const prs = parseInt(prRow?.prs ?? '0', 10);
 
+      // Duration PRs — mirrors the load-PR comparison: this run's longest
+      // hold per exercise vs the max across all earlier runs. load_lbs of the
+      // best-duration set rides along for the "@ 70 lb" recap label.
+      const { rows: durationPrRows } = await db.query<{
+        exercise_slug: string;
+        exercise_name: string;
+        best_duration_sec: number;
+        load_lbs: number | null;
+      }>(
+        `WITH this_run_best AS (
+           SELECT DISTINCT ON (ps.exercise_id)
+                  ps.exercise_id, sl.performed_duration_sec AS best_duration_sec,
+                  sl.performed_load_lbs::float AS load_lbs
+           FROM set_logs sl
+           JOIN planned_sets ps ON ps.id = sl.planned_set_id
+           JOIN day_workouts dw ON dw.id = ps.day_workout_id
+           WHERE dw.mesocycle_run_id = $1
+             AND sl.performed_duration_sec IS NOT NULL
+           ORDER BY ps.exercise_id, sl.performed_duration_sec DESC
+         ),
+         prior_best AS (
+           SELECT ps2.exercise_id, MAX(sl2.performed_duration_sec) AS best_duration_sec
+           FROM set_logs sl2
+           JOIN planned_sets ps2 ON ps2.id = sl2.planned_set_id
+           JOIN day_workouts dw2 ON dw2.id = ps2.day_workout_id
+           JOIN mesocycle_runs mr2 ON mr2.id = dw2.mesocycle_run_id
+           WHERE mr2.user_id = $2
+             AND mr2.id <> $1
+             AND sl2.performed_duration_sec IS NOT NULL
+             AND COALESCE(mr2.finished_at, now()) < $3
+           GROUP BY ps2.exercise_id
+         )
+         SELECT e.slug AS exercise_slug, e.name AS exercise_name,
+                trb.best_duration_sec, trb.load_lbs
+         FROM this_run_best trb
+         JOIN exercises e ON e.id = trb.exercise_id
+         WHERE NOT EXISTS (
+           SELECT 1 FROM prior_best pb
+           WHERE pb.exercise_id = trb.exercise_id
+             AND pb.best_duration_sec >= trb.best_duration_sec
+         )
+         ORDER BY trb.best_duration_sec DESC`,
+        [run.id, userId, runCutoff],
+      );
+
       const recap: MesocycleRecapStatsResponse = {
         weeks: run.weeks,
         total_sets,
         prs,
+        duration_prs: durationPrRows,
       };
       return recap;
     },

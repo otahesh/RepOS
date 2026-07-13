@@ -215,6 +215,19 @@ export const MesocycleRecapStatsResponseSchema = z.object({
   // (or now() if the run is still active). Uses set_logs → planned_sets →
   // day_workouts chain; planned_cardio_blocks are excluded (no load).
   prs: z.number().int().min(0),
+  // Hold Best-Time PRs (measurement model): distinct duration exercises where
+  // this run's longest hold beats all prior runs'. Best Time is the ONLY PR
+  // for duration exercises (Hevy convention). Optional for rollout skew.
+  duration_prs: z
+    .array(
+      z.object({
+        exercise_slug: z.string(),
+        exercise_name: z.string(),
+        best_duration_sec: z.number().int().min(1),
+        load_lbs: z.number().nullable(), // null = bodyweight hold
+      }),
+    )
+    .optional(),
 });
 
 export type MesocycleRecapStatsResponse = z.infer<typeof MesocycleRecapStatsResponseSchema>;

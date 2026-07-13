@@ -20,11 +20,28 @@ export type HistorySet = {
 };
 export type HistorySession = { date: string; sets: HistorySet[] };
 
+export interface ExerciseHistoryResult {
+  sessions: HistorySession[];
+  /** All-time longest hold (seconds) for this user+exercise; null when the
+   *  exercise has no duration logs. Powers the "new best hold" toast. */
+  best_duration_sec: number | null;
+}
+
 export async function getExerciseHistory(slug: string, limit = 8): Promise<HistorySession[]> {
+  return (await getExerciseHistoryFull(slug, limit)).sessions;
+}
+
+export async function getExerciseHistoryFull(
+  slug: string,
+  limit = 8,
+): Promise<ExerciseHistoryResult> {
   const res = await apiFetch(
     `/api/exercises/${encodeURIComponent(slug)}/history?limit=${limit}`,
     {},
   );
-  const body = await jsonOrThrow<{ sessions: HistorySession[] }>(res);
-  return body.sessions;
+  const body = await jsonOrThrow<{
+    sessions: HistorySession[];
+    best_duration_sec?: number | null;
+  }>(res);
+  return { sessions: body.sessions, best_duration_sec: body.best_duration_sec ?? null };
 }
