@@ -522,13 +522,22 @@ function LoggerInner({
     [currentUserId, currentUserTz, forDate, rowInputs, setRow, focusNext, setQuotaError],
   );
 
-  const restTimer = useRestTimer();
+  // Rest-timer isolation (2026-07-13 quality pass): the 1 Hz countdown state
+  // lives inside RestTimerPill, not here — a per-second setState in this
+  // container re-rendered the whole hub/focus subtree (SetRow sliders and all)
+  // on every tick for the length of every rest. The container keeps only:
+  //   - restStartRef: imperative handle the pill exposes to arm the countdown
+  //   - restActive:   coarse boolean (flips on start/expire — 2 renders per
+  //                   rest, not ~90) that drives the 72px bottom padding
+  //                   reserving space so the fixed pill never overlaps content
+  const restStartRef = useRef<((sec: number) => void) | null>(null);
+  const [restActive, setRestActive] = useState(false);
   const handleLogWithRest = useCallback(
     async (set: TodaySet) => {
       const ok = await handleLog(set);
-      if (ok) restTimer.start(set.rest_sec || 90);
+      if (ok) restStartRef.current?.(set.rest_sec || 90);
     },
-    [handleLog, restTimer],
+    [handleLog],
   );
 
   // Hub rows: setsDone counts server-logged sets plus this session's local
@@ -659,9 +668,15 @@ function LoggerInner({
     </div>
   ) : null;
 
+  // Hub/focus content renders into `body`; the shared wrapper below keeps
+  // RestTimerPill in ONE stable child slot so the pill (which owns the
+  // countdown state) is never remounted by hub↔focus navigation — a set is
+  // usually logged right before backing out to the hub, and the countdown
+  // must survive that transition.
+  let body: React.ReactNode;
   if (!focusedEntry) {
-    return (
-      <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
+    body = (
+      <>
         {backfillBanner}
         {quotaBanner}
         {completeErrorBanner}
@@ -691,69 +706,94 @@ function LoggerInner({
           }}
           onCancel={() => setConfirmFinish(false)}
         />
-        <RestTimerPill remaining={restTimer.remaining} />
-      </div>
+      </>
+    );
+  } else {
+    const [focusedIdx, focusedSets] = focusedEntry;
+    const slug = focusedSets[0].exercise.slug;
+    const meta = exMeta[slug];
+    const guide = guideBySlug[slug] ?? null;
+    const backToHub = () => navigate(`/today/${data.run_id}/log${logSearch}`);
+
+    body = (
+      <>
+        {backfillBanner}
+        {quotaBanner}
+        <ExerciseFocus
+          position={{
+            current: blocks.findIndex(([b]) => b === focusedIdx) + 1,
+            total: blocks.length,
+          }}
+          exercise={{
+            name: focusedSets[0].exercise.name,
+            muscle: meta?.muscle ?? '',
+            equipmentLabel: meta?.equipmentLabel ?? '',
+            slug,
+          }}
+          sets={focusedSets}
+          track={data.track}
+          rowStates={rowStates}
+          rowInputs={rowInputs}
+          onInputChange={setInput}
+          onLog={handleLogWithRest}
+          onSkip={(setId) => setRow(setId, { phase: 'input' })}
+          lastSession={histBySlug[slug] ?? null}
+          onOpenHistory={() => setOpenSheet('history')}
+          onOpenGuide={guide ? () => setOpenSheet('guide') : null}
+          onBack={backToHub}
+          onDone={backToHub}
+          getWeightInputRef={getWeightInputRef}
+        />
+        {openSheet === 'history' ? (
+          <HistorySheet slug={slug} track={data.track} onClose={() => setOpenSheet(null)} />
+        ) : null}
+        {openSheet === 'guide' && guide ? (
+          <SetupCardSheet
+            exerciseName={focusedSets[0].exercise.name}
+            guide={guide}
+            onClose={() => setOpenSheet(null)}
+          />
+        ) : null}
+      </>
     );
   }
 
-  const [focusedIdx, focusedSets] = focusedEntry;
-  const slug = focusedSets[0].exercise.slug;
-  const meta = exMeta[slug];
-  const guide = guideBySlug[slug] ?? null;
-  const backToHub = () => navigate(`/today/${data.run_id}/log${logSearch}`);
-
   return (
-    <div style={{ paddingBottom: restTimer.remaining != null ? 72 : 0 }}>
-      {backfillBanner}
-      {quotaBanner}
-      <ExerciseFocus
-        position={{
-          current: blocks.findIndex(([b]) => b === focusedIdx) + 1,
-          total: blocks.length,
-        }}
-        exercise={{
-          name: focusedSets[0].exercise.name,
-          muscle: meta?.muscle ?? '',
-          equipmentLabel: meta?.equipmentLabel ?? '',
-          slug,
-        }}
-        sets={focusedSets}
-        track={data.track}
-        rowStates={rowStates}
-        rowInputs={rowInputs}
-        onInputChange={setInput}
-        onLog={handleLogWithRest}
-        onSkip={(setId) => setRow(setId, { phase: 'input' })}
-        lastSession={histBySlug[slug] ?? null}
-        onOpenHistory={() => setOpenSheet('history')}
-        onOpenGuide={guide ? () => setOpenSheet('guide') : null}
-        onBack={backToHub}
-        onDone={backToHub}
-        getWeightInputRef={getWeightInputRef}
-      />
-      {openSheet === 'history' ? (
-        <HistorySheet slug={slug} track={data.track} onClose={() => setOpenSheet(null)} />
-      ) : null}
-      {openSheet === 'guide' && guide ? (
-        <SetupCardSheet
-          exerciseName={focusedSets[0].exercise.name}
-          guide={guide}
-          onClose={() => setOpenSheet(null)}
-        />
-      ) : null}
-      <RestTimerPill remaining={restTimer.remaining} />
+    <div style={{ paddingBottom: restActive ? 72 : 0 }}>
+      {body}
+      <RestTimerPill startRef={restStartRef} onActiveChange={setRestActive} />
     </div>
   );
 }
 
 // -----------------------------------------------------------------------------
-// RestTimerPill — the REST m:ss pill. Rendered on both the hub and focus
-// branches: a set is usually logged right before backing out to the hub to
-// eye the next exercise, and the rest countdown needs to stay visible there
-// too, not just while a block is focused.
+// RestTimerPill — the REST m:ss pill. Owns useRestTimer so its 1 Hz tick
+// re-renders only this leaf (mirrors HoldStopwatch owning useHoldTimer). It
+// exposes start() to the container through `startRef` and reports coarse
+// active/idle transitions through `onActiveChange` (which drives the
+// container's 72px bottom-padding reservation). Rendered at the same tree
+// position on both the hub and focus branches so it stays mounted — and the
+// countdown survives — across hub↔focus navigation.
 // -----------------------------------------------------------------------------
 
-function RestTimerPill({ remaining }: { remaining: number | null }) {
+function RestTimerPill({
+  startRef,
+  onActiveChange,
+}: {
+  startRef: React.MutableRefObject<((sec: number) => void) | null>;
+  onActiveChange: (active: boolean) => void;
+}) {
+  const { remaining, start } = useRestTimer();
+  useEffect(() => {
+    startRef.current = start;
+    return () => {
+      startRef.current = null;
+    };
+  }, [start, startRef]);
+  const active = remaining != null;
+  useEffect(() => {
+    onActiveChange(active);
+  }, [active, onActiveChange]);
   if (remaining == null) return null;
   return (
     <div
