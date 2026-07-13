@@ -95,8 +95,7 @@ export function DayCard({
               >
                 {beginner ? (
                   <>
-                    {b.mev} sets, building to {b.mav} ·{' '}
-                    {effortCue(b.target_rir, rowMode(b))}
+                    {b.mev} sets, building to {b.mav} · {effortCue(b.target_rir, rowMode(b))}
                   </>
                 ) : b.target_duration_low_sec != null ? (
                   <>
