@@ -12,6 +12,49 @@ import {
   type PlannedSetSubstituteResponse,
 } from '../schemas/plannedSets.js';
 
+// Shared ownership prefetch for both handlers: the 3-join IDOR guard
+// (ps → dw → mr, filtered on mr.user_id) plus the columns the past-day guard
+// needs. `extraPsCols` appends handler-specific ps.* columns. Returns the row
+// or null (caller 404s — never leak existence of another user's set).
+interface OwnedPlannedSetRow {
+  id: string;
+  scheduled_date: string;
+  mesocycle_run_id: string;
+  start_tz: string;
+  [extra: string]: unknown;
+}
+
+async function loadOwnedPlannedSet(
+  id: string,
+  userId: string,
+  extraPsCols = '',
+): Promise<OwnedPlannedSetRow | null> {
+  const { rows } = await db.query(
+    `SELECT ps.id, to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
+            dw.mesocycle_run_id, mr.start_tz${extraPsCols ? `, ${extraPsCols}` : ''}
+     FROM planned_sets ps
+     JOIN day_workouts dw ON dw.id = ps.day_workout_id
+     JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
+     WHERE ps.id = $1 AND mr.user_id = $2`,
+    [id, userId],
+  );
+  return rows[0] ?? null;
+}
+
+// Both handlers share the past_day_readonly contract: 409 with the same body
+// shape when the set's day is already in the user's local past; null = writable.
+function pastDayConflict(setRow: { scheduled_date: string; start_tz: string }) {
+  const todayLocal = computeUserLocalDate(setRow.start_tz);
+  if (setRow.scheduled_date < todayLocal) {
+    return {
+      error: 'past_day_readonly',
+      scheduled_date: setRow.scheduled_date,
+      today_local: todayLocal,
+    };
+  }
+  return null;
+}
+
 export async function plannedSetRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string }; Body: unknown }>(
     '/planned-sets/:id',
@@ -31,30 +74,20 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       // Fix #2 error message extraction: ZodError for refinement has no path
       // (already handled above — first issue message is returned)
 
-      const { rows } = await db.query(
-        `SELECT ps.id, to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
-                dw.mesocycle_run_id, mr.start_tz,
-                ps.target_reps_low AS cur_reps_low, ps.target_reps_high AS cur_reps_high,
-                ps.target_duration_low_sec AS cur_dur_low
-         FROM planned_sets ps
-         JOIN day_workouts dw ON dw.id = ps.day_workout_id
-         JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
-         WHERE ps.id = $1 AND mr.user_id = $2`,
-        [req.params.id, userId],
+      const setRow = await loadOwnedPlannedSet(
+        req.params.id,
+        userId,
+        `ps.target_reps_low AS cur_reps_low, ps.target_reps_high AS cur_reps_high,
+         ps.target_duration_low_sec AS cur_dur_low`,
       );
-      if (rows.length === 0) {
+      if (!setRow) {
         reply.code(404);
         return { error: 'planned_set not found', field: 'id' };
       }
-      const setRow = rows[0];
-      const todayLocal = computeUserLocalDate(setRow.start_tz);
-      if (setRow.scheduled_date < todayLocal) {
+      const conflict = pastDayConflict(setRow);
+      if (conflict) {
         reply.code(409);
-        return {
-          error: 'past_day_readonly',
-          scheduled_date: setRow.scheduled_date,
-          today_local: todayLocal,
-        };
+        return conflict;
       }
 
       const b = parsed.data;
@@ -75,8 +108,9 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       }
 
       // Fix #4 — Cross-row rep range guard: validate merged values against DB current values
-      const newLow = b.target_reps_low ?? setRow.cur_reps_low;
-      const newHigh = b.target_reps_high ?? setRow.cur_reps_high;
+      // (cast matches the pre-helper untyped-row behavior: null coerces in >)
+      const newLow = (b.target_reps_low ?? setRow.cur_reps_low) as number;
+      const newHigh = (b.target_reps_high ?? setRow.cur_reps_high) as number;
       if (newLow > newHigh) {
         reply.code(400);
         return {
@@ -168,29 +202,15 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       }
 
       // Prefetch + ownership + scheduled_date + start_tz + current exercise_id
-      const { rows } = await db.query(
-        `SELECT ps.id, ps.exercise_id,
-                to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
-                dw.mesocycle_run_id, mr.start_tz
-         FROM planned_sets ps
-         JOIN day_workouts dw ON dw.id = ps.day_workout_id
-         JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
-         WHERE ps.id = $1 AND mr.user_id = $2`,
-        [req.params.id, userId],
-      );
-      if (rows.length === 0) {
+      const setRow = await loadOwnedPlannedSet(req.params.id, userId, 'ps.exercise_id');
+      if (!setRow) {
         reply.code(404);
         return { error: 'planned_set not found', field: 'id' };
       }
-      const setRow = rows[0];
-      const todayLocal = computeUserLocalDate(setRow.start_tz);
-      if (setRow.scheduled_date < todayLocal) {
+      const conflict = pastDayConflict(setRow);
+      if (conflict) {
         reply.code(409);
-        return {
-          error: 'past_day_readonly',
-          scheduled_date: setRow.scheduled_date,
-          today_local: todayLocal,
-        };
+        return conflict;
       }
 
       // Verify the target exercise is real + non-archived

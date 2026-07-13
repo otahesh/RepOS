@@ -24,6 +24,28 @@ import { db } from '../db/client.js';
 import { MANUAL_DELOAD_MAV_FACTOR, MANUAL_DELOAD_RIR } from './_deloadConstants.js';
 import { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
 
+// The deload snapshot SELECT and the undo-restore INSERT round-trip the same
+// planned_sets columns; both column lists AND the jsonb_to_recordset type
+// clause derive from this single table so they cannot drift — a column added
+// to one but not the other would silently drop that column's data on undo.
+const SNAPSHOT_COLUMNS = [
+  ['id', 'uuid'],
+  ['day_workout_id', 'uuid'],
+  ['block_idx', 'int'],
+  ['set_idx', 'int'],
+  ['exercise_id', 'uuid'],
+  ['target_reps_low', 'int'],
+  ['target_reps_high', 'int'],
+  ['target_duration_low_sec', 'int'],
+  ['target_duration_high_sec', 'int'],
+  ['target_rir', 'int'],
+  ['target_load_hint', 'text'],
+  ['rest_sec', 'int'],
+] as const;
+const SNAPSHOT_COL_LIST = SNAPSHOT_COLUMNS.map(([n]) => n).join(', ');
+const SNAPSHOT_PS_COL_LIST = SNAPSHOT_COLUMNS.map(([n]) => `ps.${n}`).join(', ');
+const SNAPSHOT_RECORDSET_TYPES = SNAPSHOT_COLUMNS.map(([n, t]) => `${n} ${t}`).join(', ');
+
 // W4.3 hand-off point: when userLandmarks.ts lands, replace this with a call
 // to resolveUserLandmarks(userId, muscleSlug). Until then, the seeded landmark
 // is the source of truth.
@@ -89,10 +111,7 @@ export async function applyManualDeload(
 
     // Snapshot pre-mutation planned_sets for the undo payload.
     const { rows: snapshot } = await client.query(
-      `SELECT ps.id, ps.day_workout_id, ps.block_idx, ps.set_idx, ps.exercise_id,
-              ps.target_reps_low, ps.target_reps_high,
-              ps.target_duration_low_sec, ps.target_duration_high_sec,
-              ps.target_rir, ps.target_load_hint, ps.rest_sec
+      `SELECT ${SNAPSHOT_PS_COL_LIST}
        FROM planned_sets ps JOIN day_workouts dw ON dw.id = ps.day_workout_id
        WHERE dw.mesocycle_run_id=$1 AND dw.week_idx >= $2`,
       [runId, run.current_week],
@@ -281,20 +300,9 @@ export async function undoManualDeload(userId: string, runId: string): Promise<v
     // Restore from snapshot.
     if (snapshot.length > 0) {
       await client.query(
-        `INSERT INTO planned_sets
-           (id, day_workout_id, block_idx, set_idx, exercise_id,
-            target_reps_low, target_reps_high,
-            target_duration_low_sec, target_duration_high_sec,
-            target_rir, target_load_hint, rest_sec)
-         SELECT id, day_workout_id, block_idx, set_idx, exercise_id,
-                target_reps_low, target_reps_high,
-                target_duration_low_sec, target_duration_high_sec,
-                target_rir, target_load_hint, rest_sec
-         FROM jsonb_to_recordset($1::jsonb)
-              AS t(id uuid, day_workout_id uuid, block_idx int, set_idx int, exercise_id uuid,
-                   target_reps_low int, target_reps_high int,
-                   target_duration_low_sec int, target_duration_high_sec int, target_rir int,
-                   target_load_hint text, rest_sec int)`,
+        `INSERT INTO planned_sets (${SNAPSHOT_COL_LIST})
+         SELECT ${SNAPSHOT_COL_LIST}
+         FROM jsonb_to_recordset($1::jsonb) AS t(${SNAPSHOT_RECORDSET_TYPES})`,
         [JSON.stringify(snapshot)],
       );
     }
