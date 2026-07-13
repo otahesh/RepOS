@@ -60,6 +60,8 @@ export type TodayCardio = {
   target_duration_sec?: number | null;
   target_distance_m?: number | null;
   target_zone?: number | null;
+  /** Latest cardio_log for this block, or null/absent if never completed. */
+  logged?: { duration_sec: number; distance_m: number | null } | null;
 };
 
 export type TodayDay = {

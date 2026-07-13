@@ -17,7 +17,7 @@ import { z } from 'zod';
 const FORWARD_SKEW_MS = 5 * 60 * 1000;
 const MAX_BACKFILL_MS = 365 * 24 * 60 * 60 * 1000;
 
-function performedAtRefine(iso: string): boolean {
+export function performedAtRefine(iso: string): boolean {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return false;
   const now = Date.now();

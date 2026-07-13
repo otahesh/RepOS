@@ -87,6 +87,13 @@ const TodayCardioSchema = z.object({
   target_duration_sec: z.number().int().nullable(),
   target_distance_m: z.number().int().nullable(),
   target_zone: z.number().int().min(1).max(5).nullable(),
+  logged: z
+    .object({
+      duration_sec: z.number().int(),
+      distance_m: z.number().int().nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 
 const TodayDaySchema = z.object({

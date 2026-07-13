@@ -6,6 +6,7 @@ export const VALID_SCOPES = [
   'health:workouts:write',
   'program:write',
   'set_logs:write',
+  'cardio_logs:write', // measurement model phase 2: cardio-block completion
   'health:injuries:read',
   'health:injuries:write',
   'health:recovery:read', // [FIX-28] gates the existing /api/recovery-flags routes

@@ -33,6 +33,10 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | PATCH  | /api/set-logs/:id                   | set_logs:write        | 404 not-yours                       | setLogs-contamination.test.ts                     | COVERED (WS2.5)          |
 | DELETE | /api/set-logs/:id                   | set_logs:write        | 404 not-yours                       | setLogs-contamination.test.ts                     | COVERED (WS2.5)          |
 | GET    | /api/set-logs                       | set_logs:write        | empty for foreign planned_set       | setLogs-contamination.test.ts                     | COVERED (WS2.5)          |
+| POST   | /api/cardio-logs                    | cardio_logs:write     | 404 foreign planned_cardio_block    | ../cardio-logs-flow.test.ts (IDOR case)          | COVERED (meas. model P2) |
+| PATCH  | /api/cardio-logs/:id                | cardio_logs:write     | 404 not-yours (own-scoped UPDATE)   | ../cardio-logs-flow.test.ts                       | COVERED (meas. model P2) |
+| DELETE | /api/cardio-logs/:id                | cardio_logs:write     | 404 not-yours (own-scoped DELETE)   | ../cardio-logs-flow.test.ts                       | COVERED (meas. model P2) |
+| GET    | /api/cardio-logs                    | (bearer/CF)           | empty for foreign block             | ../cardio-logs-flow.test.ts                       | COVERED (meas. model P2) |
 | POST   | /api/health/workouts                | health:workouts:write | own only (identity-scoped)          | workouts-contamination.test.ts                    | COVERED (WS2.6)          |
 | GET    | /api/recovery-flags                 | health:recovery:read  | own only                            | recoveryFlags-contamination.test.ts               | COVERED (WS2.7)          |
 | POST   | /api/recovery-flags/dismiss         | health:recovery:read  | own only                            | recoveryFlags-contamination.test.ts               | COVERED (WS2.7)          |
