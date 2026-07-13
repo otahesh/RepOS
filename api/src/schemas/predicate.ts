@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { EQUIPMENT_KEYS } from '../services/equipmentRegistry.js';
 
 // Each predicate type is a discriminated union member.
-// Add new predicate types here AND in predicateCompiler.ts in lockstep.
+// Add new predicate types here AND in services/_equipmentPredicate.ts in lockstep.
 
 export const DumbbellPredicate = z.object({
   type: z.literal('dumbbells'),
