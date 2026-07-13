@@ -128,33 +128,29 @@ export async function cardioLogsRoutes(app: FastifyInstance) {
     },
   );
 
-  app.get(
-    '/cardio-logs',
-    { preHandler: [requireBearerOrCfAccess] },
-    async (req, reply) => {
-      const userId = req.userId;
-      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+  app.get('/cardio-logs', { preHandler: [requireBearerOrCfAccess] }, async (req, reply) => {
+    const userId = req.userId;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
 
-      const parse = CardioLogListQuerySchema.safeParse(req.query);
-      if (!parse.success) {
-        const issue = parse.error.issues[0];
-        return reply
-          .code(400)
-          .send({ error: issue.message, field: issue.path[0]?.toString() ?? 'unknown' });
-      }
+    const parse = CardioLogListQuerySchema.safeParse(req.query);
+    if (!parse.success) {
+      const issue = parse.error.issues[0];
+      return reply
+        .code(400)
+        .send({ error: issue.message, field: issue.path[0]?.toString() ?? 'unknown' });
+    }
 
-      // Own-rows-only by construction; another user's block id yields an
-      // empty list (not 404) — same list semantics as GET /set-logs.
-      const { rows } = await db.query<CardioLogRow>(
-        `SELECT ${SELECT_COLUMNS}
+    // Own-rows-only by construction; another user's block id yields an
+    // empty list (not 404) — same list semantics as GET /set-logs.
+    const { rows } = await db.query<CardioLogRow>(
+      `SELECT ${SELECT_COLUMNS}
        FROM cardio_logs
        WHERE user_id = $1 AND planned_cardio_block_id = $2
        ORDER BY performed_at DESC`,
-        [userId, parse.data.planned_cardio_block_id],
-      );
-      return reply.send({ cardio_logs: rows });
-    },
-  );
+      [userId, parse.data.planned_cardio_block_id],
+    );
+    return reply.send({ cardio_logs: rows });
+  });
 
   app.patch(
     '/cardio-logs/:id',

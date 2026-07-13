@@ -13,11 +13,7 @@ import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { randomUUID } from 'crypto';
 import { build } from '../helpers/build-test-app.js';
-import {
-  seedUserWithMesocycle,
-  cleanupSeeded,
-  type SeedHandle,
-} from '../helpers/seed-fixtures.js';
+import { seedUserWithMesocycle, cleanupSeeded, type SeedHandle } from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 import { getTodayWorkout } from '../../src/services/getTodayWorkout.js';
 
@@ -224,9 +220,10 @@ describe('PATCH/DELETE /api/cardio-logs/:id — 24h audit window', () => {
         payload: postBody(blockId),
       });
       const logId = post.json().cardio_log.id;
-      await db.query(`UPDATE cardio_logs SET performed_at = now() - INTERVAL '25 hours' WHERE id=$1`, [
-        logId,
-      ]);
+      await db.query(
+        `UPDATE cardio_logs SET performed_at = now() - INTERVAL '25 hours' WHERE id=$1`,
+        [logId],
+      );
 
       const patch = await app.inject({
         method: 'PATCH',
