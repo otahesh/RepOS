@@ -31,3 +31,7 @@ npm-debug.log*
 
 # Local agent-guidance mirror (Codex); not shared via the repo
 AGENTS.md
+
+# One-off QA/browser-session outputs
+.playwright-mcp/
+*-live.png
