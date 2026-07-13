@@ -3,6 +3,8 @@ import { TOKENS, FONTS } from '../../../tokens';
 import { Term } from '../../Term';
 import { useNetworkState } from '../../../hooks/useNetworkState';
 import { useIdbQueueStatus, type QueueRowStatus } from '../../../hooks/useIdbQueueStatus';
+import { rowMode } from '../../../lib/effort';
+import { useHoldTimer } from './useHoldTimer';
 import type { TodaySet } from '../../../lib/api/mesocycles';
 
 // =============================================================================
@@ -20,7 +22,11 @@ export type RowState =
 export interface RowInputs {
   weight: string; // user-entered text; converted to number on Log
   reps: string;
-  rir: number; // 0..5
+  durationSec: string; // duration mode's primary input (seconds held)
+  rir: number; // 0..5 (reps mode)
+  /** Duration mode's OPTIONAL user-reported RPE (5..10); null = not provided.
+   *  Never defaulted from the target — fabricated effort is worse than none. */
+  holdRpe: number | null;
 }
 
 const DEBOUNCE_MS = 500;
@@ -107,16 +113,22 @@ export function SetRow({
     onLog();
   };
 
-  // Bodyweight movements (dead bug, planks, yoga-style holds) carry no
-  // external load — the weight input is hidden and reps alone unlock Log.
+  // Bodyweight movements (dead bug, planks) carry no external load — the
+  // weight input is hidden and the primary input alone unlocks Log.
   const isBodyweight = set.exercise.bodyweight === true;
 
+  // Input mode derives from the planned row's populated targets (never from
+  // exercise.measurement) so pre-reclassification rows render unchanged.
+  const mode = rowMode(set);
+
+  const primaryFilled =
+    mode === 'duration' ? inputs.durationSec.trim() !== '' : inputs.reps.trim() !== '';
   const canLog =
     !debounced &&
     !isLogged &&
     !isLogging &&
     (isBodyweight || inputs.weight.trim() !== '') &&
-    inputs.reps.trim() !== '';
+    primaryFilled;
 
   const logLabel = (() => {
     if (isLogged) return 'Logged';
@@ -142,10 +154,36 @@ export function SetRow({
           marginBottom: 8,
         }}
       >
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
+        <span
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 11,
+            color: TOKENS.textDim,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
           Set {set.set_idx + 1}
+          {mode === 'duration' ? (
+            <span
+              style={{
+                padding: '1px 6px',
+                borderRadius: 4,
+                border: `1px solid ${TOKENS.line}`,
+                background: TOKENS.surface,
+                letterSpacing: 1,
+              }}
+            >
+              <Term k="hold" compact />
+            </span>
+          ) : null}
         </span>
-        {set.target_load_hint ? (
+        {mode === 'duration' && set.target_duration_low_sec != null ? (
+          <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
+            target {set.target_duration_low_sec}–{set.target_duration_high_sec}s
+          </span>
+        ) : set.target_load_hint ? (
           <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
             target {set.target_load_hint}
           </span>
@@ -193,24 +231,48 @@ export function SetRow({
             disabled={isLogged}
           />
         )}
-        <NumInput
-          label="Reps"
-          unit=""
-          value={inputs.reps}
-          onChange={(v) => onInputChange({ reps: v })}
-          inputRef={isBodyweight ? weightInputRef : undefined}
-          ariaLabel={`Set ${set.set_idx + 1} reps`}
-          disabled={isLogged}
-        />
+        {mode === 'duration' ? (
+          <NumInput
+            label="Hold"
+            unit="sec"
+            value={inputs.durationSec}
+            onChange={(v) => onInputChange({ durationSec: v })}
+            inputRef={isBodyweight ? weightInputRef : undefined}
+            ariaLabel={`Set ${set.set_idx + 1} hold seconds`}
+            disabled={isLogged}
+          />
+        ) : (
+          <NumInput
+            label="Reps"
+            unit=""
+            value={inputs.reps}
+            onChange={(v) => onInputChange({ reps: v })}
+            inputRef={isBodyweight ? weightInputRef : undefined}
+            ariaLabel={`Set ${set.set_idx + 1} reps`}
+            disabled={isLogged}
+          />
+        )}
       </div>
 
-      {!hideRir && (
-        <RirSlider
-          value={inputs.rir}
-          onChange={(rir) => onInputChange({ rir })}
-          disabled={isLogged}
-        />
-      )}
+      {mode === 'duration' && !isLogged ? (
+        <HoldStopwatch onStop={(sec) => onInputChange({ durationSec: String(sec) })} />
+      ) : null}
+
+      {mode === 'duration'
+        ? !hideRir && (
+            <RpeSlider
+              value={inputs.holdRpe}
+              onChange={(holdRpe) => onInputChange({ holdRpe })}
+              disabled={isLogged}
+            />
+          )
+        : !hideRir && (
+            <RirSlider
+              value={inputs.rir}
+              onChange={(rir) => onInputChange({ rir })}
+              disabled={isLogged}
+            />
+          )}
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         <button
@@ -392,6 +454,124 @@ function RirSlider({
             disabled={disabled}
             onClick={() => onChange(n)}
             aria-hidden="true"
+            style={{
+              flex: 1,
+              height: 36,
+              borderRadius: 4,
+              border: 'none',
+              background: n === value ? TOKENS.accent : TOKENS.surface2,
+              color: n === value ? TOKENS.text : TOKENS.textDim,
+              fontFamily: FONTS.mono,
+              fontSize: 13,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// HoldStopwatch — count-up timer row for duration sets (Hevy pattern): START
+// HOLD arms the wall-clock-anchored counter, STOP freezes it and fills the
+// seconds input via onStop. Manual numeric entry stays available alongside.
+// -----------------------------------------------------------------------------
+
+function HoldStopwatch({ onStop }: { onStop: (sec: number) => void }) {
+  const { elapsed, running, start, stop } = useHoldTimer();
+
+  const mmss = (sec: number): string =>
+    `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
+  return (
+    <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button
+        type="button"
+        onClick={() => {
+          if (running) {
+            onStop(stop());
+          } else {
+            start();
+          }
+        }}
+        aria-label={running ? 'Stop hold timer' : 'Start hold timer'}
+        style={{
+          flex: 1,
+          padding: 8,
+          background: running ? TOKENS.danger : TOKENS.surface2,
+          color: TOKENS.text,
+          border: `1px solid ${TOKENS.line}`,
+          borderRadius: 6,
+          fontFamily: FONTS.ui,
+          fontWeight: 600,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          fontSize: 11,
+          cursor: 'pointer',
+        }}
+      >
+        {running ? 'Stop' : 'Start hold'}
+      </button>
+      <span
+        aria-live="polite"
+        style={{
+          minWidth: 48,
+          textAlign: 'right',
+          fontFamily: FONTS.mono,
+          fontSize: 16,
+          color: running ? TOKENS.accent : TOKENS.textDim,
+        }}
+      >
+        {elapsed != null ? mmss(elapsed) : '0:00'}
+      </span>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// RpeSlider — OPTIONAL effort input for duration sets. RPE 5..10 (10 = failure);
+// starts unselected and stays that way unless tapped — a hold logged without
+// effort sends none (never fabricated from the target). Tapping the selected
+// value clears it again. Stored as RPE here; the logger converts to the DB's
+// proximity-to-failure unit (rir = 10 - rpe) at enqueue via the effort seam.
+// -----------------------------------------------------------------------------
+
+function RpeSlider({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
+          <Term k="RPE" compact />
+          <span style={{ marginLeft: 6 }}>(optional)</span>
+        </span>
+        <span style={{ fontFamily: FONTS.mono, fontSize: 14, color: TOKENS.text }}>
+          {value ?? '—'}
+        </span>
+      </div>
+      <div
+        role="group"
+        aria-label="RPE — rate of perceived exertion (optional)"
+        style={{ marginTop: 6, display: 'flex', gap: 4 }}
+      >
+        {[5, 6, 7, 8, 9, 10].map((n) => (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(n === value ? null : n)}
+            aria-pressed={n === value}
+            aria-label={`RPE ${n}`}
             style={{
               flex: 1,
               height: 36,

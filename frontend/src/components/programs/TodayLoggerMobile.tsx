@@ -16,6 +16,7 @@ import { getExerciseHistory, type HistorySession } from '../../lib/api/exerciseH
 import { getExerciseGuide, type ExerciseGuide } from '../../lib/api/exerciseGuide';
 import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
+import { rowMode, rirFromRpe } from '../../lib/effort';
 import { useRestTimer } from './logger/useRestTimer';
 import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
 import { ExerciseFocus } from './logger/ExerciseFocus';
@@ -227,10 +228,13 @@ function LoggerInner({
         s.id,
         {
           // `logged` fields are individually nullable (reps-only bodyweight
-          // logs) — seed only non-null values, never render "null".
+          // logs, duration-only holds) — seed only non-null values, never
+          // render "null".
           weight: s.logged?.weight_lbs != null ? String(s.logged.weight_lbs) : '',
           reps: s.logged?.reps != null ? String(s.logged.reps) : '',
+          durationSec: s.logged?.duration_sec != null ? String(s.logged.duration_sec) : '',
           rir: s.target_rir,
+          holdRpe: null,
         },
       ]),
     ),
@@ -303,14 +307,25 @@ function LoggerInner({
           for (const set of sets) {
             if (set.logged) continue;
             const cur = prev[set.id];
-            if (!cur || cur.weight !== '' || cur.reps !== '') continue;
+            if (!cur || cur.weight !== '' || cur.reps !== '' || cur.durationSec !== '') continue;
             const hs = last.sets[set.set_idx] ?? last.sets[0];
             if (!hs) continue;
-            next[set.id] = {
-              ...cur,
-              weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
-              reps: hs.reps != null ? String(hs.reps) : cur.reps,
-            };
+            if (rowMode(set) === 'duration') {
+              // Quarantine rule: pre-reclassification history logged holds as
+              // "reps" (units ambiguous — some were seconds). Only genuine
+              // duration_sec values prefill a duration row; old reps never do.
+              next[set.id] = {
+                ...cur,
+                weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
+                durationSec: hs.duration_sec != null ? String(hs.duration_sec) : cur.durationSec,
+              };
+            } else {
+              next[set.id] = {
+                ...cur,
+                weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
+                reps: hs.reps != null ? String(hs.reps) : cur.reps,
+              };
+            }
           }
           return next;
         });
@@ -390,15 +405,34 @@ function LoggerInner({
     async (set: TodaySet): Promise<boolean> => {
       if (!currentUserId) return false; // shouldn't happen — AuthGate blocks render
       const inputs = rowInputs[set.id];
-      // Bodyweight movements log reps-only: weight_lbs stays null and
+      // Bodyweight movements log without load: weight_lbs stays null and
       // logBuffer omits it from the POST (the API field is optional).
       const isBodyweight = set.exercise.bodyweight === true;
+      const mode = rowMode(set);
       const weight = isBodyweight ? null : parseFloat(inputs.weight);
-      const reps = parseInt(inputs.reps, 10);
-      if ((weight !== null && !Number.isFinite(weight)) || !Number.isFinite(reps) || reps <= 0) {
+      let reps: number | null = null;
+      let durationSec: number | null = null;
+      if (mode === 'duration') {
+        durationSec = parseInt(inputs.durationSec, 10);
+        if (!Number.isFinite(durationSec) || durationSec <= 0) return false;
+      } else {
+        reps = parseInt(inputs.reps, 10);
+        if (!Number.isFinite(reps) || reps <= 0) return false;
+      }
+      if (weight !== null && !Number.isFinite(weight)) {
         // Validation gate — UI surfaces via the disabled CTA; nothing to do.
         return false;
       }
+      // Effort: reps mode keeps existing behavior (rir always sent; beginner
+      // hideRir silently keeps the target). Duration mode NEVER fabricates
+      // effort — rir is sent only when the user tapped the optional RPE
+      // control, converted to proximity-to-failure via the effort seam.
+      const rir =
+        mode === 'duration'
+          ? inputs.holdRpe != null
+            ? rirFromRpe(inputs.holdRpe)
+            : null
+          : inputs.rir;
 
       setRow(set.id, { phase: 'logging', clientRequestId: null });
       // Backfill mode stamps the chosen date at 12:00 user-local (noon keeps the
@@ -423,7 +457,7 @@ function LoggerInner({
       try {
         const clientRequestId = await logBuffer.enqueue(
           set.id,
-          { weight_lbs: weight, reps, rir: inputs.rir, performed_at: performedAt },
+          { weight_lbs: weight, reps, duration_sec: durationSec, rir, performed_at: performedAt },
           currentUserId,
         );
         setRow(set.id, { phase: 'logged', clientRequestId, loggedAt: Date.now() });

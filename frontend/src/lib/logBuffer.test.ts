@@ -205,7 +205,7 @@ describe('logBuffer', () => {
     await seedRow({ duration_sec: null });
     // legacy row without the key at all (pre-upgrade IDB row)
     const legacy = await seedRow({});
-    delete (legacy as Record<string, unknown>).duration_sec;
+    delete (legacy as unknown as Record<string, unknown>).duration_sec;
     (fetch as any).mockResolvedValue({
       ok: true,
       status: 201,
