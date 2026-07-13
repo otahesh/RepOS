@@ -6,6 +6,32 @@ entries first. Referenced by `docs/runbooks/beta-cutover-checklist.md`,
 
 ---
 
+## Measurement-model wave — 2026-07-12 — SHIPPED (PRs #61–#66)
+
+Design session ran as a three-specialist agent team (sports science /
+competitive research / codebase audit) + adversarial review; user-approved
+design + implementation plan at
+`docs/superpowers/plans/2026-07-12-measurement-model.md` (plan carries the
+full review record). Six stacked PRs, each independently green on the 8
+required checks; 092 (DROP NOT NULL) rehearsed against the live prod dump
+(`tests/dr/dryrun-092.txt` — 0 XOR violations, in-flight rows untouched).
+
+Shipped: `exercises.measurement (reps|duration)`; duration targets/logs as
+sparse columns with XOR CHECK; side-plank prescribed 3×30–45s (was "8–15
+reps"); logger duration mode (count-up hold timer, HOLD chip, optional RPE
+via the single effort seam); history/recap render holds; stalled-PR
+evaluator measurement guard; `cardio_logs` + inline cardio completion
+(closes the W1 "prescribed but never completable" gap); hold Best-Time PRs
++ new-best toast.
+
+**In-flight-run protection (the invariant to remember):** render mode
+derives from each planned row's populated targets, never from the
+exercise's current classification — the active mesocycle's side-plank rows
+keep the reps UI until the next materialization. Pre-wave side-plank "reps"
+history is unit-ambiguous and quarantined from duration prefill/PRs.
+
+---
+
 ## Post-deploy smoke live firing (G13) — 2026-07-10 — GREEN
 
 One-time infra + first live firing completed:
