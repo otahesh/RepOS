@@ -130,7 +130,17 @@ export async function exerciseRoutes(app: FastifyInstance) {
       );
       reply.header('cache-control', 'private, max-age=60');
       reply.header('vary', 'Authorization');
-      return { sessions: rows };
+      // All-time longest hold for this user+exercise (measurement model):
+      // powers the logger's "new best hold" toast. NULL when the exercise has
+      // no duration logs — reps exercises pay one cheap indexed aggregate.
+      const {
+        rows: [best],
+      } = await db.query<{ best_duration_sec: number | null }>(
+        `SELECT MAX(performed_duration_sec)::int AS best_duration_sec
+         FROM set_logs WHERE user_id = $1 AND exercise_id = $2`,
+        [userId, ex.id],
+      );
+      return { sessions: rows, best_duration_sec: best?.best_duration_sec ?? null };
     },
   );
 

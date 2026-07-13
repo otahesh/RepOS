@@ -9,16 +9,18 @@ import {
   getTodayWorkout,
   type TodayDay,
   type TodaySet,
+  type TodayCardio,
   type TodayWorkoutResponse,
 } from '../../lib/api/mesocycles';
 import { listExercises } from '../../lib/api/exercises';
-import { getExerciseHistory, type HistorySession } from '../../lib/api/exerciseHistory';
+import { getExerciseHistoryFull, type HistorySession } from '../../lib/api/exerciseHistory';
 import { getExerciseGuide, type ExerciseGuide } from '../../lib/api/exerciseGuide';
 import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
 import { rowMode, rirFromRpe } from '../../lib/effort';
 import { useRestTimer } from './logger/useRestTimer';
 import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
+import { CardioBlockRow } from './logger/CardioBlockRow';
 import { ExerciseFocus } from './logger/ExerciseFocus';
 import { HistorySheet } from './logger/HistorySheet';
 import { SetupCardSheet } from './logger/SetupCardSheet';
@@ -45,7 +47,13 @@ export interface TodayLoggerMobileProps {
    * the network. In production this is always undefined and the component
    * fetches its own data on mount.
    */
-  preloaded?: { run_id: string; day: TodayDay; sets: TodaySet[]; track?: string | null };
+  preloaded?: {
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    cardio?: TodayCardio[];
+    track?: string | null;
+  };
 }
 
 export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps) {
@@ -55,6 +63,7 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
     run_id: string;
     day: TodayDay;
     sets: TodaySet[];
+    cardio?: TodayCardio[];
     track?: string | null;
   } | null>(preloaded ?? null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -67,7 +76,13 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
       .then((res: TodayWorkoutResponse) => {
         if (cancelled) return;
         if (res.state === 'workout') {
-          setData({ run_id: res.run_id, day: res.day, sets: res.sets, track: res.track });
+          setData({
+            run_id: res.run_id,
+            day: res.day,
+            sets: res.sets,
+            cardio: res.cardio,
+            track: res.track,
+          });
         } else {
           // Sequence-workouts: `today` is workout | mesocycle_complete |
           // no_active_run — there is NO rest state. The else-branch is
@@ -166,7 +181,13 @@ function LoggerInner({
   quotaError,
   setQuotaError,
 }: {
-  data: { run_id: string; day: TodayDay; sets: TodaySet[]; track?: string | null };
+  data: {
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    cardio?: TodayCardio[];
+    track?: string | null;
+  };
   currentUserId: string | null;
   currentUserTz: string | null;
   quotaError: string | null;
@@ -277,6 +298,9 @@ function LoggerInner({
   // in-flight/completed fetches so each slug is requested at most once.
   const [histBySlug, setHistBySlug] = useState<Record<string, HistorySession | null>>({});
   const histRequested = useRef<Set<string>>(new Set());
+  // All-time longest hold per slug (from the history fetch) — powers the
+  // "new best hold" toast. Ref, not state: read/compare at log time only.
+  const bestHoldBySlug = useRef<Record<string, number | null>>({});
 
   const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
     setRowInputs((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -292,8 +316,9 @@ function LoggerInner({
     // dropped mid-flight (StrictMode re-fire, or any focusedEntry identity
     // change) would never be refetched. The caches are slug-keyed and the
     // prefill only touches untouched, unlogged rows, so a late write is safe.
-    getExerciseHistory(slug, 1)
-      .then((sessions) => {
+    getExerciseHistoryFull(slug, 1)
+      .then(({ sessions, best_duration_sec }) => {
+        bestHoldBySlug.current[slug] = best_duration_sec;
         const last = sessions[0] ?? null;
         setHistBySlug((prev) => ({ ...prev, [slug]: last }));
         if (!last || last.sets.length === 0) return;
@@ -461,6 +486,24 @@ function LoggerInner({
           currentUserId,
         );
         setRow(set.id, { phase: 'logged', clientRequestId, loggedAt: Date.now() });
+        // Hold Best-Time PR toast (the one delight moment duration sets get —
+        // Hevy convention: Best Time is the ONLY duration PR). Compared
+        // against the all-time best from the history fetch; a missed fetch
+        // (null) still toasts on the exercise's first-ever hold.
+        if (mode === 'duration' && durationSec != null) {
+          const slug = set.exercise.slug;
+          const prev = bestHoldBySlug.current[slug];
+          if (prev == null || durationSec > prev) {
+            bestHoldBySlug.current[slug] = durationSec;
+            pushToast({
+              severity: 'success',
+              body:
+                prev == null
+                  ? `First hold logged — ${durationSec}s ${set.exercise.name}`
+                  : `New best hold — ${durationSec}s ${set.exercise.name} (was ${prev}s)`,
+            });
+          }
+        }
         // Defer focus shift so React commits the new affordance first.
         setTimeout(() => focusNext(set.id), 0);
         return true;
@@ -628,6 +671,13 @@ function LoggerInner({
           onFinish={requestFinish}
           finishing={finishing}
         />
+        {data.cardio && data.cardio.length > 0 ? (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {data.cardio.map((c) => (
+              <CardioBlockRow key={c.id} block={c} />
+            ))}
+          </div>
+        ) : null}
         <ConfirmDialog
           open={confirmFinish}
           tier="medium"

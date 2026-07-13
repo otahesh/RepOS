@@ -166,6 +166,12 @@ export type MesocycleRecapStats = {
   weeks: number;
   total_sets: number;
   prs: number;
+  duration_prs?: Array<{
+    exercise_slug: string;
+    exercise_name: string;
+    best_duration_sec: number;
+    load_lbs: number | null;
+  }>;
 };
 
 export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {

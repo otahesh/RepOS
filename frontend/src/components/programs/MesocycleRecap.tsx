@@ -6,7 +6,17 @@ export function MesocycleRecap({
   stats,
   onChoice,
 }: {
-  stats: { weeks: number; total_sets: number; prs: number };
+  stats: {
+    weeks: number;
+    total_sets: number;
+    prs: number;
+    duration_prs?: Array<{
+      exercise_slug: string;
+      exercise_name: string;
+      best_duration_sec: number;
+      load_lbs: number | null;
+    }>;
+  };
   onChoice: (c: RecapChoice) => void;
 }) {
   return (
@@ -42,6 +52,27 @@ export function MesocycleRecap({
           {' PR'}
           {stats.prs === 1 ? '' : 's'}
         </div>
+        {stats.duration_prs && stats.duration_prs.length > 0 ? (
+          <div
+            style={{
+              marginTop: 8,
+              fontFamily: 'JetBrains Mono',
+              fontSize: 12,
+              color: '#6BE28B',
+            }}
+          >
+            {stats.duration_prs.map((p) => (
+              <div key={p.exercise_slug}>
+                {'Best hold: '}
+                {p.exercise_name}
+                {' — '}
+                {p.best_duration_sec}
+                {'s @ '}
+                {p.load_lbs != null ? `${p.load_lbs} lb` : 'BW'}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </header>
 
       <div

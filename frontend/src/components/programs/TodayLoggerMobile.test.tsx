@@ -54,6 +54,12 @@ const {
 }));
 vi.mock('../../lib/api/exerciseHistory', () => ({
   getExerciseHistory: getExerciseHistoryMock,
+  // The component consumes the Full variant ({ sessions, best_duration_sec });
+  // existing tests resolve bare session arrays, so normalize both shapes here.
+  getExerciseHistoryFull: (slug: string, limit?: number) =>
+    Promise.resolve(getExerciseHistoryMock(slug, limit)).then((r: unknown) =>
+      Array.isArray(r) ? { sessions: r, best_duration_sec: null } : r,
+    ),
 }));
 vi.mock('../../lib/api/exercises', () => ({
   listExercises: listExercisesMock,
@@ -369,6 +375,43 @@ describe('<TodayLoggerMobile>', () => {
       renderFocused(HOLD_PRELOADED);
       await flush();
       expect(screen.getByLabelText(/Set 1 hold seconds/i)).toHaveValue(null);
+    });
+
+    it('toasts a new best hold when the logged duration beats the all-time best', async () => {
+      const user = userEvent.setup();
+      getExerciseHistoryMock.mockResolvedValueOnce({
+        sessions: [],
+        best_duration_sec: 30,
+      });
+      renderFocused(HOLD_PRELOADED);
+      await flush();
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/Set 1 hold seconds/i), '40');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+      await flush();
+      expect(pushToastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: 'success',
+          body: expect.stringMatching(/new best hold — 40s.*was 30s/i),
+        }),
+      );
+    });
+
+    it('does NOT toast when the hold is below the existing best', async () => {
+      const user = userEvent.setup();
+      getExerciseHistoryMock.mockResolvedValueOnce({
+        sessions: [],
+        best_duration_sec: 60,
+      });
+      renderFocused(HOLD_PRELOADED);
+      await flush();
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/Set 1 hold seconds/i), '40');
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+      await flush();
+      expect(pushToastMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringMatching(/best hold/i) }),
+      );
     });
 
     it('prefills from genuine duration history', async () => {
