@@ -79,11 +79,14 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
         (f): f is Extract<EvaluatedFlag, { triggered: true }> => f.triggered,
       );
 
+      // Dismissal lookups are per-flag independent reads — batch them.
+      const dismissals = await Promise.all(
+        triggered.map((f) => isDismissed({ userId, flag: f.key, weekStart: week_start })),
+      );
       const flags: RecoveryFlagListResponse['flags'] = [];
       const visibleKeys: RecoveryFlagKey[] = [];
-      for (const f of triggered) {
-        const dismissed = await isDismissed({ userId, flag: f.key, weekStart: week_start });
-        if (dismissed) continue;
+      triggered.forEach((f, i) => {
+        if (dismissals[i]) return;
         flags.push({
           flag: f.key as RecoveryFlagListResponse['flags'][number]['flag'],
           message: f.message,
@@ -92,15 +95,14 @@ export async function recoveryFlagRoutes(app: FastifyInstance) {
             : {}),
         });
         visibleKeys.push(f.key as RecoveryFlagKey);
-      }
+      });
 
       // [FIX-6] EvaluatedFlag's discriminator is `key` (not `flag`). We track
       // f.key into visibleKeys above so the telemetry write here uses the
       // evaluator key directly. Append-only on first emit per (user, flag,
-      // week); subsequent polls dedupe via the partial unique index.
-      for (const key of visibleKeys) {
-        await recordFlagShown({ userId, flag: key });
-      }
+      // week); subsequent polls dedupe via the partial unique index — distinct
+      // keys, so the batched writes can't conflict.
+      await Promise.all(visibleKeys.map((key) => recordFlagShown({ userId, flag: key })));
 
       const flagsResp: RecoveryFlagListResponse = { flags };
       return flagsResp;

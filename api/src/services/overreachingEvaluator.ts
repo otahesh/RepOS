@@ -49,7 +49,7 @@ const COMPOUND_PATTERNS = [
 export const overreachingEvaluator: RecoveryFlagEvaluator = {
   key: 'overreaching',
   version: 1,
-  async evaluate({ userId, runId }) {
+  async evaluate({ userId, runId, weekIdx }) {
     // No active run → no current-week volume to compare → fail-closed.
     if (!runId) return { triggered: false };
 
@@ -104,16 +104,10 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // Condition 2: current-week performed_sets >= MAV for at least one
     // worked muscle. mesocycle_runs.current_week is 1-indexed and matches
     // WeekVolume.week_idx by construction (volumeRollup loops 1..nWeeks).
-    const {
-      rows: [run],
-    } = await db.query<{ current_week: number }>(
-      `SELECT current_week FROM mesocycle_runs WHERE id = $1`,
-      [runId],
-    );
-    if (!run) return { triggered: false };
-
+    // ctx.weekIdx is resolved by the route from the SAME active-run row as
+    // ctx.runId, so re-reading current_week here was a redundant round-trip.
     const rollup = await computeVolumeRollup(runId);
-    const week = rollup.weeks.find((w) => w.week_idx === run.current_week);
+    const week = rollup.weeks.find((w) => w.week_idx === weekIdx);
     if (!week) return { triggered: false };
 
     const overMav = week.muscles.some((m) => m.performed_sets >= m.mav);

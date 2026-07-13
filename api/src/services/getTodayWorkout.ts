@@ -2,6 +2,7 @@
 import { db } from '../db/client.js';
 import { computeUserLocalDate } from './userLocalDate.js';
 import { findSubstitutions } from './substitutions.js';
+import { fetchUserInjuries } from './injuryRanker.js';
 import { allPredicatesSatisfied } from './_equipmentPredicate.js';
 import type { PredicateT } from '../schemas/predicate.js';
 
@@ -152,18 +153,17 @@ export async function getTodayWorkout(
     );
   }
 
-  const {
-    rows: [lastCompleted],
-  } = await db.query<{ last_completed_at: Date | null }>(
+  // The four reads below (last-completed, set rows, cardio rows, equipment
+  // profile) are mutually independent leaf queries keyed on already-resolved
+  // ids — issue them concurrently (db is a Pool, each takes its own pooled
+  // connection) instead of paying four sequential round-trips on the hot
+  // `today` endpoint.
+  const lastCompletedQ = db.query<{ last_completed_at: Date | null }>(
     `SELECT MAX(completed_at) AS last_completed_at
      FROM day_workouts WHERE mesocycle_run_id=$1 AND status='completed'`,
     [run.id],
   );
-  const completedToday =
-    lastCompleted?.last_completed_at != null &&
-    computeUserLocalDate(run.start_tz, lastCompleted.last_completed_at) === todayLocal;
-
-  const { rows: setRows } = await db.query<{
+  const setRowsQ = db.query<{
     id: string;
     block_idx: number;
     set_idx: number;
@@ -203,7 +203,7 @@ export async function getTodayWorkout(
      ORDER BY ps.block_idx, ps.set_idx`,
     [day.id],
   );
-  const { rows: cardioRows } = await db.query<{
+  const cardioRowsQ = db.query<{
     id: string;
     block_idx: number;
     target_duration_sec: number | null;
@@ -231,58 +231,91 @@ export async function getTodayWorkout(
     [day.id],
   );
 
-  const {
-    rows: [profileRow],
-  } = await db.query<{ equipment_profile: Record<string, unknown> }>(
+  const profileQ = db.query<{ equipment_profile: Record<string, unknown> }>(
     `SELECT equipment_profile FROM users WHERE id=$1`,
     [userId],
   );
+
+  const [
+    {
+      rows: [lastCompleted],
+    },
+    { rows: setRows },
+    { rows: cardioRows },
+    {
+      rows: [profileRow],
+    },
+  ] = await Promise.all([lastCompletedQ, setRowsQ, cardioRowsQ, profileQ]);
+
+  const completedToday =
+    lastCompleted?.last_completed_at != null &&
+    computeUserLocalDate(run.start_tz, lastCompleted.last_completed_at) === todayLocal;
+
   const profile = profileRow?.equipment_profile ?? { _v: 1 };
 
   // For any block whose required_equipment predicates fail under the user's
   // current profile, attach a suggested_substitution from Library v1's ranker.
-  const sets = await Promise.all(
-    setRows.map(async (s) => {
-      const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
-      const fits = allPredicatesSatisfied(predicates, profile);
-      let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
-      if (!fits) {
-        // Beta W3.2 — pass userId so the picked suggested_substitution also
-        // reflects injury-aware ranking (knee-stressful alternative for a knee
-        // injury would otherwise outrank a safer choice).
-        const sub = await findSubstitutions(s.ex_slug, profile, userId);
-        const top = sub?.subs?.[0];
-        if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
-      }
-      return {
-        id: s.id,
-        block_idx: s.block_idx,
-        set_idx: s.set_idx,
-        exercise: {
-          id: s.ex_id,
-          slug: s.ex_slug,
-          name: s.ex_name,
-          bodyweight: predicates.length === 0,
-          measurement: s.ex_measurement,
-        },
-        target_reps_low: s.target_reps_low,
-        target_reps_high: s.target_reps_high,
-        target_duration_low_sec: s.target_duration_low_sec,
-        target_duration_high_sec: s.target_duration_high_sec,
-        target_rir: s.target_rir,
-        rest_sec: s.rest_sec,
-        logged:
-          s.logged_id != null
-            ? {
-                weight_lbs: s.logged_weight,
-                reps: s.logged_reps,
-                duration_sec: s.logged_duration,
-              }
-            : null,
-        ...(suggested ? { suggested_substitution: suggested } : {}),
-      };
-    }),
-  );
+  //
+  // A day materializes one planned_sets row PER SET, so an ill-fitting
+  // exercise with 3 sets used to trigger the (3-query) findSubstitutions once
+  // per row for the identical slug, plus a fetchUserInjuries per call. Both
+  // are request-invariant: resolve substitutions once per DISTINCT missing
+  // slug, with the injuries fetched a single time and passed down. (The memo
+  // is per-request by construction — nothing outlives this call.)
+  const missingSlugs = new Set<string>();
+  for (const s of setRows) {
+    const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
+    if (!allPredicatesSatisfied(predicates, profile)) missingSlugs.add(s.ex_slug);
+  }
+  const subBySlug = new Map<string, Awaited<ReturnType<typeof findSubstitutions>>>();
+  if (missingSlugs.size > 0) {
+    // Beta W3.2 — pass userId so the picked suggested_substitution also
+    // reflects injury-aware ranking (knee-stressful alternative for a knee
+    // injury would otherwise outrank a safer choice).
+    const injuries = await fetchUserInjuries(userId);
+    await Promise.all(
+      [...missingSlugs].map(async (slug) => {
+        subBySlug.set(slug, await findSubstitutions(slug, profile, userId, injuries));
+      }),
+    );
+  }
+
+  const sets = setRows.map((s) => {
+    const predicates = (s.ex_required?.requires ?? []) as PredicateT[];
+    const fits = allPredicatesSatisfied(predicates, profile);
+    let suggested: { id: string; slug: string; name: string; reason: string } | undefined;
+    if (!fits) {
+      const top = subBySlug.get(s.ex_slug)?.subs?.[0];
+      if (top) suggested = { id: top.id, slug: top.slug, name: top.name, reason: top.reason };
+    }
+    return {
+      id: s.id,
+      block_idx: s.block_idx,
+      set_idx: s.set_idx,
+      exercise: {
+        id: s.ex_id,
+        slug: s.ex_slug,
+        name: s.ex_name,
+        bodyweight: predicates.length === 0,
+        measurement: s.ex_measurement,
+      },
+      target_reps_low: s.target_reps_low,
+      target_reps_high: s.target_reps_high,
+      target_duration_low_sec: s.target_duration_low_sec,
+      target_duration_high_sec: s.target_duration_high_sec,
+      target_rir: s.target_rir,
+      rest_sec: s.rest_sec,
+      logged:
+        s.logged_id != null
+          ? {
+              weight_lbs: s.logged_weight,
+              reps: s.logged_reps,
+              duration_sec: s.logged_duration,
+            }
+          : null,
+      ...(suggested ? { suggested_substitution: suggested } : {}),
+    };
+  });
 
   return {
     state: 'workout',

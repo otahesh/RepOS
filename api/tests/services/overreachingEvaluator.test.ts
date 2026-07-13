@@ -32,7 +32,7 @@ describe('overreachingEvaluator (W3.1 AND-gate)', () => {
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
-      weekIdx: 0,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(true);
     if (r.triggered) {
@@ -46,7 +46,7 @@ describe('overreachingEvaluator (W3.1 AND-gate)', () => {
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
-      weekIdx: 0,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(false);
   });
@@ -57,7 +57,7 @@ describe('overreachingEvaluator (W3.1 AND-gate)', () => {
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
-      weekIdx: 0,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(false);
   });
@@ -68,7 +68,7 @@ describe('overreachingEvaluator (W3.1 AND-gate)', () => {
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
-      weekIdx: 0,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(false);
   });

@@ -26,6 +26,7 @@ describe('overreachingEvaluator — deload guard [I-OVERREACHING-DELOAD-GUARD]',
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(true);
   });
@@ -37,6 +38,7 @@ describe('overreachingEvaluator — deload guard [I-OVERREACHING-DELOAD-GUARD]',
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(false);
   });
@@ -53,6 +55,7 @@ describe('overreachingEvaluator — deload guard [I-OVERREACHING-DELOAD-GUARD]',
     const r = await overreachingEvaluator.evaluate({
       userId: seed.userId,
       runId: seed.mesocycleRunId,
+      weekIdx: 1,
     });
     expect(r.triggered).toBe(false);
   });

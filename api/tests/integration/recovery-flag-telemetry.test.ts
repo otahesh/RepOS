@@ -45,8 +45,11 @@ describe('recovery_flag_events telemetry', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(resp.statusCode).toBe(200);
+    // Filter by flag rather than taking the newest row: shown-event writes
+    // are batched (Promise.all) so cross-flag insertion order is incidental.
     const { rows } = await db.query<{ flag: string; event_type: string; week_start: string }>(
-      `SELECT flag, event_type, week_start FROM recovery_flag_events WHERE user_id=$1 ORDER BY id DESC LIMIT 1`,
+      `SELECT flag, event_type, week_start FROM recovery_flag_events
+       WHERE user_id=$1 AND flag='overreaching' ORDER BY id DESC LIMIT 1`,
       [userId],
     );
     expect(rows[0]).toMatchObject({ flag: 'overreaching', event_type: 'shown' });

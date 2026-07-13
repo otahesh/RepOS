@@ -38,6 +38,10 @@ export async function findSubstitutions(
   // demotes candidates whose joint stress overlaps the user's recorded
   // injuries; when undefined, the ranker is skipped entirely.
   userId?: string,
+  // Optional pre-fetched injuries: callers resolving substitutions for many
+  // slugs in one request (getTodayWorkout) fetch injuries once and pass them
+  // down instead of re-querying per call. Ignored when userId is absent.
+  injuries?: Awaited<ReturnType<typeof fetchUserInjuries>>,
 ): Promise<SubResult | null> {
   const {
     rows: [target],
@@ -159,7 +163,7 @@ export async function findSubstitutions(
           reason: c.reason,
           joint_stress_profile: c.joint_stress_profile,
         })),
-        await fetchUserInjuries(userId),
+        injuries ?? (await fetchUserInjuries(userId)),
       )
     : passing;
 
