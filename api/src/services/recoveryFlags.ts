@@ -35,20 +35,24 @@ export type EvaluatedFlag =
   | { key: string; triggered: true; message: string; payload?: Record<string, unknown> };
 
 export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFlag[]> {
-  const out: EvaluatedFlag[] = [];
-  for (const ev of REGISTRY.values()) {
-    try {
-      const r = await ev.evaluate(ctx);
-      if (r.triggered)
-        out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
-      else out.push({ key: ev.key, triggered: false });
-    } catch (err) {
-      // Fail-closed so one evaluator failure doesn't drop the others.
-      console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
-      out.push({ key: ev.key, triggered: false });
-    }
-  }
-  return out;
+  // Evaluators are mutually independent — run them concurrently (each takes
+  // its own pooled connection). Promise.all over the mapped array preserves
+  // registry-insertion order in the output, so the response `flags` order is
+  // unchanged from the previous sequential loop.
+  return Promise.all(
+    Array.from(REGISTRY.values()).map(async (ev): Promise<EvaluatedFlag> => {
+      try {
+        const r = await ev.evaluate(ctx);
+        return r.triggered
+          ? { key: ev.key, triggered: true, message: r.message, payload: r.payload }
+          : { key: ev.key, triggered: false };
+      } catch (err) {
+        // Fail-closed so one evaluator failure doesn't drop the others.
+        console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
+        return { key: ev.key, triggered: false };
+      }
+    }),
+  );
 }
 
 // For tests: clear registry between scenarios.
