@@ -34,20 +34,20 @@ describe('useIdbQueueStatus', () => {
   });
 
   it('returns "unknown" when clientRequestId is null', () => {
-    const { result } = renderHook(() => useIdbQueueStatus(null));
+    const { result } = renderHook(() => useIdbQueueStatus(null, 50));
     expect(result.current).toBe('unknown');
   });
 
   it('reads "pending" for an enqueued row on first tick', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'r-1' }));
-    const { result } = renderHook(() => useIdbQueueStatus('r-1'));
+    const { result } = renderHook(() => useIdbQueueStatus('r-1', 50));
     await waitFor(() => expect(result.current).toBe('pending'));
   });
 
   it('transitions to "synced" once markSynced deletes the row', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'r-2' }));
 
-    const { result } = renderHook(() => useIdbQueueStatus('r-2'));
+    const { result } = renderHook(() => useIdbQueueStatus('r-2', 50));
     await waitFor(() => expect(result.current).toBe('pending'));
 
     await act(async () => {
@@ -61,7 +61,7 @@ describe('useIdbQueueStatus', () => {
 
   it('reflects "rejected" when markRejected runs', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'r-3' }));
-    const { result } = renderHook(() => useIdbQueueStatus('r-3'));
+    const { result } = renderHook(() => useIdbQueueStatus('r-3', 50));
     await waitFor(() => expect(result.current).toBe('pending'));
 
     await act(async () => {
@@ -74,7 +74,7 @@ describe('useIdbQueueStatus', () => {
   it('clears the interval on unmount', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'r-4' }));
     const clearSpy = vi.spyOn(window, 'clearInterval');
-    const { unmount } = renderHook(() => useIdbQueueStatus('r-4'));
+    const { unmount } = renderHook(() => useIdbQueueStatus('r-4', 50));
     unmount();
     expect(clearSpy).toHaveBeenCalled();
   });
@@ -85,7 +85,7 @@ describe('useIdbQueueStatus', () => {
     await idbQueue.markRejected('r-b', 'planned_set_deleted');
 
     const { result, rerender } = renderHook(
-      ({ id }: { id: string | null }) => useIdbQueueStatus(id),
+      ({ id }: { id: string | null }) => useIdbQueueStatus(id, 50),
       { initialProps: { id: 'r-a' as string | null } },
     );
     await waitFor(() => expect(result.current).toBe('pending'));
