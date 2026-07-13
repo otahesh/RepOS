@@ -6,7 +6,7 @@ GAP = filled by WS2.2–WS2.9.
 N/A (public) = unauthenticated catalog/health route; cross-user isolation does not apply.
 N/A (admin) = `X-Admin-Key` / CF-Access gated operational route (no per-user ownership; gate-tested elsewhere).
 
-Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (67 handlers). The inline `GET /api/me` lives in `api/src/app.ts` (not under `src/routes/`) and is enumerated separately in the per-user table below, so the per-user table total is consistent with the route-file grep plus that one inline handler.
+Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (66 handlers after the 2026-07-13 quality pass removed the consumer-less `GET /api/muscles/joint-stress`). The inline `GET /api/me` lives in `api/src/app.ts` (not under `src/routes/`) and is enumerated separately in the per-user table below, so the per-user table total is consistent with the route-file grep plus that one inline handler.
 
 ## Per-user routes (ownership-scoped)
 
@@ -60,7 +60,6 @@ Reconciled against `grep -rnE "app\.(get|post|patch|delete|put)" src/routes/` (6
 | PATCH  | /api/users/me/landmarks             | bearer/CF             | own only                            | userLandmarks-contamination.test.ts               | COVERED                  |
 | POST   | /api/me/onboarding/complete         | bearer/CF             | own only                            | onboarding-contamination.test.ts                  | COVERED                  |
 | POST   | /api/auth/signout-everywhere        | bearer/CF             | own tokens only                     | signout-everywhere-contamination.test.ts          | COVERED                  |
-| GET    | /api/muscles/joint-stress           | bearer/CF             | own injuries only                   | muscleJointStress-contamination.test.ts           | COVERED                  |
 | POST   | /api/feedback                       | bearer/CF + CSRF      | stamps token owner                  | feedback-contamination.test.ts                    | COVERED                  |
 | GET    | /api/equipment/profile              | bearer/CF             | own only                            | (identity-scoped read; see note)                  | COVERED (weight pattern) |
 | PUT    | /api/equipment/profile              | bearer/CF             | own only                            | (identity-scoped write; see note)                 | COVERED (weight pattern) |

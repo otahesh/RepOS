@@ -38,10 +38,3 @@ export async function computeMuscleJointRoots(): Promise<Record<string, string[]
   for (const slug of Object.keys(out)) final[slug] = [...out[slug]].sort();
   return final;
 }
-
-export async function getMuscleJointStressCatalog() {
-  return {
-    JOINT_ROOT,
-    MUSCLE_JOINT_ROOTS: await computeMuscleJointRoots(),
-  };
-}

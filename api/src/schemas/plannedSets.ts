@@ -49,8 +49,6 @@ export type PlannedSetPatchResponse = z.infer<typeof PlannedSetPatchResponseSche
 // ---------------------------------------------------------------------------
 // POST /api/planned-sets/:id/substitute — request body
 // The route uses to_exercise_id (UUID), not to_exercise_slug.
-// Note: the schema file plannedSetSubstitute.ts uses slug — but the actual
-// route uses UUID. This schema reflects the route implementation.
 // ---------------------------------------------------------------------------
 
 export const PlannedSetSubstituteRequestSchema = z.object({
