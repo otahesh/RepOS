@@ -39,19 +39,20 @@ export function makeExerciseSeedAdapter(key: string): SeedAdapter<ExerciseSeed> 
       } = await tx.query<{ id: string }>(
         `INSERT INTO exercises (
            slug, name, parent_exercise_id, primary_muscle_id, movement_pattern,
-           peak_tension_length, required_equipment, skill_complexity, loading_demand,
+           peak_tension_length, measurement, required_equipment, skill_complexity, loading_demand,
            systemic_fatigue, joint_stress_profile, eccentric_overload_capable,
            contraindications, requires_shoulder_flexion_overhead,
            loads_spine_in_flexion, loads_spine_axially, requires_hip_internal_rotation,
            requires_ankle_dorsiflexion, requires_wrist_extension_loaded,
            created_by, seed_key, seed_generation, archived_at, updated_at
          ) VALUES (
-           $1,$2,$3,$4,$5::movement_pattern,$6::peak_tension_length,$7::jsonb,
-           $8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,
-           'system',$20,$21,NULL,now()
+           $1,$2,$3,$4,$5::movement_pattern,$6::peak_tension_length,$7,$8::jsonb,
+           $9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,$20,
+           'system',$21,$22,NULL,now()
          )
          ON CONFLICT (slug) DO UPDATE SET
            name=EXCLUDED.name,
+           measurement=EXCLUDED.measurement,
            parent_exercise_id=EXCLUDED.parent_exercise_id,
            primary_muscle_id=EXCLUDED.primary_muscle_id,
            movement_pattern=EXCLUDED.movement_pattern,
@@ -81,6 +82,7 @@ export function makeExerciseSeedAdapter(key: string): SeedAdapter<ExerciseSeed> 
           primary_muscle_id,
           e.movement_pattern,
           e.peak_tension_length,
+          e.measurement ?? 'reps',
           JSON.stringify(e.required_equipment),
           e.skill_complexity,
           e.loading_demand,

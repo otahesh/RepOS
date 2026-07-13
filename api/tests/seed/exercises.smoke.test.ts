@@ -23,6 +23,22 @@ describe('exercises seed (production smoke)', () => {
     if (r.applied) expect(r.archived).toBe(0); // no curated entries removed
   });
 
+  it('classifies holds and carries as duration, dynamic work as reps', async () => {
+    const { rows } = await db.query(
+      `SELECT slug, measurement FROM exercises
+       WHERE slug IN ('side-plank','dumbbell-farmers-carry','suitcase-carry',
+                      'dumbbell-suitcase-carry','dumbbell-overhead-carry','dead-bug','barbell-back-squat')`,
+    );
+    const bySlug = Object.fromEntries(rows.map((r) => [r.slug, r.measurement]));
+    expect(bySlug['side-plank']).toBe('duration');
+    expect(bySlug['dumbbell-farmers-carry']).toBe('duration');
+    expect(bySlug['suitcase-carry']).toBe('duration');
+    expect(bySlug['dumbbell-suitcase-carry']).toBe('duration');
+    expect(bySlug['dumbbell-overhead-carry']).toBe('duration');
+    expect(bySlug['dead-bug']).toBe('reps'); // dynamic — stays reps by design
+    expect(bySlug['barbell-back-squat']).toBe('reps');
+  });
+
   it('every active exercise has primary_muscle resolved', async () => {
     const { rows } = await db.query(`
       SELECT slug FROM exercises

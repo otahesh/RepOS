@@ -58,6 +58,12 @@ export const ExerciseSeedSchema = z
     muscle_contributions: z.partialRecord(z.enum(MUSCLE_SLUGS), z.number().min(0.05).max(1.0)),
     movement_pattern: z.enum(MOVEMENT_PATTERNS),
     peak_tension_length: z.enum(PEAK_TENSION),
+    // How the exercise is measured: 'reps' (dynamic) or 'duration' (isometric
+    // holds, time-prescribed carries). Drives prescription shape, logging form,
+    // and substitution filtering. Load is orthogonal (required_equipment).
+    // Optional-absent = 'reps': runSeed hands upsertOne the RAW entries (zod
+    // defaults never materialize), so the adapter applies the fallback.
+    measurement: z.enum(['reps', 'duration']).optional(),
     required_equipment: RequiredEquipment,
     skill_complexity: z.number().int().min(1).max(5),
     loading_demand: z.number().int().min(1).max(5),

@@ -43,6 +43,52 @@ describe('ProgramTemplateSchema', () => {
     expect(r.success).toBe(true);
   });
 
+  const durationBlock = {
+    exercise_slug: 'side-plank',
+    mev: 2,
+    mav: 3,
+    target_duration_low_sec: 30,
+    target_duration_high_sec: 45,
+    target_rir: 2,
+    rest_sec: 60,
+  };
+  const withBlock = (block: object) => ({
+    ...validTemplate,
+    days_per_week: 1,
+    structure: { _v: 1, days: [baseDay({ blocks: [block] })] },
+  });
+
+  it('accepts a duration-targeted block (holds)', () => {
+    const r = ProgramTemplateSchema.safeParse(withBlock(durationBlock));
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects a block with BOTH reps and duration targets', () => {
+    const r = ProgramTemplateSchema.safeParse(
+      withBlock({ ...durationBlock, target_reps_low: 8, target_reps_high: 15 }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a block with NEITHER reps nor duration targets', () => {
+    const { target_duration_low_sec, target_duration_high_sec, ...neither } = durationBlock;
+    const r = ProgramTemplateSchema.safeParse(withBlock(neither));
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a half-set duration pair', () => {
+    const { target_duration_high_sec, ...half } = durationBlock;
+    const r = ProgramTemplateSchema.safeParse(withBlock(half));
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects inverted duration range', () => {
+    const r = ProgramTemplateSchema.safeParse(
+      withBlock({ ...durationBlock, target_duration_low_sec: 50, target_duration_high_sec: 30 }),
+    );
+    expect(r.success).toBe(false);
+  });
+
   it('rejects bad slug', () => {
     const r = ProgramTemplateSchema.safeParse({ ...validTemplate, slug: 'Bad Slug' });
     expect(r.success).toBe(false);

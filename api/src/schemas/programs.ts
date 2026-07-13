@@ -44,6 +44,8 @@ const BlockSchema = z
     mav: z.number().int().min(0).optional(),
     target_reps_low: z.number().int().min(1).optional(),
     target_reps_high: z.number().int().min(1).optional(),
+    target_duration_low_sec: z.number().int().min(1).optional(),
+    target_duration_high_sec: z.number().int().min(1).optional(),
     target_rir: z.number().int().min(1).optional(),
     rest_sec: z.number().int().min(0).optional(),
     cardio: z
