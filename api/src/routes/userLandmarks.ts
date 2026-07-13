@@ -23,8 +23,8 @@ export async function userLandmarksRoutes(app: FastifyInstance) {
     );
     // [I-INJURY-OVERLAY-COPY] Derive named injury constraints server-side
     // so the editor can render `⚠ left knee (high)` chips. The derivation
-    // uses the same JOINT_ROOT / MUSCLE_JOINT_ROOTS that the
-    // /api/muscles/joint-stress catalog endpoint exposes (Task 5b).
+    // uses the server-side JOINT_ROOT / MUSCLE_JOINT_ROOTS single source
+    // of truth in services/muscleJointStress.ts.
     const injury_constraints = await deriveInjuryConstraints(userId);
     return {
       landmarks,
