@@ -23,8 +23,11 @@ export type ProgramTemplateStructure = {
       exercise_slug: string;
       mev: number;
       mav: number;
-      target_reps_low: number;
-      target_reps_high: number;
+      /** Exactly one measurement dimension per block (reps pair XOR duration pair). */
+      target_reps_low?: number | null;
+      target_reps_high?: number | null;
+      target_duration_low_sec?: number | null;
+      target_duration_high_sec?: number | null;
       target_rir: number;
       rest_sec: number;
       cardio?: { target_duration_sec?: number; target_distance_m?: number; target_zone?: number };

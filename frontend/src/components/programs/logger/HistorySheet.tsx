@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { rpeFromRir } from '../../../lib/effort';
 import { TOKENS, FONTS } from '../../../tokens';
 import {
   getExerciseHistory,
@@ -249,7 +250,17 @@ function HistorySpinner() {
 // `135 × 8` with `BW` for a null weight (bodyweight logs), reps omitted when
 // null, and ` @RIR n` appended only on non-beginner tracks — per product
 // decision 2026-07-06, beginner surfaces never show RIR jargon.
+// Duration sets (holds) render `40s hold` / `70 · 40s hold`; their stored
+// rir is displayed as RPE (10 − rir) per the one-unit rule in lib/effort.ts.
+// Mode is derived from the LOG's own duration_sec, so mixed pre/post-
+// reclassification history renders each row as it was actually logged.
 export function formatHistorySet(set: HistorySet, beginnerTrack: boolean): string {
+  if (set.duration_sec != null) {
+    let str = set.weight_lbs != null ? `${set.weight_lbs} · ` : '';
+    str += `${set.duration_sec}s hold`;
+    if (!beginnerTrack && set.rir != null) str += ` @RPE ${rpeFromRir(set.rir)}`;
+    return str;
+  }
   let str = set.weight_lbs != null ? String(set.weight_lbs) : 'BW';
   if (set.reps != null) str += ` × ${set.reps}`;
   if (!beginnerTrack && set.rir != null) str += ` @RIR ${set.rir}`;

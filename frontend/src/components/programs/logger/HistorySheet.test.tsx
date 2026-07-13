@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HistorySheet } from './HistorySheet';
+import { HistorySheet, formatHistorySet } from './HistorySheet';
 import * as historyApi from '../../../lib/api/exerciseHistory';
 
 // Auto-mock (no factory). The repo's vitest config sets `restoreMocks: true`,
@@ -142,5 +142,37 @@ describe('<HistorySheet>', () => {
   it('fetches history for the given slug with a limit of 8', () => {
     render(<HistorySheet slug="bb-bench-press" track="intermediate" onClose={() => {}} />);
     expect(historyApi.getExerciseHistory).toHaveBeenCalledWith('bb-bench-press', 8);
+  });
+});
+
+describe('formatHistorySet — measurement model', () => {
+  it('formats reps shapes exactly as before', () => {
+    expect(formatHistorySet({ weight_lbs: 135, reps: 8, duration_sec: null, rir: 2 }, false)).toBe(
+      '135 × 8 @RIR 2',
+    );
+    expect(
+      formatHistorySet({ weight_lbs: null, reps: 12, duration_sec: null, rir: null }, false),
+    ).toBe('BW × 12');
+  });
+
+  it('formats holds with duration + RPE display unit', () => {
+    expect(
+      formatHistorySet({ weight_lbs: null, reps: null, duration_sec: 40, rir: 2 }, false),
+    ).toBe('40s hold @RPE 8');
+    expect(
+      formatHistorySet({ weight_lbs: 70, reps: null, duration_sec: 45, rir: null }, false),
+    ).toBe('70 · 45s hold');
+  });
+
+  it('beginner track drops effort jargon on holds too', () => {
+    expect(formatHistorySet({ weight_lbs: null, reps: null, duration_sec: 40, rir: 2 }, true)).toBe(
+      '40s hold',
+    );
+  });
+
+  it('legacy ambiguous rows (reps that were probably seconds) render as logged, never reinterpreted', () => {
+    expect(
+      formatHistorySet({ weight_lbs: null, reps: 45, duration_sec: null, rir: null }, false),
+    ).toBe('BW × 45');
   });
 });

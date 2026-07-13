@@ -18,12 +18,43 @@ export interface SeedSet {
   id: string;
   block_idx: number;
   set_idx: number;
-  exercise: { id: string; slug: string; name: string };
-  target_reps_low: number;
-  target_reps_high: number;
+  exercise: {
+    id: string;
+    slug: string;
+    name: string;
+    bodyweight?: boolean;
+    measurement?: 'reps' | 'duration';
+  };
+  /** Exactly one measurement dimension per row (reps pair XOR duration pair);
+   *  the logger derives its input mode from which pair is populated. */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   rest_sec: number;
+  logged?: { weight_lbs: number | null; reps: number | null; duration_sec?: number | null } | null;
 }
+
+/** Duration-set fixture (side plank) for O10 + any hold-mode spec. */
+export const HOLD_SEED_SET: SeedSet = {
+  id: 'ps-hold-1',
+  block_idx: 0,
+  set_idx: 0,
+  exercise: {
+    id: 'ex-plank',
+    slug: 'side-plank',
+    name: 'Side Plank',
+    bodyweight: true,
+    measurement: 'duration',
+  },
+  target_reps_low: null,
+  target_reps_high: null,
+  target_duration_low_sec: 30,
+  target_duration_high_sec: 45,
+  target_rir: 2,
+  rest_sec: 60,
+};
 
 export interface SeedDay {
   id: string;
@@ -57,6 +88,7 @@ export interface CapturedPost {
   planned_set_id: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec: number | null;
   rir: number | null;
   rpe: number | null;
   performed_at: string;
@@ -310,6 +342,7 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
       planned_set_id: parsed.planned_set_id,
       weight_lbs: parsed.weight_lbs ?? null,
       reps: parsed.reps ?? null,
+      duration_sec: parsed.duration_sec ?? null,
       rir: parsed.rir ?? null,
       rpe: parsed.rpe ?? null,
       performed_at: parsed.performed_at,
@@ -409,6 +442,7 @@ export interface PendingSetLogRow {
   performed_at: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec?: number | null;
   rir: number | null;
   rpe: number | null;
   notes: string | null;
@@ -551,6 +585,19 @@ export async function logSet(
   // The button label is "Log" online and "Log (offline)" when navigator.onLine
   // is false (TodayLoggerMobile SetRow) — match both, but NOT the "Logged"
   // locked state. O2 logs while offline, so an exact /^Log$/ would miss it.
+  await row.getByRole('button', { name: /^Log( \(offline\))?$/ }).click();
+}
+
+/** Duration-mode sibling of logSet: fills the hold-seconds field and logs. */
+export async function logHoldSet(
+  page: Page,
+  setIdx: number,
+  values: { durationSec: number },
+): Promise<void> {
+  const row = page.getByTestId(`set-row-${setIdx}`);
+  await row
+    .getByLabel(new RegExp(`Set ${setIdx + 1} hold seconds`, 'i'))
+    .fill(String(values.durationSec));
   await row.getByRole('button', { name: /^Log( \(offline\))?$/ }).click();
 }
 

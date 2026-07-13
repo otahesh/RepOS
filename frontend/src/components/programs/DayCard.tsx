@@ -1,5 +1,6 @@
 // frontend/src/components/programs/DayCard.tsx
 import { Term } from '../Term';
+import { rpeFromRir } from '../../lib/effort';
 import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 
 type Day = {
@@ -11,8 +12,10 @@ type Day = {
     exercise_slug: string;
     mev: number;
     mav: number;
-    target_reps_low: number;
-    target_reps_high: number;
+    target_reps_low?: number | null;
+    target_reps_high?: number | null;
+    target_duration_low_sec?: number | null;
+    target_duration_high_sec?: number | null;
     target_rir: number;
     rest_sec: number;
   }>;
@@ -92,7 +95,16 @@ export function DayCard({
               >
                 {beginner ? (
                   <>
-                    {b.mev} sets, building to {b.mav} · {effortCue(b.target_rir)}
+                    {b.mev} sets, building to {b.mav} ·{' '}
+                    {effortCue(
+                      b.target_rir,
+                      b.target_duration_low_sec != null ? 'duration' : 'reps',
+                    )}
+                  </>
+                ) : b.target_duration_low_sec != null ? (
+                  <>
+                    {b.mev}–{b.mav} sets · {b.target_duration_low_sec}–{b.target_duration_high_sec}s{' '}
+                    <Term k="hold" /> · <Term k="RPE" /> {rpeFromRir(b.target_rir)}
                   </>
                 ) : (
                   <>
