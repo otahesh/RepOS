@@ -28,8 +28,12 @@ const ZERO: QueueCounts = {
  * Reuses the cancellation pattern from useIdbQueueStatus: a `cancelled` flag
  * gates setState so an in-flight Promise resolving after unmount cannot mutate
  * the component. Re-polls immediately on mount and on each interval tick.
+ *
+ * `pollMs` is injectable for tests only (a fast cadence beats fake timers
+ * here — the tick's IndexedDB work is genuinely async); production callers
+ * pass nothing.
  */
-export function useIdbQueueCounts(): QueueCounts {
+export function useIdbQueueCounts(pollMs: number = POLL_MS): QueueCounts {
   const [counts, setCounts] = useState<QueueCounts>(ZERO);
 
   useEffect(() => {
@@ -66,13 +70,13 @@ export function useIdbQueueCounts(): QueueCounts {
     void tick();
     const id = setInterval(() => {
       void tick();
-    }, POLL_MS);
+    }, pollMs);
 
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [pollMs]);
 
   return counts;
 }
