@@ -75,6 +75,7 @@ type HistorySetRow = {
   exercise_name: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec: number | null;
   rir: number | null;
   performed_at: Date;
 };
@@ -85,6 +86,7 @@ type HistoryExercise = {
   sets: Array<{
     weight_lbs: number | null;
     reps: number | null;
+    duration_sec: number | null;
     rir: number | null;
     performed_at: Date;
   }>;
@@ -156,6 +158,7 @@ export async function workoutHistoryRoutes(app: FastifyInstance) {
                   e.slug, e.name AS exercise_name,
                   sl.performed_load_lbs::float AS weight_lbs,
                   sl.performed_reps             AS reps,
+                  sl.performed_duration_sec     AS duration_sec,
                   sl.performed_rir              AS rir,
                   sl.performed_at
            FROM set_logs sl
@@ -179,6 +182,7 @@ export async function workoutHistoryRoutes(app: FastifyInstance) {
         ex.sets.push({
           weight_lbs: r.weight_lbs,
           reps: r.reps,
+          duration_sec: r.duration_sec,
           rir: r.rir,
           performed_at: r.performed_at,
         });

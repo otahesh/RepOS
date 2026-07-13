@@ -27,16 +27,26 @@ export type TodaySet = {
     /** requires: [] on the exercise — the logger captures reps-only. Optional
      *  so older fixtures/mocks without it still compile (treated as false). */
     bodyweight?: boolean;
+    /** Library-level classification; drives materialization + substitution
+     *  filtering. Render mode keys on populated targets instead. */
+    measurement?: 'reps' | 'duration';
   };
-  target_reps_low: number;
-  target_reps_high: number;
+  /** Exactly one measurement dimension is populated per row (reps pair XOR
+   *  duration pair). Nullable + optional while PR1..PR2 are in flight; the
+   *  logger derives its input mode from WHICH pair is populated — never from
+   *  exercise.measurement — so pre-reclassification rows render unchanged. */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   rest_sec: number;
   target_load_hint?: string;
   suggested_substitution?: { id: string; slug: string; name: string; reason: string } | null;
   /** Latest log for this planned set, or null if never logged. Fields are
-   *  individually nullable — a reps-only bodyweight log has weight_lbs: null. */
-  logged: { weight_lbs: number | null; reps: number | null } | null;
+   *  individually nullable — a reps-only bodyweight log has weight_lbs: null,
+   *  a duration-only hold has reps: null. */
+  logged: { weight_lbs: number | null; reps: number | null; duration_sec?: number | null } | null;
 };
 
 export type TodayCardio = {

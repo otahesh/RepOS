@@ -106,12 +106,18 @@ export async function exerciseRoutes(app: FastifyInstance) {
         date: string;
         // set_logs weight/reps columns are nullable and this query doesn't
         // filter nulls — a reps-only bodyweight log emits weight_lbs: null.
-        sets: { weight_lbs: number | null; reps: number | null; rir: number | null }[];
+        sets: {
+          weight_lbs: number | null;
+          reps: number | null;
+          duration_sec: number | null;
+          rir: number | null;
+        }[];
       }>(
         `SELECT to_char((sl.performed_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date, 'YYYY-MM-DD') AS date,
                 json_agg(json_build_object(
                   'weight_lbs', sl.performed_load_lbs::float,
                   'reps', sl.performed_reps,
+                  'duration_sec', sl.performed_duration_sec,
                   'rir', sl.performed_rir
                 ) ORDER BY sl.performed_at ASC, sl.created_at ASC, sl.id ASC) AS sets
          FROM set_logs sl

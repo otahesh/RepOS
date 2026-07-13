@@ -95,8 +95,8 @@ describe('GET /api/exercises/:slug/history', () => {
     const body = res.json<{ sessions: { date: string; sets: unknown[] }[] }>();
     expect(body.sessions.length).toBe(1);
     expect(body.sessions[0].sets).toEqual([
-      { weight_lbs: 135, reps: 8, rir: 2 },
-      { weight_lbs: 135, reps: 8, rir: 2 },
+      { weight_lbs: 135, reps: 8, duration_sec: null, rir: 2 },
+      { weight_lbs: 135, reps: 8, duration_sec: null, rir: 2 },
     ]);
     expect(body.sessions[0].date).toBe('2026-06-01');
   });
@@ -166,9 +166,9 @@ describe('GET /api/exercises/:slug/history', () => {
     // Same session as the two 10:00 UTC (5:00am Chicago) week-1 sets,
     // ordered last because its performed_at instant is the latest.
     expect(june1!.sets).toEqual([
-      { weight_lbs: 135, reps: 8, rir: 2 },
-      { weight_lbs: 135, reps: 8, rir: 2 },
-      { weight_lbs: 145, reps: 6, rir: 1 },
+      { weight_lbs: 135, reps: 8, duration_sec: null, rir: 2 },
+      { weight_lbs: 135, reps: 8, duration_sec: null, rir: 2 },
+      { weight_lbs: 145, reps: 6, duration_sec: null, rir: 1 },
     ]);
   });
 
