@@ -18,6 +18,7 @@ import { getExerciseGuide, type ExerciseGuide } from '../../lib/api/exerciseGuid
 import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
 import { rowMode, rirFromRpe } from '../../lib/effort';
+import { formatBackfillDate } from '../../lib/formatDate';
 import { useRestTimer } from './logger/useRestTimer';
 import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
 import { CardioBlockRow } from './logger/CardioBlockRow';
@@ -832,16 +833,4 @@ function zonedNoonISO(dateStr: string, tz: string): string {
   return new Date(noonAsUTC - offset).toISOString();
 }
 
-// "Sunday, Jul 5" — weekday + short month + day, tz-independent (the date is a
-// bare calendar day, read as UTC midnight so no local shift moves it).
-function formatBackfillDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  });
-  const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));
-  return `${p.weekday}, ${p.month} ${p.day}`;
-}
+// formatBackfillDate moved to lib/formatDate.ts (2026-07-13 quality pass).

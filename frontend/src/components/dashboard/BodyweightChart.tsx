@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { TOKENS, FONTS } from '../../tokens';
 import type { WeightSampleRow, WeightStats, CurrentWeight } from '../../lib/api/health';
+import { formatShortDate } from '../../lib/formatDate';
 
 // Re-export for consumers that imported WeightSample from this module.
 // Prefer importing WeightSampleRow from lib/api/health directly.
@@ -32,8 +33,7 @@ function computeSmoothed(samples: WeightSample[]): { date: string; avg: number }
 }
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return formatShortDate(new Date(dateStr + 'T00:00:00'));
 }
 
 interface DeltaStatProps {
