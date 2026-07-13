@@ -99,3 +99,20 @@ Adversarial review 2026-07-13: **SHIP-WITH-FIXES** — 2 Critical (sleeps are lo
 - `npx tsc --noEmit` + full unit suites on every touched side; `npm run test:integration` (api) when api behavior-adjacent code moves; offline/e2e Playwright when logger surfaces move (Q7).
 - Q6 additionally: before/after response-shape assertions; optional local k6 spot-check of `today`.
 - Prod redeploy only after the wave completes (single redeploy, not per-PR), followed by outside-in smoke + a live `today` check.
+
+## Execution record — COMPLETE 2026-07-13
+
+All nine PRs merged same-day (#68–#76), each green on all 8 required checks.
+Single prod redeploy: `APP_SHA=7ad90fc`, rollback tag
+`rollback-20260713T150609Z`; outside-in 302/401 green; post-deploy smoke
+workflow success; live meso data verified intact via in-container psql
+(1 active run / 10 set_logs / 121 planned_sets). Suite deltas: api unit
+575→597, integration 325 (skips 7→0), frontend 626→629, offline matrix
+10/10. Full narrative in `docs/PASSDOWN.md` §2026-07-13.
+
+Notable deviations from the plan, decided during execution: bodyweightCrash
+goal lookup kept lazy (Q6 — hoisting costs the common case); MyLibrary
+created_at + all time formats left on user locale (Q5 pixel-identical rule);
+manual-deload undo test merged into the contamination file rather than
+deleted (Q3, reviewer catch); direct-evaluate tests now pass real weekIdx
+(Q6 exposed they'd been passing a dead placeholder).

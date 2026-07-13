@@ -286,3 +286,60 @@ N=1 cohort: jmeyer (jason@jpmtech.com), the alpha tester.
 - **All G1–G15 green. Beta cutover authorized AND executed — the system is
   live on production for the Beta cohort. Milestone 2 (one full mesocycle
   end-to-end with no Sev-1) begins now.**
+
+## 2026-07-13 — Codebase quality pass (9 PRs, Q1–Q9)
+
+First systematic tidy sweep since alpha. Five parallel read-only audits
+(dead code / redundancy / performance / test health / hygiene) → plan at
+`docs/superpowers/plans/2026-07-13-quality-pass.md` (adversarially reviewed
+SHIP-WITH-FIXES; 2 Critical + 4 Important review findings applied to the
+plan BEFORE execution — two of them stopped test-sensitivity regressions
+that were about to be smuggled in as "cleanup").
+
+Shipped as PRs #68–#76, each independently green on all 8 checks; single
+prod redeploy at the end (`APP_SHA=7ad90fc`, rollback tag
+`rollback-20260713T150609Z`), outside-in 302/401 green, post-deploy smoke
+workflow success, live meso data verified intact (1 active run, 10
+set_logs, 121 planned_sets).
+
+- **Q1 #68** dead code: −796 LOC. 6 api orphan modules (incl. the never-wired
+  weekly jointStress evaluator + 3 superseded schema files), the
+  consumer-less `GET /api/muscles/joint-stress` route (owner call D-a),
+  frontend `featureFlags.ts` + dead API client. `muscleJointStress.ts`
+  service STAYS (deriveInjuryConstraints consumes it).
+- **Q2 #69** hygiene: `.env.example` pointed at the RETIRED DB host; phantom
+  var comments fixed; CLAUDE.md alpha→Beta + Vite 5→8; `.gitignore` for QA
+  screenshots; react-router-dom 6.30.4 (GHSA-2j2x-hqr9-3h42) via targeted
+  install; playwright offline glob deepened.
+- **Q3 #70** tests: 7-empty-test skip block deleted; stale ".skip-gated"
+  comments removed; `programs.test` exact-4 assertion → superset (the
+  reference_test_db_cruft flake root); manual-deload undo IDOR case merged
+  (NOT deleted — reviewer caught it was complementary); mkUserPair scopes
+  param.
+- **Q4 #71** consolidation: deload constants single-sourced; manualDeload
+  snapshot/restore columns derive from one table; `rowMode()` seam restored
+  in 3 components; plannedSets shared ownership+past-day guards.
+- **Q5 #72** `lib/formatDate.ts` — one formatToParts date lib; only
+  output-identical sites migrated (MyLibrary user-locale + time formats
+  deliberately left).
+- **Q6 #73** backend perf on the k6 hot spots: `today` 4 leaf reads
+  parallelized + substitutions deduped per-slug + injuries hoisted;
+  recovery-flag evaluators parallel (order preserved), redundant
+  current_week read dropped, dismissal/telemetry writes batched.
+  Deviation: bodyweightCrash goal lookup stays lazy (cheaper common case).
+- **Q7 #74** frontend perf: rest-timer 1 Hz tick isolated into
+  RestTimerPill (72px padding reservation + countdown-across-navigation
+  both preserved — the two traps the reviewer flagged); IDB hook tests on
+  injectable 50ms cadence (~3.5s suite win).
+- **Q8 #75** +22 direct unit tests for stats, deriveInjuryConstraints,
+  recoveryFlagEvents, equipmentProfile, parQRateLimit, backupRunner
+  failure branches.
+- **Q9 #76** fixture convergence: new `tests/helpers/user-fixtures.ts` owns
+  mkUser/cleanupUser/mintBearer; both families re-export (zero call-site
+  churn across ~76 files); 7 raw user INSERTs + the HTTP token-mint hop
+  eliminated.
+
+Test counts after the wave: api 597 unit + 325 integration (0 skipped, was
+7), frontend 629 unit + O1–O10 offline 10/10. Deferred with reasons (in the
+plan doc): major version bumps, CI SHA-pinning/composite actions, tsconfig
+strictness parity, frontend lint scope broadening.
