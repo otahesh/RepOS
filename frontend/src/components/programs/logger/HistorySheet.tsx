@@ -271,4 +271,3 @@ export function formatHistorySet(set: HistorySet, beginnerTrack: boolean): strin
   if (!beginnerTrack && set.rir != null) str += ` @RIR ${set.rir}`;
   return str;
 }
-
