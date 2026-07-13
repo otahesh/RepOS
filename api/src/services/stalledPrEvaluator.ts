@@ -85,10 +85,17 @@ export const stalledPrEvaluator: RecoveryFlagEvaluator = {
            MAX(sl.performed_at)             AS session_at
          FROM set_logs sl
          JOIN planned_sets ps ON ps.id = sl.planned_set_id
+         JOIN exercises e     ON e.id  = ps.exercise_id
          JOIN day_workouts dw ON dw.id = ps.day_workout_id
          WHERE sl.user_id = $1
            AND dw.mesocycle_run_id = $2
            AND dw.is_deload = false           -- W2 swap: per-row deload guard
+           -- Measurement guard: duration sets (holds/carries) have no
+           -- load/rep progression to stall, and their NULL loads would
+           -- otherwise compare equal across sessions (null===null) once past
+           -- the reps gate, which today only skips them via accidental
+           -- "null < 5" JS coercion. Explicit is the contract.
+           AND e.measurement = 'reps'
          GROUP BY ps.exercise_id, dw.id
        ),
        ranked AS (

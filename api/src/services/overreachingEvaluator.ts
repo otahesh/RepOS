@@ -78,6 +78,13 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // we read the canonical movement_pattern from the planned exercise
     // (a future logged substitution would land in set_logs.exercise_id,
     // but the AND-gate semantically asks about programmed compound load).
+    //
+    // KNOWN GAP (by design, measurement model 2026-07-12): duration sets log
+    // effort only when the user opts in (performed_rir omitted otherwise), so
+    // holds rarely contribute to this RIR-0 condition. Do NOT "fix" by feeding
+    // RPE through a separate unit — performed effort is stored as
+    // proximity-to-failure (rir) for ALL measurement classes; an opted-in
+    // hold at failure (RPE 10 → rir 0) already lands here correctly.
     const {
       rows: [{ ct }],
     } = await db.query<{ ct: number }>(
