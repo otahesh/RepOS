@@ -34,7 +34,8 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       const { rows } = await db.query(
         `SELECT ps.id, to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
                 dw.mesocycle_run_id, mr.start_tz,
-                ps.target_reps_low AS cur_reps_low, ps.target_reps_high AS cur_reps_high
+                ps.target_reps_low AS cur_reps_low, ps.target_reps_high AS cur_reps_high,
+                ps.target_duration_low_sec AS cur_dur_low
          FROM planned_sets ps
          JOIN day_workouts dw ON dw.id = ps.day_workout_id
          JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
@@ -57,6 +58,21 @@ export async function plannedSetRoutes(app: FastifyInstance) {
       }
 
       const b = parsed.data;
+
+      // Measurement-mismatch guard (measurement model): a duration-targeted
+      // row (reps pair NULL) must not receive reps targets — the COALESCE
+      // UPDATE below would otherwise trip planned_sets_measurement_xor_check
+      // as an unhandled 500. Duration targets are not PATCHable yet (no
+      // authoring UI); when they become so, mirror this guard for reps rows.
+      const isDurationRow = setRow.cur_reps_low == null && setRow.cur_dur_low != null;
+      if (isDurationRow && (b.target_reps_low != null || b.target_reps_high != null)) {
+        reply.code(422);
+        return {
+          error: 'measurement_mismatch',
+          field: 'target_reps_low',
+          detail: 'this set is duration-targeted; reps targets do not apply',
+        };
+      }
 
       // Fix #4 — Cross-row rep range guard: validate merged values against DB current values
       const newLow = b.target_reps_low ?? setRow.cur_reps_low;

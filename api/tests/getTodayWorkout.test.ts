@@ -259,10 +259,10 @@ describe('getTodayWorkout (sequence semantics)', () => {
   });
 
   it('exposes duration targets, measurement, and logged duration (holds)', async () => {
-    // Pre-092 fixture: reps targets still NOT NULL, so this planned row
-    // carries BOTH pairs; the assertions cover duration passthrough only.
+    // Post-092 shape: duration rows carry NULL reps (XOR CHECK enforces
+    // exactly one dimension). Original reps restored in finally.
     const { rows: pss } = await db.query(
-      `SELECT ps.id, ps.exercise_id FROM planned_sets ps
+      `SELECT ps.id, ps.exercise_id, ps.target_reps_low, ps.target_reps_high FROM planned_sets ps
        JOIN day_workouts dw ON dw.id=ps.day_workout_id
        WHERE dw.mesocycle_run_id=$1
        ORDER BY dw.week_idx, dw.day_idx, ps.block_idx, ps.set_idx LIMIT 1`,
@@ -270,7 +270,10 @@ describe('getTodayWorkout (sequence semantics)', () => {
     );
     const ps = pss[0];
     await db.query(
-      `UPDATE planned_sets SET target_duration_low_sec=30, target_duration_high_sec=45 WHERE id=$1`,
+      `UPDATE planned_sets
+       SET target_reps_low=NULL, target_reps_high=NULL,
+           target_duration_low_sec=30, target_duration_high_sec=45
+       WHERE id=$1`,
       [ps.id],
     );
     await db.query(
@@ -290,8 +293,11 @@ describe('getTodayWorkout (sequence semantics)', () => {
     } finally {
       await db.query(`DELETE FROM set_logs WHERE planned_set_id=$1`, [ps.id]);
       await db.query(
-        `UPDATE planned_sets SET target_duration_low_sec=NULL, target_duration_high_sec=NULL WHERE id=$1`,
-        [ps.id],
+        `UPDATE planned_sets
+         SET target_reps_low=$2, target_reps_high=$3,
+             target_duration_low_sec=NULL, target_duration_high_sec=NULL
+         WHERE id=$1`,
+        [ps.id, ps.target_reps_low, ps.target_reps_high],
       );
     }
   });
