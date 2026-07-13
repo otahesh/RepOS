@@ -2,18 +2,17 @@ import { db } from '../db/client.js';
 import { computeBlockRamp } from './autoRamp.js';
 import { addDaysISO } from './_dateUtil.js';
 import { resolveUserLandmarksWith } from './resolveUserLandmarks.js';
+import { MANUAL_DELOAD_MAV_FACTOR, MANUAL_DELOAD_RIR } from './_deloadConstants.js';
 import type { UserProgramCustomizations } from '../schemas/userProgramCustomizations.js';
 
 export { MUSCLE_LANDMARKS } from './_muscleLandmarks.js';
 
-// [D3] Deload formula constants. W2 publishes these in
-// api/src/services/_deloadConstants.ts (DELOAD_MAV_FRACTION=0.5,
-// DELOAD_TARGET_RIR=4). W2 has not merged at W4-ship time, so they are inlined
-// here per the plan's fallback instruction. TODO(W2): replace these two consts
-// with `import { DELOAD_MAV_FRACTION, DELOAD_TARGET_RIR } from './_deloadConstants.js';`
-// once W2 lands.
-const DELOAD_MAV_FRACTION = 0.5;
-const DELOAD_TARGET_RIR = 4;
+// [D3] Deload formula constants — single source in _deloadConstants.ts,
+// shared with the manual mid-meso deload (same knob by design; if the two
+// surfaces ever need to diverge, add FULL_DELOAD_* constants there).
+// Local aliases keep this file's auto-deload vocabulary.
+const DELOAD_MAV_FRACTION = MANUAL_DELOAD_MAV_FACTOR;
+const DELOAD_TARGET_RIR = MANUAL_DELOAD_RIR;
 
 type Block = {
   exercise_slug: string;
