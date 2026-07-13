@@ -183,6 +183,42 @@ describe('logBuffer', () => {
     expect(body.rir).toBe(2);
   });
 
+  it('flush posts duration_sec when present and omits reps — hold rows (measurement model)', async () => {
+    await seedRow({ weight_lbs: null, reps: null, duration_sec: 40, rir: null });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-hold', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.duration_sec).toBe(40);
+    expect(body).not.toHaveProperty('reps');
+    expect(body).not.toHaveProperty('weight_lbs');
+    expect(body).not.toHaveProperty('rir');
+  });
+
+  it('flush strips null AND absent duration_sec — reps rows and legacy queued rows send none', async () => {
+    // duration_sec: null (new-code reps row)
+    await seedRow({ duration_sec: null });
+    // legacy row without the key at all (pre-upgrade IDB row)
+    const legacy = await seedRow({});
+    delete (legacy as unknown as Record<string, unknown>).duration_sec;
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-x', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    for (const call of (fetch as any).mock.calls) {
+      expect(JSON.parse(call[1].body)).not.toHaveProperty('duration_sec');
+    }
+  });
+
   it('flush omits every null optional — a reps-only bodyweight row sends no weight_lbs/rir', async () => {
     await seedRow({ weight_lbs: null, rir: null, rpe: null, notes: null, reps: 12 });
     (fetch as any).mockResolvedValueOnce({

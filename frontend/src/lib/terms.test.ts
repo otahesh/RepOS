@@ -4,6 +4,7 @@ import { TERMS, type TermKey } from './terms';
 const ALL_KEYS: TermKey[] = [
   'RIR',
   'RPE',
+  'hold',
   'MV',
   'MEV',
   'MAV',

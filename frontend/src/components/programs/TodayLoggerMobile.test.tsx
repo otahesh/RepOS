@@ -291,6 +291,99 @@ describe('<TodayLoggerMobile>', () => {
     });
   });
 
+  describe('duration movements (hold logging — measurement model)', () => {
+    const HOLD_SET: TodaySet = {
+      ...SET_1,
+      id: 'ps-hold',
+      exercise: {
+        id: 'e-hold',
+        slug: 'side-plank',
+        name: 'Side Plank',
+        bodyweight: true,
+        measurement: 'duration',
+      },
+      target_reps_low: null,
+      target_reps_high: null,
+      target_duration_low_sec: 30,
+      target_duration_high_sec: 45,
+    };
+    const HOLD_PRELOADED = { run_id: 'mr-1', day: DAY, sets: [HOLD_SET] };
+
+    it('logs a hold: duration_sec enqueued, reps null, rir omitted when RPE untouched', async () => {
+      const user = userEvent.setup();
+      renderFocused(HOLD_PRELOADED);
+      const row = within(screen.getByTestId('set-row-0'));
+      const logBtn = row.getByRole('button', { name: /^log$/i });
+      expect(logBtn).toBeDisabled();
+      await user.type(row.getByLabelText(/Set 1 hold seconds/i), '40');
+      expect(logBtn).not.toBeDisabled();
+      await user.click(logBtn);
+      expect(logBuffer.enqueue).toHaveBeenCalledTimes(1);
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe('ps-hold');
+      expect(call[1]).toMatchObject({
+        weight_lbs: null,
+        reps: null,
+        duration_sec: 40,
+        rir: null, // never fabricated from the target
+      });
+      await flush();
+    });
+
+    it('logs a hold with RPE 8 → rir 2 via the effort seam', async () => {
+      const user = userEvent.setup();
+      renderFocused(HOLD_PRELOADED);
+      const row = within(screen.getByTestId('set-row-0'));
+      await user.type(row.getByLabelText(/Set 1 hold seconds/i), '35');
+      await user.click(row.getByRole('button', { name: 'RPE 8' }));
+      await user.click(row.getByRole('button', { name: /^log$/i }));
+      const call = (logBuffer.enqueue as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[1]).toMatchObject({ duration_sec: 35, rir: 2 });
+      await flush();
+    });
+
+    it('hydrates a logged hold row from logged.duration_sec', async () => {
+      renderFocused({
+        run_id: 'mr-1',
+        day: DAY,
+        sets: [
+          {
+            ...HOLD_SET,
+            logged: { weight_lbs: null, reps: null, duration_sec: 42 },
+          },
+        ],
+      });
+      expect(screen.getByLabelText(/Set 1 hold seconds/i)).toHaveValue(42);
+      await flush();
+    });
+
+    it('prefills duration ONLY from history duration_sec — never reinterprets old reps as seconds', async () => {
+      // Pre-reclassification history: side plank logged as "reps: 45" with no
+      // duration — unit-ambiguous, must NOT leak into the seconds field.
+      getExerciseHistoryMock.mockResolvedValueOnce([
+        {
+          date: '2026-07-10',
+          sets: [{ weight_lbs: null, reps: 45, duration_sec: null, rir: null }],
+        },
+      ]);
+      renderFocused(HOLD_PRELOADED);
+      await flush();
+      expect(screen.getByLabelText(/Set 1 hold seconds/i)).toHaveValue(null);
+    });
+
+    it('prefills from genuine duration history', async () => {
+      getExerciseHistoryMock.mockResolvedValueOnce([
+        {
+          date: '2026-07-10',
+          sets: [{ weight_lbs: null, reps: null, duration_sec: 38, rir: null }],
+        },
+      ]);
+      renderFocused(HOLD_PRELOADED);
+      await flush();
+      expect(screen.getByLabelText(/Set 1 hold seconds/i)).toHaveValue(38);
+    });
+  });
+
   describe('focus screen', () => {
     it('beginner track: hides RIR sliders and shows a plain-language effort cue', async () => {
       renderFocused({ ...PRELOADED, track: 'beginner' });

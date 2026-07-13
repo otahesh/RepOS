@@ -44,8 +44,8 @@ function rowStates(): Record<string, RowState> {
 
 function rowInputs(): Record<string, RowInputs> {
   return {
-    'ps-1': { weight: '185', reps: '7', rir: 2 },
-    'ps-2': { weight: '', reps: '', rir: 2 },
+    'ps-1': { weight: '185', reps: '7', durationSec: '', rir: 2, holdRpe: null },
+    'ps-2': { weight: '', reps: '', durationSec: '', rir: 2, holdRpe: null },
   };
 }
 

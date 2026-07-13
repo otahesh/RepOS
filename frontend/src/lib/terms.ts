@@ -9,6 +9,7 @@ export type TermDef = {
 export type TermKey =
   | 'RIR'
   | 'RPE'
+  | 'hold'
   | 'MV'
   | 'MEV'
   | 'MAV'
@@ -64,6 +65,13 @@ export const TERMS: Record<TermKey, TermDef> = {
     plain: 'A 1–10 scale of how hard a set felt. RPE 10 is true failure.',
     whyMatters:
       'RPE and RIR are interchangeable: RPE 8 ≈ RIR 2. RepOS speaks RIR; convert if you prefer RPE.',
+  },
+  hold: {
+    short: 'HOLD',
+    full: 'Isometric hold',
+    plain: 'A timed set — you hold the position instead of counting reps.',
+    whyMatters:
+      'Time under tension is the progression currency for holds: add seconds toward the target, then add load. A hold counts as one set toward weekly volume, same as a lift.',
   },
   MV: {
     short: 'MV',

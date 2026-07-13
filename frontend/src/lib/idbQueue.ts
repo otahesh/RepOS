@@ -7,6 +7,10 @@ export interface PendingSetLog {
   performed_at: string; // ISO with offset
   weight_lbs: number | null;
   reps: number | null;
+  // Duration sets (holds/timed carries). Non-indexed prop: old queued rows
+  // and older fixtures simply lack the key (undefined → treated as absent);
+  // no Dexie version bump needed.
+  duration_sec?: number | null;
   rir: number | null;
   rpe: number | null;
   notes: string | null;
