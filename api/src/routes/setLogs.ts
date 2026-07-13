@@ -41,6 +41,7 @@ const SELECT_COLUMNS = `
   id, user_id, exercise_id, planned_set_id, client_request_id,
   performed_load_lbs::float AS weight_lbs,
   performed_reps             AS reps,
+  performed_duration_sec     AS duration_sec,
   performed_rir              AS rir,
   rpe, performed_at, notes, created_at, updated_at
 `;
@@ -84,9 +85,9 @@ export async function setLogsRoutes(app: FastifyInstance) {
       const insert = await db.query<SetLogRow>(
         `INSERT INTO set_logs (
          user_id, exercise_id, planned_set_id, client_request_id,
-         performed_load_lbs, performed_reps, performed_rir, rpe,
+         performed_load_lbs, performed_reps, performed_duration_sec, performed_rir, rpe,
          performed_at, notes
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT DO NOTHING
        RETURNING ${SELECT_COLUMNS}`,
         [
@@ -96,6 +97,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
           body.client_request_id,
           body.weight_lbs ?? null,
           body.reps ?? null,
+          body.duration_sec ?? null,
           body.rir ?? null,
           body.rpe ?? null,
           body.performed_at,
@@ -236,6 +238,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
       const map = {
         weight_lbs: 'performed_load_lbs',
         reps: 'performed_reps',
+        duration_sec: 'performed_duration_sec',
         rir: 'performed_rir',
         rpe: 'rpe',
         notes: 'notes',
@@ -384,6 +387,7 @@ export async function setLogsRoutes(app: FastifyInstance) {
          sl.id, sl.user_id, sl.exercise_id, sl.planned_set_id, sl.client_request_id,
          sl.performed_load_lbs::float AS weight_lbs,
          sl.performed_reps             AS reps,
+         sl.performed_duration_sec     AS duration_sec,
          sl.performed_rir              AS rir,
          sl.rpe, sl.performed_at, sl.notes, sl.created_at, sl.updated_at
        FROM set_logs sl

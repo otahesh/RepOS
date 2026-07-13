@@ -68,6 +68,22 @@ describe('substitutions (spec §9.3)', () => {
     expect(r!.subs[0].score).toBeGreaterThanOrEqual(1000);
   });
 
+  it('never suggests a duration exercise for a reps block or vice versa', async () => {
+    // side-plank (duration, anti_rotation) must not appear in substitutions for
+    // cable-pallof-press (reps, anti_rotation) even though the pattern matches
+    // (+1000 score) — measurement is a hard predicate, not a score.
+    const r = await findSubstitutions('cable-pallof-press', TEST_USER_1_PROFILE);
+    expect(r).not.toBeNull();
+    expect(r!.subs.map((c) => c.slug)).not.toContain('side-plank');
+
+    // And the reverse: reps movements never suggested for a hold.
+    const h = await findSubstitutions('side-plank', TEST_USER_1_PROFILE);
+    if (h && h.subs.length > 0) {
+      expect(h.subs.map((c) => c.slug)).not.toContain('cable-pallof-press');
+      expect(h.subs.map((c) => c.slug)).not.toContain('dead-bug');
+    }
+  });
+
   it('16. deterministic tiebreak: two calls return identical ordering', async () => {
     const a = await findSubstitutions('barbell-bench-press', TEST_USER_1_PROFILE);
     const b = await findSubstitutions('barbell-bench-press', TEST_USER_1_PROFILE);

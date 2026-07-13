@@ -36,6 +36,30 @@ describe('stalledPrEvaluator (spec §7.2 — W3.1)', () => {
     }
   });
 
+  it('ignores duration exercises entirely (NULL loads must not false-fire)', async () => {
+    // 3 uniform hold sessions: no load, no reps, RIR 0. Without the
+    // measurement guard, MAX/MIN over NULL loads yields NULL and null===null
+    // satisfies the streak equality in JS — a phantom stalled-PR flag.
+    const seed = await seedStalledPr({ pattern: 'stalled' });
+    handles.push(seed);
+    await db.query(
+      `UPDATE set_logs SET performed_load_lbs=NULL, performed_reps=NULL, performed_duration_sec=45
+       WHERE user_id=$1 AND exercise_id=$2`,
+      [seed.userId, seed.exerciseId],
+    );
+    await db.query(`UPDATE exercises SET measurement='duration' WHERE id=$1`, [seed.exerciseId]);
+    try {
+      const r = await stalledPrEvaluator.evaluate({
+        userId: seed.userId,
+        runId: seed.mesocycleRunId,
+        weekIdx: 0,
+      });
+      expect(r.triggered).toBe(false);
+    } finally {
+      await db.query(`UPDATE exercises SET measurement='reps' WHERE id=$1`, [seed.exerciseId]);
+    }
+  });
+
   it('does NOT fire when most recent session shows weight increase', async () => {
     const seed = await seedStalledPr({ pattern: 'progressing' });
     handles.push(seed);

@@ -51,17 +51,26 @@ const TodaySetSchema = z.object({
     id: z.string().uuid(),
     slug: z.string(),
     name: z.string(),
+    // How the exercise is classified TODAY. Render mode must derive from the
+    // row's populated targets, not this field (rows materialized before a
+    // reclassification keep their original shape).
+    measurement: z.enum(['reps', 'duration']).optional(),
   }),
-  target_reps_low: z.number().int().min(1),
-  target_reps_high: z.number().int().min(1),
+  // Exactly one measurement dimension is populated (reps pair XOR duration pair).
+  target_reps_low: z.number().int().min(1).nullable(),
+  target_reps_high: z.number().int().min(1).nullable(),
+  target_duration_low_sec: z.number().int().min(1).nullable().optional(),
+  target_duration_high_sec: z.number().int().min(1).nullable().optional(),
   target_rir: z.number().int().min(0),
   rest_sec: z.number().int().min(0),
   // Latest set_log for this planned set, or null if never logged. Fields pass
-  // through as-is (reps-only bodyweight logs have weight_lbs: null).
+  // through as-is (reps-only bodyweight logs have weight_lbs: null,
+  // duration-only holds have reps: null).
   logged: z
     .object({
       weight_lbs: z.number().nullable(),
       reps: z.number().int().nullable(),
+      duration_sec: z.number().int().nullable().optional(),
     })
     .nullable(),
   suggested_substitution: SuggestedSubstitutionSchema.optional(),

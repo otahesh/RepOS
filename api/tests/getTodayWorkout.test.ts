@@ -258,6 +258,44 @@ describe('getTodayWorkout (sequence semantics)', () => {
     }
   });
 
+  it('exposes duration targets, measurement, and logged duration (holds)', async () => {
+    // Pre-092 fixture: reps targets still NOT NULL, so this planned row
+    // carries BOTH pairs; the assertions cover duration passthrough only.
+    const { rows: pss } = await db.query(
+      `SELECT ps.id, ps.exercise_id FROM planned_sets ps
+       JOIN day_workouts dw ON dw.id=ps.day_workout_id
+       WHERE dw.mesocycle_run_id=$1
+       ORDER BY dw.week_idx, dw.day_idx, ps.block_idx, ps.set_idx LIMIT 1`,
+      [runId],
+    );
+    const ps = pss[0];
+    await db.query(
+      `UPDATE planned_sets SET target_duration_low_sec=30, target_duration_high_sec=45 WHERE id=$1`,
+      [ps.id],
+    );
+    await db.query(
+      `INSERT INTO set_logs (planned_set_id, user_id, exercise_id, client_request_id, performed_duration_sec, performed_rir)
+       VALUES ($1,$2,$3,gen_random_uuid(),40,2)`,
+      [ps.id, userId, ps.exercise_id],
+    );
+    try {
+      const today = await getTodayWorkout(userId, new Date('2026-05-04T16:00:00Z'));
+      if (today.state !== 'workout') throw new Error('expected workout state');
+      const hold = today.sets.find((s) => s.id === ps.id);
+      expect(hold).toBeDefined();
+      expect(hold!.target_duration_low_sec).toBe(30);
+      expect(hold!.target_duration_high_sec).toBe(45);
+      expect(hold!.exercise.measurement).toMatch(/^(reps|duration)$/);
+      expect(hold!.logged).toEqual({ weight_lbs: null, reps: null, duration_sec: 40 });
+    } finally {
+      await db.query(`DELETE FROM set_logs WHERE planned_set_id=$1`, [ps.id]);
+      await db.query(
+        `UPDATE planned_sets SET target_duration_low_sec=NULL, target_duration_high_sec=NULL WHERE id=$1`,
+        [ps.id],
+      );
+    }
+  });
+
   it('carries latest logged weight/reps once a set_log exists', async () => {
     // Two planned sets from Day A of week 1. dw.day_idx in the ORDER BY breaks
     // the Day A/Day B tie (both have block_idx 0 / set_idx 0) so the pick is
@@ -289,10 +327,10 @@ describe('getTodayWorkout (sequence semantics)', () => {
       if (today.state !== 'workout') throw new Error('expected workout state');
       const logged = today.sets.find((s) => s.id === ps.id);
       expect(logged).toBeDefined();
-      expect(logged!.logged).toEqual({ weight_lbs: 135, reps: 8 });
+      expect(logged!.logged).toEqual({ weight_lbs: 135, reps: 8, duration_sec: null });
       const repsOnly = today.sets.find((s) => s.id === ps2.id);
       expect(repsOnly).toBeDefined();
-      expect(repsOnly!.logged).toEqual({ weight_lbs: null, reps: 12 });
+      expect(repsOnly!.logged).toEqual({ weight_lbs: null, reps: 12, duration_sec: null });
       expect(
         today.sets.filter((s) => s.id !== ps.id && s.id !== ps2.id).every((s) => s.logged === null),
       ).toBe(true);

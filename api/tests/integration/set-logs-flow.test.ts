@@ -82,6 +82,70 @@ describe('POST /api/set-logs — happy path', () => {
       await app.close();
     }
   });
+
+  it('round-trips a hold log: duration_sec stored, reps null (measurement model)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '22222222-2222-4222-8222-222222222222',
+          planned_set_id: seed.plannedSetId,
+          duration_sec: 40,
+          rir: 2, // proximity-to-failure — an RPE-8 hold
+          performed_at: new Date().toISOString(),
+        },
+      });
+
+      expect(resp.statusCode).toBe(201);
+      const body = resp.json();
+      expect(body.set_log).toMatchObject({
+        planned_set_id: seed.plannedSetId,
+        duration_sec: 40,
+        reps: null,
+        weight_lbs: null,
+        rir: 2,
+      });
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/set-logs?planned_set_id=${seed.plannedSetId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().set_logs[0].duration_sec).toBe(40);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400s a log with neither reps nor duration_sec (must measure something)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '33333333-3333-4333-8333-333333333333',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 100,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('POST /api/set-logs — day-workout status flip (sequence-workouts)', () => {

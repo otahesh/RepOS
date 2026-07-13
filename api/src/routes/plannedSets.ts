@@ -93,7 +93,9 @@ export async function plannedSetRoutes(app: FastifyInstance) {
              override_reason = CASE WHEN $7::boolean THEN $6::text ELSE override_reason END
            WHERE id = $8
            RETURNING id, day_workout_id, block_idx, set_idx, exercise_id,
-                     target_reps_low, target_reps_high, target_rir, target_load_hint,
+                     target_reps_low, target_reps_high,
+                     target_duration_low_sec, target_duration_high_sec,
+                     target_rir, target_load_hint,
                      rest_sec, overridden_at, override_reason, substituted_from_exercise_id`,
           [
             b.target_reps_low ?? null,

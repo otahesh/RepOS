@@ -43,15 +43,32 @@ export type TodayWorkout =
         set_idx: number;
         // bodyweight: required_equipment.requires is empty — the logger
         // captures reps-only for these (no meaningful external load).
-        exercise: { id: string; slug: string; name: string; bodyweight: boolean };
-        target_reps_low: number;
-        target_reps_high: number;
+        // measurement: how the EXERCISE is classified today. Render mode must
+        // key on the row's populated targets, NOT this field — rows
+        // materialized before a reclassification keep their original shape.
+        exercise: {
+          id: string;
+          slug: string;
+          name: string;
+          bodyweight: boolean;
+          measurement: 'reps' | 'duration';
+        };
+        /** Exactly one measurement dimension is populated (reps pair XOR duration pair). */
+        target_reps_low: number | null;
+        target_reps_high: number | null;
+        target_duration_low_sec: number | null;
+        target_duration_high_sec: number | null;
         target_rir: number;
         rest_sec: number;
         /** Latest log for this planned set, or null if never logged. Present iff a
-         *  set_log row exists; weight/reps pass through as-is (either may be null —
-         *  e.g. reps-only bodyweight logs). Lets the UI show completion after reload. */
-        logged: { weight_lbs: number | null; reps: number | null } | null;
+         *  set_log row exists; fields pass through as-is (each may be null —
+         *  e.g. reps-only bodyweight logs, duration-only holds). Lets the UI
+         *  show completion after reload. */
+        logged: {
+          weight_lbs: number | null;
+          reps: number | null;
+          duration_sec: number | null;
+        } | null;
         suggested_substitution?: { id: string; slug: string; name: string; reason: string };
       }>;
       cardio: Array<{
@@ -148,28 +165,36 @@ export async function getTodayWorkout(
     id: string;
     block_idx: number;
     set_idx: number;
-    target_reps_low: number;
-    target_reps_high: number;
+    target_reps_low: number | null;
+    target_reps_high: number | null;
+    target_duration_low_sec: number | null;
+    target_duration_high_sec: number | null;
     target_rir: number;
     rest_sec: number;
     ex_id: string;
     ex_slug: string;
     ex_name: string;
     ex_required: any;
+    ex_measurement: 'reps' | 'duration';
     logged_id: string | null;
     logged_weight: number | null;
     logged_reps: number | null;
+    logged_duration: number | null;
   }>(
     `SELECT ps.id, ps.block_idx, ps.set_idx,
-            ps.target_reps_low, ps.target_reps_high, ps.target_rir, ps.rest_sec,
+            ps.target_reps_low, ps.target_reps_high,
+            ps.target_duration_low_sec, ps.target_duration_high_sec,
+            ps.target_rir, ps.rest_sec,
             e.id AS ex_id, e.slug AS ex_slug, e.name AS ex_name,
             e.required_equipment AS ex_required,
+            e.measurement AS ex_measurement,
             sl.id AS logged_id,
-            sl.performed_load_lbs::float AS logged_weight, sl.performed_reps AS logged_reps
+            sl.performed_load_lbs::float AS logged_weight, sl.performed_reps AS logged_reps,
+            sl.performed_duration_sec AS logged_duration
      FROM planned_sets ps
      JOIN exercises e ON e.id=ps.exercise_id
      LEFT JOIN LATERAL (
-       SELECT id, performed_load_lbs, performed_reps FROM set_logs
+       SELECT id, performed_load_lbs, performed_reps, performed_duration_sec FROM set_logs
        WHERE planned_set_id = ps.id ORDER BY performed_at DESC LIMIT 1
      ) sl ON true
      WHERE ps.day_workout_id=$1
@@ -226,12 +251,22 @@ export async function getTodayWorkout(
           slug: s.ex_slug,
           name: s.ex_name,
           bodyweight: predicates.length === 0,
+          measurement: s.ex_measurement,
         },
         target_reps_low: s.target_reps_low,
         target_reps_high: s.target_reps_high,
+        target_duration_low_sec: s.target_duration_low_sec,
+        target_duration_high_sec: s.target_duration_high_sec,
         target_rir: s.target_rir,
         rest_sec: s.rest_sec,
-        logged: s.logged_id != null ? { weight_lbs: s.logged_weight, reps: s.logged_reps } : null,
+        logged:
+          s.logged_id != null
+            ? {
+                weight_lbs: s.logged_weight,
+                reps: s.logged_reps,
+                duration_sec: s.logged_duration,
+              }
+            : null,
         ...(suggested ? { suggested_substitution: suggested } : {}),
       };
     }),

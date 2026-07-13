@@ -729,8 +729,13 @@ export const exercises: ExerciseSeed[] = [
 
   // ── CARRY ─────────────────────────────────────────────────────────────────
 
+  // Carries + holds are measurement: 'duration' — time-prescribed sets
+  // (industry-standard for hypertrophy; distance is a post-Beta additive
+  // column). Progression rule: cap duration ramps at ~60s, then add LOAD —
+  // a 3-minute carry is conditioning, not trap/grip hypertrophy.
   {
     slug: 'dumbbell-farmers-carry',
+    measurement: 'duration',
     name: "Dumbbell Farmer's Carry",
     primary_muscle: 'upper_back',
     muscle_contributions: { upper_back: 1.0, glutes: 0.3, calves: 0.2, biceps: 0.2 },
@@ -851,6 +856,7 @@ export const exercises: ExerciseSeed[] = [
 
   {
     slug: 'suitcase-carry',
+    measurement: 'duration',
     name: 'Suitcase Carry',
     primary_muscle: 'core',
     muscle_contributions: { core: 1.0, upper_back: 0.4 },
@@ -917,6 +923,7 @@ export const exercises: ExerciseSeed[] = [
 
   {
     slug: 'side-plank',
+    measurement: 'duration',
     name: 'Side Plank',
     primary_muscle: 'core',
     muscle_contributions: { core: 1.0, glutes: 0.3 },
@@ -961,6 +968,7 @@ export const exercises: ExerciseSeed[] = [
 
   {
     slug: 'dumbbell-overhead-carry',
+    measurement: 'duration',
     name: 'Dumbbell Overhead Carry',
     primary_muscle: 'front_delt',
     muscle_contributions: { front_delt: 1.0, side_delt: 0.4, triceps: 0.2, upper_back: 0.3 },
@@ -983,6 +991,7 @@ export const exercises: ExerciseSeed[] = [
 
   {
     slug: 'dumbbell-suitcase-carry',
+    measurement: 'duration',
     name: 'Dumbbell Suitcase Carry',
     primary_muscle: 'upper_back',
     muscle_contributions: { upper_back: 1.0, glutes: 0.2, calves: 0.1 },

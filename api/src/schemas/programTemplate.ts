@@ -7,16 +7,40 @@ const StrengthBlock = z
     exercise_slug: z.string().regex(SLUG_RE),
     mev: z.number().int().min(0).max(40),
     mav: z.number().int().min(0).max(40),
-    target_reps_low: z.number().int().min(1).max(50),
-    target_reps_high: z.number().int().min(1).max(50),
-    target_rir: z.number().int().min(1).max(5), // RIR 0 banned globally (Q4)
+    target_reps_low: z.number().int().min(1).max(50).optional(),
+    target_reps_high: z.number().int().min(1).max(50).optional(),
+    target_duration_low_sec: z.number().int().min(5).max(600).optional(),
+    target_duration_high_sec: z.number().int().min(5).max(600).optional(),
+    target_rir: z.number().int().min(1).max(5), // RIR 0 banned globally (Q4); proximity-to-failure — rendered as RPE on duration blocks
     rest_sec: z.number().int().min(15).max(900),
   })
   .refine((b) => b.mev <= b.mav, { message: 'mev must be <= mav', path: ['mev'] })
-  .refine((b) => b.target_reps_low <= b.target_reps_high, {
+  .refine((b) => (b.target_reps_low == null) === (b.target_reps_high == null), {
+    message: 'target_reps_low and target_reps_high must be set together',
+    path: ['target_reps_low'],
+  })
+  .refine((b) => (b.target_duration_low_sec == null) === (b.target_duration_high_sec == null), {
+    message: 'duration targets must be set together',
+    path: ['target_duration_low_sec'],
+  })
+  // Exactly one measurement dimension per block (measurement-model design).
+  .refine((b) => (b.target_reps_low != null) !== (b.target_duration_low_sec != null), {
+    message: 'block must have exactly one of reps targets or duration targets',
+    path: ['target_reps_low'],
+  })
+  .refine((b) => b.target_reps_low == null || b.target_reps_low <= (b.target_reps_high ?? 0), {
     message: 'target_reps_low must be <= target_reps_high',
     path: ['target_reps_low'],
-  });
+  })
+  .refine(
+    (b) =>
+      b.target_duration_low_sec == null ||
+      b.target_duration_low_sec <= (b.target_duration_high_sec ?? 0),
+    {
+      message: 'target_duration_low_sec must be <= target_duration_high_sec',
+      path: ['target_duration_low_sec'],
+    },
+  );
 
 const CardioInner = z
   .object({

@@ -11,8 +11,12 @@ export type TemplateBlock = {
   exercise_slug: string;
   mev: number;
   mav: number;
-  target_reps_low: number;
-  target_reps_high: number;
+  // Exactly one measurement dimension is populated per block (zod-enforced XOR):
+  // reps pair for dynamic work, duration pair for holds/timed carries.
+  target_reps_low?: number;
+  target_reps_high?: number;
+  target_duration_low_sec?: number;
+  target_duration_high_sec?: number;
   target_rir: number;
   rest_sec: number;
   /** Primary movement pattern for frequency / fatigue scheduling rules. */

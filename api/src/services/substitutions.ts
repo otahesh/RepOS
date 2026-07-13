@@ -46,8 +46,9 @@ export async function findSubstitutions(
     name: string;
     movement_pattern: string;
     primary_muscle_id: number;
+    measurement: 'reps' | 'duration';
   }>(
-    `SELECT id, name, movement_pattern, primary_muscle_id
+    `SELECT id, name, movement_pattern, primary_muscle_id, measurement
      FROM exercises WHERE slug=$1 AND archived_at IS NULL`,
     [targetSlug],
   );
@@ -94,8 +95,13 @@ export async function findSubstitutions(
          WHERE t.exercise_id = $1
        ), 0) AS overlap_score
      FROM exercises e
-     WHERE e.id <> $1 AND e.archived_at IS NULL`,
-    [target.id, target.movement_pattern, target.primary_muscle_id],
+     WHERE e.id <> $1 AND e.archived_at IS NULL
+       -- Cross-measurement swaps are forbidden: the substitute endpoint keeps
+       -- the old row's targets, so a duration exercise on a reps slot (or vice
+       -- versa) would strand mismatched targets. Pattern match is a score, not
+       -- a filter — this must be a hard predicate.
+       AND e.measurement = $4`,
+    [target.id, target.movement_pattern, target.primary_muscle_id, target.measurement],
   );
 
   const profile = userEquipmentProfile;

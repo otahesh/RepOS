@@ -24,31 +24,45 @@ function performedAtRefine(iso: string): boolean {
   return t <= now + FORWARD_SKEW_MS && t >= now - MAX_BACKFILL_MS;
 }
 
-export const SetLogPostSchema = z.object({
-  client_request_id: z.string().uuid(),
-  planned_set_id: z.string().uuid(),
-  weight_lbs: z.number().min(0).max(2000).optional(),
-  reps: z.number().int().min(0).max(100).optional(),
-  rir: z.number().int().min(0).max(5).optional(),
-  rpe: z.number().int().min(1).max(10).optional(),
-  performed_at: z
-    .string()
-    .datetime({ offset: true })
-    // Reviewer Critical: an unbounded `performed_at` keeps the 24h audit
-    // window open forever (post a row dated 2099 → still editable in 2098).
-    // Bound to (now - 365d, now + 5min] so the audit gate retains its
-    // "historical analytics can't be silently rewritten" guarantee.
-    .refine(performedAtRefine, {
-      message: 'performed_at must be within the last 365 days and not >5 minutes in the future',
-    }),
-  notes: z.string().max(500).optional(),
-});
+export const SetLogPostSchema = z
+  .object({
+    client_request_id: z.string().uuid(),
+    planned_set_id: z.string().uuid(),
+    weight_lbs: z.number().min(0).max(2000).optional(),
+    reps: z.number().int().min(0).max(100).optional(),
+    // Duration sets (holds, timed carries): seconds of unbroken time under
+    // load. Optional-absent like every other performed field.
+    duration_sec: z.number().int().min(1).max(3600).optional(),
+    rir: z.number().int().min(0).max(5).optional(),
+    rpe: z.number().int().min(1).max(10).optional(),
+    performed_at: z
+      .string()
+      .datetime({ offset: true })
+      // Reviewer Critical: an unbounded `performed_at` keeps the 24h audit
+      // window open forever (post a row dated 2099 → still editable in 2098).
+      // Bound to (now - 365d, now + 5min] so the audit gate retains its
+      // "historical analytics can't be silently rewritten" guarantee.
+      .refine(performedAtRefine, {
+        message: 'performed_at must be within the last 365 days and not >5 minutes in the future',
+      }),
+    notes: z.string().max(500).optional(),
+  })
+  // Rollback-skew + junk-row guard: a set log must measure SOMETHING. Old
+  // clients always send reps for reps sets — no compat break. This also makes
+  // a new-client hold POST against a rolled-back pre-duration API fail loudly
+  // (400 → row stays pending in the offline queue) instead of silently
+  // stripping duration_sec and 201-ing an empty row.
+  .refine((v) => v.reps != null || v.duration_sec != null, {
+    message: 'either reps or duration_sec is required',
+    path: ['reps'],
+  });
 export type SetLogPost = z.infer<typeof SetLogPostSchema>;
 
 export const SetLogPatchSchema = z
   .object({
     weight_lbs: z.number().min(0).max(2000).optional(),
     reps: z.number().int().min(0).max(100).optional(),
+    duration_sec: z.number().int().min(1).max(3600).optional(),
     rir: z.number().int().min(0).max(5).optional(),
     rpe: z.number().int().min(1).max(10).optional(),
     notes: z.string().max(500).optional(),
@@ -82,6 +96,7 @@ export interface SetLogRow {
   client_request_id: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec: number | null;
   rir: number | null;
   rpe: number | null;
   performed_at: string;
