@@ -90,7 +90,9 @@ export async function applyManualDeload(
     // Snapshot pre-mutation planned_sets for the undo payload.
     const { rows: snapshot } = await client.query(
       `SELECT ps.id, ps.day_workout_id, ps.block_idx, ps.set_idx, ps.exercise_id,
-              ps.target_reps_low, ps.target_reps_high, ps.target_rir, ps.target_load_hint, ps.rest_sec
+              ps.target_reps_low, ps.target_reps_high,
+              ps.target_duration_low_sec, ps.target_duration_high_sec,
+              ps.target_rir, ps.target_load_hint, ps.rest_sec
        FROM planned_sets ps JOIN day_workouts dw ON dw.id = ps.day_workout_id
        WHERE dw.mesocycle_run_id=$1 AND dw.week_idx >= $2`,
       [runId, run.current_week],
@@ -281,12 +283,17 @@ export async function undoManualDeload(userId: string, runId: string): Promise<v
       await client.query(
         `INSERT INTO planned_sets
            (id, day_workout_id, block_idx, set_idx, exercise_id,
-            target_reps_low, target_reps_high, target_rir, target_load_hint, rest_sec)
+            target_reps_low, target_reps_high,
+            target_duration_low_sec, target_duration_high_sec,
+            target_rir, target_load_hint, rest_sec)
          SELECT id, day_workout_id, block_idx, set_idx, exercise_id,
-                target_reps_low, target_reps_high, target_rir, target_load_hint, rest_sec
+                target_reps_low, target_reps_high,
+                target_duration_low_sec, target_duration_high_sec,
+                target_rir, target_load_hint, rest_sec
          FROM jsonb_to_recordset($1::jsonb)
               AS t(id uuid, day_workout_id uuid, block_idx int, set_idx int, exercise_id uuid,
-                   target_reps_low int, target_reps_high int, target_rir int,
+                   target_reps_low int, target_reps_high int,
+                   target_duration_low_sec int, target_duration_high_sec int, target_rir int,
                    target_load_hint text, rest_sec int)`,
         [JSON.stringify(snapshot)],
       );

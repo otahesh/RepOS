@@ -24,8 +24,11 @@ export type PlannedSetPatchResponse = {
   block_idx: number;
   set_idx: number;
   exercise_id: string;
-  target_reps_low: number;
-  target_reps_high: number;
+  /** Exactly one measurement dimension is populated (reps pair XOR duration pair). */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   target_load_hint: string | null;
   rest_sec: number;

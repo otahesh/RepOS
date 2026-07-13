@@ -19,8 +19,10 @@ type Block = {
   exercise_slug: string;
   mev: number;
   mav: number;
-  target_reps_low: number;
-  target_reps_high: number;
+  target_reps_low?: number;
+  target_reps_high?: number;
+  target_duration_low_sec?: number;
+  target_duration_high_sec?: number;
   target_rir: number;
   rest_sec: number;
   cardio?: { target_duration_sec?: number; target_distance_m?: number; target_zone?: number };
@@ -231,8 +233,10 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       block_idx: number;
       set_idx: number;
       exercise_id: string;
-      reps_low: number;
-      reps_high: number;
+      reps_low: number | null;
+      reps_high: number | null;
+      dur_low: number | null;
+      dur_high: number | null;
       rir: number;
       rest: number;
     }[] = [];
@@ -267,8 +271,10 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
               block_idx: blockIdx,
               set_idx: s,
               exercise_id: ex.id,
-              reps_low: b.target_reps_low,
-              reps_high: b.target_reps_high,
+              reps_low: b.target_reps_low ?? null,
+              reps_high: b.target_reps_high ?? null,
+              dur_low: b.target_duration_low_sec ?? null,
+              dur_high: b.target_duration_high_sec ?? null,
               rir: b.target_rir,
               rest: b.rest_sec,
             });
@@ -300,11 +306,12 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
       await client.query(
         `INSERT INTO planned_sets
            (day_workout_id, block_idx, set_idx, exercise_id,
-            target_reps_low, target_reps_high, target_rir, rest_sec)
-         SELECT dw, bi, si, ex, rl, rh, ri, rs
+            target_reps_low, target_reps_high,
+            target_duration_low_sec, target_duration_high_sec, target_rir, rest_sec)
+         SELECT dw, bi, si, ex, rl, rh, dl, dh, ri, rs
          FROM unnest($1::uuid[], $2::int[], $3::int[], $4::uuid[],
-                     $5::int[], $6::int[], $7::int[], $8::int[])
-              AS t(dw, bi, si, ex, rl, rh, ri, rs)`,
+                     $5::int[], $6::int[], $7::int[], $8::int[], $9::int[], $10::int[])
+              AS t(dw, bi, si, ex, rl, rh, dl, dh, ri, rs)`,
         [
           setRows.map((r) => r.day_workout_id),
           setRows.map((r) => r.block_idx),
@@ -312,6 +319,8 @@ async function runOnce(input: MaterializeInput): Promise<MaterializeResult> {
           setRows.map((r) => r.exercise_id),
           setRows.map((r) => r.reps_low),
           setRows.map((r) => r.reps_high),
+          setRows.map((r) => r.dur_low),
+          setRows.map((r) => r.dur_high),
           setRows.map((r) => r.rir),
           setRows.map((r) => r.rest),
         ],
