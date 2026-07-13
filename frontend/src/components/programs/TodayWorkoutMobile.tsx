@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { rpeFromRir } from '../../lib/effort';
 import { Link, useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { skipDayWorkout } from '../../lib/api/dayWorkouts';
@@ -201,12 +202,32 @@ export function TodayWorkoutMobile({
               >
                 {blockSets.length} <Term k="working_set" compact />
                 {'s · '}
-                {first.target_reps_low}
-                {'–'}
-                {first.target_reps_high}
-                {' reps · '}
+                {first.target_duration_low_sec != null ? (
+                  <>
+                    {first.target_duration_low_sec}
+                    {'–'}
+                    {first.target_duration_high_sec}
+                    {'s '}
+                    <Term k="hold" compact />
+                    {' · '}
+                  </>
+                ) : (
+                  <>
+                    {first.target_reps_low}
+                    {'–'}
+                    {first.target_reps_high}
+                    {' reps · '}
+                  </>
+                )}
                 {isBeginnerTrack(data.track) ? (
-                  effortCue(first.target_rir)
+                  effortCue(
+                    first.target_rir,
+                    first.target_duration_low_sec != null ? 'duration' : 'reps',
+                  )
+                ) : first.target_duration_low_sec != null ? (
+                  <>
+                    <Term k="RPE" compact /> {rpeFromRir(first.target_rir)}
+                  </>
                 ) : (
                   <>
                     <Term k="RIR" compact /> {first.target_rir}

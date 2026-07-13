@@ -1,5 +1,6 @@
 // frontend/src/components/programs/ProgramTemplateDetail.tsx
 import { useEffect, useState } from 'react';
+import { rpeFromRir } from '../../lib/effort';
 import { getProgramTemplate, type ProgramTemplate } from '../../lib/api/programs';
 import { Term } from '../Term';
 import { TrackChip } from './TrackChip';
@@ -100,8 +101,27 @@ export function ProgramTemplateDetail({
                   >
                     {isBeginnerTrack(t.track) ? (
                       <>
-                        {b.mev} sets, building to {b.mav} · {b.target_reps_low}–{b.target_reps_high}{' '}
-                        reps · {effortCue(b.target_rir)}
+                        {b.mev} sets, building to {b.mav} ·{' '}
+                        {b.target_duration_low_sec != null ? (
+                          <>
+                            {b.target_duration_low_sec}–{b.target_duration_high_sec}s{' '}
+                            <Term k="hold" /> ·{' '}
+                          </>
+                        ) : (
+                          <>
+                            {b.target_reps_low}–{b.target_reps_high} reps ·{' '}
+                          </>
+                        )}
+                        {effortCue(
+                          b.target_rir,
+                          b.target_duration_low_sec != null ? 'duration' : 'reps',
+                        )}
+                      </>
+                    ) : b.target_duration_low_sec != null ? (
+                      <>
+                        {b.mev}–{b.mav} sets · {b.target_duration_low_sec}–
+                        {b.target_duration_high_sec}s <Term k="hold" /> · <Term k="RPE" />{' '}
+                        {rpeFromRir(b.target_rir)}
                       </>
                     ) : (
                       <>

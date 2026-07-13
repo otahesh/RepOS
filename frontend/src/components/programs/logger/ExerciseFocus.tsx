@@ -1,4 +1,5 @@
 import { TOKENS, FONTS } from '../../../tokens';
+import { rowMode, rpeFromRir } from '../../../lib/effort';
 import { Term } from '../../Term';
 import { isBeginnerTrack, effortCue } from '../../../lib/programTracks';
 import { SetRow, type RowState, type RowInputs } from './SetRow';
@@ -199,7 +200,11 @@ export function ExerciseFocus({
           }}
         >
           {beginner ? (
-            effortCue(firstSet.target_rir)
+            effortCue(firstSet.target_rir, rowMode(firstSet))
+          ) : rowMode(firstSet) === 'duration' ? (
+            <>
+              <Term k="RPE" compact /> {rpeFromRir(firstSet.target_rir)}
+            </>
           ) : (
             <>
               <Term k="RIR" compact /> {firstSet.target_rir}

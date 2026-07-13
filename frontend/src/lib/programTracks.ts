@@ -14,9 +14,12 @@ export function isBeginnerTrack(track: string | null | undefined): boolean {
   return track === 'beginner';
 }
 
-/** Plain-language equivalent of "RIR n" for beginner surfaces. */
-export function effortCue(rir: number): string {
+/** Plain-language equivalent of "RIR n" for beginner surfaces. Duration sets
+ *  (holds) get a time-phrased cue — "reps in the tank" is meaningless
+ *  mid-plank. The stored value is proximity-to-failure either way. */
+export function effortCue(rir: number, mode: 'reps' | 'duration' = 'reps'): string {
   if (rir <= 0) return 'Push to your limit';
+  if (mode === 'duration') return 'Hold until it gets hard — stop just short of failure';
   return `Leave ${rir} rep${rir === 1 ? '' : 's'} in the tank`;
 }
 
