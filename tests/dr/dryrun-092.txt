@@ -1,0 +1,19 @@
+# 092 DROP NOT NULL dry-run rehearsal — 2026-07-13T02:16:43Z
+# forward-apply 090+091+092 against a restore of the latest prod dump
+# ephemeral: local repos_dr DB (no docker on workstation — DR-script fallback path)
+prod dump: /mnt/user/appdata/repos/config/backups/repos-20260712T031500Z.dump.gz
+0
+restored: 28 tables, 121 planned_sets rows, 1 users
+→ applying 090, 091, 092 forward:
+  ✓ 090_exercises_measurement
+  ✓ 091_duration_columns
+  ✓ 092_planned_sets_reps_nullable
+→ post-apply verification:
+constraints present: exercises_measurement_check, planned_sets_measurement_xor_check, planned_sets_reps_pair_check
+rows violating XOR (must be 0): 0
+reps nullable now: YES
+in-flight run side-plank rows keep reps shape (no retro-migration): 11
+→ reapply-against-scratch guard: re-running 092 must FAIL loudly (constraint already exists), not corrupt:
+psql:api/src/db/migrations/092_planned_sets_reps_nullable.sql:16: ERROR:  constraint "planned_sets_reps_pair_check" for relation "planned_sets" already exists
+post-reapply XOR violations still 0: 0
+✓ dry-run rehearsal complete (ephemeral dropped)

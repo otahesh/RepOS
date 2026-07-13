@@ -231,6 +231,44 @@ describe('PATCH /api/planned-sets/:id', () => {
     expect(r.json<any>().field).toBe('target_reps_low');
   });
 
+  it('PATCH reps targets onto a duration-targeted row → 422 measurement_mismatch, row unchanged', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    // Convert the row to duration-targeted (post-092 shape: reps NULL + duration pair).
+    await db.query(
+      `UPDATE planned_sets
+       SET target_reps_low=NULL, target_reps_high=NULL,
+           target_duration_low_sec=30, target_duration_high_sec=45
+       WHERE id=$1`,
+      [setRow.id],
+    );
+    try {
+      const r = await app.inject({
+        method: 'PATCH',
+        url: `/api/planned-sets/${setRow.id}`,
+        headers: auth(),
+        body: { target_reps_low: 8, target_reps_high: 12 },
+      });
+      expect(r.statusCode).toBe(422);
+      expect(r.json<any>().error).toBe('measurement_mismatch');
+      const {
+        rows: [after],
+      } = await db.query(
+        `SELECT target_reps_low, target_duration_low_sec FROM planned_sets WHERE id=$1`,
+        [setRow.id],
+      );
+      expect(after.target_reps_low).toBeNull();
+      expect(after.target_duration_low_sec).toBe(30);
+    } finally {
+      await db.query(
+        `UPDATE planned_sets
+         SET target_reps_low=$2, target_reps_high=$3,
+             target_duration_low_sec=NULL, target_duration_high_sec=NULL
+         WHERE id=$1`,
+        [setRow.id, setRow.target_reps_low, setRow.target_reps_high],
+      );
+    }
+  });
+
   it('bearer revoked mid-mesocycle → 401, no partial write', async () => {
     const setRow = await getSetOnDate('2026-05-06');
     const before = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [

@@ -206,6 +206,27 @@ describe('program_templates seed (e2e)', () => {
     }
   });
 
+  it('prescribes every side-plank block in seconds, never reps (measurement model)', async () => {
+    for (const t of programTemplates) {
+      for (const day of (t.structure as { days: { blocks: Record<string, unknown>[] }[] }).days) {
+        for (const b of day.blocks) {
+          if (b.exercise_slug !== 'side-plank') continue;
+          expect(b.target_duration_low_sec).toBe(30);
+          expect(b.target_duration_high_sec).toBe(45);
+          expect(b.target_reps_low).toBeUndefined();
+          expect(b.target_reps_high).toBeUndefined();
+        }
+      }
+    }
+    // The three templates known to carry side-plank actually exercised the loop.
+    const holdBlocks = programTemplates.flatMap((t) =>
+      (t.structure as { days: { blocks: Record<string, unknown>[] }[] }).days.flatMap((d) =>
+        d.blocks.filter((b) => b.exercise_slug === 'side-plank'),
+      ),
+    );
+    expect(holdBlocks.length).toBe(3);
+  });
+
   it('every exercise_slug in every template resolves to a live exercises row', async () => {
     const slugs = new Set<string>();
     for (const t of programTemplates)
