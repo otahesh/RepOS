@@ -32,6 +32,7 @@ import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
 export interface EnqueueFields {
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec?: number | null;
   rir: number | null;
   rpe?: number | null;
   performed_at: string; // ISO with offset
@@ -71,6 +72,7 @@ async function postSetLog(row: PendingSetLog): Promise<Response> {
   };
   if (row.weight_lbs != null) payload.weight_lbs = row.weight_lbs;
   if (row.reps != null) payload.reps = row.reps;
+  if (row.duration_sec != null) payload.duration_sec = row.duration_sec;
   if (row.rir != null) payload.rir = row.rir;
   if (row.rpe != null) payload.rpe = row.rpe;
   if (row.notes != null) payload.notes = row.notes;
@@ -197,6 +199,7 @@ export const logBuffer = {
       performed_at: fields.performed_at,
       weight_lbs: fields.weight_lbs,
       reps: fields.reps,
+      duration_sec: fields.duration_sec ?? null,
       rir: fields.rir,
       rpe: fields.rpe ?? null,
       notes: fields.notes ?? null,
