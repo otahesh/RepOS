@@ -139,9 +139,11 @@ export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   //    onboarding / deload-now integration tests carry the scope those routes
   //    require (requireScope('account:write')). Scope-rejection tests still
   //    mint parallel wrong-scope bearers.
+  //    [Measurement model phase 2] Additive `cardio_logs:write` for the
+  //    cardio-block completion tests. Same parallel-wrong-scope convention.
   const { bearer } = await mintBearer({
     userId,
-    scopes: ['set_logs:write', 'health:recovery:read', 'account:write'],
+    scopes: ['set_logs:write', 'health:recovery:read', 'account:write', 'cardio_logs:write'],
   });
 
   // 3. Pick any seeded exercise.

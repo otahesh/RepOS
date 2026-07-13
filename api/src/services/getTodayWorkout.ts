@@ -78,6 +78,8 @@ export type TodayWorkout =
         target_duration_sec: number | null;
         target_distance_m: number | null;
         target_zone: number | null;
+        /** Latest cardio_log for this block, or null if never completed. */
+        logged: { duration_sec: number; distance_m: number | null } | null;
       }>;
     };
 
@@ -210,10 +212,20 @@ export async function getTodayWorkout(
     ex_id: string;
     ex_slug: string;
     ex_name: string;
+    logged_id: string | null;
+    logged_duration: number | null;
+    logged_distance: number | null;
   }>(
     `SELECT pc.id, pc.block_idx, pc.target_duration_sec, pc.target_distance_m, pc.target_zone,
-            e.id AS ex_id, e.slug AS ex_slug, e.name AS ex_name
+            e.id AS ex_id, e.slug AS ex_slug, e.name AS ex_name,
+            cl.id AS logged_id,
+            cl.performed_duration_sec AS logged_duration,
+            cl.performed_distance_m   AS logged_distance
      FROM planned_cardio_blocks pc JOIN exercises e ON e.id=pc.exercise_id
+     LEFT JOIN LATERAL (
+       SELECT id, performed_duration_sec, performed_distance_m FROM cardio_logs
+       WHERE planned_cardio_block_id = pc.id ORDER BY performed_at DESC LIMIT 1
+     ) cl ON true
      WHERE pc.day_workout_id=$1
      ORDER BY pc.block_idx`,
     [day.id],
@@ -295,6 +307,10 @@ export async function getTodayWorkout(
       target_duration_sec: c.target_duration_sec,
       target_distance_m: c.target_distance_m,
       target_zone: c.target_zone,
+      logged:
+        c.logged_id != null
+          ? { duration_sec: c.logged_duration as number, distance_m: c.logged_distance }
+          : null,
     })),
   };
 }

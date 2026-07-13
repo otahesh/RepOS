@@ -18,6 +18,7 @@ import { mesocycleRoutes } from './routes/mesocycles.js';
 import { plannedSetRoutes } from './routes/plannedSets.js';
 import { recoveryFlagRoutes } from './routes/recoveryFlags.js';
 import { setLogsRoutes } from './routes/setLogs.js';
+import { cardioLogsRoutes } from './routes/cardioLogs.js';
 import { dayWorkoutsRoutes } from './routes/dayWorkouts.js';
 import { workoutHistoryRoutes } from './routes/workoutHistory.js';
 import { userInjuriesRoutes } from './routes/userInjuries.js';
@@ -75,6 +76,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(workoutsRoutes, { prefix: '/api/health' });
   await app.register(syncRoutes, { prefix: '/api/health' });
   await app.register(setLogsRoutes, { prefix: '/api' });
+  await app.register(cardioLogsRoutes, { prefix: '/api' });
   await app.register(dayWorkoutsRoutes, { prefix: '/api' });
   await app.register(workoutHistoryRoutes, { prefix: '/api' });
   await app.register(userInjuriesRoutes, { prefix: '/api' });
