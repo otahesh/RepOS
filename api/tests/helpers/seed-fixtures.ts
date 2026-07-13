@@ -12,9 +12,13 @@
 // W1.2 PATCH/DELETE/GET will lean on the same helpers and shouldn't need an
 // `await app.inject` round-trip just to seed data.
 
-import { randomBytes, randomUUID } from 'node:crypto';
-import argon2 from 'argon2';
+import { randomUUID } from 'node:crypto';
 import { db } from '../../src/db/client.js';
+import { mkUser, mintBearer } from './user-fixtures.js';
+
+// Bearer minting lives in user-fixtures.ts (quality pass Q9); re-exported so
+// this file's many existing import sites keep working.
+export { mintBearer };
 
 export interface SeedHandle {
   userId: string;
@@ -35,30 +39,6 @@ export interface SeedHandleWithLogs extends SeedHandle {
 }
 
 // ---------------------------------------------------------------------------
-// mintBearer — INSERT a device_tokens row that the production auth middleware
-// (api/src/middleware/auth.ts) will accept. Token format is
-// "<16-hex-prefix>.<64-hex-secret>"; stored as "<prefix>:<argon2hash-of-secret>".
-// ---------------------------------------------------------------------------
-export async function mintBearer(opts: {
-  userId: string;
-  scopes?: string[];
-  label?: string;
-}): Promise<{ bearer: string; userId: string }> {
-  const prefix = randomBytes(8).toString('hex'); // 16 hex chars
-  const secret = randomBytes(32).toString('hex'); // 64 hex chars
-  const bearer = `${prefix}.${secret}`;
-  const hash = await argon2.hash(secret);
-  const stored = `${prefix}:${hash}`;
-  const scopes = opts.scopes ?? ['health:weight:write'];
-  await db.query(
-    `INSERT INTO device_tokens (user_id, token_hash, scopes, label)
-     VALUES ($1, $2, $3::text[], $4)`,
-    [opts.userId, stored, scopes, opts.label ?? 'seed-fixture'],
-  );
-  return { bearer, userId: opts.userId };
-}
-
-// ---------------------------------------------------------------------------
 // seedUserAndMintBearer — minimal "user + bearer" seed for tests that don't
 // need a mesocycle/program chain (e.g. scope-enforcement W1.4.0). Returns a
 // SeedHandle-compatible shape (with empty program/meso/etc. ids) so the
@@ -68,14 +48,7 @@ export async function seedUserAndMintBearer(opts: {
   scopes: string[];
   label?: string;
 }): Promise<{ bearer: string; userId: string; handle: SeedHandle }> {
-  const userTag = randomUUID();
-  const email = `scope-fixture.${userTag}@repos.test`;
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
-    [email],
-  );
+  const u = await mkUser({ prefix: 'scope-fixture' });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
@@ -110,17 +83,10 @@ export async function seedUserAndMintBearer(opts: {
 // ---------------------------------------------------------------------------
 export async function seedUserWithMesocycle(): Promise<SeedHandle> {
   const userTag = randomUUID();
-  const email = `setlogs-fixture.${userTag}@repos.test`;
 
   // 1. User. Goal column was added in migration 026 with a NOT NULL default,
-  //    so we don't have to specify it; same for timezone.
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'America/New_York')
-     RETURNING id`,
-    [email],
-  );
+  //    so we don't have to specify it.
+  const u = await mkUser({ prefix: 'setlogs-fixture', timezone: 'America/New_York' });
   const userId = u.id;
 
   // 2. Bearer token. Scope-gated per W1 reviewer matrix: set_logs routes
@@ -629,12 +595,7 @@ export async function seedUserProgramAtTemplateVersion(opts: {
 }): Promise<SeedHandle> {
   const currentVersion = opts.currentTemplateVersion ?? 2;
   const userTag = randomUUID();
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
-    [`w2-altfork.${userTag}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'w2-altfork' });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
@@ -702,12 +663,7 @@ export async function seedUserProgramAtTemplateVersion(opts: {
 export async function seedUserProgram(opts: { weeks?: number } = {}): Promise<SeedHandle> {
   const weeks = opts.weeks ?? 5;
   const userTag = randomUUID();
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
-    [`w2-userprogram.${userTag}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'w2-userprogram' });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
@@ -749,14 +705,7 @@ export interface UserPairHandle {
 }
 
 async function mkLoneUser(tag: string, scopes?: string[]): Promise<SeedHandle> {
-  const userTag = randomUUID();
-  const email = `pair-${tag}.${userTag}@repos.test`;
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
-    [email],
-  );
+  const u = await mkUser({ prefix: `pair-${tag}` });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
@@ -855,12 +804,7 @@ export async function seedUserWithFullMesocycle(opts: {
 }): Promise<FullMesocycleHandle> {
   const { materializeMesocycle } = await import('../../src/services/materializeMesocycle.js');
   const userTag = randomUUID();
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'America/New_York') RETURNING id`,
-    [`w2-fullmeso.${userTag}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'w2-fullmeso', timezone: 'America/New_York' });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
@@ -1011,12 +955,7 @@ async function mkBenchRun(opts: { weeks: number; currentWeek: number }): Promise
   exerciseId: string;
 }> {
   const userTag = randomUUID();
-  const {
-    rows: [u],
-  } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, timezone) VALUES ($1, 'UTC') RETURNING id`,
-    [`w2-stalledpr.${userTag}@repos.test`],
-  );
+  const u = await mkUser({ prefix: 'w2-stalledpr' });
   const userId = u.id;
   const { bearer } = await mintBearer({
     userId,
