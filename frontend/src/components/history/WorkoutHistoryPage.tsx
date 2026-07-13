@@ -11,7 +11,8 @@ import {
 import { reopenDayWorkout } from '../../lib/api/dayWorkouts';
 import { pushToast } from '../common/ToastHost';
 import { ConfirmDialog } from '../common/ConfirmDialog';
-import { formatSessionDate, formatHistorySet } from '../programs/logger/HistorySheet';
+import { formatHistorySet } from '../programs/logger/HistorySheet';
+import { formatSessionDate, formatZonedDate } from '../../lib/formatDate';
 import Icon from '../Icon';
 
 // =============================================================================
@@ -315,29 +316,6 @@ function displayDate(item: HistoryItem, tz: string): string {
   return item.completed_at
     ? formatZonedDate(item.completed_at, tz)
     : formatSessionDate(item.scheduled_date);
-}
-
-// Same small-icu-safe discipline as formatSessionDate (project_alpine_smallicu):
-// assemble the label from numeric `formatToParts` fields, never `.format()`'s
-// locale-reshaped layout. Here the parts are computed in `tz`, and the year is
-// shown only when it differs from the current year in that same zone.
-function formatZonedDate(iso: string, tz: string, now: Date = new Date()): string {
-  const d = new Date(iso);
-  const yearOf = (at: Date): string | undefined =>
-    new Intl.DateTimeFormat('en-US', { year: 'numeric', timeZone: tz })
-      .formatToParts(at)
-      .find((p) => p.type === 'year')?.value;
-  const includeYear = yearOf(d) !== yearOf(now);
-  const parts = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: includeYear ? 'numeric' : undefined,
-    timeZone: tz,
-  }).formatToParts(d);
-  const month = parts.find((p) => p.type === 'month')?.value ?? '';
-  const day = parts.find((p) => p.type === 'day')?.value ?? '';
-  const year = parts.find((p) => p.type === 'year')?.value;
-  return year ? `${month} ${day}, ${year}` : `${month} ${day}`;
 }
 
 function HistoryCard({

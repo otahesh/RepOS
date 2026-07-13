@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { rpeFromRir } from '../../../lib/effort';
+import { formatSessionDate } from '../../../lib/formatDate';
 import { TOKENS, FONTS } from '../../../tokens';
 import {
   getExerciseHistory,
@@ -7,6 +8,10 @@ import {
   type HistorySet,
 } from '../../../lib/api/exerciseHistory';
 import { isBeginnerTrack } from '../../../lib/programTracks';
+
+// formatSessionDate moved to lib/formatDate.ts (2026-07-13 quality pass);
+// re-exported so existing consumers of this import site keep working.
+export { formatSessionDate };
 
 // =============================================================================
 // HistorySheet — per-exercise history bottom sheet, opened by the ⟲ button in
@@ -265,25 +270,4 @@ export function formatHistorySet(set: HistorySet, beginnerTrack: boolean): strin
   if (set.reps != null) str += ` × ${set.reps}`;
   if (!beginnerTrack && set.rir != null) str += ` @RIR ${set.rir}`;
   return str;
-}
-
-// formatToParts-safe date label: production Node is Alpine small-icu, which
-// ignores locale tags and falls back to MM/DD/YYYY when asked to `.format()`
-// directly (see project_alpine_smallicu). Building the string from
-// `formatToParts` rather than trusting `.format()`'s layout sidesteps that.
-// Year is included only when the session isn't from the current year.
-export function formatSessionDate(dateStr: string, now: Date = new Date()): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  const includeYear = d.getUTCFullYear() !== now.getUTCFullYear();
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: includeYear ? 'numeric' : undefined,
-    timeZone: 'UTC',
-  });
-  const parts = fmt.formatToParts(d);
-  const month = parts.find((p) => p.type === 'month')?.value ?? '';
-  const day = parts.find((p) => p.type === 'day')?.value ?? '';
-  const year = parts.find((p) => p.type === 'year')?.value;
-  return year ? `${month} ${day}, ${year}` : `${month} ${day}`;
 }
