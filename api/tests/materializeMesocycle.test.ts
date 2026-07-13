@@ -22,6 +22,10 @@ let userProgramId: string;
 let uId2: string;
 let tId2: string;
 
+// Fixtures for the duration-block describe (measurement model).
+let uId3: string;
+let tId3: string;
+
 const MIN_TEMPLATE_STRUCTURE = {
   _v: 1,
   days: [
@@ -77,7 +81,88 @@ afterAll(async () => {
   await cleanupTemplate(templateId);
   if (uId2) await cleanupUser(uId2);
   if (tId2) await cleanupTemplate(tId2);
+  if (uId3) await cleanupUser(uId3);
+  if (tId3) await cleanupTemplate(tId3);
   await db.end();
+});
+
+describe('materializeMesocycle — duration blocks (measurement model)', () => {
+  it('writes duration targets with NULL reps for hold blocks; reps blocks unchanged', async () => {
+    const u = await mkUser({ prefix: 'vitest.materialize.duration' });
+    uId3 = u.id;
+    const t = await mkTemplate({
+      prefix: 'vitest-materialize-duration',
+      name: 'Vitest duration',
+      weeks: 4,
+      daysPerWeek: 1,
+      structure: {
+        _v: 1,
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'strength',
+            name: 'Core Day',
+            blocks: [
+              {
+                exercise_slug: 'dead-bug',
+                mev: 2,
+                mav: 3,
+                target_reps_low: 8,
+                target_reps_high: 12,
+                target_rir: 2,
+                rest_sec: 60,
+              },
+              {
+                exercise_slug: 'side-plank',
+                mev: 2,
+                mav: 3,
+                target_duration_low_sec: 30,
+                target_duration_high_sec: 45,
+                target_rir: 2,
+                rest_sec: 60,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    tId3 = t.id;
+    const up = await mkUserProgram({ userId: u.id, templateId: t.id, name: 'Vitest duration run' });
+
+    const result = await materializeMesocycle({
+      userProgramId: up.id,
+      userId: u.id,
+      startDate: addDaysISO(new Date().toISOString().slice(0, 10), 1),
+      startTz: 'America/New_York',
+    });
+
+    const { rows } = await db.query(
+      `SELECT e.slug, ps.target_reps_low, ps.target_reps_high,
+              ps.target_duration_low_sec, ps.target_duration_high_sec
+       FROM planned_sets ps
+       JOIN exercises e ON e.id = ps.exercise_id
+       JOIN day_workouts dw ON dw.id = ps.day_workout_id
+       WHERE dw.mesocycle_run_id = $1`,
+      [result.run_id],
+    );
+    const holds = rows.filter((r) => r.slug === 'side-plank');
+    const reps = rows.filter((r) => r.slug === 'dead-bug');
+    expect(holds.length).toBeGreaterThan(0);
+    expect(reps.length).toBeGreaterThan(0);
+    for (const h of holds) {
+      expect(h.target_duration_low_sec).toBe(30);
+      expect(h.target_duration_high_sec).toBe(45);
+      expect(h.target_reps_low).toBeNull();
+      expect(h.target_reps_high).toBeNull();
+    }
+    for (const r of reps) {
+      expect(r.target_reps_low).toBe(8);
+      expect(r.target_reps_high).toBe(12);
+      expect(r.target_duration_low_sec).toBeNull();
+      expect(r.target_duration_high_sec).toBeNull();
+    }
+  });
 });
 
 describe('materializeMesocycle (spec §3.3 step list)', () => {
