@@ -35,3 +35,4 @@ AGENTS.md
 # One-off QA/browser-session outputs
 .playwright-mcp/
 *-live.png
+.handoffs/

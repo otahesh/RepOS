@@ -1,6 +1,6 @@
 // frontend/src/components/programs/ProgramTemplateDetail.tsx
 import { useEffect, useState } from 'react';
-import { rpeFromRir } from '../../lib/effort';
+import { rpeFromRir, rowMode } from '../../lib/effort';
 import { getProgramTemplate, type ProgramTemplate } from '../../lib/api/programs';
 import { Term } from '../Term';
 import { TrackChip } from './TrackChip';
@@ -112,10 +112,7 @@ export function ProgramTemplateDetail({
                             {b.target_reps_low}–{b.target_reps_high} reps ·{' '}
                           </>
                         )}
-                        {effortCue(
-                          b.target_rir,
-                          b.target_duration_low_sec != null ? 'duration' : 'reps',
-                        )}
+                        {effortCue(b.target_rir, rowMode(b))}
                       </>
                     ) : b.target_duration_low_sec != null ? (
                       <>
