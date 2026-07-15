@@ -21,6 +21,7 @@ interface OwnedPlannedSetRow {
   scheduled_date: string;
   mesocycle_run_id: string;
   start_tz: string;
+  day_status: 'planned' | 'in_progress' | 'completed' | 'skipped';
   [extra: string]: unknown;
 }
 
@@ -31,7 +32,7 @@ async function loadOwnedPlannedSet(
 ): Promise<OwnedPlannedSetRow | null> {
   const { rows } = await db.query(
     `SELECT ps.id, to_char(dw.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
-            dw.mesocycle_run_id, mr.start_tz${extraPsCols ? `, ${extraPsCols}` : ''}
+            dw.mesocycle_run_id, dw.status AS day_status, mr.start_tz${extraPsCols ? `, ${extraPsCols}` : ''}
      FROM planned_sets ps
      JOIN day_workouts dw ON dw.id = ps.day_workout_id
      JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
@@ -42,10 +43,18 @@ async function loadOwnedPlannedSet(
 }
 
 // Both handlers share the past_day_readonly contract: 409 with the same body
-// shape when the set's day is already in the user's local past; null = writable.
-function pastDayConflict(setRow: { scheduled_date: string; start_tz: string }) {
+// shape when the set's day is history — in the user's local past AND terminal
+// (completed/skipped); null = writable. A past day still planned/in_progress
+// is the user running late, not history, and set-logging accepts writes to it,
+// so plan edits must too.
+function pastDayConflict(setRow: {
+  scheduled_date: string;
+  start_tz: string;
+  day_status: OwnedPlannedSetRow['day_status'];
+}) {
   const todayLocal = computeUserLocalDate(setRow.start_tz);
-  if (setRow.scheduled_date < todayLocal) {
+  const terminal = setRow.day_status === 'completed' || setRow.day_status === 'skipped';
+  if (terminal && setRow.scheduled_date < todayLocal) {
     return {
       error: 'past_day_readonly',
       scheduled_date: setRow.scheduled_date,
