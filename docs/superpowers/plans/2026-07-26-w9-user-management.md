@@ -3507,6 +3507,14 @@ export interface InviteOutcome {
   id: string;
   email: string;
   status: UserStatus;
+  /**
+   * True ONLY on the path that INSERTs a users row — the single thing that
+   * makes the response a 201. Required, not optional: an optional flag lets a
+   * new return site forget it and silently fall back to 200, which is the
+   * class of bug that made the route's old `resent`/`resynced` inference wrong
+   * in the first place. Every exit from inviteUser must state it.
+   */
+  created: boolean;
   cf_synced: boolean;
   invite_sent: boolean;
   sync_error: string | null;
@@ -6171,7 +6179,7 @@ import 'dotenv/config';
 import { describe, it, expect, afterAll, vi } from 'vitest';
 import pg from 'pg';
 import { existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
@@ -6229,6 +6237,12 @@ describe('restore of a pre-080 dump (Q35)', () => {
     const { pool, url } = await preO80Database('dr-b');
     await runMigrations(pool);
 
+    // Capture BEFORE overwriting. Reading it after the assignment below just
+    // hands back the temp path, so cleanup would "restore" the env to a flag
+    // file that the negative case leaves on disk — every later suite in this
+    // process would then boot into maintenance mode.
+    const savedFlagPath = process.env.MAINTENANCE_FLAG_PATH;
+
     const flag = join(await mkdtemp(join(tmpdir(), 'repos-dr-')), 'maintenance.flag');
     await writeFile(flag, 'restore in progress');
     process.env.MAINTENANCE_FLAG_PATH = flag;
@@ -6252,13 +6266,16 @@ describe('restore of a pre-080 dump (Q35)', () => {
     // Set it, send NO x-admin-key, and the gate is forced down the CF Access
     // path where the founding admin's role is actually resolved.
     const savedAdminKey = process.env.ADMIN_API_KEY;
-    const savedFlagPath = process.env.MAINTENANCE_FLAG_PATH;
     process.env.ADMIN_API_KEY = 'dr-guard-key';
     cleanups.push(async () => {
       if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY;
       else process.env.ADMIN_API_KEY = savedAdminKey;
+      // Restore the ORIGINAL path (captured before the overwrite) and delete
+      // the temp flag the negative case deliberately left in place, so no
+      // later suite can pick up either.
       if (savedFlagPath === undefined) delete process.env.MAINTENANCE_FLAG_PATH;
       else process.env.MAINTENANCE_FLAG_PATH = savedFlagPath;
+      await rm(flag, { force: true });
       await app.close();
       await db.end();
       await jwks.teardown();
