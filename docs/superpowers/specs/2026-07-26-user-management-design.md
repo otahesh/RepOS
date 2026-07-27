@@ -8,7 +8,7 @@
 
 ## Outcome
 
-An admin invites a Beta user from inside RepOS. The invite writes a `users` row, pushes the email into the Cloudflare Access policy, and sends a branded email via Resend. The invitee clicks through, signs in with Google, and lands in the app. Suspending or deleting a user reverses all of it. **No container recreate at any point.**
+An admin invites a Beta user from inside RepOS. The invite writes a `users` row, pushes the email into the Cloudflare Access policy, and sends a branded email via Resend. The invitee clicks through, signs in with Google, and lands in the app. Suspending or deleting a user reverses all of it. **No container recreate for any user-lifecycle change** — the five new environment variables (see Configuration) require one initial configuration rollout, and nothing after it.
 
 This removes the two env vars that currently couple user management to a redeploy — `CF_ACCESS_ALLOWED_EMAILS` and `REPOS_ADMIN_EMAILS` — and replaces them with `users.status` and `users.role`.
 
@@ -42,14 +42,24 @@ Each is binding for the implementation plan; deviations require re-opening this 
 | Q14 | **Suspension removes the email from the CF policy; reinstatement re-adds it.** | A suspended user should be stopped at the edge, not travel to the origin for a 403. |
 | Q15 | **Dedicated, narrowly-scoped Cloudflare API token.** Attempt the beta resource-scoped "Access policy admin" role limited to this one policy; fall back to account-scoped `Access: Apps and Policies → Edit`. Recorded in `docs/runbooks/secret-rotation.md` with a rotation cadence. | The account-scoped permission also grants edit over `ha.jpmtech.com` and `jellyseerr.jpmtech.com`. A RepOS compromise holding it is a path into home automation. The narrower scope is worth verifying. |
 | Q16 | **Serialization uses a session-level `pg_advisory_lock` on a dedicated pooled connection, released in a `finally`** — not `pg_advisory_xact_lock`. The connection is checked out of the pool, the lock taken, the CF round-trip performed with **no open transaction**, then unlock + release. | Review finding 1. `pg_advisory_xact_lock` is transaction-scoped: it releases at commit, so it serializes nothing once the transaction closes, and keeping the transaction open across an HTTP call is exactly what Q7 forbids. A session lock holds across statements without a transaction. `db` is a `pg.Pool` (`max: 20`), so one held connection is acceptable at Beta volume; `statement_timeout: 5000` is per-statement and does not fire on an idle held connection. Lock acquisition is bounded by a timeout so a wedged holder fails fast instead of blocking. Crash safety is free — session end releases the lock. |
-| Q17 | **Sync direction follows the fail-closed rule.** *Grants* (invite, reinstate) are DB-first then CF: a CF failure means no access and no email. *Revocations* (suspend, delete) are **CF-first then DB**: the email is removed from the policy before the row is changed or cascaded. | Review finding 2. Deleting the row first destroys the only record of what needs removing — `retry-sync` would have neither an email nor a target. Inverting the order removes the failure mode rather than tracking it, so **no `deleting` tombstone state is needed**. If the DB step fails after CF removal, access is already revoked and the data is intact: the safe direction, and the admin simply retries. |
+| Q17 | **The DB row — not the Cloudflare policy — is the immediate security boundary.** The rule is **grants take effect last, revocations take effect first**, where "takes effect" means *at the layer checked on every request*. Only the DB is. Concretely: **invite** = insert non-activatable row → CF add → mark synced → email. **Reinstate** = CF add → set `active` last. **Suspend** = set `suspended` **first** → CF policy remove → `revoke_user`. **Delete** = set `deleting` **first** → CF policy remove → `revoke_user` → cascade last. | **Round-2 review finding 1 — the round-1 version of this decision was wrong.** It assumed removing an email from the CF policy revokes access immediately. It does not: Access evaluates policy at *authentication*, and an issued session remains valid for its duration — 24h on this app's policy. Corroborated across three doc areas (service tokens describe "revoke existing tokens" as an action separate from policy config; managed OAuth re-evaluates policy "on each token refresh," not per request; MFA session durations are "only checked during the login flow and do not affect a user's existing session") and by the existence of a dedicated revocation endpoint. The DB status *is* checked on every request by `cfAccess.ts`, so it is the only immediate boundary available. |
+| Q17a | **Revocation additionally calls `POST /accounts/{account_id}/access/organizations/revoke_user`** after removing the email from the policy. | Policy removal alone prevents *new* sessions; it does not end live ones. This endpoint does. Both are required: per the service-token docs, revocation without policy removal lets a still-matching identity start a fresh session on the next request. Advisory rather than blocking — the DB status has already denied access by this point (Q17), so a `revoke_user` failure degrades defence-in-depth, not correctness. |
+| Q17b | **Durable intent columns:** `status` gains `'deleting'`, and an `invited` row may not activate unless `cf_synced_at IS NOT NULL`. | Round-2 review finding 1. Without `deleting`, a delete whose CF step fails leaves no record that deletion was requested — the intent is lost and nothing can retry it. Without the `cf_synced_at` precondition, a row whose CF provisioning failed is nonetheless activatable the moment anything puts a session in front of it. |
 | Q18 | **The cohort cap check and the row insert happen inside the same critical section as the CF sync lock** (Q16). | Review finding 3. A bare count-then-insert races: two admins each observe 9 and both insert, yielding 11. Invites already serialize on the advisory lock, so moving the count inside it costs nothing. |
 | Q19 | **Immediately before PUT, the policy is re-fetched and compared against the snapshot taken at the start of the operation. Any difference aborts the write and surfaces as drift.** | Review finding 4. The advisory lock serializes RepOS against itself, not against a human editing the Cloudflare dashboard between our GET and PUT. **Verified against the Cloudflare OpenAPI spec: the Access policy PUT supports no `ETag`, `If-Match`, or version field**, so true optimistic concurrency is unavailable. Re-fetch-and-compare narrows the window to the compare→PUT gap; it does not eliminate it. **Accepted residual risk**, justified by a single-operator account and an admin-initiated, low-frequency operation. |
-| Q20 | **User-management routes require CF Access + `role='admin'`. The `X-Admin-Key` path is rejected**, matching `requireCfAccessOnly`. Delete additionally follows the `requireFreshCfAccess` posture. | Review finding 5. `requireAdminKeyOrCfAccess()` returns on the admin-key branch **without setting `req.userId` or `req.userEmail`**, so there is no actor: self-lockout guards (Q13) have no "self" to compare against and audit rows have no attribution. Precedent already exists — `account.ts:298` gates `DELETE /api/me` with `requireCfAccessOnly` on identical reasoning. No operator automation needs to manage users. |
+| Q20 | **User-management routes require CF Access + `role='admin'`. The `X-Admin-Key` path is rejected**, matching `requireCfAccessOnly`. Delete additionally rejects any `Authorization: Bearer` header — see Q32 for what that does and does not guarantee. | Review finding 5. `requireAdminKeyOrCfAccess()` returns on the admin-key branch **without setting `req.userId` or `req.userEmail`**, so there is no actor: self-lockout guards (Q13) have no "self" to compare against and audit rows have no attribution. Precedent already exists — `account.ts:298` gates `DELETE /api/me` with `requireCfAccessOnly` on identical reasoning. No operator automation needs to manage users. |
 | Q21 | **Activation is a conditional update:** `UPDATE users SET status='active', activated_at=now() WHERE id=$1 AND status='invited' RETURNING id`. The `user_activated` event is emitted **only** by the request whose UPDATE returned a row. | Review finding 6. Concurrent first requests can both read `invited` and both emit an activation event. The conditional update makes exactly one the winner; losers proceed as normal `active` requests. |
 | Q22 | **The sync service writes only to the `Owner Only` policy, and only when every `include[]` element is an email selector** (`{email:{email:…}}`). Any other selector type — `everyone`, `email_domain`, `group`, `service_token` — causes a refusal that surfaces as drift. `exclude[]` and `require[]` are never touched, and the app's second policy (`post-deploy-smoke service token`) is never touched. | Review clarification. "Mutate `include[]`" is unsafe without a declared shape: blind array manipulation could drop a group selector or, worse, preserve an `everyone` rule while appearing to work. Fail-closed on any unrecognized shape. Verified 2026-07-26: the policy currently contains exactly three email selectors and nothing else. |
 | Q23 | **Audit rows carry both actor and target.** `account_events.user_id` is the **target** (so the event lands in that user's `AccountEventsTimeline`); `meta.actor_user_id` + `meta.actor_email` record the **actor**. | Review clarification. `invited_by` covers invitation only; suspension, role change, and deletion need durable attribution too. This requires **no migration** — `kind` has no CHECK constraint by design (per C-ACCOUNT-EVENTS-ENUM, new kinds extend the TypeScript union) and `meta` is intentionally permissive. Deletion attribution survives via the existing `user_id_at_event` snapshot + `ON DELETE SET NULL`. |
-| Q24 | **`cf_synced_at` means "this row's intent is reflected in the CF policy."** Any status change that alters CF membership clears it to NULL first; it is stamped only after a successful sync. Under Q17, revocations sync before the DB write, so they set status and `cf_synced_at` together in one statement. | Review clarification. Left implicit in the first draft. Without this rule a suspended-then-reinstated row could carry a stale timestamp and read as synced when it is not. |
+| Q24 | **`cf_synced_at` means "this row's intent is reflected in the CF policy."** Any status change that alters CF membership clears it to NULL first; it is stamped only after a successful sync. | Review clarification. Left implicit in the first draft. Without this rule a suspended-then-reinstated row could carry a stale timestamp and read as synced when it is not. |
+| Q25 | **The bearer path enforces status too.** `requireAuth` joins `users` and requires `status='active'`; a suspended, deleting, or invited-but-unactivated user's token returns 401. | **Round-2 review finding 2.** Verified: `auth.ts:43–48` selects from `device_tokens` alone with no join to `users`. A suspended user's iOS Shortcut token would keep working indefinitely — the gate would exist on only one of two authentication paths. Suspension and reinstatement are tested through **both** paths. |
+| Q26 | **Every transition affecting cohort membership runs under the Q16 mutation lock** — invite, reinstate, suspend, and delete, not invite alone. **Role changes and last-admin checks additionally take a transaction-level lock** covering the count-and-mutate. | **Round-2 review finding 3.** Two gaps: reinstating a suspended user also grows `active + invited` (suspend one of ten, invite a replacement, reinstate the original → eleven), and two admins can concurrently demote each other after each observes two admins → zero admins. The Q13 guardrails are read-then-write and race exactly like the cap did. |
+| Q27 | **Audit rows are written in the same transaction as the mutation they describe**, via the existing `recordAccountEventTx`. `user_invited` commits with the `users` INSERT, not after the email. A new `user_deleted` kind is written **immediately before** the cascade, in the same transaction. | **Round-2 review finding 4.** The round-1 ordering wrote `user_invited` after Resend, so a mail failure left a real user row and a live CF grant with no audit record. `recordAccountEventTx` already exists for this exact pattern (W2 precedent). Note W6's own deletion path records `account_deleted` only as a **log line** (`account.ts:349`) with no `account_events` row — W9 does not inherit that gap. |
+| Q28 | **PATCH transition matrix is closed.** Permitted: `active→suspended`, `suspended→active`, `invited→suspended`, and `role` changes on `active`/`suspended`. Rejected with 409: anything → `invited`, anything → `deleting` (delete owns that), and `deleting` → anything. **Activation happens only through first sign-in** (Q21), never through PATCH. | Review clarification. An open matrix would let an admin hand-set `invited`, re-arming an activation that Q21's conditional update assumes happens once. |
+| Q29 | **Duplicate invite is explicit per current status:** `invited` → 200 with `{resent: true}` (re-sends the email, no new row); `active` → 409 `already_active`; `suspended` → 409 `suspended_use_reinstate`; `deleting` → 409 `deletion_in_progress`. | Review clarification. `users.email` is UNIQUE, so the un-specified path was a raw constraint violation surfacing as a 500. |
+| Q30 | **Resend idempotency keys.** The initial send uses a key derived from the user id + `invited_at`, so a timeout-retry cannot double-send. An explicit admin "resend" uses a **fresh** key, because that is a deliberate second delivery. | Review clarification. Distinguishes transport retry from intentional resend. |
+| Q31 | **The migration stamps a sync baseline.** The cutover step reads the live CF policy, verifies each pre-existing user's membership, promotes the founding admin, and stamps `cf_synced_at` for rows confirmed present. Rows not present in the policy are left NULL and surface as drift on first load. | Review clarification. The bare `ALTER TABLE` leaves every existing row `cf_synced_at NULL`, which the drift banner would read as "nothing is synced" on day one — a false alarm that trains the operator to ignore the signal. |
+| Q32 | **This spec does not claim `requireFreshCfAccess` enforces re-authentication.** It rejects the `X-Admin-Key` path and requires a valid CF Access JWT plus an admin email; it performs **no token-age check** (`cfAccess.ts:217`). Delete adopts that posture under its accurate description. Renaming the existing flag is noted as a follow-up, out of scope here. | Review clarification. The round-1 spec said delete "follows the `requireFreshCfAccess` posture," which implied a freshness guarantee that does not exist. Propagating a misleading name into a security-relevant decision is how the misunderstanding spreads. |
 
 ## Architecture
 
@@ -73,24 +83,34 @@ Each is binding for the implementation plan; deviations require re-opening this 
 │    POST   /api/admin/users/:id/retry-sync                              │
 │                                          │                             │
 │         ┌────────────────────────────────┘                             │
-│         │  GRANT path — DB first, then CF (Q17)                        │
+│         │  ALL membership transitions hold the same lock (Q26)         │
 │         ▼  ─── pg_advisory_lock, session-scoped, finally-released ──┐  │
-│              (1) count active+invited; 409 if cap reached  (Q18)    │  │
-│              (2) INSERT users (status='invited', cf_synced_at NULL) │  │
-│              (3) services/cfAccessSync.ts                           │  │
-│                    GET policy → assert app_count===1 (Q10)          │  │
-│                    → assert all include[] are email selectors (Q22) │  │
-│                    → mutate → RE-FETCH + compare (Q19) → PUT        │  │
-│                    → stamp cf_synced_at                             │  │
+│                                                                      │  │
+│  GRANT — effective LAST (Q17)                                        │  │
+│   invite:  (1) count active+invited+deleting; 409 if capped  (Q18)   │  │
+│            (2) BEGIN → INSERT users (status='invited',               │  │
+│                  cf_synced_at NULL → not yet activatable, Q17b)      │  │
+│                → recordAccountEventTx('user_invited')  (Q27)         │  │
+│                → COMMIT                                              │  │
+│            (3) cfAccessSync.add                                      │  │
+│                  GET policy → assert app_count===1        (Q10)      │  │
+│                  → assert all include[] are email selectors (Q22)    │  │
+│                  → mutate → RE-FETCH + compare (Q19) → PUT           │  │
+│            (4) stamp cf_synced_at  ← row becomes activatable          │  │
+│            (5) inviteMailer (idempotency key, Q30)                    │  │
+│   reinstate: CF add → set status='active' LAST                        │  │
+│                                                                      │  │
+│  REVOKE — effective FIRST (Q17)                                      │  │
+│   suspend: (1) UPDATE status='suspended', cf_synced_at=NULL          │  │
+│                + event, one transaction              (Q24, Q27)      │  │
+│            (2) cfAccessSync.remove   (3) revoke_user      (Q17a)     │  │
+│   delete:  (1) UPDATE status='deleting' + event, one txn  (Q17b)     │  │
+│            (2) cfAccessSync.remove   (3) revoke_user                 │  │
+│            (4) BEGIN → recordAccountEventTx('user_deleted')          │  │
+│                → DELETE FROM users (W6 cascade) → COMMIT   (Q27)     │  │
 │         ▼  ─── unlock + release ────────────────────────────────────┘  │
-│              (4) services/inviteMailer.ts  (only if 3 succeeded)       │
-│                    Resend API → stamp invite_sent_at + message id      │
-│              (5) INSERT account_events (kind='user_invited',           │
-│                    user_id=target, meta.actor_*)             (Q23)     │
 │                                                                        │
-│         REVOKE path (suspend / delete) — CF first, then DB (Q17)       │
-│              (1) CF remove under the same lock                         │
-│              (2) UPDATE status (+cf_synced_at) or W6 cascade delete    │
+│  middleware/auth.ts — bearer path JOINs users, requires 'active' (Q25) │
 │                                                                      │  │
 │  middleware/cfAccess.ts  — THE GATE (rewritten)                     │  │
 │    verify JWT → resolve email → SELECT users row                    │  │
@@ -112,7 +132,7 @@ ALTER TABLE users
   ADD COLUMN role   TEXT NOT NULL DEFAULT 'member'
     CHECK (role IN ('member','admin')),
   ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
-    CHECK (status IN ('invited','active','suspended')),
+    CHECK (status IN ('invited','active','suspended','deleting')),
   ADD COLUMN invited_by      UUID NULL REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN invited_at      TIMESTAMPTZ NULL,
   ADD COLUMN activated_at    TIMESTAMPTZ NULL,
@@ -127,7 +147,7 @@ Defaults are chosen so the migration is safe on its own: every pre-existing row 
 
 **Data step (idempotent, sentinel-gated, same pattern as `scripts/cutover/001-placeholder-to-jmeyer.sql`):** promote the founding account to `role='admin'`. As of 2026-07-26 the `users` table holds exactly one row — `jason.meyer1@gmail.com` (`c5a79f4b-1701-483f-861c-0386b7dabca4`). The step is a no-op on re-run.
 
-Lifecycle transitions append `account_events` rows, reusing W6's existing cross-wave contract rather than adding a second audit table. New `kind` values: `user_invited`, `user_activated`, `user_suspended`, `user_reinstated`, `role_changed`.
+Lifecycle transitions append `account_events` rows, reusing W6's existing cross-wave contract rather than adding a second audit table. New `kind` values: `user_invited`, `user_activated`, `user_suspended`, `user_reinstated`, `role_changed`, **`user_deleted`**. Each is written in the same transaction as the mutation it describes (Q27); `user_deleted` is written immediately before the cascade so its `user_id_at_event` + `user_email_at_event` snapshot survives the FK `SET NULL`.
 
 ## Configuration
 
@@ -135,7 +155,7 @@ Five new env vars, all **set-once infrastructure identity** — none of them cha
 
 | Var | Purpose |
 |---|---|
-| `CF_API_TOKEN` | Cloudflare API token (Q15) |
+| `CF_API_TOKEN` | Cloudflare API token (Q15). **Implementation-plan check:** `revoke_user` (Q17a) sits under `/access/organizations/…` and may require a permission beyond policy edit — verify the scope covers both calls before relying on it, and degrade gracefully if it does not |
 | `CF_ACCOUNT_ID` | `400d0b4a35d63a32b86ab774b9feb4ab` |
 | `CF_ACCESS_POLICY_ID` | `b4a92a15-27d5-477b-ad36-f78fcdae931c` |
 | `RESEND_API_KEY` | Resend transactional key |
@@ -172,8 +192,9 @@ Shaped by G14, which requires each Beta user to have a disclaimer and a document
 | Failure | Behavior |
 |---|---|
 | CF API unreachable / token invalid — **grant** | Row persists `cf_synced_at NULL`; **no email sent**; admin UI shows "Sync pending — retry"; `POST .../retry-sync` is idempotent |
-| CF API unreachable / token invalid — **revoke** | Operation aborts **before** any DB change (Q17); status unchanged, row not cascaded; admin retries. No orphaned state to reconcile |
-| DB failure after a successful CF removal | Access is already revoked and data is intact — the fail-closed direction. Admin retries the delete/suspend |
+| CF API unreachable / token invalid — **revoke** | The DB status change has **already committed** and already denies access on every request (Q17). CF removal and `revoke_user` are retried; until they succeed the row shows as drift. A live CF session is harmless because the DB gate rejects it |
+| `revoke_user` fails after policy removal | Advisory-only failure (Q17a). The DB gate is the boundary; a stale CF session cannot pass it. Surfaced as drift, retried |
+| Delete interrupted after `status='deleting'` | Intent is durable (Q17b). The row is non-authenticating on both paths, and the admin resumes the delete. This is the state the round-1 design lost |
 | Policy `app_count !== 1` | Sync refuses, surfaces a distinct error (Q10) |
 | Policy contains a non-email selector | Sync refuses, surfaces as drift (Q22) |
 | Concurrent invites | Session-level `pg_advisory_lock` on a dedicated connection serializes the whole count → insert → CF round-trip (Q16, Q18) |
@@ -190,14 +211,20 @@ Shaped by G14, which requires each Beta user to have a disclaimer and a document
 
 The highest regression risk is **inverted behavior**: existing tests assert that auto-provisioning works. Locating and flipping those assertions matters more than any new test.
 
-- **Gate:** unknown email → `403 not_invited`; `invited` → flips to `active` and stamps `activated_at`; `suspended` → `403 access_suspended`; no row is ever created by the middleware
+- **Gate (CF Access path):** unknown email → `403 not_invited`; `invited` + `cf_synced_at` set → flips to `active`; `invited` + `cf_synced_at NULL` → 403, **not** activated (Q17b); `suspended` and `deleting` → 403; no row is ever created by the middleware
+- **Gate (bearer path, Q25):** a token belonging to a `suspended`, `deleting`, or unactivated user returns 401. Suspend-then-reinstate is asserted through **both** authentication paths in one test, since the round-1 design covered only one
+- **Revocation timing (Q17):** with the CF calls mocked to fail entirely, a suspended user is denied on the **very next request** — proving the DB, not the policy, is the boundary
 - **Activation race (Q21):** two concurrent first requests for the same `invited` user both succeed, but exactly **one** `user_activated` event is written
 - **Lockout guardrails:** self-suspend, self-demote, self-delete, and last-admin removal each rejected
 - **Auth gate (Q20):** every route rejects `X-Admin-Key`; a CF-Access `member` gets 403; `DELETE` additionally rejects an `Authorization: Bearer` header
 - **CF sync (mocked CF API):** success stamps `cf_synced_at`; grant failure leaves NULL **and sends no email**; retry idempotent; `app_count !== 1` refuses; a non-email selector in `include[]` refuses (Q22)
 - **Revoke ordering (Q17):** with CF removal mocked to fail, suspend leaves `status` unchanged and delete leaves the row and its data intact — asserted by row counts, not just status code
 - **Dashboard-edit clobber (Q19):** mutate the policy between the service's GET and its pre-PUT re-fetch; assert the write aborts and drift surfaces rather than overwriting
-- **Cap concurrency (Q18):** fire the tenth and eleventh invites concurrently against a 9-user table; assert exactly one 201 and one 409, and that the final count is 10
+- **Cap concurrency (Q18, Q26):** fire the tenth and eleventh invites concurrently against a 9-user table — exactly one 201, one 409, final count 10. Separately, fire a **concurrent invite-versus-reinstate** at a count of nine and ten; reinstate must contend for the same cap
+- **Last-admin race (Q26):** two admins concurrently demote each other; assert exactly one succeeds and at least one admin always remains. Same test for concurrent mutual deletion
+- **Transition matrix (Q28):** every rejected transition returns 409 — notably `active→invited` and any transition out of `deleting`
+- **Duplicate invite (Q29):** each of the four current-status cases returns its specified code, and none surfaces a raw UNIQUE violation
+- **Audit atomicity (Q27):** with Resend mocked to fail, the `user_invited` event still exists; with the cascade mocked to fail, `user_deleted` is rolled back with it — no event describing a mutation that did not happen, and no mutation without its event
 - **Email (mocked Resend):** not sent when sync failed; sent on success; resend works
 - **Contamination:** a non-admin receives 403 on all six routes — six rows toward G2's ≥35
 - **Audit (Q23):** every lifecycle event records both target (`user_id`) and actor (`meta.actor_*`); attribution survives deletion via `user_id_at_event`
