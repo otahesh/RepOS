@@ -2439,20 +2439,12 @@ describe('requireCfAccessAdmin (Q3, Q20)', () => {
     expect(r.json<{ error: string }>().error).toBe('cf_access_required');
   });
 
-  it('does not depend on REPOS_ADMIN_EMAILS in any way', async () => {
-    const saved = process.env.REPOS_ADMIN_EMAILS;
-    process.env.REPOS_ADMIN_EMAILS = 'nobody@nowhere.test';
-    try {
-      const r = await app.inject({
-        method: 'GET', url: '/probe',
-        headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(adminEmail) },
-      });
-      expect(r.statusCode).toBe(200);
-    } finally {
-      if (saved === undefined) delete process.env.REPOS_ADMIN_EMAILS;
-      else process.env.REPOS_ADMIN_EMAILS = saved;
-    }
-  });
+  // NOTE: there is deliberately NO "does not depend on REPOS_ADMIN_EMAILS"
+  // test here. Writing one means writing `process.env.REPOS_ADMIN_EMAILS`,
+  // which is exactly the string Task 19's sweep scans `api/tests` for — this
+  // file would become the sweep's only remaining offender and fail it
+  // deterministically. The sweep is also the strictly stronger statement:
+  // "no file anywhere reads this var" subsumes "setting it changes nothing".
 });
 ```
 
@@ -2560,7 +2552,18 @@ cd /var/home/jason/Projects/RepOS/api && git rm tests/middleware/admin-emails.te
 
 `tests/integration/admin-feedback.test.ts` sets `REPOS_ADMIN_EMAILS='boss@repos.test'` in four places (lines 9, 13, 19–20, 46, 51, 71). Replace that plumbing with a `mkUserWithEmail('boss@repos.test', { role: 'admin' })` fixture created in `beforeAll` and cleaned up in `afterAll`.
 
-Grep for any remaining reader: `grep -rn "REPOS_ADMIN_EMAILS\|isAdminEmail" api/src api/tests` must return nothing.
+Grep for any remaining reader — run from the repo root, and it must return nothing:
+
+```bash
+cd /var/home/jason/Projects/RepOS && grep -rn "REPOS_ADMIN_EMAILS\|isAdminEmail" api/src api/tests
+```
+
+`api/tests` is in scope on purpose and this grep is only satisfiable once the
+four existing test readers above are gone: `admin-emails.test.ts` (deleted),
+`admin-feedback.test.ts` (fixture instead of env), `jwks-rotation.test.ts:72`,
+and the `CF_ACCESS_ALLOWED_EMAILS` plumbing in `helpers/cf-access-jwt.ts`. Do
+not add a new test that writes the variable to prove the gate ignores it —
+Task 19's sweep asserts the stronger property statically.
 
 - [ ] **Step 6: Run tests**
 
@@ -3038,6 +3041,7 @@ const { buildApp } = await import('../../src/app.js');
 const { db } = await import('../../src/db/client.js');
 const policy = await import('../../src/services/cfAccessPolicy.js');
 const mailer = await import('../../src/services/inviteMailer.js');
+const { initialIdempotencyKey } = mailer;
 const { setupTestJwks } = await import('../helpers/cf-access-jwt.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -3098,10 +3102,12 @@ async function invite(email: string, role: 'member' | 'admin' = 'member') {
 
 function freshEmail(tag: string) { return `inv-${tag}-${randomUUID().slice(0, 8)}@repos.test`; }
 
-async function seed(email: string, status: string, cfSynced: Date | null) {
+async function seed(
+  email: string, status: string, cfSynced: Date | null, sentAt: Date | null = null,
+) {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, status, cf_synced_at, invited_at)
-     VALUES ($1,$2,$3, now()) RETURNING id`, [email, status, cfSynced],
+    `INSERT INTO users (email, status, cf_synced_at, invited_at, invite_sent_at)
+     VALUES ($1,$2,$3, now(), $4) RETURNING id`, [email, status, cfSynced, sentAt],
   );
   return rows[0].id;
 }
@@ -3210,9 +3216,11 @@ describe('duplicate invite — all five cases (Q29)', () => {
     expect(sentMail).toHaveLength(0);
   });
 
-  it('invited + synced -> intentional resend with a FRESH idempotency key, 200 resent', async () => {
+  it('invited + synced + already delivered -> intentional resend with a FRESH key, 200 resent', async () => {
     const email = freshEmail('synced');
-    const id = await seed(email, 'invited', new Date());
+    // invite_sent_at NON-NULL: a delivery is already known to have succeeded,
+    // so every further invite is a deliberate second delivery.
+    const id = await seed(email, 'invited', new Date(), new Date());
     policyEmails.push(email);
     const first = await invite(email);
     const second = await invite(email);
@@ -3222,6 +3230,43 @@ describe('duplicate invite — all five cases (Q29)', () => {
     expect(sentMail[0].idempotencyKey).not.toBe(sentMail[1].idempotencyKey);
     expect(second.statusCode).toBe(200);
     expect(id).toBeTruthy();
+  });
+
+  // Q30's real failure mode: Resend ACCEPTED the initial send but the response
+  // never came back, so the row is invited + CF-synced + invite_sent_at NULL.
+  // Retrying must reuse the deterministic initial key — that is the only thing
+  // that lets Resend collapse the two requests into one delivery.
+  it('invited + synced + NEVER delivered -> reuses the INITIAL key, not a fresh one', async () => {
+    const email = freshEmail('lostack');
+    const id = await seed(email, 'invited', new Date(), null);
+    policyEmails.push(email);
+
+    const { rows } = await db.query<{ invited_at: Date }>(
+      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    );
+    const expected = initialIdempotencyKey(id, rows[0].invited_at);
+
+    const r = await invite(email);
+    expect(r.statusCode).toBe(200);
+    expect(sentMail).toHaveLength(1);
+    expect(sentMail[0].idempotencyKey).toBe(expected);
+    // Not a resend — this is the initial delivery finally completing.
+    expect(r.json<{ resent: boolean }>().resent).toBe(false);
+
+    // ...and only NOW does a further invite become a genuine resend.
+    const again = await invite(email);
+    expect(again.json<{ resent: boolean }>().resent).toBe(true);
+    expect(sentMail[1].idempotencyKey).not.toBe(expected);
+  });
+
+  it('an unsynced retry whose mail never landed also reuses the INITIAL key', async () => {
+    const email = freshEmail('unsyncedkey');
+    const id = await seed(email, 'invited', null, null);
+    const { rows } = await db.query<{ invited_at: Date }>(
+      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    );
+    await invite(email);
+    expect(sentMail[0].idempotencyKey).toBe(initialIdempotencyKey(id, rows[0].invited_at));
   });
 
   it('active -> 409 already_active', async () => {
@@ -3507,7 +3552,7 @@ export async function inviteUser(
   // and both insert, yielding 11.
   return withMembershipLock(async () => {
     const existing = await db.query<{ id: string; status: UserStatus; cf_synced_at: Date | null; invited_at: Date | null }>(
-      `SELECT id, status, cf_synced_at, invited_at FROM users WHERE lower(email)=$1`,
+      `SELECT id, status, cf_synced_at, invited_at, invite_sent_at FROM users WHERE lower(email)=$1`,
       [target],
     );
 
@@ -3521,25 +3566,45 @@ export async function inviteUser(
       if (row.status === 'deleting') throw new LifecycleError(409, 'deletion_in_progress');
 
       const invitedAt = row.invited_at ?? new Date();
+
+      // Q30 — the key is chosen by whether a delivery has ever SUCCEEDED, not
+      // by which retry branch we are in. `invite_sent_at` is the only durable
+      // record of that, and it is written only after sendInviteEmail resolves.
+      //
+      // The case that forces this: Resend ACCEPTS the initial send but the
+      // response times out. The row is left invited + CF-synced +
+      // invite_sent_at NULL, so a retry lands in the "already provisioned"
+      // branch below — which used to mint a FRESH key and deliver the same
+      // initial invite a second time. Resend only deduplicates retries that
+      // reuse the same key, so the deterministic initial key is the only thing
+      // that collapses them. A fresh key is correct exclusively when a prior
+      // delivery is known-successful, which is what Q30 means by "a deliberate
+      // second delivery".
+      const neverDelivered = row.invite_sent_at === null;
+      const idempotencyKey = neverDelivered
+        ? initialIdempotencyKey(row.id, invitedAt)
+        : resendIdempotencyKey(row.id);
+
       if (row.cf_synced_at === null) {
         // Provisioning failed last time: retry the sync FIRST and send only if
         // it succeeds. Mailing unconditionally would send a link the invitee
         // cannot use, contradicting Q7 and Q17b.
         const r = await provisionAndMail(
-          row.id, target, invitedAt, actor.email, resendIdempotencyKey(row.id),
+          row.id, target, invitedAt, actor.email, idempotencyKey,
         );
         return {
           id: row.id, email: target, status: 'invited',
           ...r, resynced: r.cf_synced,
         };
       }
-      // Already provisioned: a deliberate second delivery, fresh key (Q30).
+      // Already provisioned. Whether this is a resend or the completion of an
+      // initial delivery is decided by `neverDelivered`, not by this branch.
       let invite_sent = false;
       let mail_error: string | null = null;
       try {
         const { messageId } = await sendInviteEmail({
           toEmail: target, invitedByEmail: actor.email,
-          idempotencyKey: resendIdempotencyKey(row.id),
+          idempotencyKey,
         });
         await db.query(
           `UPDATE users SET invite_sent_at = now(), invite_message_id=$2 WHERE id=$1`,
@@ -3551,7 +3616,10 @@ export async function inviteUser(
       }
       return {
         id: row.id, email: target, status: 'invited',
-        cf_synced: true, invite_sent, sync_error: null, mail_error, resent: true,
+        cf_synced: true, invite_sent, sync_error: null, mail_error,
+        // Only a genuine second delivery is a resend; finishing an initial
+        // send whose response was lost is not.
+        resent: !neverDelivered,
       };
     }
 
@@ -5695,14 +5763,33 @@ describe('reconciliation runs under the Q16/Q26 membership lock', () => {
   it('a concurrent lock holder blocks the run rather than racing it', async () => {
     await db.query(`DELETE FROM users`);
     policyEmails = ['serialized@repos.test'];
-    let started = false;
+
+    // The holder must NOT await the reconciliation from inside its callback:
+    // withMembershipLock keeps the lock until the callback settles, and the
+    // reconciliation is waiting on that same lock from another pooled
+    // connection. Awaiting it there deadlocks until the 60s acquisition
+    // timeout, which Vitest's 30s limit kills first. Start the run OUTSIDE
+    // the holder and release the holder through a latch.
+    let signalAcquired!: () => void;
+    const acquired = new Promise<void>((r) => { signalAcquired = r; });
+    let release!: () => void;
+    const releaseHolder = new Promise<void>((r) => { release = r; });
+
     const holder = withMembershipLock(async () => {
-      const p = reconcileCfBaseline('cutover').then(() => { started = true; });
-      await new Promise((r) => setTimeout(r, 150));
-      expect(started).toBe(false); // still waiting on the lock
-      return p;
+      signalAcquired();
+      await releaseHolder;
     });
+    await acquired; // deterministic: the holder owns the lock before we race it
+
+    let started = false;
+    const run = reconcileCfBaseline('cutover').then(() => { started = true; });
+
+    await new Promise((r) => setTimeout(r, 150));
+    expect(started).toBe(false); // still waiting on the lock
+
+    release();
     await holder;
+    await run;
     expect(started).toBe(true);
   });
 });
@@ -6047,15 +6134,29 @@ Create `api/tests/dr/restore-admin-guarantee.test.ts`:
 import 'dotenv/config';
 import { describe, it, expect, afterAll, vi } from 'vitest';
 import pg from 'pg';
+import { existsSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 
 const cleanups: Array<() => Promise<void>> = [];
-afterAll(async () => { for (const c of cleanups) await c(); });
+// LIFO, not FIFO. preO80Database registers `pool.end(); eph.drop()` first, and
+// cases (b)–(d) later register the app / singleton-db teardown against that
+// same database. Draining in registration order would DROP DATABASE while the
+// app's pool still holds connections to it, which Postgres refuses with
+// "database is being accessed by other users".
+afterAll(async () => { for (const c of cleanups.reverse()) await c(); });
 
-/** Reconstruct a pre-080 database: full schema, then unwind 080. */
-async function preO80Database(tag: string): Promise<pg.Pool> {
+/**
+ * Reconstruct a pre-080 database: full schema, then unwind 080.
+ *
+ * Returns the URL alongside the pool because cases (b)–(d) must point
+ * `DATABASE_URL` at THIS database before importing the singleton db client.
+ */
+async function preO80Database(tag: string): Promise<{ pool: pg.Pool; url: string }> {
   const eph = await createEphemeralDb(tag);
   const pool = new pg.Pool({ connectionString: eph.url, max: 3 });
   cleanups.push(async () => { await pool.end(); await eph.drop(); });
@@ -6067,12 +6168,12 @@ async function preO80Database(tag: string): Promise<pg.Pool> {
       DROP COLUMN activated_at, DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at,
       DROP COLUMN invite_message_id`);
   await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
-  return pool;
+  return { pool, url: eph.url };
 }
 
 describe('restore of a pre-080 dump (Q35)', () => {
   it('(a) migrations alone, with NO Cloudflare, yield an active admin', async () => {
-    const pool = await preO80Database('dr-a');
+    const { pool } = await preO80Database('dr-a');
     await pool.query(`INSERT INTO users (email) VALUES ('beta.user@repos.test')`);
     // No CF_API_TOKEN is set anywhere in this test — that is the point.
     await runMigrations(pool);
@@ -6084,17 +6185,46 @@ describe('restore of a pre-080 dump (Q35)', () => {
   });
 
   it('(b) that admin can clear maintenance — the lockout scenario is closed', async () => {
-    const pool = await preO80Database('dr-b');
+    // This is the whole point of the wave's DR story, so it EXERCISES the
+    // endpoint. Asserting role/status off a SELECT only restates migration
+    // 080; it cannot catch a gate that rejects the row for some other reason
+    // (a stale allowlist read, the Q17b precondition applied too broadly, a
+    // non-async preHandler that hangs). Boot the app and clear the flag.
+    const { pool, url } = await preO80Database('dr-b');
     await runMigrations(pool);
-    // The maintenance route is admin-gated; the gate resolves role from this
-    // row, so "can clear maintenance" reduces to "an admin row the gate will
-    // accept exists": active, role=admin, and not blocked by the invited-row
-    // provisioning precondition (Q17b applies to `invited` only).
-    const { rows } = await pool.query<{ role: string; status: string; cf_synced_at: Date | null }>(
-      `SELECT role, status, cf_synced_at FROM users WHERE lower(email)=$1`, [FOUNDING_ADMIN_EMAIL],
+
+    const flag = join(await mkdtemp(join(tmpdir(), 'repos-dr-')), 'maintenance.flag');
+    await writeFile(flag, 'restore in progress');
+    process.env.MAINTENANCE_FLAG_PATH = flag;
+
+    // Fresh module registry so app.js and client.js bind to THIS database
+    // rather than a pool cached by an earlier case.
+    vi.resetModules();
+    process.env.DATABASE_URL = url;
+    const { buildApp } = await import('../../src/app.js');
+    const { db } = await import('../../src/db/client.js');
+    const { setupTestJwks } = await import('../helpers/cf-access-jwt.js');
+
+    const jwks = await setupTestJwks();
+    const app = await buildApp();
+    cleanups.push(async () => { await app.close(); await db.end(); await jwks.teardown(); });
+
+    const r = await app.inject({
+      method: 'POST', url: '/api/maintenance/clear',
+      headers: {
+        'cf-access-jwt-assertion': await jwks.mintJwt(FOUNDING_ADMIN_EMAIL),
+        'x-repos-csrf': '1',
+      },
+    });
+    expect(r.statusCode).toBe(204);
+    expect(existsSync(flag)).toBe(false);
+
+    // No Cloudflare was consulted to get here — the row is unstamped and the
+    // clear still worked. That is the property the lockout regression needs.
+    const { rows } = await db.query<{ cf_synced_at: Date | null }>(
+      `SELECT cf_synced_at FROM users WHERE lower(email)=$1`, [FOUNDING_ADMIN_EMAIL],
     );
-    expect(rows[0]).toMatchObject({ role: 'admin', status: 'active' });
-    expect(rows[0].cf_synced_at).toBeNull(); // membership unknown until reconciliation
+    expect(rows[0].cf_synced_at).toBeNull();
   });
 
   it('(c) the CF reconciliation reconstructs the CF-only invite', async () => {
@@ -6103,6 +6233,12 @@ describe('restore of a pre-080 dump (Q35)', () => {
     cleanups.push(async () => { await pool.end(); await eph.drop(); });
     await runMigrations(pool);
 
+    // vi.resetModules() BEFORE setting DATABASE_URL and importing: db/client.js
+    // is a singleton that reads the URL once at module evaluation. Without a
+    // registry reset the dynamic import below returns whatever pool an earlier
+    // case already built, so this case would silently reconcile the WRONG
+    // database while asserting against this one.
+    vi.resetModules();
     process.env.DATABASE_URL = eph.url;
     const policy = await import('../../src/services/cfAccessPolicy.js');
     const { reconcileCfBaseline } = await import('../../src/services/cfReconcile.js');
@@ -6137,9 +6273,14 @@ describe('restore of a pre-080 dump (Q35)', () => {
     await runMigrations(pool);
     await pool.query(`INSERT INTO users (email, status) VALUES ('kept@repos.test','active')`);
 
+    // Same reason as case (c): without the reset this would run against dr-c's
+    // cached pool and pass vacuously while asserting against dr-d.
+    vi.resetModules();
     process.env.DATABASE_URL = eph.url;
     const policy = await import('../../src/services/cfAccessPolicy.js');
     const { reconcileCfBaseline, ReconcileAbort } = await import('../../src/services/cfReconcile.js');
+    const { db } = await import('../../src/db/client.js');
+    cleanups.push(async () => { await db.end(); });
     vi.spyOn(policy, 'fetchPolicy').mockRejectedValue(
       new policy.CfPolicyError('app_count_not_one', 'attached to two apps'),
     );
@@ -6219,6 +6360,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import SettingsUsersPage from './SettingsUsersPage';
 import * as api from '../lib/api/adminUsers';
+import * as auth from '../auth';
 
 const baseResponse = {
   users: [
@@ -6235,7 +6377,26 @@ const baseResponse = {
 
 beforeEach(() => vi.restoreAllMocks());
 
-function renderPage() {
+// The page reads `useCurrentUser()` for `is_admin` and for the Q13 self-action
+// rule (`row.id !== currentUserId`). `AuthContext`'s default value is
+// `{ status:'loading', user:null }`, so rendering without a provider or a mock
+// leaves `currentUserId` undefined — every row then compares unequal, the
+// signed-in admin's row grows a full action set, and both the self-action test
+// and the delete test (which indexes [0] of the DELETE buttons) fail.
+// `renderPage` mocks the hook so the signed-in user is row id '1'.
+function renderPage(user: Partial<auth.User> = {}) {
+  vi.spyOn(auth, 'useCurrentUser').mockReturnValue({
+    status: 'authenticated',
+    user: {
+      id: '1',                       // matches baseResponse's admin row
+      email: 'admin@repos.test',
+      display_name: 'Admin',
+      timezone: 'America/New_York',
+      is_admin: true,
+      ...user,
+    },
+    error: null,
+  });
   return render(<MemoryRouter><SettingsUsersPage /></MemoryRouter>);
 }
 
