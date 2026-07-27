@@ -2439,12 +2439,14 @@ describe('requireCfAccessAdmin (Q3, Q20)', () => {
     expect(r.json<{ error: string }>().error).toBe('cf_access_required');
   });
 
-  // NOTE: there is deliberately NO "does not depend on REPOS_ADMIN_EMAILS"
-  // test here. Writing one means writing `process.env.REPOS_ADMIN_EMAILS`,
-  // which is exactly the string Task 19's sweep scans `api/tests` for — this
-  // file would become the sweep's only remaining offender and fail it
-  // deterministically. The sweep is also the strictly stronger statement:
-  // "no file anywhere reads this var" subsumes "setting it changes nothing".
+  // NOTE: there is deliberately NO "the gate ignores the old admin-emails env
+  // var" test here. Writing one means writing an env read for that variable,
+  // and Task 19's sweep matches raw file text — it cannot tell a real reader
+  // from one inside a test or a comment, so this file would become the sweep's
+  // only remaining offender and fail it deterministically. The sweep is also
+  // the strictly stronger statement: "no file reads it anywhere" subsumes
+  // "setting it changes nothing here". This comment names no variable for the
+  // same reason.
 });
 ```
 
@@ -2555,14 +2557,24 @@ cd /var/home/jason/Projects/RepOS/api && git rm tests/middleware/admin-emails.te
 Grep for any remaining reader — run from the repo root, and it must return nothing:
 
 ```bash
-cd /var/home/jason/Projects/RepOS && grep -rn "REPOS_ADMIN_EMAILS\|isAdminEmail" api/src api/tests
+cd /var/home/jason/Projects/RepOS && grep -rnE "process\.env\.(REPOS_ADMIN_EMAILS|CF_ACCESS_ALLOWED_EMAILS)|isAdminEmail" api/src api/tests
 ```
 
-`api/tests` is in scope on purpose and this grep is only satisfiable once the
+**Match env READS, not the names.** A bare-name grep is unsatisfiable by
+construction: this wave deliberately writes the old names into prose that has
+to survive — migration 080's mapping header (`CF_ACCESS_ALLOWED_EMAILS ->
+users.status`), the replacement comment in `cfAccess.ts`, and the boot-guard
+and runbook text all cite them to explain what was removed. Deleting that
+documentation to satisfy a grep would be the tail wagging the dog. The
+invariant that actually matters is that **no code reads them**, which is what
+`process\.env\.` anchors. `isAdminEmail` stays a bare match because it is an
+identifier, not prose, and Task 9 deletes it outright.
+
+`api/tests` is in scope on purpose, and this grep is only satisfiable once the
 four existing test readers above are gone: `admin-emails.test.ts` (deleted),
 `admin-feedback.test.ts` (fixture instead of env), `jwks-rotation.test.ts:72`,
 and the `CF_ACCESS_ALLOWED_EMAILS` plumbing in `helpers/cf-access-jwt.ts`. Do
-not add a new test that writes the variable to prove the gate ignores it —
+not add a new test that writes either variable to prove the gate ignores it —
 Task 19's sweep asserts the stronger property statically.
 
 - [ ] **Step 6: Run tests**
@@ -3010,7 +3022,16 @@ The full grant path: count under the lock, insert non-activatable, CF add, stamp
   - `class LifecycleError extends Error { statusCode: number; code: string; details?: Record<string, unknown> }`
   - `inviteUser(email: string, role: UserRole, actor: Actor): Promise<InviteOutcome>`
   - `resendInvite(targetId: string, actor: Actor): Promise<InviteOutcome>`
-  - `type InviteOutcome = { id: string; email: string; status: UserStatus; cf_synced: boolean; invite_sent: boolean; sync_error: string | null; mail_error: string | null; resent?: boolean; resynced?: boolean }`
+  - `type InviteOutcome = { id: string; email: string; status: UserStatus; created: boolean; cf_synced: boolean; invite_sent: boolean; sync_error: string | null; mail_error: string | null; resent?: boolean; resynced?: boolean }`
+
+    `created` is an explicit discriminator, set true **only** on the path that
+    INSERTs a row. The route previously inferred freshness as
+    `resent !== true && resynced === undefined`, which silently misclassifies
+    any duplicate-invite branch that reports `resent: false` — the synced but
+    never-delivered case returns exactly that and would have been sent as 201.
+    Do not reintroduce inference here: `created` is the only thing that
+    actually distinguishes "a user row came into existence" from "we tried
+    again", and every other field is about delivery, not creation.
   - Routes `POST /api/admin/users/invite`, `POST /api/admin/users/:id/resend-invite`.
 
 - [ ] **Step 1: Write the failing test**
@@ -3151,7 +3172,10 @@ describe('POST /api/admin/users/invite — happy path', () => {
     mailImpl = async () => { throw new mailer.MailerError('mail_http_error', 'nope'); };
     const email = freshEmail('mailfail');
     const r = await invite(email);
+    // 201 even though the mail failed — `created` tracks the row INSERT, not
+    // delivery. That separation is the whole reason it exists.
     expect(r.statusCode).toBe(201);
+    expect(r.json<{ created: boolean }>().created).toBe(true);
     const id = r.json<{ id: string; invite_sent: boolean }>().id;
     expect(r.json<{ invite_sent: boolean }>().invite_sent).toBe(false);
     const { rows } = await db.query<{ n: number }>(
@@ -3247,7 +3271,10 @@ describe('duplicate invite — all five cases (Q29)', () => {
     const expected = initialIdempotencyKey(id, rows[0].invited_at);
 
     const r = await invite(email);
+    // 200, not 201: nothing was created. This is the case that broke when the
+    // route inferred freshness from `resent`/`resynced` instead of `created`.
     expect(r.statusCode).toBe(200);
+    expect(r.json<{ created: boolean }>().created).toBe(false);
     expect(sentMail).toHaveLength(1);
     expect(sentMail[0].idempotencyKey).toBe(expected);
     // Not a resend — this is the initial delivery finally completing.
@@ -3551,7 +3578,10 @@ export async function inviteUser(
   // as the CF sync. A bare count-then-insert races: two admins each observe 9
   // and both insert, yielding 11.
   return withMembershipLock(async () => {
-    const existing = await db.query<{ id: string; status: UserStatus; cf_synced_at: Date | null; invited_at: Date | null }>(
+    const existing = await db.query<{
+      id: string; status: UserStatus; cf_synced_at: Date | null;
+      invited_at: Date | null; invite_sent_at: Date | null;
+    }>(
       `SELECT id, status, cf_synced_at, invited_at, invite_sent_at FROM users WHERE lower(email)=$1`,
       [target],
     );
@@ -3593,7 +3623,7 @@ export async function inviteUser(
           row.id, target, invitedAt, actor.email, idempotencyKey,
         );
         return {
-          id: row.id, email: target, status: 'invited',
+          id: row.id, email: target, status: 'invited', created: false,
           ...r, resynced: r.cf_synced,
         };
       }
@@ -3615,10 +3645,12 @@ export async function inviteUser(
         mail_error = mailErrorCode(err);
       }
       return {
-        id: row.id, email: target, status: 'invited',
+        id: row.id, email: target, status: 'invited', created: false,
         cf_synced: true, invite_sent, sync_error: null, mail_error,
         // Only a genuine second delivery is a resend; finishing an initial
-        // send whose response was lost is not.
+        // send whose response was lost is not. This is exactly the branch that
+        // returns resent:false WITHOUT having created anything, which is why
+        // the route keys 201 off `created` and not off this field.
         resent: !neverDelivered,
       };
     }
@@ -3662,7 +3694,8 @@ export async function inviteUser(
     const r = await provisionAndMail(
       userId, target, invitedAt, actor.email, initialIdempotencyKey(userId, invitedAt),
     );
-    return { id: userId, email: target, status: 'invited', ...r };
+    // The only path that INSERTs, so the only one that is a 201.
+    return { id: userId, email: target, status: 'invited', created: true, ...r };
   });
 }
 
@@ -3732,8 +3765,11 @@ export async function adminUsersRoutes(app: FastifyInstance) {
       }
       try {
         const out = await inviteUser(parsed.data.email, parsed.data.role, actor);
-        const fresh = out.resent !== true && out.resynced === undefined;
-        return reply.code(fresh ? 201 : 200).send(out);
+        // 201 ONLY when a row was created. Inferring this from `resent` /
+        // `resynced` breaks as soon as a duplicate-invite branch legitimately
+        // reports resent:false, which the synced-but-never-delivered retry
+        // does.
+        return reply.code(out.created ? 201 : 200).send(out);
       } catch (err) {
         return sendLifecycleError(reply, err);
       }
@@ -6207,7 +6243,26 @@ describe('restore of a pre-080 dump (Q35)', () => {
 
     const jwks = await setupTestJwks();
     const app = await buildApp();
-    cleanups.push(async () => { await app.close(); await db.end(); await jwks.teardown(); });
+
+    // CRITICAL: requireAdminKeyOrCfAccess short-circuits to authMode='admin'
+    // and returns WITHOUT looking at the JWT whenever ADMIN_API_KEY is unset
+    // (api/src/middleware/cfAccess.ts — the "dev / test: open admin path"
+    // branch). Leaving it unset makes this test pass for a database with no
+    // admin at all, which is precisely the regression it exists to catch.
+    // Set it, send NO x-admin-key, and the gate is forced down the CF Access
+    // path where the founding admin's role is actually resolved.
+    const savedAdminKey = process.env.ADMIN_API_KEY;
+    const savedFlagPath = process.env.MAINTENANCE_FLAG_PATH;
+    process.env.ADMIN_API_KEY = 'dr-guard-key';
+    cleanups.push(async () => {
+      if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY;
+      else process.env.ADMIN_API_KEY = savedAdminKey;
+      if (savedFlagPath === undefined) delete process.env.MAINTENANCE_FLAG_PATH;
+      else process.env.MAINTENANCE_FLAG_PATH = savedFlagPath;
+      await app.close();
+      await db.end();
+      await jwks.teardown();
+    });
 
     const r = await app.inject({
       method: 'POST', url: '/api/maintenance/clear',
@@ -6218,6 +6273,25 @@ describe('restore of a pre-080 dump (Q35)', () => {
     });
     expect(r.statusCode).toBe(204);
     expect(existsSync(flag)).toBe(false);
+
+    // Prove the gate was really exercised rather than bypassed: the same
+    // request from a non-admin identity must be refused. If ADMIN_API_KEY
+    // were unset, this would also return 204 and the assertion above would be
+    // meaningless.
+    await writeFile(flag, 'restore in progress');
+    await db.query(
+      `INSERT INTO users (email, role, status) VALUES ('member.dr@repos.test','member','active')`,
+    );
+    const denied = await app.inject({
+      method: 'POST', url: '/api/maintenance/clear',
+      headers: {
+        'cf-access-jwt-assertion': await jwks.mintJwt('member.dr@repos.test'),
+        'x-repos-csrf': '1',
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json<{ error: string }>().error).toBe('not_an_admin');
+    expect(existsSync(flag)).toBe(true);
 
     // No Cloudflare was consulted to get here — the row is unstamped and the
     // clear still worked. That is the property the lockout regression needs.
@@ -6842,7 +6916,7 @@ Expected: the contamination suite passes if Tasks 9–14 are correct — run it 
 
 - [ ] **Step 3: Fix whatever the sweep finds**
 
-Remove every surviving reader, including the `.env` template in `docker/` and any documentation that instructs an operator to set them. Replace those doc lines with a pointer to `/settings/users`.
+Remove every surviving reader, plus `api/.env.example` (there is no template under `docker/` — see the Files list above) and any documentation that instructs an operator to *set* these variables. Replace those doc lines with a pointer to `/settings/users`. Documentation that merely records what the variables *were*, and what replaced them, stays — the greps above are anchored on `process.env.` precisely so that history survives.
 
 - [ ] **Step 4: Update the Beta dashboard and scope docs**
 
@@ -6863,10 +6937,15 @@ Run, in order:
 ```bash
 cd /var/home/jason/Projects/RepOS/api && npm run build && npm test && npm run test:integration
 cd /var/home/jason/Projects/RepOS/frontend && npx vitest run && npm run build
-cd /var/home/jason/Projects/RepOS && grep -rn "REPOS_ADMIN_EMAILS\|CF_ACCESS_ALLOWED_EMAILS\|isAdminEmail" api/src frontend/src docker scripts
+cd /var/home/jason/Projects/RepOS && grep -rnE "process\.env\.(REPOS_ADMIN_EMAILS|CF_ACCESS_ALLOWED_EMAILS)|isAdminEmail" api/src frontend/src docker scripts
 ```
 
 Expected: all green; the final grep returns **nothing**.
+
+Same reasoning as Task 9's grep: this matches **reads**, not the names. Migration
+080's mapping header and the `cfAccess.ts` replacement comment both cite the
+removed variables on purpose, to record what they were replaced by. A
+bare-name grep would force deleting that history to go green.
 
 - [ ] **Step 6: Commit**
 
