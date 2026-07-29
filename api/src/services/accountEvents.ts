@@ -4,7 +4,41 @@ import type { PoolClient } from 'pg';
 export type AccountEventKind =
   | 'profile_changed' | 'token_minted' | 'token_revoked' | 'signout_everywhere' | 'delete_initiated'
   | 'par_q_acknowledged' | 'onboarding_completed'
-  | 'restore_replayed';
+  | 'restore_replayed'
+  // W9 lifecycle kinds. No migration needed: account_events.kind has no CHECK
+  // constraint by design (C-ACCOUNT-EVENTS-ENUM) — new kinds extend this union.
+  | 'user_invited' | 'user_activated' | 'user_suspended' | 'user_reinstated'
+  | 'role_changed' | 'user_delete_requested' | 'user_deleted'
+  // Q31b — distinct from user_invited because no invitation was actually sent;
+  // the identity was granted out of band and imported from the CF policy.
+  | 'user_imported';
+
+/**
+ * Q23 — the discriminated actor recorded in account_events.meta. Every W9
+ * lifecycle event carries exactly ONE of these shapes, never a partial or a
+ * mix. `meta` is intentionally permissive (see 060_account_events.sql) so this
+ * needs no migration.
+ */
+export type EventActor =
+  | { actor_kind: 'user'; actor_user_id: string; actor_email: string }
+  | { actor_kind: 'system'; actor_name: string; source: 'cutover' | 'restore' };
+
+/** A real admin (or the user themselves, for user_activated) took the action. */
+export function humanActor(userId: string, email: string): EventActor {
+  return { actor_kind: 'user', actor_user_id: userId, actor_email: email };
+}
+
+/**
+ * The reconciliation script took the action. `source` keeps the run's origin
+ * accurate: the same code path runs at cutover and inside run-restore.sh, and
+ * a hard-coded 'system:cutover' would simply lie in the restore case.
+ */
+export function systemActor(
+  actor_name: string,
+  source: 'cutover' | 'restore',
+): EventActor {
+  return { actor_kind: 'system', actor_name, source };
+}
 
 export interface RecordAccountEventArgs {
   userId: string;
