@@ -1,17 +1,12 @@
 import { db } from '../db/client.js';
 import type { PoolClient } from 'pg';
 
-export type AccountEventKind =
-  | 'profile_changed' | 'token_minted' | 'token_revoked' | 'signout_everywhere' | 'delete_initiated'
-  | 'par_q_acknowledged' | 'onboarding_completed'
-  | 'restore_replayed'
-  // W9 lifecycle kinds. No migration needed: account_events.kind has no CHECK
-  // constraint by design (C-ACCOUNT-EVENTS-ENUM) — new kinds extend this union.
-  | 'user_invited' | 'user_activated' | 'user_suspended' | 'user_reinstated'
-  | 'role_changed' | 'user_delete_requested' | 'user_deleted'
-  // Q31b — distinct from user_invited because no invitation was actually sent;
-  // the identity was granted out of band and imported from the CF policy.
-  | 'user_imported';
+// The kind list lives in constants/accountEvents.ts so that schemas/account.ts
+// can derive its zod enum from the SAME source. Importing this service there
+// instead would drag the db pool into the schema module. Re-exported here so
+// existing importers are unaffected.
+import type { AccountEventKind } from '../constants/accountEvents.js';
+export type { AccountEventKind };
 
 /**
  * Q23 — the discriminated actor recorded in account_events.meta. Every W9

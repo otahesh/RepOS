@@ -33,6 +33,8 @@ import { Term } from '../Term';
 
 const PAGE_SIZE = 50;
 
+// Record<AccountEventKind, string> is deliberate, not incidental: it makes a
+// new kind a COMPILE error here rather than a silent raw-key fallback.
 const KIND_LABELS: Record<AccountEventKind, string> = {
   profile_changed: 'Profile changed',
   signout_everywhere: 'Signed out everywhere',
@@ -42,6 +44,15 @@ const KIND_LABELS: Record<AccountEventKind, string> = {
   par_q_acknowledged: 'PAR-Q acknowledged',
   onboarding_completed: 'Onboarding completed',
   restore_replayed: 'Restore replayed',
+  // W9. Phrased from the target's point of view — this is their own timeline.
+  user_invited: 'Invited',
+  user_activated: 'Activated',
+  user_suspended: 'Suspended',
+  user_reinstated: 'Reinstated',
+  role_changed: 'Role changed',
+  user_delete_requested: 'Delete requested',
+  user_deleted: 'Deleted',
+  user_imported: 'Imported',
 };
 
 function humanizeKind(kind: AccountEventKind): string {

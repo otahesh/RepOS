@@ -6,6 +6,7 @@
 //   frontend/src/lib/constants/accountConfirmPhrases.ts → CONFIRM_DELETE_ACCOUNT_PHRASE
 // The API mirrors that const here. If it ever drifts the cascade test catches it.
 import { z } from 'zod';
+import { ACCOUNT_EVENT_KINDS } from '../constants/accountEvents.js';
 
 // Mirror of frontend/src/lib/constants/accountConfirmPhrases.ts.
 // Both must stay in sync.
@@ -61,18 +62,15 @@ export type SessionListResponse = z.infer<typeof SessionListResponseSchema>;
 
 // kind is enum-on-the-wire (zod) even though the DB has no CHECK on it
 // (per C-ACCOUNT-EVENTS-ENUM) — defensive on the read side too.
+//
+// Derived from ACCOUNT_EVENT_KINDS rather than restated. This list used to be
+// a second hand-maintained copy, and W9 extended only the service-side union:
+// because the events route calls AccountEventListResponseSchema.parse() (which
+// throws, not degrades), the first lifecycle event written would have made
+// GET /api/account/events return 500 for that user.
 export const AccountEventItemSchema = z.object({
   id: z.string(),
-  kind: z.enum([
-    'profile_changed',
-    'token_minted',
-    'token_revoked',
-    'signout_everywhere',
-    'delete_initiated',
-    'par_q_acknowledged',
-    'onboarding_completed',
-    'restore_replayed',
-  ]),
+  kind: z.enum(ACCOUNT_EVENT_KINDS),
   ip: z.string().nullable(),
   user_email_at_event: z.string().nullable(),
   meta: z.record(z.string(), z.unknown()),
