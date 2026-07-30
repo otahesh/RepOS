@@ -19,7 +19,36 @@ export type CfPolicyErrorCode =
   | 'cf_timeout'
   | 'app_count_not_one'
   | 'non_email_selector'
+  | 'malformed_policy'
   | 'policy_changed';
+
+/**
+ * Every property the reusable-policy PUT accepts, verified against the
+ * Cloudflare OpenAPI spec on 2026-07-27. `name`, `decision` and `include` are
+ * required; the rest are optional but MEANINGFUL — the PUT is a full replace,
+ * so any writable field we fail to echo back is reset to its default.
+ *
+ * Sending only name/decision/include/exclude/require, as this client
+ * originally did, meant every suspend or invite silently cleared
+ * session_duration, approval_required, mfa_config, isolation_required and the
+ * purpose-justification settings. Membership changes must not reconfigure the
+ * application.
+ */
+const POLICY_WRITABLE_FIELDS = [
+  'name',
+  'decision',
+  'include',
+  'exclude',
+  'require',
+  'approval_groups',
+  'approval_required',
+  'connection_rules',
+  'isolation_required',
+  'mfa_config',
+  'purpose_justification_prompt',
+  'purpose_justification_required',
+  'session_duration',
+] as const;
 
 export class CfPolicyError extends Error {
   readonly code: CfPolicyErrorCode;
@@ -37,10 +66,13 @@ export interface CfPolicySnapshot {
   emails: string[];
   name: string;
   decision: string;
-  /** Echoed back on PUT untouched (Q22). */
-  exclude: unknown[];
-  /** Echoed back on PUT untouched (Q22). */
-  require: unknown[];
+  /**
+   * Every writable field exactly as the API returned it — nothing defaulted,
+   * nothing invented, absent keys left absent. This is both what gets echoed
+   * back on PUT (Q22) and what the Q19 compare fingerprints, so "any
+   * difference aborts" covers the whole policy rather than a hand-picked five.
+   */
+  config: Record<string, unknown>;
 }
 
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -154,9 +186,30 @@ function toSnapshot(result: Record<string, unknown>): CfPolicySnapshot {
       `policy app_count is ${String(appCount)}, refusing to write`,
     );
   }
-  const include = Array.isArray(result.include) ? result.include : [];
+
+  // Validate, never default. Coercing a missing field to a plausible-looking
+  // value (`[]`, `'allow'`, `''`) turns a truncated-but-2xx response into a
+  // DESTRUCTIVE write: both reads degrade identically, the Q19 fingerprints
+  // match, and the PUT then strips exclude[]/require[] and rewrites the name
+  // and decision. A malformed policy must fail closed like every other refusal
+  // here.
+  const malformed = (field: string, saw: unknown): never => {
+    throw new CfPolicyError(
+      'malformed_policy',
+      `policy field \`${field}\` is missing or the wrong type — refusing to write`,
+      `saw ${typeof saw}: ${JSON.stringify(saw)?.slice(0, 80)}`,
+    );
+  };
+
+  if (typeof result.name !== 'string') malformed('name', result.name);
+  if (typeof result.decision !== 'string') malformed('decision', result.decision);
+  if (!Array.isArray(result.include)) malformed('include', result.include);
+  for (const k of ['exclude', 'require'] as const) {
+    if (k in result && !Array.isArray(result[k])) malformed(k, result[k]);
+  }
+
   const emails: string[] = [];
-  for (const sel of include) {
+  for (const sel of result.include as unknown[]) {
     const s = sel as Record<string, unknown>;
     const keys = Object.keys(s);
     const emailObj = s.email as { email?: unknown } | undefined;
@@ -168,28 +221,45 @@ function toSnapshot(result: Record<string, unknown>): CfPolicySnapshot {
     }
     emails.push(emailObj.email.toLowerCase());
   }
+
+  // Copy writable fields verbatim, and only the ones actually present. An
+  // absent key stays absent so the PUT does not assert a value Cloudflare
+  // never told us about.
+  const config: Record<string, unknown> = {};
+  for (const k of POLICY_WRITABLE_FIELDS) {
+    if (k in result) config[k] = result[k];
+  }
+
   return {
     emails,
-    name: String(result.name ?? ''),
-    decision: String(result.decision ?? 'allow'),
-    exclude: Array.isArray(result.exclude) ? result.exclude : [],
-    require: Array.isArray(result.require) ? result.require : [],
+    name: result.name as string,
+    decision: result.decision as string,
+    config,
   };
+}
+
+/** Key-order-independent so a reserialized response is not read as a change. */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(o).sort().map((k) => [k, canonical(o[k])]));
+  }
+  return v;
 }
 
 /**
  * A stable, total serialization of everything we observed about the policy.
  * Used for the Q19 compare-before-write: "any difference aborts" has to mean
  * any difference, including the fields we echo back rather than compute.
+ *
+ * Fingerprinting `config` rather than a hand-picked subset is what makes that
+ * true. A five-field fingerprint missed every other mutable setting — flipping
+ * session_duration from 24h to 1h, or turning off approval_required, between
+ * the read and the write compared equal and the PUT went ahead.
  */
 function fingerprint(s: CfPolicySnapshot): string {
-  return JSON.stringify({
-    emails: s.emails,
-    name: s.name,
-    decision: s.decision,
-    exclude: s.exclude,
-    require: s.require,
-  });
+  return JSON.stringify(canonical(s.config));
 }
 
 export async function fetchPolicy(
@@ -232,14 +302,15 @@ export async function putPolicyEmails(
       `expected ${fingerprint(snapshot)}, found ${fingerprint(current)}`.slice(0, 300),
     );
   }
+  // Echo the ENTIRE observed writable config back, replacing only include[].
+  // The PUT is a full replace: anything omitted here is reset to its default,
+  // so a membership change would otherwise silently reconfigure the
+  // application (session_duration, approval, MFA, isolation, justification).
   await cfRequest(
     'PUT',
     {
-      name: current.name,
-      decision: current.decision,
+      ...current.config,
       include: desiredEmails.map((e) => ({ email: { email: e } })),
-      exclude: current.exclude,
-      require: current.require,
     },
     timeoutMs,
   );

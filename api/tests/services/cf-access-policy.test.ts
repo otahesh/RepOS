@@ -244,3 +244,145 @@ describe('CfPolicyError', () => {
     await expect(fetchPolicy()).rejects.toBeInstanceOf(CfPolicyError);
   });
 });
+
+// A 2xx response is not the same thing as a well-formed one. Defaulting an
+// absent field to a plausible value ([], 'allow', '') makes BOTH reads degrade
+// identically, so the Q19 compare passes and the PUT then writes the degraded
+// values back — stripping exclude[]/require[] and rewriting name and decision.
+describe('malformed policy responses fail closed rather than defaulting', () => {
+  it('refuses a result carrying only app_count and name', async () => {
+    queue.push(async () => jsonResponse({
+      success: true, errors: [], result: { app_count: 1, name: 'Owner Only' },
+    }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing include[] instead of treating it as empty', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).include;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing decision instead of assuming allow', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).decision;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing name instead of blanking it', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).name;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a non-array exclude[]', async () => {
+    queue.push(async () => jsonResponse(policyResult({ exclude: 'nope' })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('an absent optional field stays absent — the PUT never invents one', async () => {
+    const withoutExclude = () => {
+      const r = policyResult();
+      delete (r.result as Record<string, unknown>).exclude;
+      return r;
+    };
+    queue.push(async () => jsonResponse(withoutExclude()));
+    queue.push(async () => jsonResponse(withoutExclude()));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await putPolicyEmails(['a@repos.test'], snap);
+    const body = JSON.parse(String(calls[2].init.body));
+    expect('exclude' in body).toBe(false);
+    expect('require' in body).toBe(true); // it WAS present, so it is echoed
+  });
+});
+
+// The PUT is a full replace (Cloudflare OpenAPI, verified 2026-07-27: it
+// accepts 13 writable properties). Anything not echoed back is reset to its
+// default, so a membership change must not double as a reconfiguration.
+describe('the whole writable policy is preserved and compared', () => {
+  const configured = (over: Record<string, unknown> = {}) =>
+    policyResult({
+      session_duration: '24h',
+      approval_required: true,
+      approval_groups: [{ approvals_needed: 1, email_addresses: ['boss@repos.test'] }],
+      isolation_required: false,
+      purpose_justification_required: true,
+      purpose_justification_prompt: 'Why do you need access?',
+      mfa_config: { mode: 'required' },
+      connection_rules: { ssh: { usernames: ['jason'] } },
+      ...over,
+    });
+
+  it('echoes every writable field back on PUT, replacing only include[]', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await putPolicyEmails(['a@repos.test'], snap);
+
+    const body = JSON.parse(String(calls[2].init.body));
+    expect(body.session_duration).toBe('24h');
+    expect(body.approval_required).toBe(true);
+    expect(body.approval_groups).toEqual([{ approvals_needed: 1, email_addresses: ['boss@repos.test'] }]);
+    expect(body.isolation_required).toBe(false);
+    expect(body.purpose_justification_required).toBe(true);
+    expect(body.purpose_justification_prompt).toBe('Why do you need access?');
+    expect(body.mfa_config).toEqual({ mode: 'required' });
+    expect(body.connection_rules).toEqual({ ssh: { usernames: ['jason'] } });
+    // ...and include[] IS replaced.
+    expect(body.include).toEqual([{ email: { email: 'a@repos.test' } }]);
+    // Read-only fields are never sent back.
+    expect('app_count' in body).toBe(false);
+    expect('id' in body).toBe(false);
+  });
+
+  it('Q19: aborts when session_duration changed between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ session_duration: '1h' })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+    expect(calls).toHaveLength(2); // no PUT was issued
+  });
+
+  it('Q19: aborts when approval_required was turned off between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ approval_required: false })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+  });
+
+  it('Q19: aborts when mfa_config changed between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ mfa_config: { mode: 'optional' } })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+  });
+
+  it('key ORDER alone is not a change — the compare is canonical', async () => {
+    queue.push(async () => jsonResponse(policyResult()));
+    // Same content, different property order in the JSON body.
+    queue.push(async () => jsonResponse({
+      success: true,
+      errors: [],
+      result: {
+        require: [], exclude: [], app_count: 1,
+        include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'b@repos.test' } }],
+        decision: 'allow', name: 'Owner Only', id: POLICY,
+      },
+    }));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).resolves.toBeUndefined();
+    expect(calls).toHaveLength(3); // the PUT DID happen
+  });
+});
