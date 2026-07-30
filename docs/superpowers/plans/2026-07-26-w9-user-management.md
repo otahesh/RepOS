@@ -1900,7 +1900,7 @@ Create `api/tests/services/cf-access-sync.test.ts`:
 
 ```ts
 // Q36 — reconcile TO the row's status. Never blindly re-add.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import * as policy from '../../src/services/cfAccessPolicy.js';
 import { desiredPresence, syncEmail, syncEmailToStatus } from '../../src/services/cfAccessSync.js';
 
@@ -1913,14 +1913,26 @@ function snap(emails: string[]) {
   };
 }
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
-let putSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: MockInstance<typeof policy.fetchPolicy>;
+let putSpy: MockInstance<typeof policy.putPolicyEmails>;
 
 beforeEach(() => {
+  // Belt and braces. These tests assert on spies attached to the module
+  // namespace; if that interop ever stops taking effect, the REAL client would
+  // run — and its PUT would land on the live `Owner Only` policy. Today the
+  // local `.env` carries no CF_* vars so it would fail closed on
+  // cf_not_configured, but that is an accident of configuration, not a
+  // guarantee. Deny the network outright instead of relying on it.
+  policy.__setFetchForTesting((() => {
+    throw new Error('cf-access-sync tests must never issue a real HTTP request');
+  }) as unknown as typeof fetch);
   fetchSpy = vi.spyOn(policy, 'fetchPolicy');
   putSpy = vi.spyOn(policy, 'putPolicyEmails').mockResolvedValue(undefined);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  policy.__setFetchForTesting(null);
+  vi.restoreAllMocks();
+});
 
 describe('desiredPresence', () => {
   it('grants for invited and active; revokes for suspended and deleting', () => {
@@ -1964,6 +1976,19 @@ describe('syncEmail', () => {
     fetchSpy.mockRejectedValue(new policy.CfPolicyError('app_count_not_one', 'nope'));
     await expect(syncEmail('x@repos.test', 'present')).rejects.toMatchObject({
       code: 'app_count_not_one',
+    });
+  });
+
+  it('propagates a WRITE-side refusal too — the Q19 abort must not be swallowed', async () => {
+    // The read succeeds and a change is genuinely needed, so the PUT is
+    // attempted and it is putPolicyEmails' own compare-before-write that
+    // aborts. Callers translate this into "sync pending"/drift; a syncEmail
+    // that caught it and reported { changed: true } would report success for a
+    // membership change Cloudflare never accepted.
+    fetchSpy.mockResolvedValue(snap(['a@repos.test']));
+    putSpy.mockRejectedValue(new policy.CfPolicyError('policy_changed', 'dashboard edit'));
+    await expect(syncEmail('b@repos.test', 'present')).rejects.toMatchObject({
+      code: 'policy_changed',
     });
   });
 });
@@ -2058,9 +2083,13 @@ export async function syncEmailToStatus(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-sync.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
-> **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
+> **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable — verified working on vitest 4.1.5. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
+>
+> The `__setFetchForTesting` guard in `beforeEach` is not redundant with the spies; it is what makes an ineffective spy *safe*. Without it, spies that stopped intercepting would run the real client, and its PUT would land on the live `Owner Only` policy. That it currently fails closed on `cf_not_configured` instead is only because the local `.env` happens to carry no `CF_*` vars.
+>
+> The write-side propagation test (`propagates a WRITE-side refusal too`) covers a gap the read-side one does not: mutation-testing confirmed that wrapping `putPolicyEmails` in a swallowing `try/catch` is caught by *only* that test. Without it, `syncEmail` could report `{ changed: true }` for a membership change Cloudflare rejected.
 
 - [ ] **Step 5: Commit**
 
