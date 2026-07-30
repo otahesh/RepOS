@@ -77,6 +77,11 @@ export interface CfPolicySnapshot {
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 
+/** typeof null === 'object' and arrays are objects — neither is a policy. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
 // Injection seam so tests never reach the network. Production leaves this null
 // and uses the global fetch.
 let fetchImpl: typeof fetch | null = null;
@@ -148,11 +153,21 @@ async function cfRequest(
       throw new CfPolicyError('cf_http_error', `Cloudflare ${method} body read failed`, String(err));
     }
 
-    let parsed: Record<string, unknown>;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(text) as Record<string, unknown>;
+      parsed = JSON.parse(text);
     } catch {
       throw new CfPolicyError('cf_http_error', `Cloudflare ${method} returned non-JSON`, text.slice(0, 200));
+    }
+    // Validate before ANY property access. A raw TypeError escaping this module
+    // is not merely untidy: callers map CfPolicyError.code onto a sync_error and
+    // surface it as drift, so an unclassified throw becomes a 500 instead.
+    if (!isPlainObject(parsed)) {
+      throw new CfPolicyError(
+        'cf_http_error',
+        `Cloudflare ${method} returned a non-object envelope`,
+        text.slice(0, 200),
+      );
     }
     if (!res.ok || parsed.success !== true) {
       throw new CfPolicyError(
@@ -161,7 +176,14 @@ async function cfRequest(
         JSON.stringify(parsed.errors ?? parsed).slice(0, 300),
       );
     }
-    return parsed.result as Record<string, unknown>;
+    if (!isPlainObject(parsed.result)) {
+      throw new CfPolicyError(
+        'malformed_policy',
+        `Cloudflare ${method} succeeded but returned no policy object`,
+        `result was ${JSON.stringify(parsed.result)?.slice(0, 80) ?? 'undefined'}`,
+      );
+    }
+    return parsed.result;
   } finally {
     clearTimeout(timer);
   }
@@ -210,10 +232,20 @@ function toSnapshot(result: Record<string, unknown>): CfPolicySnapshot {
 
   const emails: string[] = [];
   for (const sel of result.include as unknown[]) {
-    const s = sel as Record<string, unknown>;
-    const keys = Object.keys(s);
-    const emailObj = s.email as { email?: unknown } | undefined;
-    if (keys.length !== 1 || keys[0] !== 'email' || typeof emailObj?.email !== 'string') {
+    // Structurally invalid entries are malformed, not merely the wrong kind of
+    // selector — and Object.keys(null) would throw a raw TypeError.
+    if (!isPlainObject(sel)) {
+      malformed('include[] entry', sel);
+      continue; // unreachable; keeps the narrowing honest
+    }
+    const keys = Object.keys(sel);
+    const emailObj = sel.email;
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'email' ||
+      !isPlainObject(emailObj) ||
+      typeof emailObj.email !== 'string'
+    ) {
       throw new CfPolicyError(
         'non_email_selector',
         `policy include[] contains a non-email selector (${keys.join(',') || 'empty'})`,

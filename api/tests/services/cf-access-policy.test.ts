@@ -283,6 +283,69 @@ describe('malformed policy responses fail closed rather than defaulting', () => 
     await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
   });
 
+  // Every one of these threw a raw TypeError before. That matters beyond
+  // tidiness: callers map CfPolicyError.code onto a sync_error and render it as
+  // drift, so an unclassified throw escapes that path and becomes a 500.
+  it('refuses a null result rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: null }));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('malformed_policy');
+  });
+
+  it('refuses a non-object result rather than reporting app_count_not_one', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: 'nope' }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses an array result', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: [] }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a null envelope rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse(null));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('cf_http_error');
+  });
+
+  it('refuses a null include[] entry rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: [null] })));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('malformed_policy');
+  });
+
+  it('refuses a scalar include[] entry', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: ['a@repos.test'] })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('still reports a null nested email object as a non-email selector', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: [{ email: null }] })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'non_email_selector' });
+  });
+
+  it('no malformed shape ever escapes as something other than CfPolicyError', async () => {
+    const shapes: unknown[] = [
+      null,
+      { success: true, errors: [], result: null },
+      { success: true, errors: [], result: [] },
+      { success: true, errors: [], result: 42 },
+      policyResult({ include: [null] }),
+      policyResult({ include: [[]] }),
+      policyResult({ include: [{ email: 'flat@repos.test' }] }),
+      policyResult({ exclude: null }),
+      policyResult({ require: 7 }),
+    ];
+    for (const body of shapes) {
+      queue.push(async () => jsonResponse(body));
+      const err = await fetchPolicy().catch((e) => e);
+      expect(err, `shape ${JSON.stringify(body)?.slice(0, 60)}`).toBeInstanceOf(CfPolicyError);
+    }
+  });
+
   it('an absent optional field stays absent — the PUT never invents one', async () => {
     const withoutExclude = () => {
       const r = policyResult();

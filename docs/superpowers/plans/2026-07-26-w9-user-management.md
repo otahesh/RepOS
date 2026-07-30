@@ -1011,7 +1011,14 @@ EOF
 
 ### Task 5: Cloudflare Access policy client
 
+> **SHIPPED** as `8ea91c0`, hardened by `601e3ba` and `dfc16a4`. `api/src/services/cfAccessPolicy.ts` is authoritative; the code below is kept in sync with it. Two corruption paths were found in review *after* the first commit and are now encoded here — do not re-derive this module from an older revision of this plan.
+
 The fail-closed layer. Every refusal here surfaces as drift rather than a silent partial write.
+
+**Two rules this module exists to enforce, both learned the hard way:**
+
+1. **Validate, never default.** Coercing an absent field to a plausible value (`[]`, `'allow'`, `''`) makes a truncated-but-2xx response degrade *identically on both reads*, so the Q19 compare passes and the PUT writes the degraded values back — stripping `exclude[]`/`require[]` and rewriting the name and decision.
+2. **Echo the whole writable config back.** Verified against the Cloudflare OpenAPI spec on 2026-07-27: the reusable-policy PUT accepts **thirteen** writable properties and is a **full replace**. Sending only `name`/`decision`/`include`/`exclude`/`require` silently reset `session_duration`, `approval_required`, `approval_groups`, `mfa_config`, `isolation_required`, `connection_rules` and both `purpose_justification_*` fields — on *every* membership change, not just when a dashboard edit raced us.
 
 **Files:**
 - Create: `api/src/services/cfAccessPolicy.ts`
@@ -1020,9 +1027,10 @@ The fail-closed layer. Every refusal here surfaces as drift rather than a silent
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces:
-  - `interface CfPolicySnapshot { emails: string[]; name: string; decision: string; exclude: unknown[]; require: unknown[] }`
+  - `interface CfPolicySnapshot { emails: string[]; name: string; decision: string; config: Record<string, unknown> }`
+    `config` holds every writable field **exactly as returned** — nothing defaulted, absent keys left absent. It is both what the PUT echoes back and what the Q19 fingerprint covers. There are deliberately no top-level `exclude`/`require` fields: two sources of truth for the same data is what let the fingerprint drift from the payload.
   - `class CfPolicyError extends Error { code: CfPolicyErrorCode }`
-  - `type CfPolicyErrorCode = 'cf_not_configured' | 'cf_http_error' | 'cf_timeout' | 'app_count_not_one' | 'non_email_selector' | 'policy_changed'`
+  - `type CfPolicyErrorCode = 'cf_not_configured' | 'cf_http_error' | 'cf_timeout' | 'app_count_not_one' | 'non_email_selector' | 'malformed_policy' | 'policy_changed'`
   - `fetchPolicy(): Promise<CfPolicySnapshot>`
   - `putPolicyEmails(desiredEmails: string[], snapshot: CfPolicySnapshot): Promise<void>`
   - `__setFetchForTesting(f: typeof fetch | null): void`
@@ -1072,7 +1080,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 let calls: Array<{ url: string; init: RequestInit }>;
-let queue: Array<() => Promise<Response>>;
+// Queue entries receive the request's AbortSignal so a response can model a
+// body that stalls until the deadline fires (see the stalled-body test).
+let queue: Array<(signal?: AbortSignal | null) => Promise<Response>>;
 
 beforeEach(() => {
   process.env.CF_API_TOKEN = 'test-token';
@@ -1088,7 +1098,7 @@ beforeEach(() => {
     // that ignores it makes the Q38 deadline test pass vacuously: the abort
     // fires, nothing observes it, and the slow response resolves normally —
     // so the assertion would be testing nothing.
-    return abortable(next(), init.signal);
+    return abortable(next(init.signal), init.signal);
   });
 });
 
@@ -1160,6 +1170,27 @@ describe('fetchPolicy', () => {
 
   it('Q38: aborts on deadline and reports cf_timeout', async () => {
     queue.push(async () => { await new Promise((r) => setTimeout(r, 200)); return jsonResponse(policyResult()); });
+    await expect(fetchPolicy({ timeoutMs: 40 })).rejects.toMatchObject({ code: 'cf_timeout' });
+  });
+
+  it('Q38: the deadline covers the RESPONSE BODY, not just the headers', async () => {
+    // Round-7 finding: clearing the abort timer once headers arrive would let a
+    // stalled body hold the pooled connection AND the global membership lock
+    // indefinitely — exactly what the deadline exists to prevent. Headers here
+    // arrive immediately; the body never does.
+    queue.push(async (signal) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener(
+            'abort',
+            () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+            { once: true },
+          );
+          // deliberately never enqueue and never close
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } });
+    });
     await expect(fetchPolicy({ timeoutMs: 40 })).rejects.toMatchObject({ code: 'cf_timeout' });
   });
 });
@@ -1248,6 +1279,218 @@ describe('putPolicyEmails', () => {
     expect(calls).toHaveLength(2);
   });
 });
+
+describe('CfPolicyError', () => {
+  it('is the error type every refusal uses', async () => {
+    queue.push(async () => jsonResponse(policyResult({ app_count: 9 })));
+    await expect(fetchPolicy()).rejects.toBeInstanceOf(CfPolicyError);
+  });
+});
+
+// A 2xx response is not the same thing as a well-formed one. Defaulting an
+// absent field to a plausible value ([], 'allow', '') makes BOTH reads degrade
+// identically, so the Q19 compare passes and the PUT then writes the degraded
+// values back — stripping exclude[]/require[] and rewriting name and decision.
+describe('malformed policy responses fail closed rather than defaulting', () => {
+  it('refuses a result carrying only app_count and name', async () => {
+    queue.push(async () => jsonResponse({
+      success: true, errors: [], result: { app_count: 1, name: 'Owner Only' },
+    }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing include[] instead of treating it as empty', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).include;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing decision instead of assuming allow', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).decision;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a missing name instead of blanking it', async () => {
+    const r = policyResult();
+    delete (r.result as Record<string, unknown>).name;
+    queue.push(async () => jsonResponse(r));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a non-array exclude[]', async () => {
+    queue.push(async () => jsonResponse(policyResult({ exclude: 'nope' })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  // Every one of these threw a raw TypeError before. That matters beyond
+  // tidiness: callers map CfPolicyError.code onto a sync_error and render it as
+  // drift, so an unclassified throw escapes that path and becomes a 500.
+  it('refuses a null result rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: null }));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('malformed_policy');
+  });
+
+  it('refuses a non-object result rather than reporting app_count_not_one', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: 'nope' }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses an array result', async () => {
+    queue.push(async () => jsonResponse({ success: true, errors: [], result: [] }));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('refuses a null envelope rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse(null));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('cf_http_error');
+  });
+
+  it('refuses a null include[] entry rather than throwing TypeError', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: [null] })));
+    const err = await fetchPolicy().catch((e) => e);
+    expect(err).toBeInstanceOf(CfPolicyError);
+    expect(err.code).toBe('malformed_policy');
+  });
+
+  it('refuses a scalar include[] entry', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: ['a@repos.test'] })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
+  });
+
+  it('still reports a null nested email object as a non-email selector', async () => {
+    queue.push(async () => jsonResponse(policyResult({ include: [{ email: null }] })));
+    await expect(fetchPolicy()).rejects.toMatchObject({ code: 'non_email_selector' });
+  });
+
+  it('no malformed shape ever escapes as something other than CfPolicyError', async () => {
+    const shapes: unknown[] = [
+      null,
+      { success: true, errors: [], result: null },
+      { success: true, errors: [], result: [] },
+      { success: true, errors: [], result: 42 },
+      policyResult({ include: [null] }),
+      policyResult({ include: [[]] }),
+      policyResult({ include: [{ email: 'flat@repos.test' }] }),
+      policyResult({ exclude: null }),
+      policyResult({ require: 7 }),
+    ];
+    for (const body of shapes) {
+      queue.push(async () => jsonResponse(body));
+      const err = await fetchPolicy().catch((e) => e);
+      expect(err, `shape ${JSON.stringify(body)?.slice(0, 60)}`).toBeInstanceOf(CfPolicyError);
+    }
+  });
+
+  it('an absent optional field stays absent — the PUT never invents one', async () => {
+    const withoutExclude = () => {
+      const r = policyResult();
+      delete (r.result as Record<string, unknown>).exclude;
+      return r;
+    };
+    queue.push(async () => jsonResponse(withoutExclude()));
+    queue.push(async () => jsonResponse(withoutExclude()));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await putPolicyEmails(['a@repos.test'], snap);
+    const body = JSON.parse(String(calls[2].init.body));
+    expect('exclude' in body).toBe(false);
+    expect('require' in body).toBe(true); // it WAS present, so it is echoed
+  });
+});
+
+// The PUT is a full replace (Cloudflare OpenAPI, verified 2026-07-27: it
+// accepts 13 writable properties). Anything not echoed back is reset to its
+// default, so a membership change must not double as a reconfiguration.
+describe('the whole writable policy is preserved and compared', () => {
+  const configured = (over: Record<string, unknown> = {}) =>
+    policyResult({
+      session_duration: '24h',
+      approval_required: true,
+      approval_groups: [{ approvals_needed: 1, email_addresses: ['boss@repos.test'] }],
+      isolation_required: false,
+      purpose_justification_required: true,
+      purpose_justification_prompt: 'Why do you need access?',
+      mfa_config: { mode: 'required' },
+      connection_rules: { ssh: { usernames: ['jason'] } },
+      ...over,
+    });
+
+  it('echoes every writable field back on PUT, replacing only include[]', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await putPolicyEmails(['a@repos.test'], snap);
+
+    const body = JSON.parse(String(calls[2].init.body));
+    expect(body.session_duration).toBe('24h');
+    expect(body.approval_required).toBe(true);
+    expect(body.approval_groups).toEqual([{ approvals_needed: 1, email_addresses: ['boss@repos.test'] }]);
+    expect(body.isolation_required).toBe(false);
+    expect(body.purpose_justification_required).toBe(true);
+    expect(body.purpose_justification_prompt).toBe('Why do you need access?');
+    expect(body.mfa_config).toEqual({ mode: 'required' });
+    expect(body.connection_rules).toEqual({ ssh: { usernames: ['jason'] } });
+    // ...and include[] IS replaced.
+    expect(body.include).toEqual([{ email: { email: 'a@repos.test' } }]);
+    // Read-only fields are never sent back.
+    expect('app_count' in body).toBe(false);
+    expect('id' in body).toBe(false);
+  });
+
+  it('Q19: aborts when session_duration changed between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ session_duration: '1h' })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+    expect(calls).toHaveLength(2); // no PUT was issued
+  });
+
+  it('Q19: aborts when approval_required was turned off between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ approval_required: false })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+  });
+
+  it('Q19: aborts when mfa_config changed between the reads', async () => {
+    queue.push(async () => jsonResponse(configured()));
+    queue.push(async () => jsonResponse(configured({ mfa_config: { mode: 'optional' } })));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
+      code: 'policy_changed',
+    });
+  });
+
+  it('key ORDER alone is not a change — the compare is canonical', async () => {
+    queue.push(async () => jsonResponse(policyResult()));
+    // Same content, different property order in the JSON body.
+    queue.push(async () => jsonResponse({
+      success: true,
+      errors: [],
+      result: {
+        require: [], exclude: [], app_count: 1,
+        include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'b@repos.test' } }],
+        decision: 'allow', name: 'Owner Only', id: POLICY,
+      },
+    }));
+    queue.push(async () => jsonResponse(policyResult()));
+    const snap = await fetchPolicy();
+    await expect(putPolicyEmails(['a@repos.test'], snap)).resolves.toBeUndefined();
+    expect(calls).toHaveLength(3); // the PUT DID happen
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1281,7 +1524,36 @@ export type CfPolicyErrorCode =
   | 'cf_timeout'
   | 'app_count_not_one'
   | 'non_email_selector'
+  | 'malformed_policy'
   | 'policy_changed';
+
+/**
+ * Every property the reusable-policy PUT accepts, verified against the
+ * Cloudflare OpenAPI spec on 2026-07-27. `name`, `decision` and `include` are
+ * required; the rest are optional but MEANINGFUL — the PUT is a full replace,
+ * so any writable field we fail to echo back is reset to its default.
+ *
+ * Sending only name/decision/include/exclude/require, as this client
+ * originally did, meant every suspend or invite silently cleared
+ * session_duration, approval_required, mfa_config, isolation_required and the
+ * purpose-justification settings. Membership changes must not reconfigure the
+ * application.
+ */
+const POLICY_WRITABLE_FIELDS = [
+  'name',
+  'decision',
+  'include',
+  'exclude',
+  'require',
+  'approval_groups',
+  'approval_required',
+  'connection_rules',
+  'isolation_required',
+  'mfa_config',
+  'purpose_justification_prompt',
+  'purpose_justification_required',
+  'session_duration',
+] as const;
 
 export class CfPolicyError extends Error {
   readonly code: CfPolicyErrorCode;
@@ -1299,13 +1571,21 @@ export interface CfPolicySnapshot {
   emails: string[];
   name: string;
   decision: string;
-  /** Echoed back on PUT untouched (Q22). */
-  exclude: unknown[];
-  /** Echoed back on PUT untouched (Q22). */
-  require: unknown[];
+  /**
+   * Every writable field exactly as the API returned it — nothing defaulted,
+   * nothing invented, absent keys left absent. This is both what gets echoed
+   * back on PUT (Q22) and what the Q19 compare fingerprints, so "any
+   * difference aborts" covers the whole policy rather than a hand-picked five.
+   */
+  config: Record<string, unknown>;
 }
 
 const DEFAULT_TIMEOUT_MS = 8_000;
+
+/** typeof null === 'object' and arrays are objects — neither is a policy. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
 
 // Injection seam so tests never reach the network. Production leaves this null
 // and uses the global fetch.
@@ -1378,11 +1658,21 @@ async function cfRequest(
       throw new CfPolicyError('cf_http_error', `Cloudflare ${method} body read failed`, String(err));
     }
 
-    let parsed: Record<string, unknown>;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(text) as Record<string, unknown>;
+      parsed = JSON.parse(text);
     } catch {
       throw new CfPolicyError('cf_http_error', `Cloudflare ${method} returned non-JSON`, text.slice(0, 200));
+    }
+    // Validate before ANY property access. A raw TypeError escaping this module
+    // is not merely untidy: callers map CfPolicyError.code onto a sync_error and
+    // surface it as drift, so an unclassified throw becomes a 500 instead.
+    if (!isPlainObject(parsed)) {
+      throw new CfPolicyError(
+        'cf_http_error',
+        `Cloudflare ${method} returned a non-object envelope`,
+        text.slice(0, 200),
+      );
     }
     if (!res.ok || parsed.success !== true) {
       throw new CfPolicyError(
@@ -1391,7 +1681,14 @@ async function cfRequest(
         JSON.stringify(parsed.errors ?? parsed).slice(0, 300),
       );
     }
-    return parsed.result as Record<string, unknown>;
+    if (!isPlainObject(parsed.result)) {
+      throw new CfPolicyError(
+        'malformed_policy',
+        `Cloudflare ${method} succeeded but returned no policy object`,
+        `result was ${JSON.stringify(parsed.result)?.slice(0, 80) ?? 'undefined'}`,
+      );
+    }
+    return parsed.result;
   } finally {
     clearTimeout(timer);
   }
@@ -1416,13 +1713,44 @@ function toSnapshot(result: Record<string, unknown>): CfPolicySnapshot {
       `policy app_count is ${String(appCount)}, refusing to write`,
     );
   }
-  const include = Array.isArray(result.include) ? result.include : [];
+
+  // Validate, never default. Coercing a missing field to a plausible-looking
+  // value (`[]`, `'allow'`, `''`) turns a truncated-but-2xx response into a
+  // DESTRUCTIVE write: both reads degrade identically, the Q19 fingerprints
+  // match, and the PUT then strips exclude[]/require[] and rewrites the name
+  // and decision. A malformed policy must fail closed like every other refusal
+  // here.
+  const malformed = (field: string, saw: unknown): never => {
+    throw new CfPolicyError(
+      'malformed_policy',
+      `policy field \`${field}\` is missing or the wrong type — refusing to write`,
+      `saw ${typeof saw}: ${JSON.stringify(saw)?.slice(0, 80)}`,
+    );
+  };
+
+  if (typeof result.name !== 'string') malformed('name', result.name);
+  if (typeof result.decision !== 'string') malformed('decision', result.decision);
+  if (!Array.isArray(result.include)) malformed('include', result.include);
+  for (const k of ['exclude', 'require'] as const) {
+    if (k in result && !Array.isArray(result[k])) malformed(k, result[k]);
+  }
+
   const emails: string[] = [];
-  for (const sel of include) {
-    const s = sel as Record<string, unknown>;
-    const keys = Object.keys(s);
-    const emailObj = s.email as { email?: unknown } | undefined;
-    if (keys.length !== 1 || keys[0] !== 'email' || typeof emailObj?.email !== 'string') {
+  for (const sel of result.include as unknown[]) {
+    // Structurally invalid entries are malformed, not merely the wrong kind of
+    // selector — and Object.keys(null) would throw a raw TypeError.
+    if (!isPlainObject(sel)) {
+      malformed('include[] entry', sel);
+      continue; // unreachable; keeps the narrowing honest
+    }
+    const keys = Object.keys(sel);
+    const emailObj = sel.email;
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'email' ||
+      !isPlainObject(emailObj) ||
+      typeof emailObj.email !== 'string'
+    ) {
       throw new CfPolicyError(
         'non_email_selector',
         `policy include[] contains a non-email selector (${keys.join(',') || 'empty'})`,
@@ -1430,28 +1758,45 @@ function toSnapshot(result: Record<string, unknown>): CfPolicySnapshot {
     }
     emails.push(emailObj.email.toLowerCase());
   }
+
+  // Copy writable fields verbatim, and only the ones actually present. An
+  // absent key stays absent so the PUT does not assert a value Cloudflare
+  // never told us about.
+  const config: Record<string, unknown> = {};
+  for (const k of POLICY_WRITABLE_FIELDS) {
+    if (k in result) config[k] = result[k];
+  }
+
   return {
     emails,
-    name: String(result.name ?? ''),
-    decision: String(result.decision ?? 'allow'),
-    exclude: Array.isArray(result.exclude) ? result.exclude : [],
-    require: Array.isArray(result.require) ? result.require : [],
+    name: result.name as string,
+    decision: result.decision as string,
+    config,
   };
+}
+
+/** Key-order-independent so a reserialized response is not read as a change. */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(o).sort().map((k) => [k, canonical(o[k])]));
+  }
+  return v;
 }
 
 /**
  * A stable, total serialization of everything we observed about the policy.
  * Used for the Q19 compare-before-write: "any difference aborts" has to mean
  * any difference, including the fields we echo back rather than compute.
+ *
+ * Fingerprinting `config` rather than a hand-picked subset is what makes that
+ * true. A five-field fingerprint missed every other mutable setting — flipping
+ * session_duration from 24h to 1h, or turning off approval_required, between
+ * the read and the write compared equal and the PUT went ahead.
  */
 function fingerprint(s: CfPolicySnapshot): string {
-  return JSON.stringify({
-    emails: s.emails,
-    name: s.name,
-    decision: s.decision,
-    exclude: s.exclude,
-    require: s.require,
-  });
+  return JSON.stringify(canonical(s.config));
 }
 
 export async function fetchPolicy(
@@ -1494,14 +1839,15 @@ export async function putPolicyEmails(
       `expected ${fingerprint(snapshot)}, found ${fingerprint(current)}`.slice(0, 300),
     );
   }
+  // Echo the ENTIRE observed writable config back, replacing only include[].
+  // The PUT is a full replace: anything omitted here is reset to its default,
+  // so a membership change would otherwise silently reconfigure the
+  // application (session_duration, approval, MFA, isolation, justification).
   await cfRequest(
     'PUT',
     {
-      name: current.name,
-      decision: current.decision,
+      ...current.config,
       include: desiredEmails.map((e) => ({ email: { email: e } })),
-      exclude: current.exclude,
-      require: current.require,
     },
     timeoutMs,
   );
@@ -1511,7 +1857,7 @@ export async function putPolicyEmails(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-policy.test.ts`
-Expected: PASS, 15 tests.
+Expected: PASS, 36 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1559,7 +1905,12 @@ import * as policy from '../../src/services/cfAccessPolicy.js';
 import { desiredPresence, syncEmail, syncEmailToStatus } from '../../src/services/cfAccessSync.js';
 
 function snap(emails: string[]) {
-  return { emails, name: 'Owner Only', decision: 'allow', exclude: [], require: [] };
+  // `config` mirrors what fetchPolicy would have observed. Task 5's snapshot
+  // carries the WHOLE writable policy; there are no top-level exclude/require.
+  return {
+    emails, name: 'Owner Only', decision: 'allow',
+    config: { name: 'Owner Only', decision: 'allow', include: emails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+  };
 }
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -3095,7 +3446,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   policyEmails = [ADMIN];
   fetchPolicyImpl = async () => ({
-    emails: [...policyEmails], name: 'Owner Only', decision: 'allow', exclude: [], require: [],
+    emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
+    config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
   });
   vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never);
   vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
@@ -4542,7 +4894,10 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
     fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
     await del(id);
     // CF recovers; a different admin finishes the job.
-    fetchPolicyImpl = async () => ({ emails: [...policyEmails], name: 'Owner Only', decision: 'allow', exclude: [], require: [] });
+    fetchPolicyImpl = async () => ({
+      emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
+      config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    });
     const r = await del(id);
     expect(r.statusCode).toBe(204);
     const ev = await db.query<{ n: number }>(
@@ -4692,7 +5047,10 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     expect((await selfDelete(email)).statusCode).toBe(403);
 
     // An admin completes it.
-    fetchPolicyImpl = async () => ({ emails: [...policyEmails], name: 'Owner Only', decision: 'allow', exclude: [], require: [] });
+    fetchPolicyImpl = async () => ({
+      emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
+      config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    });
     expect((await del(id)).statusCode).toBe(204);
   });
 });
@@ -5792,7 +6150,10 @@ describe('reconciliation runs under the Q16/Q26 membership lock', () => {
     let heldDuringFetch = false;
     fetchPolicyImpl = async () => {
       heldDuringFetch = await membershipLockIsHeld();
-      return { emails: [...policyEmails], name: 'p', decision: 'allow', exclude: [], require: [] };
+      return {
+        emails: [...policyEmails], name: 'p', decision: 'allow',
+        config: { name: 'p', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+      };
     };
 
     const res = await reconcileCfBaseline('cutover');
@@ -6338,7 +6699,8 @@ describe('restore of a pre-080 dump (Q35)', () => {
 
     vi.spyOn(policy, 'fetchPolicy').mockResolvedValue({
       emails: [FOUNDING_ADMIN_EMAIL, 'thesugardog@repos.test'],
-      name: 'Owner Only', decision: 'allow', exclude: [], require: [],
+      name: 'Owner Only', decision: 'allow',
+      config: { name: 'Owner Only', decision: 'allow', include: [], exclude: [], require: [] },
     } as never);
 
     const r = await reconcileCfBaseline('restore');
