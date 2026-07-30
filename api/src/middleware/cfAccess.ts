@@ -2,12 +2,14 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
+import { recordAccountEventTx, humanActor } from '../services/accountEvents.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
 // `CF_Authorization` cookie (browser). Verifies signature against the team's
 // JWKS endpoint, validates `aud` and `iss`, then resolves the email claim
-// to a `users` row (auto-provisioning on first sight).
+// to a `users` row. Deny-by-default per W9 Q2: no row means 403, never an
+// INSERT.
 //
 // All gating is on `CF_ACCESS_ENABLED=true` — when off, requireCfAccess
 // returns 503 so callers can detect "feature not configured" cleanly. This
@@ -105,51 +107,119 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
   const rawEmail = typeof payload.email === 'string' ? payload.email.toLowerCase() : null;
   if (!rawEmail) return reply.code(401).send({ error: 'no_email_claim' });
 
-  const allowList = (process.env.CF_ACCESS_ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  if (allowList.length && !allowList.includes(rawEmail)) {
-    return reply.code(403).send({ error: 'email_not_allowed' });
-  }
-
   const displayNameClaim = typeof payload.name === 'string' ? payload.name : null;
 
-  const { rows } = await db.query(
-    `SELECT id, display_name, timezone, last_seen_at
+  // Deny-by-default (Q2). cfAccess.ts previously INSERTed a users row for any
+  // email that cleared CF Access; auto-provisioning is the opposite of a gate,
+  // and without this flip the DB cannot be authoritative.
+  const { rows } = await db.query<{
+    id: string;
+    display_name: string | null;
+    timezone: string;
+    last_seen_at: Date | null;
+    status: string;
+    role: string;
+    cf_synced_at: Date | null;
+  }>(
+    `SELECT id, display_name, timezone, last_seen_at, status, role, cf_synced_at
      FROM users WHERE lower(email) = $1`,
     [rawEmail],
   );
 
-  let userId: string;
-  let userDisplayName: string | null;
-  let userTz: string;
-
   if (rows.length === 0) {
-    const ins = await db.query(
-      `INSERT INTO users (email, timezone, display_name, last_seen_at)
-       VALUES ($1, 'UTC', $2, now())
-       RETURNING id, display_name, timezone`,
-      [rawEmail, displayNameClaim],
-    );
-    userId = ins.rows[0].id as string;
-    userDisplayName = ins.rows[0].display_name as string | null;
-    userTz = ins.rows[0].timezone as string;
-  } else {
-    userId = rows[0].id as string;
-    userDisplayName = rows[0].display_name as string | null;
-    userTz = rows[0].timezone as string;
-    const last = rows[0].last_seen_at as Date | null;
-    if (!last || Date.now() - last.getTime() > 60_000) {
-      // Debounce last_seen_at writes to once per minute per user.
-      await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [userId]);
+    req.log.warn({ email: rawEmail }, 'cf_access_not_invited');
+    return reply.code(403).send({ error: 'not_invited' });
+  }
+
+  const user = rows[0];
+  let status = user.status;
+
+  if (status === 'invited') {
+    // Q17b — an invited row may not activate unless its CF provisioning
+    // actually landed. Without this precondition a row whose CF step failed
+    // would be activatable the moment anything put a session in front of it.
+    if (user.cf_synced_at === null) {
+      req.log.warn({ email: rawEmail }, 'cf_access_not_provisioned');
+      return reply.code(403).send({ error: 'not_provisioned' });
+    }
+
+    // Q21 — the conditional UPDATE picks exactly one winner among concurrent
+    // first requests, so user_activated is emitted at most once.
+    //
+    // Q27 — the UPDATE and its audit row commit TOGETHER. Doing the update on
+    // the pool and then recording the event separately would leave an
+    // activated account with no user_activated row if the process died or the
+    // insert failed in between: a mutation without its event, which is exactly
+    // the lost-intent case invariant I3 forbids. Only the transaction that
+    // actually won the race writes the event, so the race test's
+    // "exactly one event" assertion still holds.
+    const client = await db.connect();
+    let won = false;
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query<{ id: string }>(
+        `UPDATE users SET status='active', activated_at=now()
+          WHERE id=$1 AND status='invited' AND cf_synced_at IS NOT NULL
+          RETURNING id`,
+        [user.id],
+      );
+      won = upd.rowCount === 1;
+      if (won) {
+        await recordAccountEventTx(client, {
+          userId: user.id,
+          userEmail: rawEmail,
+          kind: 'user_activated',
+          ip: req.ip,
+          meta: { ...humanActor(user.id, rawEmail) },
+        });
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      req.log.error({ err, userId: user.id }, 'activation_failed');
+      // Fail closed: an activation we could not commit must not admit anyone.
+      return reply.code(403).send({ error: 'not_provisioned' });
+    } finally {
+      client.release();
+    }
+
+    if (won) {
+      status = 'active';
+    } else {
+      // A zero-row result is NEVER treated as "someone else activated me"
+      // (round-4 review finding 3). The update may equally have lost because
+      // an admin concurrently suspended or deleted the row — assuming the
+      // benign case would let a suspended user straight through. Re-read and
+      // branch on the row's ACTUAL current status.
+      const re = await db.query<{ status: string; cf_synced_at: Date | null }>(
+        `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+        [user.id],
+      );
+      status = re.rows[0]?.status ?? 'deleting';
+      if (status === 'invited') {
+        return reply.code(403).send({ error: 'not_provisioned' });
+      }
     }
   }
 
-  (req as any).userId = userId;
+  if (status !== 'active') {
+    // 'suspended' and 'deleting' share one response: a deleting row must not
+    // reveal that a deletion is under way.
+    req.log.warn({ email: rawEmail, status }, 'cf_access_inactive');
+    return reply.code(403).send({ error: 'access_suspended' });
+  }
+
+  const last = user.last_seen_at;
+  if (!last || Date.now() - last.getTime() > 60_000) {
+    // Debounce last_seen_at writes to once per minute per user.
+    await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [user.id]);
+  }
+
+  (req as any).userId = user.id;
   (req as any).userEmail = rawEmail;
-  (req as any).userDisplayName = userDisplayName;
-  (req as any).userTimezone = userTz;
+  (req as any).userDisplayName = user.display_name ?? displayNameClaim;
+  (req as any).userTimezone = user.timezone;
+  (req as any).userRole = user.role;
 }
 
 // Composer: tries Bearer first (the iOS Shortcut machine path), then CF

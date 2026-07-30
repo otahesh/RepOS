@@ -2527,14 +2527,56 @@ describe('activation (Q21 + Q17b)', () => {
     const email = freshEmail('lostrace');
     const u = await mkUserWithEmail(email, { status: 'invited', cfSyncedAt: new Date() });
     created.push(u.id);
-    // Force the exact interleaving: suspend between the read and the update.
-    // We simulate it by flipping the row to `suspended` while the request is
-    // in flight, using a statement-level advisory hook: the middleware re-reads
-    // on zero rows, so a suspended row must yield 403 rather than 200.
+    // NOTE: this suspends the row BEFORE the request, so the gate's opening
+    // SELECT already sees 'suspended' and the activation block is never
+    // entered — it does not reach the re-read at all. Kept because it is a
+    // legitimate case, but the interleaving one below is what actually covers
+    // the zero-row re-read.
     await db.query(`UPDATE users SET status='suspended' WHERE id=$1`, [u.id]);
     const r = await me(email);
     expect(r.statusCode).toBe(403);
     expect(r.json<{ error: string }>().error).toBe('access_suspended');
+  });
+
+  it('a row suspended BETWEEN the read and the conditional UPDATE stays denied', async () => {
+    // This is the case round-4 finding 3 is actually about: the gate reads the
+    // row as invited + provisioned, and only then does an admin suspend it, so
+    // the conditional UPDATE matches zero rows. Assuming that means "someone
+    // else activated me" would admit a suspended user.
+    //
+    // Hook the gate's own identity SELECT: let it resolve, then suspend the row
+    // before returning. That lands the mutation strictly between the SELECT and
+    // the conditional UPDATE — deterministic, not a timing race. (Hooking
+    // db.connect instead does not work: pool.query() acquires a client
+    // internally, so the first connect is the SELECT's own.)
+    const email = freshEmail('interleave');
+    const u = await mkUserWithEmail(email, { status: 'invited', cfSyncedAt: new Date() });
+    created.push(u.id);
+    const realQuery = db.query.bind(db);
+    const spy = vi.spyOn(db, 'query').mockImplementation(async (...args: unknown[]) => {
+      const res = await (realQuery as (...a: unknown[]) => Promise<unknown>)(...args);
+      const sql = typeof args[0] === 'string' ? args[0] : '';
+      if (sql.includes('FROM users WHERE lower(email)')) {
+        await (realQuery as (...a: unknown[]) => Promise<unknown>)(
+          `UPDATE users SET status='suspended' WHERE id=$1`,
+          [u.id],
+        );
+      }
+      return res;
+    });
+    try {
+      const r = await me(email);
+      expect(r.statusCode).toBe(403);
+      expect(r.json<{ error: string }>().error).toBe('access_suspended');
+    } finally {
+      spy.mockRestore();
+    }
+    // And it must not have activated on the way past.
+    const { rows } = await db.query<{ status: string; activated_at: Date | null }>(
+      `SELECT status, activated_at FROM users WHERE id=$1`, [u.id],
+    );
+    expect(rows[0].status).toBe('suspended');
+    expect(rows[0].activated_at).toBeNull();
   });
 
   it('a concurrently deleted row also stays denied', async () => {
@@ -2722,17 +2764,29 @@ Run this to find every one of them:
 cd /var/home/jason/Projects/RepOS/api && grep -rln "mintJwt\|cf-access-jwt-assertion\|CF_Authorization" tests/
 ```
 
-Known set from the 2026-07-26 survey — each needs a pre-created `users` row via `mkUserWithEmail`, and any `CF_ACCESS_ALLOWED_EMAILS` handling deleted:
+**The 2026-07-26 survey list was wrong in both directions — this is the corrected set, verified at Task 8 by running both suites and reading each file.** Exactly five files fail, each needing a pre-created `users` row via `mkUserWithEmail`:
 
-- `tests/integration/jwks-rotation.test.ts:72` — deletes the `CF_ACCESS_ALLOWED_EMAILS = TEST_EMAIL` line and pre-creates `TEST_EMAIL` as `active`
+- `tests/integration/jwks-rotation.test.ts:72` — delete the `CF_ACCESS_ALLOWED_EMAILS = TEST_EMAIL` line and pre-create `TEST_EMAIL` as `active`
 - `tests/integration/scope-enforcement.test.ts`
+- `tests/integration/admin-feedback.test.ts` — **two** describe blocks, each needing both `boss@` and `peon@`
+- `tests/middleware/require-cf-access-only.test.ts`
+- `tests/middleware/admin-emails.test.ts` — **omitted from the original survey.** Four cases, all of which stop at `403 not_invited` and never reach the admin-check branch they exist to test. Its header comment documented the auto-provisioning reliance outright. The `grep` above does find it; only the hand-written list missed it.
+
+**Needs no flip** — each already pre-creates a `users` row with the *same* email it mints, and `status` takes migration 080's `DEFAULT 'active'`:
+
 - `tests/integration/signout-everywhere.test.ts`
 - `tests/integration/account-deletion-cascade.test.ts`
+- `tests/integration/contamination/account-deletion-contamination.test.ts`
+- `tests/integration/contamination/signout-everywhere-contamination.test.ts`
+
+**Not on the CF Access path at all** — both build a bare Fastify instance and authenticate with `x-admin-key`/`origin` headers only, never minting a JWT, so there is nothing to flip:
+
 - `tests/integration/csrf-origin.test.ts`
 - `tests/integration/admin-gate.test.ts`
-- `tests/middleware/require-cf-access-only.test.ts`
-- `tests/integration/admin-feedback.test.ts`
-- `tests/integration/contamination/*.test.ts` (any that mint a JWT)
+
+None of the five needs an *assertion* changed. Every failure is the same shape — the row does not exist, so the response is `not_invited` — so pre-creating the row is the whole fix. No test in the repo positively asserts that auto-provisioning works.
+
+Note `src/bootstrap-guards.ts` also reads `CF_ACCESS_ALLOWED_EMAILS` and `tests/unit/startup-guards.test.ts` asserts on its allow-list count. Both are deliberately **out of scope here** — a later task owns them (see the `bootstrap-guards.ts:39-47` row in the impact table). Leaving them means the env var survives as vestigial config until then, which is expected, not an oversight.
 
 Also strip the `CF_ACCESS_ALLOWED_EMAILS` save/restore plumbing from `tests/helpers/cf-access-jwt.ts` (the `SavedEnv` field, the two assignments, and the `allowedEmails` option) — the env var no longer exists.
 
@@ -2741,7 +2795,13 @@ Also strip the `CF_ACCESS_ALLOWED_EMAILS` save/restore plumbing from `tests/help
 - [ ] **Step 6: Run the gate tests, then the full suite**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/middleware/cf-access-gate.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 13 tests.
+
+> **Note for the implementer — the round-4 re-read fix was untested as originally planned.** Replacing the entire zero-row re-read block with a bare `status = 'active'` (exactly the hole finding 3 identified) passed all 12 original tests. The `lostrace` case suspends the row *before* the request, so the gate's opening SELECT already reads `suspended`, `status === 'invited'` is false, and the activation block — including the re-read — is never entered; it passes through the ordinary inactive-status branch instead. Its comment claiming a "statement-level advisory hook" described something the test did not do.
+>
+> The added `BETWEEN the read and the conditional UPDATE` case forces the interleaving deterministically by hooking the gate's own identity SELECT via `vi.spyOn(db, 'query')`, letting it resolve, then suspending the row before returning. Note that hooking `db.connect` instead does **not** work — `pool.query()` acquires a client internally, so the first `connect` of the request is the SELECT's own, and the request times out.
+>
+> Also verified: dropping the `cf_synced_at === null` early check is *not* detectable by any test, and that is correct rather than a gap. The conditional UPDATE's `AND cf_synced_at IS NOT NULL` carries the same precondition, so an invited+NULL row yields `403 not_provisioned` by either route. The early check is defence in depth, not the enforcement point.
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npm test && npm run test:integration`
 Expected: PASS. Every remaining failure is a test that assumed auto-provisioning; fix the test.
@@ -2749,7 +2809,16 @@ Expected: PASS. Every remaining failure is a test that assumed auto-provisioning
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /var/home/jason/Projects/RepOS && git add -A api/src/middleware/cfAccess.ts api/tests/
+cd /var/home/jason/Projects/RepOS && git add \
+  api/src/middleware/cfAccess.ts \
+  api/tests/middleware/cf-access-gate.test.ts \
+  api/tests/helpers/program-fixtures.ts \
+  api/tests/helpers/cf-access-jwt.ts \
+  api/tests/middleware/require-cf-access-only.test.ts \
+  api/tests/middleware/admin-emails.test.ts \
+  api/tests/integration/scope-enforcement.test.ts \
+  api/tests/integration/admin-feedback.test.ts \
+  api/tests/integration/jwks-rotation.test.ts
 git commit -m "$(cat <<'EOF'
 feat(w9)!: deny-by-default CF Access gate with provisioned activation
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 import { db } from '../../src/db/client.js';
+import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 
 describe('/api/me is_admin', () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
@@ -11,6 +12,10 @@ describe('/api/me is_admin', () => {
   beforeAll(async () => {
     jwks = await setupTestJwks();
     process.env.REPOS_ADMIN_EMAILS = 'boss@repos.test';
+    // W9 Q2: deny-by-default — both JWT identities need pre-created rows.
+    await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
+    await mkUserWithEmail('boss@repos.test', { status: 'active', role: 'admin' });
+    await mkUserWithEmail('peon@repos.test', { status: 'active' });
     app = await buildApp();
   });
 
@@ -49,6 +54,10 @@ describe('admin feedback routes', () => {
   beforeAll(async () => {
     jwks = await setupTestJwks();
     process.env.REPOS_ADMIN_EMAILS = 'boss@repos.test';
+    // W9 Q2: deny-by-default — both JWT identities need pre-created rows.
+    await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
+    await mkUserWithEmail('boss@repos.test', { status: 'active', role: 'admin' });
+    await mkUserWithEmail('peon@repos.test', { status: 'active' });
     process.env.ADMIN_API_KEY = 'w7-admin-key'; // force the gate closed for non-admins
     app = await buildApp();
     // Seed THREE rows so the list test can prove the spec-mandated ordering

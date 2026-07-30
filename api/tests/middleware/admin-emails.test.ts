@@ -2,7 +2,7 @@
 //
 // We exercise the live middleware end-to-end against a real CF Access JWT
 // (signed by the in-process JWKS helper) + the real Postgres DB (which
-// `requireCfAccess` queries to auto-provision the user). This is the only
+// `requireCfAccess` queries for the pre-created user row). This is the only
 // way to test the admin-check branch — `requireAdminKeyOrCfAccess` calls
 // `requireCfAccess` by direct reference, so module-level spies can't
 // intercept it.
@@ -19,13 +19,30 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { requireAdminKeyOrCfAccess } from '../../src/middleware/cfAccess.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 import { db } from '../../src/db/client.js';
+import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 
 let jwks: TestJwksHandle;
 let savedAdminKey: string | undefined;
 let savedAdminEmails: string | undefined;
 
+// W9 Q2: every email this suite mints a JWT for needs a pre-existing users
+// row. The gate is deny-by-default now, so without these the four cases below
+// all stop at 403 not_invited and never reach the admin-check branch they exist
+// to test. This file was NOT in the plan's Step 5 flip list.
+const D10_EMAILS = [
+  'd10.allowed@repos.test',
+  'd10.denied@repos.test',
+  'd10.misconf@repos.test',
+  'd10.mixedcase@repos.test',
+];
+
 beforeAll(async () => {
   jwks = await setupTestJwks();
+  // Delete first so a crashed earlier run can't trip the unique constraint.
+  await db.query(`DELETE FROM users WHERE email = ANY($1::text[])`, [D10_EMAILS]);
+  for (const email of D10_EMAILS) {
+    await mkUserWithEmail(email, { status: 'active' });
+  }
   // Force ADMIN_API_KEY to be set so the function doesn't take the "no admin
   // key → open admin" early-return. Empty string would also be falsy.
   savedAdminKey = process.env.ADMIN_API_KEY;
@@ -39,16 +56,8 @@ afterAll(async () => {
   else process.env.ADMIN_API_KEY = savedAdminKey;
   if (savedAdminEmails === undefined) delete process.env.REPOS_ADMIN_EMAILS;
   else process.env.REPOS_ADMIN_EMAILS = savedAdminEmails;
-  // Clear users auto-provisioned by CF Access path.
-  await db.query(
-    `DELETE FROM users WHERE email IN ($1, $2, $3, $4)`,
-    [
-      'd10.allowed@repos.test',
-      'd10.denied@repos.test',
-      'd10.misconf@repos.test',
-      'd10.mixedcase@repos.test',
-    ],
-  );
+  // Clear the rows beforeAll created (no longer auto-provisioned — W9 Q2).
+  await db.query(`DELETE FROM users WHERE email = ANY($1::text[])`, [D10_EMAILS]);
   await db.end();
 });
 
