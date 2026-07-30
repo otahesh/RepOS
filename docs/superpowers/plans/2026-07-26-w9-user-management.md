@@ -6697,10 +6697,19 @@ describe('restore of a pre-080 dump (Q35)', () => {
     const { db } = await import('../../src/db/client.js');
     cleanups.push(async () => { await db.end(); });
 
+    // `emails` is DERIVED from config.include by toSnapshot, so a fixture must
+    // keep the two agreeing — an empty include[] beside a populated emails[] is
+    // a shape fetchPolicy can never return, and would hide a bug in any code
+    // that reads config instead of emails.
+    const restoredEmails = [FOUNDING_ADMIN_EMAIL, 'thesugardog@repos.test'];
     vi.spyOn(policy, 'fetchPolicy').mockResolvedValue({
-      emails: [FOUNDING_ADMIN_EMAIL, 'thesugardog@repos.test'],
+      emails: restoredEmails,
       name: 'Owner Only', decision: 'allow',
-      config: { name: 'Owner Only', decision: 'allow', include: [], exclude: [], require: [] },
+      config: {
+        name: 'Owner Only', decision: 'allow',
+        include: restoredEmails.map((e) => ({ email: { email: e } })),
+        exclude: [], require: [],
+      },
     } as never);
 
     const r = await reconcileCfBaseline('restore');
