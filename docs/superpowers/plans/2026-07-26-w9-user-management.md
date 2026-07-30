@@ -2195,6 +2195,27 @@ describe('requireAuth status enforcement (Q25)', () => {
     expect(await probe()).toBe(200);
   });
 
+  it('does not stamp last_used_at for a rejected request', async () => {
+    // The status check sits before the last_used_at UPDATE. Without this the
+    // ordering is only a comment: a suspended user's token would keep showing
+    // fresh activity on the sessions surface every time their Shortcut retried,
+    // which is exactly the signal an admin would use to judge whether a
+    // suspension took effect.
+    await setStatus('active');
+    expect(await probe()).toBe(200);
+    const { rows: before } = await db.query<{ last_used_at: Date | null }>(
+      `SELECT last_used_at FROM device_tokens WHERE user_id=$1`,
+      [userId],
+    );
+    await setStatus('suspended');
+    expect(await probe()).toBe(401);
+    const { rows: after } = await db.query<{ last_used_at: Date | null }>(
+      `SELECT last_used_at FROM device_tokens WHERE user_id=$1`,
+      [userId],
+    );
+    expect(after[0].last_used_at).toEqual(before[0].last_used_at);
+  });
+
   it('still 401s a garbage token (no status leak on the miss path)', async () => {
     const r = await app.inject({
       method: 'GET',
@@ -2202,6 +2223,36 @@ describe('requireAuth status enforcement (Q25)', () => {
       headers: { authorization: 'Bearer deadbeefdeadbeef.' + 'f'.repeat(64) },
     });
     expect(r.statusCode).toBe(401);
+  });
+});
+
+// The cases above probe a READ route. Q25's actual concern is the iOS Shortcut,
+// which WRITES. `POST /api/health/weight` runs the same requireAuth via
+// requireBearerOrCfAccess, so the gate covers it by construction — but "by
+// construction" is exactly what stops holding when a route is later registered
+// with a different auth preHandler. Assert the ingest path directly: a
+// suspended user's Shortcut must not be able to write, and the pairing with the
+// active case proves the 401 comes from the status gate rather than from a
+// missing scope or a malformed body.
+describe('the iOS Shortcut ingest path (the Q25 attack path)', () => {
+  async function ingest(): Promise<number> {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/health/weight',
+      headers: { authorization: `Bearer ${token}` },
+      body: { weight_lbs: 185.5, date: '2026-03-14', time: '07:30:00', source: 'Apple Health' },
+    });
+    return r.statusCode;
+  }
+
+  it('accepts the write while the user is active', async () => {
+    await setStatus('active');
+    expect(await ingest()).toBe(201);
+  });
+
+  it('401s the write once the user is suspended', async () => {
+    await setStatus('suspended');
+    expect(await ingest()).toBe(401);
   });
 });
 ```
@@ -2238,7 +2289,9 @@ Then, immediately after the existing `argon2.verify` failure check (currently li
 ```ts
   // Status is checked AFTER the secret verifies, so an attacker probing
   // prefixes learns nothing about account state from the response code —
-  // every failure is an indistinguishable bare 401.
+  // every failure is an indistinguishable bare 401. It is checked BEFORE the
+  // last_used_at UPDATE so a rejected request does not make a suspended
+  // user's token look freshly used on the sessions surface.
   if (row.status !== 'active') {
     req.log.warn({ userId: row.user_id, status: row.status }, 'bearer_rejected_inactive_user');
     return reply.code(401).send();
@@ -2248,7 +2301,15 @@ Then, immediately after the existing `argon2.verify` failure check (currently li
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/middleware/bearer-status-gate.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 9 tests.
+
+> **Note for the implementer:** the test block above adds three cases beyond the six originally planned, each of which mutation-testing showed nothing else covered.
+>
+> - **The ingest path.** The six planned cases all probe `GET /api/account/sessions`, but Q25's actual concern is the iOS Shortcut, which *writes*. `POST /api/health/weight` reaches the same `requireAuth` via `requireBearerOrCfAccess`, so it is covered by construction — and "by construction" stops holding the moment a route is registered with a different auth preHandler. Before the fix, the suspended write returned **200**, not 401.
+> - **`last_used_at` ordering.** Placing the check before the UPDATE is otherwise only a comment. Moving the check after the UPDATE passes all six planned tests.
+> - Note the ingest body needs `time` as `HH:MM:SS`; `'07:30'` is rejected with a 400 by `WeightSampleSchema`. Pairing the suspended assertion with an active one is what catches that — a lone 401 assertion passes for the wrong reason on a malformed body.
+>
+> Two things worth knowing about this task's environment: `POST /api/tokens` is gated by `requireAdminKeyOrCfAccess`, which is an open path when `ADMIN_API_KEY` is unset, so the header-less mint above works locally and matches how `tests/weight.test.ts` already mints. And the new INNER JOIN means any test inserting a `device_tokens` row for a `user_id` with no `users` row now 401s instead of authenticating; a full-suite run at Task 7 found no such test.
 
 - [ ] **Step 5: Run the full suite — every bearer-authenticated test now depends on `status='active'`**
 
