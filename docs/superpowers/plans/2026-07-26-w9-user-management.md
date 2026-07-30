@@ -1011,7 +1011,7 @@ EOF
 
 ### Task 5: Cloudflare Access policy client
 
-> **SHIPPED** as `8ea91c0`, hardened by `601e3ba` and `dfc16a4`. `api/src/services/cfAccessPolicy.ts` is authoritative; the code below is kept in sync with it. Two corruption paths were found in review *after* the first commit and are now encoded here — do not re-derive this module from an older revision of this plan.
+> **SHIPPED** as `8ea91c0`, hardened by `601e3ba` and `33e073c`. `api/src/services/cfAccessPolicy.ts` is authoritative; the code below is kept in sync with it. Two corruption paths were found in review *after* the first commit and are now encoded here — do not re-derive this module from an older revision of this plan.
 
 The fail-closed layer. Every refusal here surfaces as drift rather than a silent partial write.
 
