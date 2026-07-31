@@ -2083,7 +2083,7 @@ export async function syncEmailToStatus(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-sync.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 12 tests.
 
 > **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable — verified working on vitest 4.1.5. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
 >
@@ -3215,6 +3215,20 @@ describe('idempotency keys (Q30)', () => {
   it('an explicit resend is a FRESH key every time — a deliberate second delivery', () => {
     expect(resendIdempotencyKey('u1')).not.toBe(resendIdempotencyKey('u1'));
   });
+
+  it('both key forms fit Resend’s 1–256 character limit', () => {
+    // Verified against Resend’s idempotency docs on 2026-07-30: the header
+    // accepts 1–256 characters and rejects anything else with a 400
+    // invalid_idempotency_key. Both generators are derived, so a future change
+    // to either format could silently cross that line and turn every invite
+    // into a hard failure. Pin the external constraint here rather than
+    // discovering it in production.
+    const uuid = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
+    for (const key of [initialIdempotencyKey(uuid, new Date()), resendIdempotencyKey(uuid)]) {
+      expect(key.length).toBeGreaterThanOrEqual(1);
+      expect(key.length).toBeLessThanOrEqual(256);
+    }
+  });
 });
 
 describe('copy (G14)', () => {
@@ -3243,6 +3257,21 @@ describe('copy (G14)', () => {
 
   it('the plain-text alternative contains no markup', () => {
     expect(renderInviteText(input)).not.toMatch(/<[a-z]/i);
+  });
+
+  it('escapes both addresses into the HTML instead of interpolating them raw', () => {
+    // Both addresses are admin-supplied and land inside markup. A local part
+    // may legally be a quoted string, so `"a<b"@example.test` is a valid
+    // address that would otherwise open a tag mid-document and corrupt the
+    // email — and the same hole lets an admin inject markup into a message
+    // delivered to someone else.
+    const html = renderInviteHtml({
+      toEmail: '"a<b"@example.test',
+      invitedByEmail: '<script>x</script>@evil.test',
+    });
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('&lt;b&quot;@example.test');
   });
 });
 
@@ -3357,10 +3386,28 @@ export interface InviteCopyInput {
 
 // Gmail strips @font-face, so Inter Tight / JetBrains Mono cannot be relied on.
 // System-font stack + the brand palette + inline CSS + table layout.
+/**
+ * Both addresses are admin-supplied and land inside markup. A local part may
+ * legally be a quoted string, so `"a<b"@example.test` is a valid address that
+ * would otherwise open a tag mid-document — and the same hole lets an admin
+ * inject markup into a message delivered to someone else. The text part needs
+ * no equivalent.
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const FONT_STACK =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
-export function renderInviteHtml({ toEmail, invitedByEmail }: InviteCopyInput): string {
+export function renderInviteHtml(input: InviteCopyInput): string {
+  const toEmail = escapeHtml(input.toEmail);
+  const invitedByEmail = escapeHtml(input.invitedByEmail);
   return `<!doctype html>
 <html><body style="margin:0;padding:0;background:#0A0D12;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0A0D12;padding:24px 0;">
@@ -3500,7 +3547,16 @@ export async function sendInviteEmail(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/invite-mailer.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 12 tests.
+
+> **Resend contract verified against the live docs on 2026-07-30, before writing the client** (the Task 5 lesson). Everything this task assumed is correct: `POST https://api.resend.com/emails`, `Authorization: Bearer`, the `Idempotency-Key` header, `{from, to, subject, html, text}` with `from` accepting `Name <addr>`, and `{ "id": "<uuid>" }` on success. No client changes were needed — recorded here so a future run does not re-litigate it.
+>
+> Two constraints the docs add that the original tests did not cover, hence the two extra cases:
+>
+> - **Idempotency keys must be 1–256 characters**; outside that Resend returns a 400 `invalid_idempotency_key`. Both generators are derived (39 and ~80 chars today), so a format change could silently cross the limit and turn every invite into a hard failure. The added test pins the external constraint.
+> - **Keys expire after 24 hours.** That is fine for `initialIdempotencyKey` even though it is stable forever: within the window a transport retry dedupes, and beyond it a genuinely later re-send *should* deliver. Worth knowing rather than assuming the key protects indefinitely. Note also that reusing one key with a *different* payload yields 409 `invalid_idempotent_request`, which this client surfaces as the generic `mail_http_error` — acceptable fail-closed behaviour, but it is not distinguishable from a transport failure.
+>
+> Separately, `renderInviteHtml` escapes both addresses rather than interpolating them raw. A local part may legally be a quoted string, so `"a<b"@example.test` is a valid address that would open a tag mid-document, and the same hole lets an admin inject markup into a message delivered to someone else. The text part needs no equivalent.
 
 - [ ] **Step 5: Commit**
 
