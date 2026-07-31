@@ -3678,7 +3678,8 @@ const { buildApp } = await import('../../src/app.js');
 const { db } = await import('../../src/db/client.js');
 const policy = await import('../../src/services/cfAccessPolicy.js');
 const mailer = await import('../../src/services/inviteMailer.js');
-const { initialIdempotencyKey } = mailer;
+const { initialIdempotencyKey, SUPPORT_CONTACT } = mailer;
+const { humanActor, systemActor } = await import('../../src/services/accountEvents.js');
 const { setupTestJwks } = await import('../helpers/cf-access-jwt.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -3748,9 +3749,10 @@ function freshEmail(tag: string) { return `inv-${tag}-${randomUUID().slice(0, 8)
 
 async function seed(
   email: string, status: string, cfSynced: Date | null, sentAt: Date | null = null,
-  // Defaults to ADMIN because the real INSERT always stamps invited_by. Pass
-  // null explicitly to model an inviter whose account was later deleted
-  // (invited_by is ON DELETE SET NULL).
+  // Defaults to ADMIN because the real INSERT always stamps invited_by. Note
+  // the replayed sender does NOT come from this column — it comes from the
+  // user_invited / user_imported audit snapshot, which is why these tests
+  // insert that event explicitly. Pass null to model a Q31b import.
   invitedBy: string | null = adminId,
 ) {
   const { rows } = await db.query<{ id: string }>(
@@ -3928,6 +3930,13 @@ describe('duplicate invite — all five cases (Q29)', () => {
     );
     const email = freshEmail('crossadmin');
     const id = await seed(email, 'invited', new Date(), null, aRows[0].id);
+    // The sender is replayed from this frozen snapshot, not from invited_by —
+    // which is why deleting Admin A below must not change the outcome.
+    await db.query(
+      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
+       VALUES ($1,$2,'user_invited',$3::jsonb)`,
+      [id, email, JSON.stringify(humanActor(aRows[0].id, adminA))],
+    );
     policyEmails.push(email);
     const { rows } = await db.query<{ invited_at: Date }>(
       `SELECT invited_at FROM users WHERE id=$1`, [id],
@@ -3940,24 +3949,62 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // The key and the body must belong to the same request.
     expect(sentMail[0].invitedByEmail).toBe(adminA);
     expect(sentMail[0].invitedByEmail).not.toBe(ADMIN);
+
+    // Deleting the inviter nulls invited_by but cannot touch the audit
+    // snapshot, so a later attempt still replays A.
+    await db.query(`DELETE FROM users WHERE id=$1`, [aRows[0].id]);
+    await invite(email);
+    expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
+    expect(sentMail[1].invitedByEmail).toBe(adminA);
   });
 
-  it('falls back to a FRESH key when the original inviter is gone', async () => {
-    // invited_by is ON DELETE SET NULL, so deleting the inviting admin makes
-    // the original body unrecoverable. A deterministic key would then be
-    // guaranteed to 409; a fresh key risks a duplicate email instead, which is
-    // the better of the two failures.
-    const email = freshEmail('orphaned');
+  it('an IMPORTED row replays an identical key AND payload on every attempt', async () => {
+    // Q31b creates imported rows as invited + synced + invite_sent_at NULL,
+    // invited_by NULL, with a SYSTEM-actor user_imported event — so there is
+    // no original sender to recover. That is the designed steady state of
+    // every imported row, not a deleted-inviter edge case.
+    //
+    // Two attempts, because one cannot catch the bug this guards: if a lost
+    // ack leaves the row untouched, attempt two must still produce the SAME
+    // key and the SAME body, or Resend treats it as a new request and delivers
+    // a second time.
+    const email = freshEmail('imported');
     const id = await seed(email, 'invited', new Date(), null, null);
-    policyEmails.push(email);
-    const { rows } = await db.query<{ invited_at: Date }>(
-      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    await db.query(
+      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
+       VALUES ($1,$2,'user_imported',$3::jsonb)`,
+      [id, email, JSON.stringify(systemActor('cf_reconciliation', 'cutover'))],
     );
+    policyEmails.push(email);
 
     await invite(email);
+    await invite(email); // the lost-ack retry: nothing about the row changed
 
-    expect(sentMail[0].idempotencyKey).not.toBe(initialIdempotencyKey(id, rows[0].invited_at));
-    expect(sentMail[0].invitedByEmail).toBe(ADMIN);
+    expect(sentMail).toHaveLength(2);
+    expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
+    expect(sentMail[1].invitedByEmail).toBe(sentMail[0].invitedByEmail);
+    // Stable across attempts precisely because it is a constant, not the
+    // current admin — who could differ between the two.
+    expect(sentMail[0].invitedByEmail).toBe(SUPPORT_CONTACT);
+  });
+
+  it('an ordinary lost-ack retry also replays identically across two attempts', async () => {
+    // The same property for the human-actor shape: the sender comes from the
+    // frozen user_invited meta, so repeated attempts cannot drift.
+    const email = freshEmail('replay');
+    const id = await seed(email, 'invited', new Date(), null);
+    await db.query(
+      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
+       VALUES ($1,$2,'user_invited',$3::jsonb)`,
+      [id, email, JSON.stringify(humanActor(adminId, ADMIN))],
+    );
+    policyEmails.push(email);
+
+    await invite(email);
+    await invite(email);
+
+    expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
+    expect(sentMail[1].invitedByEmail).toBe(sentMail[0].invitedByEmail);
   });
 
   it('an unsynced retry whose mail never landed also reuses the INITIAL key', async () => {
@@ -4155,6 +4202,7 @@ import {
   initialIdempotencyKey,
   resendIdempotencyKey,
   MailerError,
+  SUPPORT_CONTACT,
 } from './inviteMailer.js';
 import { recordAccountEventTx, humanActor } from './accountEvents.js';
 
@@ -4213,6 +4261,36 @@ async function countCohort(): Promise<number> {
 }
 
 /**
+ * The address the invite body must name, recovered from state that was
+ * committed BEFORE any I/O, so every retry of a never-delivered invite renders
+ * byte-identical content and can therefore safely share one idempotency key.
+ *
+ * `user_invited` and `user_imported` are both written in the same transaction
+ * as the row they describe (Q27), so exactly one exists for every `invited`
+ * row and neither can be lost to a later mutation. `meta.actor_email` is a
+ * frozen snapshot: unlike a join through `invited_by` (which is
+ * ON DELETE SET NULL) it survives the inviting admin being deleted, so the
+ * replay stays stable even then.
+ *
+ * Q31b imports carry the Q23 SYSTEM actor shape and therefore have no
+ * actor_email at all — that is the designed state of every imported row, not
+ * an edge case, since the cutover creates them `invited` with `invited_by
+ * NULL` and `invite_sent_at NULL`. They resolve to a constant, which is
+ * equally stable across attempts.
+ */
+async function originalSender(userId: string): Promise<string> {
+  const { rows } = await db.query<{ meta: Record<string, unknown> | null }>(
+    `SELECT meta FROM account_events
+      WHERE user_id=$1 AND kind IN ('user_invited','user_imported')
+      ORDER BY id ASC LIMIT 1`,
+    [userId],
+  );
+  const meta = rows[0]?.meta;
+  const email = meta && meta.actor_kind === 'user' ? meta.actor_email : null;
+  return typeof email === 'string' && email !== '' ? email : SUPPORT_CONTACT;
+}
+
+/**
  * Attempt the CF add, then the mail. Shared by the fresh-invite and the
  * retry-then-send branch of Q29. Never throws for a sync or mail failure —
  * both are recorded on the outcome so the row survives with a retry
@@ -4263,16 +4341,8 @@ export async function inviteUser(
     const existing = await db.query<{
       id: string; status: UserStatus; cf_synced_at: Date | null;
       invited_at: Date | null; invite_sent_at: Date | null;
-      inviter_email: string | null;
     }>(
-      // inviter_email is joined because reusing the deterministic idempotency
-      // key obliges us to reproduce the ORIGINAL payload — see the key
-      // selection below.
-      `SELECT u.id, u.status, u.cf_synced_at, u.invited_at, u.invite_sent_at,
-              inv.email AS inviter_email
-         FROM users u
-         LEFT JOIN users inv ON inv.id = u.invited_by
-        WHERE lower(u.email)=$1`,
+      `SELECT id, status, cf_synced_at, invited_at, invite_sent_at FROM users WHERE lower(email)=$1`,
       [target],
     );
 
@@ -4301,25 +4371,25 @@ export async function inviteUser(
       // delivery is known-successful, which is what Q30 means by "a deliberate
       // second delivery".
       // Reusing the deterministic key OBLIGES us to reproduce the original
-      // request body. Resend returns 409 invalid_idempotent_request when one
-      // key arrives with different request data, so rendering the retry with
-      // the CURRENT admin's address hard-fails every cross-admin retry:
-      // Admin A's send is accepted, its response is lost, Admin B retries, and
-      // the body now names B against A's key. Recover A's address via
-      // invited_by and render with that.
+      // request body, because Resend deduplicates only IDENTICAL requests
+      // sharing a key and returns 409 invalid_idempotent_request otherwise.
+      // Rendering the retry with the CURRENT admin's address breaks that:
+      // Admin A's send is accepted, the response is lost, Admin B retries, and
+      // the body now names B against A's key.
       //
-      // invited_by is ON DELETE SET NULL, so deleting the inviting admin makes
-      // the original payload unrecoverable. There, a deterministic key is
-      // GUARANTEED to 409, so fall back to a fresh one: at worst the invitee
-      // gets a duplicate, which beats an invite that cannot be sent at all
-      // until the 24h key window expires.
+      // So the sender is resolved from durable state rather than from the
+      // caller — see originalSender(). Both the key and the body are then pure
+      // functions of the row, which is what makes the retry a true replay.
+      // There is deliberately NO fresh-key fallback on this branch: a fresh key
+      // per attempt would defeat Q30 outright, since a lost ack leaves the row
+      // untouched and the next attempt would deliver again.
       const neverDelivered = row.invite_sent_at === null;
-      const reuseInitialKey = neverDelivered && row.inviter_email !== null;
-      const idempotencyKey = reuseInitialKey
+      const idempotencyKey = neverDelivered
         ? initialIdempotencyKey(row.id, invitedAt)
         : resendIdempotencyKey(row.id);
-      // Pair the key with the payload it was minted for.
-      const senderEmail = reuseInitialKey ? row.inviter_email! : actor.email;
+      // A known-successful prior delivery gets a fresh key, so its body may
+      // name the current admin — there is no earlier request to match.
+      const senderEmail = neverDelivered ? await originalSender(row.id) : actor.email;
 
       if (row.cf_synced_at === null) {
         // Provisioning failed last time: retry the sync FIRST and send only if
@@ -4507,14 +4577,16 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
-Expected: PASS, 23 tests. (The block holds 23 `it()` cases as written — the previously
+Expected: PASS, 24 tests. (The block holds 23 `it()` cases as written — the previously
 stated 18 was already stale before the two lost-ack cases were added. Trust the measured count.)
 
-> **Why the retry sources its inviter from `invited_by` rather than `actor`.** Reusing the deterministic key obliges us to reproduce the original request body: Resend returns **409 `invalid_idempotent_request`** when one key arrives with different request data. The original shape of this branch rendered the retry with the *current* admin's address, so the cross-admin lost-ack case — A's send accepted, response lost, B retries — reused A's key against a body naming B and would have hard-failed, leaving the key dead for 24h and the invite unable to complete. Verified against Resend's idempotency documentation on 2026-07-30.
+> **Why the retry replays its sender from the audit snapshot.** Reusing the deterministic key obliges us to reproduce the original request body: Resend deduplicates only *identical* requests sharing a key, and returns **409 `invalid_idempotent_request`** otherwise. Rendering the retry with the *current* admin's address breaks the cross-admin lost-ack case — A's send accepted, response lost, B retries — by pairing A's key with a body naming B.
 >
-> The `invited_by IS NULL` fallback is not defensive padding: the column is `ON DELETE SET NULL`, so deleting the inviting admin genuinely erases the original payload. A deterministic key would then 409 every time, which is a worse outcome than a fresh key's risk of a duplicate email — so that case deliberately degrades to a fresh key.
+> **A fresh-key fallback is not an acceptable escape.** An earlier revision of this task fell back to a random key whenever the sender could not be resolved, which defeats Q30 entirely on that path: a lost ack leaves the row untouched, so the next attempt mints *another* fresh key and delivers again, forever. The key and the body must both be pure functions of the row.
 >
-> `seed()` therefore defaults `invited_by` to `adminId`: the real INSERT always stamps it, and the existing initial-key tests depend on it being resolvable. Passing `null` explicitly is how a test models the deleted-inviter case.
+> `originalSender()` reads `meta.actor_email` from the `user_invited` / `user_imported` event, which Q27 requires be committed in the same transaction as the row — i.e. before any I/O — and which is a frozen snapshot rather than a live join. That is strictly better than `invited_by`: the column is `ON DELETE SET NULL`, so a join through it would start returning a *different* sender the moment the inviting admin is deleted, which is the same 409 by another route. The audit snapshot cannot drift.
+>
+> **Q31b imports are the main case here, not a rare one.** The cutover creates every CF-only identity as `invited`, `invited_by NULL`, `invite_sent_at NULL`, with a `user_imported` event carrying the Q23 *system* actor shape — so no `actor_email` exists to recover, by design. Those rows resolve to the `SUPPORT_CONTACT` constant, which is equally stable across attempts. Both tests therefore make **two** attempts and assert an identical key *and* payload; a single-attempt test cannot observe this class of bug at all.
 
 - [ ] **Step 7: Commit**
 
