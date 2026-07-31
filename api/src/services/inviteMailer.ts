@@ -204,13 +204,33 @@ export async function sendInviteEmail(
         text.slice(0, 300),
       );
     }
-    let parsed: { id?: unknown };
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(text) as { id?: unknown };
+      parsed = JSON.parse(text);
     } catch {
       throw new MailerError('mail_http_error', 'Resend returned non-JSON', text.slice(0, 200));
     }
-    return { messageId: typeof parsed.id === 'string' ? parsed.id : '' };
+    // Validate, never default — the same rule cfAccessPolicy.ts learned the
+    // hard way. Coercing a malformed 2xx to `messageId: ''` would record the
+    // invite as delivered with an empty provider id, destroying the only
+    // handle on the actual message; reading `.id` off a bare `null` body would
+    // throw a raw TypeError that callers classify as an unknown error rather
+    // than a mail failure. Resend documents a non-empty id on every success,
+    // so anything else is a refusal.
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { id?: unknown }).id !== 'string' ||
+      (parsed as { id: string }).id === ''
+    ) {
+      throw new MailerError(
+        'mail_http_error',
+        'Resend returned 2xx without a message id',
+        text.slice(0, 200),
+      );
+    }
+    return { messageId: (parsed as { id: string }).id };
   } finally {
     clearTimeout(timer);
   }

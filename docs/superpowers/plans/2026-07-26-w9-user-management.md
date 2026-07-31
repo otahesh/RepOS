@@ -2083,7 +2083,7 @@ export async function syncEmailToStatus(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-sync.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 17 tests.
 
 > **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable — verified working on vitest 4.1.5. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
 >
@@ -3306,6 +3306,27 @@ describe('sendInviteEmail', () => {
     ).rejects.toMatchObject({ code: 'mail_http_error' });
   });
 
+  // A malformed 2xx is a refusal, not a success with a blank id. Defaulting
+  // here would let Task 11 stamp invite_sent_at with an empty
+  // invite_message_id — the invite recorded as delivered with no handle on the
+  // actual message — and the `null` body would escape as a raw TypeError that
+  // callers classify as an unknown error rather than a mail failure.
+  for (const [label, payload] of [
+    ['an empty object', '{}'],
+    ['a bare null', 'null'],
+    ['an empty id', '{"id":""}'],
+    ['a non-string id', '{"id":123}'],
+    ['an array', '[]'],
+  ] as const) {
+    it(`rejects a 200 carrying ${label}`, async () => {
+      respond = async () =>
+        new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
+      await expect(
+        sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
+      ).rejects.toMatchObject({ code: 'mail_http_error' });
+    });
+  }
+
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
@@ -3531,13 +3552,33 @@ export async function sendInviteEmail(
         text.slice(0, 300),
       );
     }
-    let parsed: { id?: unknown };
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(text) as { id?: unknown };
+      parsed = JSON.parse(text);
     } catch {
       throw new MailerError('mail_http_error', 'Resend returned non-JSON', text.slice(0, 200));
     }
-    return { messageId: typeof parsed.id === 'string' ? parsed.id : '' };
+    // Validate, never default — the same rule cfAccessPolicy.ts learned the
+    // hard way. Coercing a malformed 2xx to `messageId: ''` would record the
+    // invite as delivered with an empty provider id, destroying the only
+    // handle on the actual message; reading `.id` off a bare `null` body would
+    // throw a raw TypeError that callers classify as an unknown error rather
+    // than a mail failure. Resend documents a non-empty id on every success,
+    // so anything else is a refusal.
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { id?: unknown }).id !== 'string' ||
+      (parsed as { id: string }).id === ''
+    ) {
+      throw new MailerError(
+        'mail_http_error',
+        'Resend returned 2xx without a message id',
+        text.slice(0, 200),
+      );
+    }
+    return { messageId: (parsed as { id: string }).id };
   } finally {
     clearTimeout(timer);
   }
@@ -3547,7 +3588,7 @@ export async function sendInviteEmail(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/invite-mailer.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 17 tests.
 
 > **Resend contract verified against the live docs on 2026-07-30, before writing the client** (the Task 5 lesson). Everything this task assumed is correct: `POST https://api.resend.com/emails`, `Authorization: Bearer`, the `Idempotency-Key` header, `{from, to, subject, html, text}` with `from` accepting `Name <addr>`, and `{ "id": "<uuid>" }` on success. No client changes were needed — recorded here so a future run does not re-litigate it.
 >
@@ -3647,7 +3688,7 @@ let adminId: string;
 
 let policyEmails: string[];
 let fetchPolicyImpl: () => Promise<unknown>;
-let sentMail: Array<{ toEmail: string; idempotencyKey: string }>;
+let sentMail: Array<{ toEmail: string; idempotencyKey: string; invitedByEmail: string }>;
 let mailImpl: () => Promise<{ messageId: string }>;
 
 beforeAll(async () => {
@@ -3680,8 +3721,14 @@ beforeEach(() => {
   sentMail = [];
   mailImpl = async () => ({ messageId: 'msg_x' });
   vi.spyOn(mailer, 'sendInviteEmail').mockImplementation(async (i: never) => {
-    const input = i as unknown as { toEmail: string; idempotencyKey: string };
-    sentMail.push({ toEmail: input.toEmail, idempotencyKey: input.idempotencyKey });
+    const input = i as unknown as {
+      toEmail: string; idempotencyKey: string; invitedByEmail: string;
+    };
+    sentMail.push({
+      toEmail: input.toEmail,
+      idempotencyKey: input.idempotencyKey,
+      invitedByEmail: input.invitedByEmail,
+    });
     return mailImpl();
   });
 });
@@ -3701,10 +3748,15 @@ function freshEmail(tag: string) { return `inv-${tag}-${randomUUID().slice(0, 8)
 
 async function seed(
   email: string, status: string, cfSynced: Date | null, sentAt: Date | null = null,
+  // Defaults to ADMIN because the real INSERT always stamps invited_by. Pass
+  // null explicitly to model an inviter whose account was later deleted
+  // (invited_by is ON DELETE SET NULL).
+  invitedBy: string | null = adminId,
 ) {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, status, cf_synced_at, invited_at, invite_sent_at)
-     VALUES ($1,$2,$3, now(), $4) RETURNING id`, [email, status, cfSynced, sentAt],
+    `INSERT INTO users (email, status, cf_synced_at, invited_at, invite_sent_at, invited_by)
+     VALUES ($1,$2,$3, now(), $4, $5) RETURNING id`,
+    [email, status, cfSynced, sentAt, invitedBy],
   );
   return rows[0].id;
 }
@@ -3860,6 +3912,52 @@ describe('duplicate invite — all five cases (Q29)', () => {
     const again = await invite(email);
     expect(again.json<{ resent: boolean }>().resent).toBe(true);
     expect(sentMail[1].idempotencyKey).not.toBe(expected);
+  });
+
+  it('a lost-ack retry by a DIFFERENT admin renders the ORIGINAL inviter', async () => {
+    // Admin A invites; Resend ACCEPTS the send but the response is lost, so
+    // the row is left invited + synced + invite_sent_at NULL. Admin B then
+    // retries. Reusing A's deterministic key with a body naming B is precisely
+    // what Resend rejects with 409 invalid_idempotent_request — the key would
+    // be dead for 24h and the invite could not complete. The retry must
+    // reproduce A's payload, recovered from invited_by.
+    const adminA = `inv-origadmin-${randomUUID().slice(0, 8)}@repos.test`;
+    const { rows: aRows } = await db.query<{ id: string }>(
+      `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`,
+      [adminA],
+    );
+    const email = freshEmail('crossadmin');
+    const id = await seed(email, 'invited', new Date(), null, aRows[0].id);
+    policyEmails.push(email);
+    const { rows } = await db.query<{ invited_at: Date }>(
+      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    );
+
+    await invite(email); // performed by ADMIN — i.e. Admin B
+
+    expect(sentMail).toHaveLength(1);
+    expect(sentMail[0].idempotencyKey).toBe(initialIdempotencyKey(id, rows[0].invited_at));
+    // The key and the body must belong to the same request.
+    expect(sentMail[0].invitedByEmail).toBe(adminA);
+    expect(sentMail[0].invitedByEmail).not.toBe(ADMIN);
+  });
+
+  it('falls back to a FRESH key when the original inviter is gone', async () => {
+    // invited_by is ON DELETE SET NULL, so deleting the inviting admin makes
+    // the original body unrecoverable. A deterministic key would then be
+    // guaranteed to 409; a fresh key risks a duplicate email instead, which is
+    // the better of the two failures.
+    const email = freshEmail('orphaned');
+    const id = await seed(email, 'invited', new Date(), null, null);
+    policyEmails.push(email);
+    const { rows } = await db.query<{ invited_at: Date }>(
+      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    );
+
+    await invite(email);
+
+    expect(sentMail[0].idempotencyKey).not.toBe(initialIdempotencyKey(id, rows[0].invited_at));
+    expect(sentMail[0].invitedByEmail).toBe(ADMIN);
   });
 
   it('an unsynced retry whose mail never landed also reuses the INITIAL key', async () => {
@@ -4165,8 +4263,16 @@ export async function inviteUser(
     const existing = await db.query<{
       id: string; status: UserStatus; cf_synced_at: Date | null;
       invited_at: Date | null; invite_sent_at: Date | null;
+      inviter_email: string | null;
     }>(
-      `SELECT id, status, cf_synced_at, invited_at, invite_sent_at FROM users WHERE lower(email)=$1`,
+      // inviter_email is joined because reusing the deterministic idempotency
+      // key obliges us to reproduce the ORIGINAL payload — see the key
+      // selection below.
+      `SELECT u.id, u.status, u.cf_synced_at, u.invited_at, u.invite_sent_at,
+              inv.email AS inviter_email
+         FROM users u
+         LEFT JOIN users inv ON inv.id = u.invited_by
+        WHERE lower(u.email)=$1`,
       [target],
     );
 
@@ -4194,17 +4300,33 @@ export async function inviteUser(
       // that collapses them. A fresh key is correct exclusively when a prior
       // delivery is known-successful, which is what Q30 means by "a deliberate
       // second delivery".
+      // Reusing the deterministic key OBLIGES us to reproduce the original
+      // request body. Resend returns 409 invalid_idempotent_request when one
+      // key arrives with different request data, so rendering the retry with
+      // the CURRENT admin's address hard-fails every cross-admin retry:
+      // Admin A's send is accepted, its response is lost, Admin B retries, and
+      // the body now names B against A's key. Recover A's address via
+      // invited_by and render with that.
+      //
+      // invited_by is ON DELETE SET NULL, so deleting the inviting admin makes
+      // the original payload unrecoverable. There, a deterministic key is
+      // GUARANTEED to 409, so fall back to a fresh one: at worst the invitee
+      // gets a duplicate, which beats an invite that cannot be sent at all
+      // until the 24h key window expires.
       const neverDelivered = row.invite_sent_at === null;
-      const idempotencyKey = neverDelivered
+      const reuseInitialKey = neverDelivered && row.inviter_email !== null;
+      const idempotencyKey = reuseInitialKey
         ? initialIdempotencyKey(row.id, invitedAt)
         : resendIdempotencyKey(row.id);
+      // Pair the key with the payload it was minted for.
+      const senderEmail = reuseInitialKey ? row.inviter_email! : actor.email;
 
       if (row.cf_synced_at === null) {
         // Provisioning failed last time: retry the sync FIRST and send only if
         // it succeeds. Mailing unconditionally would send a link the invitee
         // cannot use, contradicting Q7 and Q17b.
         const r = await provisionAndMail(
-          row.id, target, invitedAt, actor.email, idempotencyKey,
+          row.id, target, invitedAt, senderEmail, idempotencyKey,
         );
         return {
           id: row.id, email: target, status: 'invited', created: false,
@@ -4217,7 +4339,7 @@ export async function inviteUser(
       let mail_error: string | null = null;
       try {
         const { messageId } = await sendInviteEmail({
-          toEmail: target, invitedByEmail: actor.email,
+          toEmail: target, invitedByEmail: senderEmail,
           idempotencyKey,
         });
         await db.query(
@@ -4385,7 +4507,14 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
-Expected: PASS, 18 tests.
+Expected: PASS, 23 tests. (The block holds 23 `it()` cases as written — the previously
+stated 18 was already stale before the two lost-ack cases were added. Trust the measured count.)
+
+> **Why the retry sources its inviter from `invited_by` rather than `actor`.** Reusing the deterministic key obliges us to reproduce the original request body: Resend returns **409 `invalid_idempotent_request`** when one key arrives with different request data. The original shape of this branch rendered the retry with the *current* admin's address, so the cross-admin lost-ack case — A's send accepted, response lost, B retries — reused A's key against a body naming B and would have hard-failed, leaving the key dead for 24h and the invite unable to complete. Verified against Resend's idempotency documentation on 2026-07-30.
+>
+> The `invited_by IS NULL` fallback is not defensive padding: the column is `ON DELETE SET NULL`, so deleting the inviting admin genuinely erases the original payload. A deterministic key would then 409 every time, which is a worse outcome than a fresh key's risk of a duplicate email — so that case deliberately degrades to a fresh key.
+>
+> `seed()` therefore defaults `invited_by` to `adminId`: the real INSERT always stamps it, and the existing initial-key tests depend on it being resolvable. Passing `null` explicitly is how a test models the deleted-inviter case.
 
 - [ ] **Step 7: Commit**
 

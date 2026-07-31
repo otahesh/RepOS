@@ -159,6 +159,27 @@ describe('sendInviteEmail', () => {
     ).rejects.toMatchObject({ code: 'mail_http_error' });
   });
 
+  // A malformed 2xx is a refusal, not a success with a blank id. Defaulting
+  // here would let Task 11 stamp invite_sent_at with an empty
+  // invite_message_id — the invite recorded as delivered with no handle on the
+  // actual message — and the `null` body would escape as a raw TypeError that
+  // callers classify as an unknown error rather than a mail failure.
+  for (const [label, payload] of [
+    ['an empty object', '{}'],
+    ['a bare null', 'null'],
+    ['an empty id', '{"id":""}'],
+    ['a non-string id', '{"id":123}'],
+    ['an array', '[]'],
+  ] as const) {
+    it(`rejects a 200 carrying ${label}`, async () => {
+      respond = async () =>
+        new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
+      await expect(
+        sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
+      ).rejects.toMatchObject({ code: 'mail_http_error' });
+    });
+  }
+
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
