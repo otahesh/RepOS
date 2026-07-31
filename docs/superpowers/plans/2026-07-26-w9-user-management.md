@@ -2843,10 +2843,12 @@ EOF
 The comment at `cfAccess.ts:265` claims "Migration 063 reserves `users.role`" — that migration was never written. Task 2 actually built it; this task consumes it.
 
 **Files:**
-- Modify: `api/src/middleware/cfAccess.ts:173-273` (`isAdminEmail` → role check, new `requireCfAccessAdmin`)
-- Modify: `api/src/app.ts:26,112`
+- Modify: `api/src/middleware/cfAccess.ts` (`isAdminEmail` → role check, new `requireCfAccessAdmin`)
+- Modify: `api/src/app.ts` (the `isAdminEmail` import and the `is_admin` field)
 - Delete: `api/tests/middleware/admin-emails.test.ts`
 - Test: `api/tests/middleware/admin-role.test.ts`
+
+> **Line numbers in this task are stale — locate by content.** Task 8 rewrote the middle of `cfAccess.ts`, shifting everything below it by ~70 lines. As executed: `isAdminEmail` was at 245 (not 173), `rejectIfNotAdminEmail` at 258 (not 185), its two call sites at 306 and 335 (not 236 and 267), the stale `Migration 063` comment at 335-336, and the `app.ts` targets at 26 and 112 (those two were still correct).
 
 **Interfaces:**
 - Consumes: `req.userRole` (Task 8).
@@ -3062,7 +3064,9 @@ In `api/src/app.ts` line 26, change the import to `import { requireCfAccess, isA
 cd /var/home/jason/Projects/RepOS/api && git rm tests/middleware/admin-emails.test.ts
 ```
 
-`tests/integration/admin-feedback.test.ts` sets `REPOS_ADMIN_EMAILS='boss@repos.test'` in four places (lines 9, 13, 19–20, 46, 51, 71). Replace that plumbing with a `mkUserWithEmail('boss@repos.test', { role: 'admin' })` fixture created in `beforeAll` and cleaned up in `afterAll`.
+`tests/integration/admin-feedback.test.ts` sets `REPOS_ADMIN_EMAILS='boss@repos.test'` across its two describe blocks. Replace that plumbing with a `mkUserWithEmail('boss@repos.test', { role: 'admin' })` fixture created in `beforeAll` and cleaned up in `afterAll`.
+
+> **As executed, Task 8 had already added those fixtures** (it needed the rows to exist at all under the deny-by-default gate) and created `boss@` with `role: 'admin'`. So this step was pure deletion of the eight `REPOS_ADMIN_EMAILS` references — no fixture had to be written. The upside is that its two `/api/me` `is_admin` assertions now genuinely exercise `users.role`: mutating `isAdminRequest` to return `true` fails both `returns is_admin=false for a non-admin email` and `403s a non-admin CF Access email`. Without that coverage the `is_admin` re-derivation in Step 4 would be unguarded, and a regression would show the admin UI to every user.
 
 Grep for any remaining reader — run from the repo root, and it must return nothing:
 
@@ -3095,7 +3099,12 @@ Expected: PASS throughout.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /var/home/jason/Projects/RepOS && git add -A api/
+cd /var/home/jason/Projects/RepOS && git add \
+  api/src/middleware/cfAccess.ts \
+  api/src/app.ts \
+  api/tests/middleware/admin-role.test.ts \
+  api/tests/middleware/admin-emails.test.ts \
+  api/tests/integration/admin-feedback.test.ts
 git commit -m "$(cat <<'EOF'
 feat(w9)!: users.role replaces REPOS_ADMIN_EMAILS (Q3, Q20)
 

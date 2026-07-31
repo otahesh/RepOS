@@ -23,7 +23,7 @@ import { authSignoutRoutes } from './routes/authSignout.js';
 import { parQRoutes } from './routes/parQ.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { mesocyclesDeloadRoutes } from './routes/mesocyclesDeload.js';
-import { requireCfAccess, isAdminEmail } from './middleware/cfAccess.js';
+import { requireCfAccess, isAdminRequest } from './middleware/cfAccess.js';
 import { registerMaintenanceGate } from './middleware/maintenance.js';
 import { backupRoutes } from './routes/backups.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
@@ -109,7 +109,9 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       onboarding_completed_at: u?.onboarding_completed_at ?? null,
       par_q_version: u?.par_q_version ?? 0,
       par_q_advisory_active: u?.par_q_advisory_active ?? false,
-      is_admin: isAdminEmail((req as { userEmail?: string }).userEmail),
+      // Q3 — re-derived from users.role. The response field name is unchanged
+      // so the frontend contract does not break.
+      is_admin: isAdminRequest(req),
     };
   });
 

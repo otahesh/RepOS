@@ -240,30 +240,23 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
   return requireCfAccess(req, reply);
 }
 
-// True iff `email` is in the comma-separated REPOS_ADMIN_EMAILS allow-list.
-// Fail-closed: unset env or empty email → false (never accidentally admin).
-export function isAdminEmail(email: string | undefined | null): boolean {
-  const adminEmails = process.env.REPOS_ADMIN_EMAILS;
-  if (!adminEmails || !email) return false;
-  return adminEmails
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(email.toLowerCase());
+// Q3 — users.role replaces REPOS_ADMIN_EMAILS. The comment that used to live
+// at line 265 claimed "Migration 063 reserves users.role"; that migration was
+// never written (060-062 then a jump to 070). Migration 080 actually builds it.
+//
+// Fail-closed: the role is only ever read from a row the gate already
+// resolved, so an unauthenticated request can never be admin.
+export function isAdminRequest(req: FastifyRequest): boolean {
+  return (req as { userRole?: string }).userRole === 'admin';
 }
 
-// Shared helper: enforce that the CF-Access-authenticated user's email is in
-// REPOS_ADMIN_EMAILS. Fail closed if env unset (per D10). Returns true if the
-// reply was already sent (caller must short-circuit).
-function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolean {
-  if (!process.env.REPOS_ADMIN_EMAILS) {
-    req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
-    reply.code(403).send({ error: 'admin_check_misconfigured' });
-    return true;
-  }
-  const userEmail = (req as { userEmail?: string }).userEmail;
-  if (!isAdminEmail(userEmail)) {
-    req.log.warn({ userEmail }, 'admin_check_rejected');
+/** Returns true if the reply was already sent (caller must short-circuit). */
+function rejectIfNotAdminRole(req: FastifyRequest, reply: FastifyReply): boolean {
+  if (!isAdminRequest(req)) {
+    req.log.warn(
+      { userEmail: (req as { userEmail?: string }).userEmail },
+      'admin_check_rejected',
+    );
     reply.code(403).send({ error: 'not_an_admin' });
     return true;
   }
@@ -303,7 +296,7 @@ export function requireAdminKeyOrCfAccess(
       }
       await requireCfAccess(req, reply);
       if (reply.sent) return;
-      if (rejectIfNotAdminEmail(req, reply)) return;
+      if (rejectIfNotAdminRole(req, reply)) return;
       (req as any).authMode = 'cf_access_fresh';
       return;
     }
@@ -330,11 +323,9 @@ export function requireAdminKeyOrCfAccess(
       if (reply.sent) return;
       (req as any).authMode = 'cf_access';
 
-      // Per D10: when authenticated via CF Access (not the admin key), enforce
-      // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
-      // Migration 063 reserves users.role TEXT for post-Beta cohort scale-up;
-      // until then REPOS_ADMIN_EMAILS is the source of truth.
-      if (rejectIfNotAdminEmail(req, reply)) return;
+      // Per D10 as re-based by W9 Q3: authorization is users.role, resolved by
+      // requireCfAccess above. There is no env allow-list any more.
+      if (rejectIfNotAdminRole(req, reply)) return;
       return;
     }
 
@@ -364,4 +355,45 @@ export async function requireCfAccessOnly(
   await requireCfAccess(req, reply);
   if (reply.sent) return;
   (req as any).authMode = 'cf_access';
+}
+
+/**
+ * Q20 — the user-management gate. CF Access JWT + role='admin', with the
+ * X-Admin-Key path rejected outright.
+ *
+ * Why reject the admin key: requireAdminKeyOrCfAccess returns on its admin-key
+ * branch WITHOUT setting req.userId or req.userEmail, so there is no actor —
+ * the self-lockout guards (Q13) have no "self" to compare against and audit
+ * rows have no attribution. Precedent already exists at account.ts:298, which
+ * gates DELETE /api/me with requireCfAccessOnly on identical reasoning. No
+ * operator automation needs to manage users.
+ *
+ * Q32 — this is NOT `requireFreshCfAccess`. It performs no token-age check and
+ * makes no re-authentication guarantee; it requires a valid CF Access JWT and
+ * the admin role, nothing more. Renaming the existing misleading flag is a
+ * follow-up, out of scope for W9.
+ *
+ * `rejectBearer` is used by DELETE: a stolen bearer must never delete a user.
+ */
+export function requireCfAccessAdmin(opts: { rejectBearer?: boolean } = {}) {
+  return async function cfAccessAdminGate(req: FastifyRequest, reply: FastifyReply) {
+    if (opts.rejectBearer) {
+      const auth = req.headers.authorization;
+      if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        req.log.warn({ path: req.url }, 'bearer_rejected_on_admin_users_route');
+        return reply.code(403).send({ error: 'cf_access_required' });
+      }
+    }
+    const adminKeyHeader = req.headers['x-admin-key'];
+    if (typeof adminKeyHeader === 'string' && adminKeyHeader.length > 0) {
+      req.log.warn({ path: req.url }, 'admin_key_rejected_on_user_management_route');
+      return reply.code(403).send({ error: 'cf_access_required' });
+    }
+    await requireCfAccess(req, reply);
+    if (reply.sent) return;
+    if (rejectIfNotAdminRole(req, reply)) return;
+    // Stamp authMode so the chained csrfOrigin preHandler enforces the Origin
+    // guard — a stolen JWT replayed cross-origin must still be blocked.
+    (req as any).authMode = 'cf_access';
+  };
 }

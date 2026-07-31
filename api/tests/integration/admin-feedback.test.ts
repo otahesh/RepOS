@@ -7,12 +7,11 @@ import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 describe('/api/me is_admin', () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
   let jwks: TestJwksHandle;
-  const savedAdminEmails = process.env.REPOS_ADMIN_EMAILS;
 
   beforeAll(async () => {
     jwks = await setupTestJwks();
-    process.env.REPOS_ADMIN_EMAILS = 'boss@repos.test';
-    // W9 Q2: deny-by-default — both JWT identities need pre-created rows.
+    // W9 Q2 + Q3: deny-by-default needs pre-created rows, and admin is now
+    // users.role — boss@ is the admin because of the column, not an env var.
     await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
     await mkUserWithEmail('boss@repos.test', { status: 'active', role: 'admin' });
     await mkUserWithEmail('peon@repos.test', { status: 'active' });
@@ -21,8 +20,6 @@ describe('/api/me is_admin', () => {
 
   afterAll(async () => {
     await jwks.teardown();
-    if (savedAdminEmails === undefined) delete process.env.REPOS_ADMIN_EMAILS;
-    else process.env.REPOS_ADMIN_EMAILS = savedAdminEmails;
     await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
     await app.close();
   });
@@ -48,13 +45,12 @@ describe('admin feedback routes', () => {
   let feedbackId: string;       // a newer untriaged row (also exercised by the triage test)
   let olderUntriagedId: string; // an older untriaged row
   let triagedId: string;        // an already-triaged row
-  const savedAdminEmails = process.env.REPOS_ADMIN_EMAILS;
   const savedAdminKey = process.env.ADMIN_API_KEY;
 
   beforeAll(async () => {
     jwks = await setupTestJwks();
-    process.env.REPOS_ADMIN_EMAILS = 'boss@repos.test';
-    // W9 Q2: deny-by-default — both JWT identities need pre-created rows.
+    // W9 Q2 + Q3: deny-by-default needs pre-created rows, and admin is now
+    // users.role — boss@ is the admin because of the column, not an env var.
     await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
     await mkUserWithEmail('boss@repos.test', { status: 'active', role: 'admin' });
     await mkUserWithEmail('peon@repos.test', { status: 'active' });
@@ -77,7 +73,6 @@ describe('admin feedback routes', () => {
 
   afterAll(async () => {
     await jwks.teardown();
-    if (savedAdminEmails === undefined) delete process.env.REPOS_ADMIN_EMAILS; else process.env.REPOS_ADMIN_EMAILS = savedAdminEmails;
     if (savedAdminKey === undefined) delete process.env.ADMIN_API_KEY; else process.env.ADMIN_API_KEY = savedAdminKey;
     await db.query(`DELETE FROM feedback WHERE id = ANY($1::bigint[])`, [[feedbackId, olderUntriagedId, triagedId]]);
     await db.query(`DELETE FROM users WHERE email IN ('boss@repos.test','peon@repos.test')`);
