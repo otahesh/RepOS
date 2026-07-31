@@ -268,10 +268,10 @@ function rejectIfNotAdminRole(req: FastifyRequest, reply: FastifyReply): boolean
 // stashed on the request so handlers can pick the right user_id source.
 //
 // FACTORY (W5): call `requireAdminKeyOrCfAccess()` to get a preHandler.
-//   - default ({}): dual-auth (X-Admin-Key OR CF Access JWT + admin email).
+//   - default ({}): dual-auth (X-Admin-Key OR CF Access JWT + role='admin').
 //   - { requireFreshCfAccess: true } (per C-RESTORE-AUTH-CFACCESS): destructive
 //     admin ops (restore) — REJECT the X-Admin-Key path, require CF Access JWT
-//     + admin email. The opaque bearer escape hatch is not enough for a
+//     + role='admin'. The opaque bearer escape hatch is not enough for a
 //     restore that DROPs the database.
 export function requireAdminKeyOrCfAccess(
   opts: { requireFreshCfAccess?: boolean } = {},
