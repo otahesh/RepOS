@@ -3934,7 +3934,24 @@ let sentMail: Array<{
 }>;
 let mailImpl: () => Promise<{ messageId: string }>;
 
+// Two env vars this suite cannot run without, neither of which is in api/.env:
+//
+//   PUBLIC_ORIGIN — csrfOrigin fails CLOSED when it is unset (403
+//     csrf_origin_misconfigured) and it does that BEFORE looking at the
+//     X-RepOS-CSRF header, so every request below would 403 for a reason that
+//     has nothing to do with the invite path.
+//   INVITE_FROM_EMAIL — buildInviteRequest throws mail_not_configured without
+//     it, so every happy path would report invite_sent:false. The
+//     missing-from case deletes it deliberately and restores it.
+const savedEnv: Record<string, string | undefined> = {};
+function setEnv(key: string, value: string): void {
+  savedEnv[key] = process.env[key];
+  process.env[key] = value;
+}
+
 beforeAll(async () => {
+  setEnv('PUBLIC_ORIGIN', 'https://repos.invite.test');
+  setEnv('INVITE_FROM_EMAIL', 'repos@send.jpmtech.com');
   jwks = await setupTestJwks();
   app = await buildApp();
   const { rows } = await db.query<{ id: string }>(
@@ -3948,6 +3965,10 @@ afterAll(async () => {
   await jwks.teardown();
   await db.end();
   await eph.drop();
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 });
 
 beforeEach(() => {
@@ -4321,6 +4342,13 @@ describe('duplicate invite — all five cases (Q29)', () => {
     //      branch keys off cf_synced_at, so a stranded NULL also mislabels the
     //      next attempt as a re-provision.
     const email = freshEmail('nofrom');
+    // This case needs the INSERT path, so it needs headroom under the cohort
+    // cap. Every fresh invite above adds a counted row and the seeds add more,
+    // so by this point the table is well past 10 and the request would 409 on
+    // the cap before it ever reached the freeze — asserting the config gap
+    // against a cap breach that never exercises it. Same prune idiom the cap
+    // describe uses.
+    await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
     const savedFrom = process.env.INVITE_FROM_EMAIL;
     delete process.env.INVITE_FROM_EMAIL;
     let r;
@@ -4801,7 +4829,6 @@ async function provisionAndMail(
     // The user is already in the CF policy and CAN sign in; the admin resends.
     return { cf_synced: true, invite_sent: false, sync_error: null, mail_error: mailErrorCode(err) };
   }
-  void invitedAt;
 }
 
 export async function inviteUser(
@@ -4991,7 +5018,7 @@ export async function resendInvite(targetId: string, actor: Actor): Promise<Invi
 }
 ```
 
-> The `void invitedAt;` line above is dead — delete it when writing the file; it is an artifact of the parameter list. Keep the parameter (the initial-send key derives from it at the call site).
+> `provisionAndMail` keeps its `invitedAt` parameter even though the body no longer reads it — the initial-send key derives from it at the call site, and the earlier revision's dead `void invitedAt;` line is gone from the shipped file.
 
 - [ ] **Step 5: Write the route plugin**
 
@@ -5085,6 +5112,14 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
 Expected: PASS, 28 tests. (Measured from the block itself. The originally stated 18 was
 already stale before any of the replay cases were added — trust the measured count, not the prose.)
+
+> **Three deviations found while executing this task, all already folded into the blocks above.**
+>
+> - **The suite must set `PUBLIC_ORIGIN` and `INVITE_FROM_EMAIL` itself.** Neither is in `api/.env`. `csrfOrigin` fails **closed** when `PUBLIC_ORIGIN` is unset — and it does so *before* it looks at the `X-RepOS-CSRF` header — so every request in the file 403s with `csrf_origin_misconfigured`, for a reason that has nothing to do with the invite path. Without `INVITE_FROM_EMAIL`, `buildInviteRequest` throws `mail_not_configured` and every happy path reports `invite_sent: false`. Both are saved and restored in `afterAll`.
+> - **The missing-`INVITE_FROM_EMAIL` case has to prune first.** It is the only later case that needs the INSERT path, and by the time it runs the earlier invites and seeds have pushed the counted set past `COHORT_CAP`, so the request 409s on the cap and never reaches the freeze at all. It reuses the cap describe's `DELETE FROM users WHERE email <> ADMIN` idiom. This is exactly the class of thing the measured-not-stated rule exists for: the case *passed* review as written and still could not run.
+> - **`void invitedAt;` is gone**, per the note under Step 4.
+>
+> **Mutation-tested, five mutations, each killing only its intended cases:** freezing the request *before* the sync fails only the missing-from case (which is why that case asserts `cf_synced`, not just durability); re-rendering from the current admin instead of replaying fails the cross-admin, config-change and both fail-closed cases; forcing `neverDelivered = false` fails all eight replay cases; stamping `cf_synced_at` before the sync succeeds fails only the sync-failure case; and inferring 201 from `resent`/`resynced` instead of `created` fails only the synced-but-never-delivered case — the precise bug that discriminator exists to prevent.
 
 > **Why the retry replays its sender from the audit snapshot.** Reusing the deterministic key obliges us to reproduce the original request body: Resend deduplicates only *identical* requests sharing a key, and returns **409 `invalid_idempotent_request`** otherwise. Rendering the retry with the *current* admin's address breaks the cross-admin lost-ack case — A's send accepted, response lost, B retries — by pairing A's key with a body naming B.
 >
