@@ -213,7 +213,6 @@ async function frozenInviteRequest(userId: string, email: string): Promise<Invit
 async function provisionAndMail(
   userId: string,
   email: string,
-  invitedAt: Date,
   makeRequest: () => Promise<InviteRequest>,
   idempotencyKey: string,
 ): Promise<{ cf_synced: boolean; invite_sent: boolean; sync_error: string | null; mail_error: string | null }> {
@@ -248,35 +247,40 @@ async function provisionAndMail(
   }
 }
 
-export async function inviteUser(
-  email: string,
-  role: UserRole,
-  actor: Actor,
-): Promise<InviteOutcome> {
-  const target = email.toLowerCase();
-  // Q18 — the cap check and the insert happen inside the SAME critical section
-  // as the CF sync. A bare count-then-insert races: two admins each observe 9
-  // and both insert, yielding 11.
-  return withMembershipLock(async () => {
-    const existing = await db.query<{
-      id: string; status: UserStatus; cf_synced_at: Date | null;
-      invited_at: Date | null; invite_sent_at: Date | null;
-    }>(
-      `SELECT id, status, cf_synced_at, invited_at, invite_sent_at FROM users WHERE lower(email)=$1`,
-      [target],
-    );
+/** The columns every duplicate/resend decision reads. */
+interface InviteRow {
+  id: string;
+  email: string;
+  status: UserStatus;
+  cf_synced_at: Date | null;
+  invited_at: Date | null;
+  invite_sent_at: Date | null;
+}
+const INVITE_ROW_COLUMNS = 'id, email, status, cf_synced_at, invited_at, invite_sent_at';
 
-    // Q29 — duplicate invite is explicit per current status. users.email is
-    // UNIQUE, so the un-specified path was a raw constraint violation
-    // surfacing as a 500.
-    if (existing.rows.length > 0) {
-      const row = existing.rows[0];
-      if (row.status === 'active') throw new LifecycleError(409, 'already_active');
-      if (row.status === 'suspended') throw new LifecycleError(409, 'suspended_use_reinstate');
-      if (row.status === 'deleting') throw new LifecycleError(409, 'deletion_in_progress');
+/**
+ * Q29's duplicate-invite half, shared by `inviteUser` (email already resolves
+ * to this row) and `resendInvite` (id resolves to it).
+ *
+ * **This function cannot create a user, and that is a security property, not a
+ * refactor.** `resendInvite` used to resolve its id to an email and hand that
+ * string to the creation-capable `inviteUser`, which re-looked-it-up by
+ * address. A deletion committing in between — the moment the resend spends
+ * queued on the membership lock is exactly such a window — left the second
+ * lookup finding nothing, so the resend fell through to the cap check and
+ * INSERTed a fresh row: a deleted identity resurrected, provisioned in
+ * Cloudflare and mailed, under an id nobody asked for. Resolving inside the
+ * lock closes the window; having no INSERT on this path closes the class.
+ *
+ * Callers MUST hold the membership lock.
+ */
+async function resendExisting(row: InviteRow, actor: Actor): Promise<InviteOutcome> {
+  const target = row.email.toLowerCase();
+  if (row.status === 'active') throw new LifecycleError(409, 'already_active');
+  if (row.status === 'suspended') throw new LifecycleError(409, 'suspended_use_reinstate');
+  if (row.status === 'deleting') throw new LifecycleError(409, 'deletion_in_progress');
 
-      const invitedAt = row.invited_at ?? new Date();
-
+  {
       // Q30 — the key is chosen by whether a delivery has ever SUCCEEDED, not
       // by which retry branch we are in. `invite_sent_at` is the only durable
       // record of that, and it is written only after sendInviteRequest resolves.
@@ -304,9 +308,30 @@ export async function inviteUser(
       // per attempt would defeat Q30 outright, since a lost ack leaves the row
       // untouched and the next attempt would deliver again.
       const neverDelivered = row.invite_sent_at === null;
-      const idempotencyKey = neverDelivered
-        ? initialIdempotencyKey(row.id, invitedAt)
-        : resendIdempotencyKey(row.id);
+      let idempotencyKey: string;
+      if (neverDelivered) {
+        // The initial key is derived from invited_at, so a NULL one cannot
+        // produce it. Defaulting to `new Date()` does not degrade gracefully:
+        // it mints a DIFFERENT key on every attempt, which is precisely the
+        // unbounded-resend failure Q30 forbids — a lost ack leaves the row
+        // untouched, so each retry looks like a new request to Resend and
+        // delivers again. `invited_at` is nullable in the schema, so this row
+        // is representable; refuse it as broken provenance rather than
+        // synthesizing mutable key material. (A CHECK constraint asserting
+        // status='invited' ⇒ invited_at IS NOT NULL would also close it, but
+        // that is a new migration and a schema decision, not this task's.)
+        if (row.invited_at === null) {
+          throw new LifecycleError(500, 'invite_provenance_invalid', {
+            reason: 'missing_invited_at',
+          });
+        }
+        idempotencyKey = initialIdempotencyKey(row.id, row.invited_at);
+      } else {
+        // A deliberate second delivery keys off the id alone, so it never reads
+        // invited_at — guarding it here would block a legitimate resend over a
+        // value the operation does not use.
+        idempotencyKey = resendIdempotencyKey(row.id);
+      }
       // A never-delivered invite REPLAYS its frozen request; a known-successful
       // prior delivery is a deliberate new one, so it renders fresh under a
       // fresh key and has no earlier request to match. Either can fail on a
@@ -324,9 +349,7 @@ export async function inviteUser(
         // Provisioning failed last time: retry the sync FIRST and send only if
         // it succeeds. Mailing unconditionally would send a link the invitee
         // cannot use, contradicting Q7 and Q17b.
-        const r = await provisionAndMail(
-          row.id, target, invitedAt, makeRequest, idempotencyKey,
-        );
+        const r = await provisionAndMail(row.id, target, makeRequest, idempotencyKey);
         return {
           id: row.id, email: target, status: 'invited', created: false,
           ...r, resynced: r.cf_synced,
@@ -364,7 +387,28 @@ export async function inviteUser(
         // the route keys 201 off `created` and not off this field.
         resent: !neverDelivered,
       };
-    }
+  }
+}
+
+export async function inviteUser(
+  email: string,
+  role: UserRole,
+  actor: Actor,
+): Promise<InviteOutcome> {
+  const target = email.toLowerCase();
+  // Q18 — the cap check and the insert happen inside the SAME critical section
+  // as the CF sync. A bare count-then-insert races: two admins each observe 9
+  // and both insert, yielding 11.
+  return withMembershipLock(async () => {
+    const existing = await db.query<InviteRow>(
+      `SELECT ${INVITE_ROW_COLUMNS} FROM users WHERE lower(email)=$1`,
+      [target],
+    );
+
+    // Q29 — duplicate invite is explicit per current status. users.email is
+    // UNIQUE, so the un-specified path was a raw constraint violation
+    // surfacing as a 500.
+    if (existing.rows.length > 0) return resendExisting(existing.rows[0], actor);
 
     const count = await countCohort();
     if (count >= COHORT_CAP) {
@@ -416,7 +460,7 @@ export async function inviteUser(
     // (Q7). Freezing between the two would satisfy the first and break the
     // second.
     const r = await provisionAndMail(
-      userId, target, invitedAt,
+      userId, target,
       () => frozenInviteRequest(userId, target),
       initialIdempotencyKey(userId, invitedAt),
     );
@@ -425,11 +469,26 @@ export async function inviteUser(
   });
 }
 
-/** Q29 — POST /:id/resend-invite enforces the identical precondition. */
+/**
+ * Q29 — POST /:id/resend-invite enforces the identical precondition.
+ *
+ * The row is resolved BY ID and INSIDE the lock, and the outcome comes from
+ * `resendExisting`, which has no INSERT. The earlier shape — read the email on
+ * the pool, then call `inviteUser` with that string — had a resurrection
+ * window: the resend can sit queued on the membership lock for as long as the
+ * holder runs, and a deletion committing in that interval means `inviteUser`'s
+ * own lookup finds nothing and takes the creation path, recreating the deleted
+ * identity with a new id, a Cloudflare grant and an email. Reading by id under
+ * the lock means whatever we read is the post-deletion truth, and a deleted row
+ * is simply a 404.
+ */
 export async function resendInvite(targetId: string, actor: Actor): Promise<InviteOutcome> {
-  const { rows } = await db.query<{ email: string }>(
-    `SELECT email FROM users WHERE id=$1`, [targetId],
-  );
-  if (rows.length === 0) throw new LifecycleError(404, 'user_not_found');
-  return inviteUser(rows[0].email, 'member', actor);
+  return withMembershipLock(async () => {
+    const { rows } = await db.query<InviteRow>(
+      `SELECT ${INVITE_ROW_COLUMNS} FROM users WHERE id=$1`,
+      [targetId],
+    );
+    if (rows.length === 0) throw new LifecycleError(404, 'user_not_found');
+    return resendExisting(rows[0], actor);
+  });
 }

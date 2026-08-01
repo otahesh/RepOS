@@ -23,6 +23,7 @@ const policy = await import('../../src/services/cfAccessPolicy.js');
 const mailer = await import('../../src/services/inviteMailer.js');
 const { initialIdempotencyKey, SUPPORT_CONTACT } = mailer;
 const { humanActor, systemActor } = await import('../../src/services/accountEvents.js');
+const { withMembershipLock } = await import('../../src/services/membershipLock.js');
 const { setupTestJwks } = await import('../helpers/cf-access-jwt.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -634,5 +635,140 @@ describe('auth (Q20)', () => {
   it('400s an invalid email', async () => {
     const r = await invite('not-an-email');
     expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('POST /api/admin/users/:id/resend-invite (Q29)', () => {
+  async function resend(id: string) {
+    return app.inject({
+      method: 'POST', url: `/api/admin/users/${id}/resend-invite`,
+      headers: {
+        'cf-access-jwt-assertion': await jwks.mintJwt(ADMIN),
+        'x-repos-csrf': '1',
+      },
+    });
+  }
+
+  it('completes a never-delivered invite under the INITIAL key', async () => {
+    const email = freshEmail('resendok');
+    const id = await seed(email, 'invited', new Date(), null);
+    policyEmails.push(email);
+    const { rows } = await db.query<{ invited_at: Date }>(
+      `SELECT invited_at FROM users WHERE id=$1`, [id],
+    );
+
+    const r = await resend(id);
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ id: string; created: boolean; invite_sent: boolean }>();
+    // Resend can NEVER create — that is the whole point of the branch it takes.
+    expect(body.created).toBe(false);
+    expect(body.id).toBe(id);
+    expect(body.invite_sent).toBe(true);
+    expect(sentMail).toHaveLength(1);
+    expect(sentMail[0].idempotencyKey).toBe(initialIdempotencyKey(id, rows[0].invited_at));
+  });
+
+  it('404s an unknown id without creating anything', async () => {
+    const before = await db.query<{ c: number }>(`SELECT count(*)::int c FROM users`);
+    const r = await resend(randomUUID());
+    expect(r.statusCode).toBe(404);
+    expect(r.json<{ error: string }>().error).toBe('user_not_found');
+    expect(sentMail).toHaveLength(0);
+    const after = await db.query<{ c: number }>(`SELECT count(*)::int c FROM users`);
+    expect(after.rows[0].c).toBe(before.rows[0].c);
+  });
+
+  it('cannot resurrect a user deleted while it waited for the membership lock', async () => {
+    // The resurrection window. Resolving the id to an email OUTSIDE the lock
+    // and then handing that email to the creation-capable invite path means a
+    // deletion that commits while the resend is queued is undone by it: the
+    // in-lock lookup finds no row for that address, falls through to the cap
+    // check, and INSERTs a NEW row for the deleted identity — provisioned in
+    // Cloudflare and mailed, under a fresh id the admin never asked for.
+    //
+    // The lock is what makes this deterministic rather than a timing test:
+    // hold it, let the resend block in acquisition, delete the row, release.
+    // Whatever the resend reads, it reads after the deletion has committed.
+    // Headroom under the cohort cap. Without it the resurrecting INSERT is
+    // refused by the cap instead of the fix, so the test would pass for a
+    // reason that has nothing to do with resolving the id inside the lock.
+    await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
+    const email = freshEmail('resurrect');
+    const id = await seed(email, 'invited', new Date(), null);
+    policyEmails.push(email);
+
+    let release!: () => void;
+    const holding = new Promise<void>((r) => { release = r; });
+    const lockHeld = withMembershipLock(async () => { await holding; });
+    await new Promise((r) => setTimeout(r, 60));
+
+    const pending = resend(id);
+    await new Promise((r) => setTimeout(r, 60));
+    await db.query(`DELETE FROM users WHERE id=$1`, [id]);
+    release();
+    await lockHeld;
+
+    const r = await pending;
+    expect(r.statusCode).toBe(404);
+    expect(sentMail).toHaveLength(0);
+    // The identity stays deleted, and no replacement row wears its address.
+    // (No assertion on policyEmails: this test seeds the address into the
+    // policy itself, to model a row whose cf_synced_at is set, so
+    // `not.toContain` would be false by construction and `toContain` true
+    // regardless of the outcome. The row count is what actually discriminates.)
+    const { rows } = await db.query<{ id: string }>(
+      `SELECT id FROM users WHERE lower(email)=$1`, [email],
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe('invite_at provenance (Q30)', () => {
+  it('a null invited_at fails closed on BOTH attempts instead of minting a key each time', async () => {
+    // invited_at is nullable, so this row is representable. The initial key is
+    // derived from it, and defaulting a missing one to `new Date()` mints a
+    // DIFFERENT key per attempt — which is the unbounded-resend failure Q30
+    // forbids, not a graceful degradation: a lost ack leaves the row
+    // untouched, so every retry looks new to Resend and delivers again.
+    //
+    // Two attempts, because one cannot see it. A single attempt succeeds
+    // either way; only the second reveals that the "retry" was a fresh
+    // delivery under a fresh key.
+    const email = freshEmail('noinvitedat');
+    const id = await seed(email, 'invited', new Date(), null);
+    await db.query(`UPDATE users SET invited_at = NULL WHERE id=$1`, [id]);
+    policyEmails.push(email);
+
+    const first = await invite(email);
+    expect(first.statusCode).toBe(500);
+    expect(first.json<{ error: string }>().error).toBe('invite_provenance_invalid');
+
+    const second = await invite(email);
+    expect(second.statusCode).toBe(500);
+    expect(second.json<{ error: string }>().error).toBe('invite_provenance_invalid');
+
+    // Nothing reached the wire on either attempt. Under the defaulting
+    // behaviour this would be two sends carrying two different keys.
+    expect(sentMail).toHaveLength(0);
+    const { rows } = await db.query<{ invite_sent_at: Date | null }>(
+      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+    );
+    expect(rows[0].invite_sent_at).toBeNull();
+  });
+
+  it('a deliberate resend of an already-delivered row does NOT need invited_at', async () => {
+    // The guard is scoped to the replay path on purpose. Once a delivery has
+    // succeeded the key comes from the id alone, so a null invited_at cannot
+    // affect it — refusing here would block a legitimate resend for a value
+    // the operation never reads.
+    const email = freshEmail('nullsent');
+    const id = await seed(email, 'invited', new Date(), new Date());
+    await db.query(`UPDATE users SET invited_at = NULL WHERE id=$1`, [id]);
+    policyEmails.push(email);
+
+    const r = await invite(email);
+    expect(r.statusCode).toBe(200);
+    expect(r.json<{ resent: boolean }>().resent).toBe(true);
+    expect(sentMail).toHaveLength(1);
   });
 });
