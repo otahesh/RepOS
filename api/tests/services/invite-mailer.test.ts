@@ -1,7 +1,8 @@
 // Q5, Q30, Q38 + the G14 email-content requirements.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  sendInviteEmail,
+  buildInviteRequest,
+  sendInviteRequest,
   renderInviteHtml,
   renderInviteText,
   initialIdempotencyKey,
@@ -108,13 +109,27 @@ describe('copy (G14)', () => {
     expect(html).toContain('#10141C');
   });
 
-  it('renders deterministically — identical input yields identical output', () => {
-    // The key is a fingerprint of the rendered body, so a template that varied
-    // per render (a timestamp, a nonce) would mint a new key on every attempt
-    // and resend without bound. Pin purity here rather than discover it as
-    // duplicate mail.
-    expect(renderInviteHtml(input)).toBe(renderInviteHtml(input));
-    expect(renderInviteText(input)).toBe(renderInviteText(input));
+  it('renders deterministically across a large jump in wall-clock time', () => {
+    // Q30 is protected by persisting the request, not by this — a
+    // non-deterministic renderer would simply be frozen at first render. But a
+    // template that embedded the date would still make the SAME invite read
+    // differently to a reader than to anyone reasoning about it later, so pin
+    // purity anyway.
+    //
+    // Rendering twice back-to-back does not test this: a timestamp rounded to
+    // seconds, minutes or days — and often even a millisecond one — lands on
+    // the same tick. Move the clock instead.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const html1 = renderInviteHtml(input);
+      const text1 = renderInviteText(input);
+      vi.setSystemTime(new Date('2027-06-15T13:45:12.500Z'));
+      expect(renderInviteHtml(input)).toBe(html1);
+      expect(renderInviteText(input)).toBe(text1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the plain-text alternative contains no markup', () => {
@@ -137,18 +152,16 @@ describe('copy (G14)', () => {
   });
 });
 
-describe('sendInviteEmail', () => {
-  it('POSTs to Resend with the from address, both parts and the idempotency key', async () => {
-    const r = await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    });
+describe('buildInviteRequest / sendInviteRequest', () => {
+  const copy = { toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test' };
+
+  it('POSTs the built request with the from address, both parts and the key', async () => {
+    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1');
     expect(r.messageId).toBe('msg_123');
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer test-key');
-    // The caller's key is a prefix: the mailer appends a fingerprint of the
-    // rendered body so one key can never span two different requests.
-    expect(headers['Idempotency-Key']).toMatch(/^k-1-[0-9a-f]{12}$/);
+    expect(headers['Idempotency-Key']).toBe('k-1');
     const body = JSON.parse(String(calls[0].init.body));
     expect(body.from).toContain('repos@send.jpmtech.com');
     expect(body.to).toEqual(['new@repos.test']);
@@ -156,64 +169,63 @@ describe('sendInviteEmail', () => {
     expect(body.text).toBeTruthy();
   });
 
-  it('binds the key to the body: identical requests reuse one key', async () => {
-    const args = {
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    };
-    await sendInviteEmail(args);
-    await sendInviteEmail(args);
+  it('Q30: replaying a persisted request is byte-identical even after the config and copy change', async () => {
+    // The whole point. Build once, then change everything the renderer reads —
+    // this is what a redeploy inside Resend's 24h window looks like. The replay
+    // must still produce the SAME key and the SAME bytes, so Resend collapses
+    // it into the original delivery instead of sending a second one.
+    const persisted = buildInviteRequest(copy);
+    await sendInviteRequest(persisted, 'k-1');
+
+    process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
+    // Round-trip through JSON exactly as a JSONB column would.
+    const replayed = JSON.parse(JSON.stringify(persisted));
+    await sendInviteRequest(replayed, 'k-1');
+
     const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
     expect(h[1]).toBe(h[0]);
-    expect(h[0].startsWith('k-1-')).toBe(true);
+    expect(String(calls[1].init.body)).toBe(String(calls[0].init.body));
   });
 
-  it('binds the key to the body: a changed from-address yields a different key', async () => {
-    // INVITE_FROM_EMAIL is read at call time, so a config change inside
-    // Resend's 24h window would otherwise pair the original key with a
-    // different request and hard-fail with 409. A new key delivers instead.
-    const args = {
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    };
-    await sendInviteEmail(args);
-    process.env.INVITE_FROM_EMAIL = 'other@send.jpmtech.com';
-    await sendInviteEmail(args);
-    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
-    expect(h[1]).not.toBe(h[0]);
+  it('a rebuilt request DOES drift when config changes — which is why it is persisted', async () => {
+    // The negative control for the case above: rebuilding is exactly what
+    // cannot be done on a retry.
+    const a = buildInviteRequest(copy);
+    process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
+    const b = buildInviteRequest(copy);
+    expect(b.from).not.toBe(a.from);
   });
 
-  it('binds the key to the body: a different inviter yields a different key', async () => {
-    await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'a@repos.test', idempotencyKey: 'k-1',
-    });
-    await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'b@repos.test', idempotencyKey: 'k-1',
-    });
-    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
-    expect(h[1]).not.toBe(h[0]);
-  });
-
-  it('the scoped key still fits Resend’s 256-character limit', async () => {
-    await sendInviteEmail({
-      toEmail: 'new@repos.test',
-      invitedByEmail: 'admin@repos.test',
-      idempotencyKey: resendIdempotencyKey('3f2504e0-4f89-11d3-9a0c-0305e82c3301'),
-    });
-    const h = (calls[0].init.headers as Record<string, string>)['Idempotency-Key'];
-    expect(h.length).toBeLessThanOrEqual(256);
+  it.each([
+    ['null', null],
+    ['a non-object', 'nope'],
+    ['an array', []],
+    ['a missing html part', { from: 'a', to: ['b'], subject: 'c', text: 'd' }],
+    ['an empty recipient list', { from: 'a', to: [], subject: 'c', html: 'd', text: 'e' }],
+  ])('refuses to send a persisted request that is %s', async (_label, bad) => {
+    await expect(
+      sendInviteRequest(bad as never, 'k-1'),
+    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+    expect(calls).toHaveLength(0);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {
     delete process.env.RESEND_API_KEY;
-    await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      code: 'mail_not_configured',
+    });
+  });
+
+  it('buildInviteRequest throws when INVITE_FROM_EMAIL is unset', () => {
+    delete process.env.INVITE_FROM_EMAIL;
+    expect(() => buildInviteRequest(copy)).toThrow(/INVITE_FROM_EMAIL/);
   });
 
   it('surfaces a non-2xx as mail_http_error', async () => {
     respond = async () => new Response(JSON.stringify({ message: 'nope' }), { status: 422 });
-    await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-    ).rejects.toMatchObject({ code: 'mail_http_error' });
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      code: 'mail_http_error',
+    });
   });
 
   // A malformed 2xx is a refusal, not a success with a blank id. Defaulting
@@ -231,16 +243,16 @@ describe('sendInviteEmail', () => {
     it(`rejects a 200 carrying ${label}`, async () => {
       respond = async () =>
         new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
-      await expect(
-        sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-      ).rejects.toMatchObject({ code: 'mail_http_error' });
+      await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+        code: 'mail_http_error',
+      });
     });
   }
 
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k', timeoutMs: 40 }),
+      sendInviteRequest(buildInviteRequest(copy), 'k', { timeoutMs: 40 }),
     ).rejects.toMatchObject({ code: 'mail_timeout' });
   });
 });

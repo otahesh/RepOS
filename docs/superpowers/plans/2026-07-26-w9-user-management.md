@@ -2083,7 +2083,7 @@ export async function syncEmailToStatus(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-sync.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 10 tests.
 
 > **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable — verified working on vitest 4.1.5. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
 >
@@ -3135,7 +3135,8 @@ EOF
   - `initialIdempotencyKey(userId: string, invitedAt: Date): string`
   - `resendIdempotencyKey(userId: string): string`
   - `renderInviteHtml(input: InviteCopyInput): string`, `renderInviteText(input: InviteCopyInput): string`
-  - `sendInviteEmail(input: SendInviteInput): Promise<{ messageId: string }>`
+  - `buildInviteRequest(input: InviteCopyInput): InviteRequest` — render ONCE, persist, replay
+  - `sendInviteRequest(request: InviteRequest, idempotencyKey: string, opts?): Promise<{ messageId: string }>`
   - `class MailerError extends Error { code: 'mail_not_configured' | 'mail_http_error' | 'mail_timeout' }`
   - `__setMailFetchForTesting(f: typeof fetch | null): void`
   - `SUPPORT_CONTACT = 'jason.meyer1@gmail.com'`, `APP_URL = 'https://repos.jpmtech.com'`
@@ -3146,9 +3147,10 @@ Create `api/tests/services/invite-mailer.test.ts`:
 
 ```ts
 // Q5, Q30, Q38 + the G14 email-content requirements.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  sendInviteEmail,
+  buildInviteRequest,
+  sendInviteRequest,
   renderInviteHtml,
   renderInviteText,
   initialIdempotencyKey,
@@ -3255,13 +3257,27 @@ describe('copy (G14)', () => {
     expect(html).toContain('#10141C');
   });
 
-  it('renders deterministically — identical input yields identical output', () => {
-    // The key is a fingerprint of the rendered body, so a template that varied
-    // per render (a timestamp, a nonce) would mint a new key on every attempt
-    // and resend without bound. Pin purity here rather than discover it as
-    // duplicate mail.
-    expect(renderInviteHtml(input)).toBe(renderInviteHtml(input));
-    expect(renderInviteText(input)).toBe(renderInviteText(input));
+  it('renders deterministically across a large jump in wall-clock time', () => {
+    // Q30 is protected by persisting the request, not by this — a
+    // non-deterministic renderer would simply be frozen at first render. But a
+    // template that embedded the date would still make the SAME invite read
+    // differently to a reader than to anyone reasoning about it later, so pin
+    // purity anyway.
+    //
+    // Rendering twice back-to-back does not test this: a timestamp rounded to
+    // seconds, minutes or days — and often even a millisecond one — lands on
+    // the same tick. Move the clock instead.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const html1 = renderInviteHtml(input);
+      const text1 = renderInviteText(input);
+      vi.setSystemTime(new Date('2027-06-15T13:45:12.500Z'));
+      expect(renderInviteHtml(input)).toBe(html1);
+      expect(renderInviteText(input)).toBe(text1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the plain-text alternative contains no markup', () => {
@@ -3284,18 +3300,16 @@ describe('copy (G14)', () => {
   });
 });
 
-describe('sendInviteEmail', () => {
-  it('POSTs to Resend with the from address, both parts and the idempotency key', async () => {
-    const r = await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    });
+describe('buildInviteRequest / sendInviteRequest', () => {
+  const copy = { toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test' };
+
+  it('POSTs the built request with the from address, both parts and the key', async () => {
+    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1');
     expect(r.messageId).toBe('msg_123');
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer test-key');
-    // The caller's key is a prefix: the mailer appends a fingerprint of the
-    // rendered body so one key can never span two different requests.
-    expect(headers['Idempotency-Key']).toMatch(/^k-1-[0-9a-f]{12}$/);
+    expect(headers['Idempotency-Key']).toBe('k-1');
     const body = JSON.parse(String(calls[0].init.body));
     expect(body.from).toContain('repos@send.jpmtech.com');
     expect(body.to).toEqual(['new@repos.test']);
@@ -3303,64 +3317,63 @@ describe('sendInviteEmail', () => {
     expect(body.text).toBeTruthy();
   });
 
-  it('binds the key to the body: identical requests reuse one key', async () => {
-    const args = {
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    };
-    await sendInviteEmail(args);
-    await sendInviteEmail(args);
+  it('Q30: replaying a persisted request is byte-identical even after the config and copy change', async () => {
+    // The whole point. Build once, then change everything the renderer reads —
+    // this is what a redeploy inside Resend's 24h window looks like. The replay
+    // must still produce the SAME key and the SAME bytes, so Resend collapses
+    // it into the original delivery instead of sending a second one.
+    const persisted = buildInviteRequest(copy);
+    await sendInviteRequest(persisted, 'k-1');
+
+    process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
+    // Round-trip through JSON exactly as a JSONB column would.
+    const replayed = JSON.parse(JSON.stringify(persisted));
+    await sendInviteRequest(replayed, 'k-1');
+
     const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
     expect(h[1]).toBe(h[0]);
-    expect(h[0].startsWith('k-1-')).toBe(true);
+    expect(String(calls[1].init.body)).toBe(String(calls[0].init.body));
   });
 
-  it('binds the key to the body: a changed from-address yields a different key', async () => {
-    // INVITE_FROM_EMAIL is read at call time, so a config change inside
-    // Resend's 24h window would otherwise pair the original key with a
-    // different request and hard-fail with 409. A new key delivers instead.
-    const args = {
-      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
-    };
-    await sendInviteEmail(args);
-    process.env.INVITE_FROM_EMAIL = 'other@send.jpmtech.com';
-    await sendInviteEmail(args);
-    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
-    expect(h[1]).not.toBe(h[0]);
+  it('a rebuilt request DOES drift when config changes — which is why it is persisted', async () => {
+    // The negative control for the case above: rebuilding is exactly what
+    // cannot be done on a retry.
+    const a = buildInviteRequest(copy);
+    process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
+    const b = buildInviteRequest(copy);
+    expect(b.from).not.toBe(a.from);
   });
 
-  it('binds the key to the body: a different inviter yields a different key', async () => {
-    await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'a@repos.test', idempotencyKey: 'k-1',
-    });
-    await sendInviteEmail({
-      toEmail: 'new@repos.test', invitedByEmail: 'b@repos.test', idempotencyKey: 'k-1',
-    });
-    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
-    expect(h[1]).not.toBe(h[0]);
-  });
-
-  it('the scoped key still fits Resend’s 256-character limit', async () => {
-    await sendInviteEmail({
-      toEmail: 'new@repos.test',
-      invitedByEmail: 'admin@repos.test',
-      idempotencyKey: resendIdempotencyKey('3f2504e0-4f89-11d3-9a0c-0305e82c3301'),
-    });
-    const h = (calls[0].init.headers as Record<string, string>)['Idempotency-Key'];
-    expect(h.length).toBeLessThanOrEqual(256);
+  it.each([
+    ['null', null],
+    ['a non-object', 'nope'],
+    ['an array', []],
+    ['a missing html part', { from: 'a', to: ['b'], subject: 'c', text: 'd' }],
+    ['an empty recipient list', { from: 'a', to: [], subject: 'c', html: 'd', text: 'e' }],
+  ])('refuses to send a persisted request that is %s', async (_label, bad) => {
+    await expect(
+      sendInviteRequest(bad as never, 'k-1'),
+    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+    expect(calls).toHaveLength(0);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {
     delete process.env.RESEND_API_KEY;
-    await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      code: 'mail_not_configured',
+    });
+  });
+
+  it('buildInviteRequest throws when INVITE_FROM_EMAIL is unset', () => {
+    delete process.env.INVITE_FROM_EMAIL;
+    expect(() => buildInviteRequest(copy)).toThrow(/INVITE_FROM_EMAIL/);
   });
 
   it('surfaces a non-2xx as mail_http_error', async () => {
     respond = async () => new Response(JSON.stringify({ message: 'nope' }), { status: 422 });
-    await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-    ).rejects.toMatchObject({ code: 'mail_http_error' });
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      code: 'mail_http_error',
+    });
   });
 
   // A malformed 2xx is a refusal, not a success with a blank id. Defaulting
@@ -3378,16 +3391,16 @@ describe('sendInviteEmail', () => {
     it(`rejects a 200 carrying ${label}`, async () => {
       respond = async () =>
         new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
-      await expect(
-        sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k' }),
-      ).rejects.toMatchObject({ code: 'mail_http_error' });
+      await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+        code: 'mail_http_error',
+      });
     });
   }
 
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
-      sendInviteEmail({ toEmail: 'a@b.test', invitedByEmail: 'c@d.test', idempotencyKey: 'k', timeoutMs: 40 }),
+      sendInviteRequest(buildInviteRequest(copy), 'k', { timeoutMs: 40 }),
     ).rejects.toMatchObject({ code: 'mail_timeout' });
   });
 });
@@ -3542,52 +3555,91 @@ export function renderInviteText({ toEmail, invitedByEmail }: InviteCopyInput): 
   ].join('\n');
 }
 
-export interface SendInviteInput extends InviteCopyInput {
-  idempotencyKey: string;
-  timeoutMs?: number;
+/**
+ * The exact Resend request body. Q30 requires that a retry after a lost
+ * acknowledgement cannot deliver twice, and Resend deduplicates only
+ * BYTE-IDENTICAL requests sharing a key — so the request has to be frozen the
+ * first time and replayed verbatim, not re-rendered.
+ *
+ * Re-rendering cannot satisfy Q30: `INVITE_FROM_EMAIL` is read from the
+ * environment and the copy ships with the deployment, so either the retry's
+ * body drifts (409, invite blocked for 24h) or the key is recomputed to match
+ * it (a second delivery — exactly what Q30 forbids). Callers therefore build
+ * this once, persist it, and replay it on every attempt.
+ */
+export interface InviteRequest {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
 }
 
-export async function sendInviteEmail(
-  input: SendInviteInput,
-): Promise<{ messageId: string }> {
-  const key = process.env.RESEND_API_KEY;
+/** Render the request. Call ONCE per invite, persist the result, then replay. */
+export function buildInviteRequest(input: InviteCopyInput): InviteRequest {
   const from = process.env.INVITE_FROM_EMAIL;
-  if (!key || !from) {
-    // Missing credentials fail at USE time with a specific error, never at
-    // boot — matching the Healthchecks and feedback-webhook precedent.
+  if (!from) {
     throw new MailerError(
       'mail_not_configured',
-      'RESEND_API_KEY and INVITE_FROM_EMAIL must both be set to send invites',
+      'INVITE_FROM_EMAIL must be set to build an invite',
     );
   }
-
-  // The caller's key identifies the INTENT (this invite, never yet delivered).
-  // Resend, though, deduplicates only byte-identical requests sharing a key and
-  // returns 409 invalid_idempotent_request otherwise — so a key that outlives
-  // the body it was minted for is a liability. INVITE_FROM_EMAIL is read here
-  // at call time and the subject/HTML/text come from whatever template is
-  // deployed, both of which can change inside Resend's 24h window and leave a
-  // retry pairing the original key with a different request.
-  //
-  // Binding a fingerprint of the ACTUAL body to the key makes "same key => same
-  // request" true by construction rather than by convention: an unchanged
-  // deployment retries into a dedupe, and a changed template or from-address
-  // yields a new key and simply delivers. That trades an unrecoverable 409 —
-  // which would block the invite for 24h — for at most one extra delivery per
-  // deliberate change, which is the safer of the two failures.
-  const requestBody = JSON.stringify({
+  return {
     from: `RepOS <${from}>`,
     to: [input.toEmail],
     subject: INVITE_SUBJECT,
     html: renderInviteHtml(input),
     text: renderInviteText(input),
-  });
-  const scopedKey = `${input.idempotencyKey}-${createHash('sha256')
-    .update(requestBody)
-    .digest('hex')
-    .slice(0, 12)}`;
+  };
+}
 
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+/**
+ * A persisted request round-trips through JSONB, so it is untrusted input by
+ * the time it comes back. Validate, never default: sending a half-shaped body
+ * under the original key is how a "replay" quietly becomes a different
+ * request.
+ */
+function assertInviteRequest(r: unknown): asserts r is InviteRequest {
+  const o = r as Record<string, unknown> | null;
+  const ok =
+    o !== null && typeof o === 'object' && !Array.isArray(o) &&
+    typeof o.from === 'string' && o.from !== '' &&
+    Array.isArray(o.to) && o.to.length > 0 && o.to.every((x) => typeof x === 'string' && x !== '') &&
+    typeof o.subject === 'string' && o.subject !== '' &&
+    typeof o.html === 'string' && o.html !== '' &&
+    typeof o.text === 'string' && o.text !== '';
+  if (!ok) {
+    throw new MailerError(
+      'mail_not_configured',
+      'the persisted invite request is missing or malformed — refusing to send',
+      JSON.stringify(r)?.slice(0, 200),
+    );
+  }
+}
+
+/**
+ * POST a previously built request under `idempotencyKey`. The body is sent
+ * verbatim: nothing here reads the environment or the templates, which is what
+ * makes a retry byte-identical to the original and lets Resend collapse the
+ * two into one delivery (Q30).
+ */
+export async function sendInviteRequest(
+  request: InviteRequest,
+  idempotencyKey: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<{ messageId: string }> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    // Missing credentials fail at USE time with a specific error, never at
+    // boot — matching the Healthchecks and feedback-webhook precedent.
+    throw new MailerError(
+      'mail_not_configured',
+      'RESEND_API_KEY must be set to send invites',
+    );
+  }
+  assertInviteRequest(request);
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   // As in cfAccessPolicy.ts, the deadline covers the response BODY too: this
@@ -3603,9 +3655,9 @@ export async function sendInviteEmail(
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json',
           // Q30 — transport retry protection, scoped to this exact body.
-          'Idempotency-Key': scopedKey,
+          'Idempotency-Key': idempotencyKey,
         },
-        body: requestBody,
+        body: JSON.stringify(request),
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
@@ -3667,7 +3719,9 @@ export async function sendInviteEmail(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/invite-mailer.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 26 tests. (Runtime count. A static grep for `it(` under-reports this
+file — the malformed-2xx and malformed-request cases are generated by a loop and by
+`it.each`.)
 
 > **Resend contract verified against the live docs on 2026-07-30, before writing the client** (the Task 5 lesson). Everything this task assumed is correct: `POST https://api.resend.com/emails`, `Authorization: Bearer`, the `Idempotency-Key` header, `{from, to, subject, html, text}` with `from` accepting `Name <addr>`, and `{ "id": "<uuid>" }` on success. No client changes were needed — recorded here so a future run does not re-litigate it.
 >
@@ -3676,9 +3730,9 @@ Expected: PASS, 22 tests.
 > - **Idempotency keys must be 1–256 characters**; outside that Resend returns a 400 `invalid_idempotency_key`. Both generators are derived (39 and ~80 chars today), so a format change could silently cross the limit and turn every invite into a hard failure. The added test pins the external constraint.
 > - **Keys expire after 24 hours.** That is fine for `initialIdempotencyKey` even though it is stable forever: within the window a transport retry dedupes, and beyond it a genuinely later re-send *should* deliver. Worth knowing rather than assuming the key protects indefinitely. Note also that reusing one key with a *different* payload yields 409 `invalid_idempotent_request`, which this client surfaces as the generic `mail_http_error` — acceptable fail-closed behaviour, but it is not distinguishable from a transport failure.
 >
-> **The key is scoped to the rendered body, which is what makes "same key ⟹ same request" true by construction.** The caller's key identifies the *intent* (this invite, never yet delivered), but `INVITE_FROM_EMAIL` is read at call time and the subject/HTML/text come from whatever template is deployed — all of which can change inside Resend's 24h window and leave a retry pairing the original key with a different request. `sendInviteEmail` therefore appends a 12-hex fingerprint of the actual body, so an unchanged deployment retries into a dedupe while a changed template or from-address yields a new key and simply delivers. That trades an unrecoverable 409 — which would block the invite for a day — for at most one extra delivery per deliberate change.
+> **The request is frozen and replayed, which is the only shape that satisfies Q30.** An earlier revision scoped the key to a fingerprint of the rendered body. That is self-consistent but *violates Q30*: if v1 was accepted and its acknowledgement lost, a later config or copy change computes a different key and Resend delivers a second time — precisely the double-send Q30 forbids. Re-rendering can only ever pick between drifting the body (409, invite blocked for a day) and drifting the key (a duplicate); neither is acceptable, so the body must not be re-rendered at all.
 >
-> This only holds while the renderers are pure, so there is a test asserting two renders of identical input are identical. A template that ever grew a timestamp or nonce would mint a fresh key on every attempt and resend without bound.
+> `buildInviteRequest` therefore renders once and the caller persists the result in the provenance event's `meta.invite_request` — the permissive audit metadata already carries it, so no migration is needed. `sendInviteRequest` POSTs those exact bytes and reads neither the environment nor the templates, which is what makes a retry byte-identical. `assertInviteRequest` validates the round-tripped JSONB rather than defaulting it, since a half-shaped replay under the original key is just a different request wearing the same name.
 >
 > Separately, `renderInviteHtml` escapes both addresses rather than interpolating them raw. A local part may legally be a quoted string, so `"a<b"@example.test` is a valid address that would open a tag mid-document, and the same hole lets an admin inject markup into a message delivered to someone else. The text part needs no equivalent.
 
@@ -3715,7 +3769,7 @@ The full grant path: count under the lock, insert non-activatable, CF add, stamp
 - Test: `api/tests/routes/admin-users-invite.test.ts`
 
 **Interfaces:**
-- Consumes: `withMembershipLock` (T4), `syncEmail`/`syncEmailToStatus` (T6), `sendInviteEmail`/`initialIdempotencyKey`/`resendIdempotencyKey` (T10), `recordAccountEventTx`/`humanActor` (T3), `COHORT_CAP` (T2), `requireCfAccessAdmin` (T9).
+- Consumes: `withMembershipLock` (T4), `syncEmail`/`syncEmailToStatus` (T6), `buildInviteRequest`/`sendInviteRequest`/`initialIdempotencyKey`/`resendIdempotencyKey` (T10), `recordAccountEventTx`/`humanActor` (T3), `COHORT_CAP` (T2), `requireCfAccessAdmin` (T9).
 - Produces:
   - `interface Actor { userId: string; email: string; ip: string | null }`
   - `class LifecycleError extends Error { statusCode: number; code: string; details?: Record<string, unknown> }`
@@ -3772,7 +3826,10 @@ let adminId: string;
 
 let policyEmails: string[];
 let fetchPolicyImpl: () => Promise<unknown>;
-let sentMail: Array<{ toEmail: string; idempotencyKey: string; invitedByEmail: string }>;
+let sentMail: Array<{
+  request: { to: string[]; from: string; html: string; text: string };
+  idempotencyKey: string;
+}>;
 let mailImpl: () => Promise<{ messageId: string }>;
 
 beforeAll(async () => {
@@ -3804,17 +3861,15 @@ beforeEach(() => {
   });
   sentMail = [];
   mailImpl = async () => ({ messageId: 'msg_x' });
-  vi.spyOn(mailer, 'sendInviteEmail').mockImplementation(async (i: never) => {
-    const input = i as unknown as {
-      toEmail: string; idempotencyKey: string; invitedByEmail: string;
-    };
-    sentMail.push({
-      toEmail: input.toEmail,
-      idempotencyKey: input.idempotencyKey,
-      invitedByEmail: input.invitedByEmail,
-    });
-    return mailImpl();
-  });
+  vi.spyOn(mailer, 'sendInviteRequest').mockImplementation(
+    async (request: never, idempotencyKey: never) => {
+      sentMail.push({
+        request: request as unknown as { to: string[]; from: string; html: string; text: string },
+        idempotencyKey: idempotencyKey as unknown as string,
+      });
+      return mailImpl();
+    },
+  );
 });
 
 async function invite(email: string, role: 'member' | 'admin' = 'member') {
@@ -4041,15 +4096,16 @@ describe('duplicate invite — all five cases (Q29)', () => {
     expect(sentMail).toHaveLength(1);
     expect(sentMail[0].idempotencyKey).toBe(initialIdempotencyKey(id, rows[0].invited_at));
     // The key and the body must belong to the same request.
-    expect(sentMail[0].invitedByEmail).toBe(adminA);
-    expect(sentMail[0].invitedByEmail).not.toBe(ADMIN);
+    expect(sentMail[0].request.html).toContain(adminA);
+    expect(sentMail[0].request.html).not.toContain(ADMIN);
 
     // Deleting the inviter nulls invited_by but cannot touch the audit
     // snapshot, so a later attempt still replays A.
     await db.query(`DELETE FROM users WHERE id=$1`, [aRows[0].id]);
     await invite(email);
     expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
-    expect(sentMail[1].invitedByEmail).toBe(adminA);
+    // Byte-identical, not merely "same sender" — that is what Resend collapses.
+    expect(sentMail[1].request).toEqual(sentMail[0].request);
   });
 
   it('an IMPORTED row replays an identical key AND payload on every attempt', async () => {
@@ -4083,10 +4139,10 @@ describe('duplicate invite — all five cases (Q29)', () => {
 
     expect(sentMail).toHaveLength(2);
     expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
-    expect(sentMail[1].invitedByEmail).toBe(sentMail[0].invitedByEmail);
+    expect(sentMail[1].request).toEqual(sentMail[0].request);
     // Stable across attempts precisely because it is a constant, not the
     // current admin — who could differ between the two.
-    expect(sentMail[0].invitedByEmail).toBe(SUPPORT_CONTACT);
+    expect(sentMail[0].request.html).toContain(SUPPORT_CONTACT);
   });
 
   it('an ordinary lost-ack retry also replays identically across two attempts', async () => {
@@ -4106,7 +4162,39 @@ describe('duplicate invite — all five cases (Q29)', () => {
     await invite(email);
 
     expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
-    expect(sentMail[1].invitedByEmail).toBe(sentMail[0].invitedByEmail);
+    expect(sentMail[1].request).toEqual(sentMail[0].request);
+  });
+
+  it('Q30: the replay survives a config change between attempts', async () => {
+    // The case that forced freezing rather than re-rendering. Attempt one is
+    // accepted but its acknowledgement is lost; the deployment then changes
+    // INVITE_FROM_EMAIL — a redeploy inside Resend's 24h window. Attempt two
+    // must still send byte-identical bytes under the same key, or Resend
+    // treats it as a new request and the invitee gets a second email.
+    const email = freshEmail('redeploy');
+    const id = await seed(email, 'invited', new Date(), null);
+    policyEmails.push(email);
+    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
+
+    await invite(email);
+
+    const savedFrom = process.env.INVITE_FROM_EMAIL;
+    process.env.INVITE_FROM_EMAIL = 'rotated@send.jpmtech.com';
+    try {
+      await invite(email);
+    } finally {
+      if (savedFrom === undefined) delete process.env.INVITE_FROM_EMAIL;
+      else process.env.INVITE_FROM_EMAIL = savedFrom;
+    }
+
+    expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
+    expect(sentMail[1].request).toEqual(sentMail[0].request);
+    // And the frozen copy is the one that was persisted, not the new config.
+    expect(sentMail[1].request.from).not.toContain('rotated@');
+    const { rows } = await db.query<{ meta: Record<string, unknown> }>(
+      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`, [id],
+    );
+    expect(rows[0].meta.invite_request).toEqual(sentMail[0].request);
   });
 
   it('fails closed when the durable provenance is missing entirely', async () => {
@@ -4332,11 +4420,13 @@ import { withMembershipLock } from './membershipLock.js';
 import { syncEmail, syncEmailToStatus } from './cfAccessSync.js';
 import { CfPolicyError } from './cfAccessPolicy.js';
 import {
-  sendInviteEmail,
+  buildInviteRequest,
+  sendInviteRequest,
   initialIdempotencyKey,
   resendIdempotencyKey,
   MailerError,
   SUPPORT_CONTACT,
+  type InviteRequest,
 } from './inviteMailer.js';
 import { recordAccountEventTx, humanActor } from './accountEvents.js';
 
@@ -4452,6 +4542,47 @@ async function originalSender(userId: string): Promise<string> {
 }
 
 /**
+ * Load the frozen request for this invite, building and persisting one on
+ * first use.
+ *
+ * Q30 says a retry after a lost acknowledgement must not deliver twice, and
+ * Resend collapses two requests only when they are BYTE-IDENTICAL under one
+ * key. Re-rendering cannot meet that bar: INVITE_FROM_EMAIL is read from the
+ * environment and the copy ships with the deployment, so a redeploy inside the
+ * 24h window would either drift the body (409, invite stuck for a day) or force
+ * a new key (a second delivery — the very thing Q30 forbids). Freezing the
+ * request the first time and replaying it is the only option that keeps Q30
+ * intact, and `meta` is already permissive enough to hold it without a
+ * migration.
+ *
+ * The build happens BEFORE any I/O and is committed on its own, so a crash
+ * between persisting and sending simply replays on the next attempt.
+ */
+async function frozenInviteRequest(userId: string, email: string): Promise<InviteRequest> {
+  const { rows } = await db.query<{ id: string; meta: Record<string, unknown> | null }>(
+    `SELECT id, meta FROM account_events
+      WHERE user_id=$1 AND kind IN ('user_invited','user_imported')
+      ORDER BY id ASC LIMIT 1`,
+    [userId],
+  );
+  const stored = rows[0]?.meta?.invite_request;
+  if (stored !== undefined && stored !== null) return stored as InviteRequest;
+
+  // Q31b imports never had one built (no mail is sent at cutover), so the
+  // first real invite mints it.
+  const request = buildInviteRequest({
+    toEmail: email,
+    invitedByEmail: await originalSender(userId),
+  });
+  await db.query(
+    `UPDATE account_events SET meta = meta || jsonb_build_object('invite_request', $2::jsonb)
+      WHERE id=$1`,
+    [rows[0].id, JSON.stringify(request)],
+  );
+  return request;
+}
+
+/**
  * Attempt the CF add, then the mail. Shared by the fresh-invite and the
  * retry-then-send branch of Q29. Never throws for a sync or mail failure —
  * both are recorded on the outcome so the row survives with a retry
@@ -4461,7 +4592,7 @@ async function provisionAndMail(
   userId: string,
   email: string,
   invitedAt: Date,
-  actorEmail: string,
+  request: InviteRequest,
   idempotencyKey: string,
 ): Promise<{ cf_synced: boolean; invite_sent: boolean; sync_error: string | null; mail_error: string | null }> {
   try {
@@ -4474,9 +4605,7 @@ async function provisionAndMail(
   await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [userId]);
 
   try {
-    const { messageId } = await sendInviteEmail({
-      toEmail: email, invitedByEmail: actorEmail, idempotencyKey,
-    });
+    const { messageId } = await sendInviteRequest(request, idempotencyKey);
     await db.query(
       `UPDATE users SET invite_sent_at = now(), invite_message_id = $2 WHERE id=$1`,
       [userId, messageId],
@@ -4520,7 +4649,7 @@ export async function inviteUser(
 
       // Q30 — the key is chosen by whether a delivery has ever SUCCEEDED, not
       // by which retry branch we are in. `invite_sent_at` is the only durable
-      // record of that, and it is written only after sendInviteEmail resolves.
+      // record of that, and it is written only after sendInviteRequest resolves.
       //
       // The case that forces this: Resend ACCEPTS the initial send but the
       // response times out. The row is left invited + CF-synced +
@@ -4548,16 +4677,19 @@ export async function inviteUser(
       const idempotencyKey = neverDelivered
         ? initialIdempotencyKey(row.id, invitedAt)
         : resendIdempotencyKey(row.id);
-      // A known-successful prior delivery gets a fresh key, so its body may
-      // name the current admin — there is no earlier request to match.
-      const senderEmail = neverDelivered ? await originalSender(row.id) : actor.email;
+      // A never-delivered invite REPLAYS its frozen request; a known-successful
+      // prior delivery is a deliberate new one, so it renders fresh under a
+      // fresh key and has no earlier request to match.
+      const request = neverDelivered
+        ? await frozenInviteRequest(row.id, target)
+        : buildInviteRequest({ toEmail: target, invitedByEmail: actor.email });
 
       if (row.cf_synced_at === null) {
         // Provisioning failed last time: retry the sync FIRST and send only if
         // it succeeds. Mailing unconditionally would send a link the invitee
         // cannot use, contradicting Q7 and Q17b.
         const r = await provisionAndMail(
-          row.id, target, invitedAt, senderEmail, idempotencyKey,
+          row.id, target, invitedAt, request, idempotencyKey,
         );
         return {
           id: row.id, email: target, status: 'invited', created: false,
@@ -4569,10 +4701,7 @@ export async function inviteUser(
       let invite_sent = false;
       let mail_error: string | null = null;
       try {
-        const { messageId } = await sendInviteEmail({
-          toEmail: target, invitedByEmail: senderEmail,
-          idempotencyKey,
-        });
+        const { messageId } = await sendInviteRequest(request, idempotencyKey);
         await db.query(
           `UPDATE users SET invite_sent_at = now(), invite_message_id=$2 WHERE id=$1`,
           [row.id, messageId],
@@ -4618,7 +4747,17 @@ export async function inviteUser(
         userEmail: target,
         kind: 'user_invited',
         ip: actor.ip,
-        meta: { ...humanActor(actor.userId, actor.email), role },
+        meta: {
+          ...humanActor(actor.userId, actor.email),
+          role,
+          // Q30 — freeze the exact request in the same transaction as the row,
+          // before any I/O, so every later attempt replays these bytes instead
+          // of re-rendering against a possibly-changed template or from-address.
+          invite_request: buildInviteRequest({
+            toEmail: target,
+            invitedByEmail: actor.email,
+          }),
+        },
       });
       await client.query('COMMIT');
     } catch (err) {
@@ -4629,7 +4768,9 @@ export async function inviteUser(
     }
 
     const r = await provisionAndMail(
-      userId, target, invitedAt, actor.email, initialIdempotencyKey(userId, invitedAt),
+      userId, target, invitedAt,
+      await frozenInviteRequest(userId, target),
+      initialIdempotencyKey(userId, invitedAt),
     );
     // The only path that INSERTs, so the only one that is a 201.
     return { id: userId, email: target, status: 'invited', created: true, ...r };
@@ -4738,7 +4879,7 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
-Expected: PASS, 26 tests. (Measured from the block itself. The originally stated 18 was
+Expected: PASS, 27 tests. (Measured from the block itself. The originally stated 18 was
 already stale before any of the replay cases were added — trust the measured count, not the prose.)
 
 > **Why the retry replays its sender from the audit snapshot.** Reusing the deterministic key obliges us to reproduce the original request body: Resend deduplicates only *identical* requests sharing a key, and returns **409 `invalid_idempotent_request`** otherwise. Rendering the retry with the *current* admin's address breaks the cross-admin lost-ack case — A's send accepted, response lost, B retries — by pairing A's key with a body naming B.
@@ -5377,7 +5518,7 @@ Add to `api/src/routes/adminUsers.ts`, and extend the import to pull in `UserPat
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-patch.test.ts`
-Expected: PASS, 22 tests.
+Expected: PASS, 23 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -7077,7 +7218,7 @@ fi
 - [ ] **Step 6: Run tests, build, and commit**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-reconcile.test.ts && npm run build`
-Expected: PASS, 12 tests; `dist/services/cfReconcile-cli.js` exists.
+Expected: PASS, 15 tests; `dist/services/cfReconcile-cli.js` exists.
 
 Run: `bash -n /var/home/jason/Projects/RepOS/scripts/run-restore.sh && bash -n /var/home/jason/Projects/RepOS/scripts/cutover/002-w9-cf-baseline.sh`
 Expected: no output (both parse).

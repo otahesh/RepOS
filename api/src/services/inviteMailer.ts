@@ -137,52 +137,91 @@ export function renderInviteText({ toEmail, invitedByEmail }: InviteCopyInput): 
   ].join('\n');
 }
 
-export interface SendInviteInput extends InviteCopyInput {
-  idempotencyKey: string;
-  timeoutMs?: number;
+/**
+ * The exact Resend request body. Q30 requires that a retry after a lost
+ * acknowledgement cannot deliver twice, and Resend deduplicates only
+ * BYTE-IDENTICAL requests sharing a key — so the request has to be frozen the
+ * first time and replayed verbatim, not re-rendered.
+ *
+ * Re-rendering cannot satisfy Q30: `INVITE_FROM_EMAIL` is read from the
+ * environment and the copy ships with the deployment, so either the retry's
+ * body drifts (409, invite blocked for 24h) or the key is recomputed to match
+ * it (a second delivery — exactly what Q30 forbids). Callers therefore build
+ * this once, persist it, and replay it on every attempt.
+ */
+export interface InviteRequest {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
 }
 
-export async function sendInviteEmail(
-  input: SendInviteInput,
-): Promise<{ messageId: string }> {
-  const key = process.env.RESEND_API_KEY;
+/** Render the request. Call ONCE per invite, persist the result, then replay. */
+export function buildInviteRequest(input: InviteCopyInput): InviteRequest {
   const from = process.env.INVITE_FROM_EMAIL;
-  if (!key || !from) {
-    // Missing credentials fail at USE time with a specific error, never at
-    // boot — matching the Healthchecks and feedback-webhook precedent.
+  if (!from) {
     throw new MailerError(
       'mail_not_configured',
-      'RESEND_API_KEY and INVITE_FROM_EMAIL must both be set to send invites',
+      'INVITE_FROM_EMAIL must be set to build an invite',
     );
   }
-
-  // The caller's key identifies the INTENT (this invite, never yet delivered).
-  // Resend, though, deduplicates only byte-identical requests sharing a key and
-  // returns 409 invalid_idempotent_request otherwise — so a key that outlives
-  // the body it was minted for is a liability. INVITE_FROM_EMAIL is read here
-  // at call time and the subject/HTML/text come from whatever template is
-  // deployed, both of which can change inside Resend's 24h window and leave a
-  // retry pairing the original key with a different request.
-  //
-  // Binding a fingerprint of the ACTUAL body to the key makes "same key => same
-  // request" true by construction rather than by convention: an unchanged
-  // deployment retries into a dedupe, and a changed template or from-address
-  // yields a new key and simply delivers. That trades an unrecoverable 409 —
-  // which would block the invite for 24h — for at most one extra delivery per
-  // deliberate change, which is the safer of the two failures.
-  const requestBody = JSON.stringify({
+  return {
     from: `RepOS <${from}>`,
     to: [input.toEmail],
     subject: INVITE_SUBJECT,
     html: renderInviteHtml(input),
     text: renderInviteText(input),
-  });
-  const scopedKey = `${input.idempotencyKey}-${createHash('sha256')
-    .update(requestBody)
-    .digest('hex')
-    .slice(0, 12)}`;
+  };
+}
 
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+/**
+ * A persisted request round-trips through JSONB, so it is untrusted input by
+ * the time it comes back. Validate, never default: sending a half-shaped body
+ * under the original key is how a "replay" quietly becomes a different
+ * request.
+ */
+function assertInviteRequest(r: unknown): asserts r is InviteRequest {
+  const o = r as Record<string, unknown> | null;
+  const ok =
+    o !== null && typeof o === 'object' && !Array.isArray(o) &&
+    typeof o.from === 'string' && o.from !== '' &&
+    Array.isArray(o.to) && o.to.length > 0 && o.to.every((x) => typeof x === 'string' && x !== '') &&
+    typeof o.subject === 'string' && o.subject !== '' &&
+    typeof o.html === 'string' && o.html !== '' &&
+    typeof o.text === 'string' && o.text !== '';
+  if (!ok) {
+    throw new MailerError(
+      'mail_not_configured',
+      'the persisted invite request is missing or malformed — refusing to send',
+      JSON.stringify(r)?.slice(0, 200),
+    );
+  }
+}
+
+/**
+ * POST a previously built request under `idempotencyKey`. The body is sent
+ * verbatim: nothing here reads the environment or the templates, which is what
+ * makes a retry byte-identical to the original and lets Resend collapse the
+ * two into one delivery (Q30).
+ */
+export async function sendInviteRequest(
+  request: InviteRequest,
+  idempotencyKey: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<{ messageId: string }> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    // Missing credentials fail at USE time with a specific error, never at
+    // boot — matching the Healthchecks and feedback-webhook precedent.
+    throw new MailerError(
+      'mail_not_configured',
+      'RESEND_API_KEY must be set to send invites',
+    );
+  }
+  assertInviteRequest(request);
+
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   // As in cfAccessPolicy.ts, the deadline covers the response BODY too: this
@@ -198,9 +237,9 @@ export async function sendInviteEmail(
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json',
           // Q30 — transport retry protection, scoped to this exact body.
-          'Idempotency-Key': scopedKey,
+          'Idempotency-Key': idempotencyKey,
         },
-        body: requestBody,
+        body: JSON.stringify(request),
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
