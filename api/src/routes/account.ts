@@ -33,6 +33,10 @@ import {
   CONFIRM_DELETE_ACCOUNT_PHRASE,
 } from '../schemas/account.js';
 import { IANA_TIMEZONES } from '../lib/timezones.js'; // static fallback per I-IANA-TIMEZONES
+import { deleteUser } from '../services/deleteUser.js';
+import { LifecycleError } from '../services/userLifecycle.js';
+import { LockTimeoutError } from '../services/membershipLock.js';
+import { SUPPORT_CONTACT } from '../services/inviteMailer.js';
 
 const VALID_TZ = new Set(IANA_TIMEZONES);
 
@@ -308,9 +312,12 @@ export async function accountRoutes(app: FastifyInstance) {
   // wipe. account_events FK is ON DELETE SET NULL with user_id_at_event +
   // user_email_at_event preserved — forensic survival.
   //
-  // Atomicity: single BEGIN/COMMIT against a pooled client. ROLLBACK + 500
-  // on any error inside the txn. The structured log fires AFTER the COMMIT
-  // (per I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
+  // Atomicity: W9 Q33 moved the mechanism into services/deleteUser.ts. This
+  // handler no longer opens a transaction of its own; the service runs the
+  // whole state machine (lock -> deleting + user_delete_requested -> CF
+  // removal -> user_deleted + cascade in one txn) and this route only maps its
+  // errors. The structured log still fires AFTER the cascade commits (per
+  // I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
   app.delete(
     '/me',
     { preHandler: [requireCfAccessOnly, csrfOrigin] },
@@ -326,25 +333,44 @@ export async function accountRoutes(app: FastifyInstance) {
           .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
       }
 
-      const { rows: tokRows } = await db.query<{ n: number }>(
-        `SELECT count(*)::int n FROM device_tokens WHERE user_id=$1`,
-        [userId],
-      );
-      const previousTokenCount = tokRows[0]?.n ?? 0;
-
-      const client = await db.connect();
+      // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
+      // deleteUser service so the self-service and admin paths produce
+      // identical end state — same events, same CF removal, same cascade — and
+      // so the "at least one active admin remains" invariant cannot be
+      // bypassed here.
+      //
+      // W6's own path recorded account_deleted only as a log line with no
+      // account_events row; the service does not inherit that gap.
+      //
+      // Q37: once status='deleting' commits, both auth paths reject this user,
+      // so they cannot call this route again. A failed self-delete tells them
+      // the account is already disabled and gives the contact path from the
+      // invite email. Letting a `deleting` user re-authenticate to finish
+      // deleting themselves would punch a hole through the gate for the one
+      // status that most needs it shut.
+      let previousTokenCount = 0;
       try {
-        await client.query('BEGIN');
-        await client.query('DELETE FROM users WHERE id=$1', [userId]);
-        await client.query('COMMIT');
+        const out = await deleteUser(userId, { userId, email: userEmail, ip: req.ip ?? null });
+        previousTokenCount = out.previous_token_count;
       } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
+        if (err instanceof LifecycleError) {
+          return reply.code(err.statusCode).send({
+            error: err.code,
+            ...err.details,
+            ...(err.code === 'cf_sync_failed'
+              ? { message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.` }
+              : {}),
+          });
+        }
+        if (err instanceof LockTimeoutError) {
+          return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
+        }
         req.log.error({ err, userId }, 'account_delete_failed');
         return reply.code(500).send({ error: 'delete_failed' });
-      } finally {
-        client.release();
       }
 
+      // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
+      // deleted on a half-committed state.
       req.log.info(
         {
           event: 'account_deleted',

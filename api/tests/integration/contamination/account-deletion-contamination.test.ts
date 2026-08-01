@@ -18,9 +18,10 @@
 
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../../src/app.js';
 import { db } from '../../../src/db/client.js';
+import * as policy from '../../../src/services/cfAccessPolicy.js';
 import { setupTestJwks, type TestJwksHandle } from '../../helpers/cf-access-jwt.js';
 
 const EMAIL_A = `vitest.w6-del-cont-a-${Math.random().toString(36).slice(2, 10)}@repos.test`;
@@ -35,6 +36,12 @@ let savedPublicOrigin: string | undefined;
 let exerciseId: string;
 let plannedSetB: string;
 let templateB: string;
+// W9 Q33 — DELETE /api/me now removes the address from the CF Access policy
+// via the deleteUser state machine. The policy client is fail-closed and
+// api/.env configures none of CF_API_TOKEN / CF_ACCOUNT_ID /
+// CF_ACCESS_POLICY_ID, so without this stub A's delete would 502 on
+// cf_not_configured and never reach the isolation assertions below.
+let policyEmails: string[] = [];
 
 beforeAll(async () => {
   savedPublicOrigin = process.env.PUBLIC_ORIGIN;
@@ -42,6 +49,23 @@ beforeAll(async () => {
 
   jwks = await setupTestJwks();
   app = await buildApp();
+
+  policyEmails = [EMAIL_A, EMAIL_B];
+  vi.spyOn(policy, 'fetchPolicy').mockImplementation(async () => ({
+    emails: [...policyEmails],
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: policyEmails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
+  }));
+  vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
+    policyEmails = [...emails];
+  });
 
   // Pre-create both users.
   const a = await db.query<{ id: string }>(
@@ -218,5 +242,10 @@ describe('DELETE /api/me contamination — G2', () => {
       [userB],
     );
     expect(bEvents[0].n).toBe(1);
+
+    // W9 Q33 — the same boundary at the CF Access policy: A's removal takes A
+    // out of include[] and leaves B in it.
+    expect(policyEmails).not.toContain(EMAIL_A);
+    expect(policyEmails).toContain(EMAIL_B);
   });
 });

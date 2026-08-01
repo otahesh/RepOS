@@ -548,7 +548,7 @@ async function assertAdminRemains(
  * transaction-level admin-count lock. Every path that needs both takes them in
  * exactly this order, so no two operations can deadlock.
  */
-async function inAdminLockedTxn<T>(
+export async function inAdminLockedTxn<T>(
   fn: (client: import('pg').PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await db.connect();

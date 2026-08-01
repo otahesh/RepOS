@@ -6034,8 +6034,21 @@ Verified at `account.ts:316-338`: `DELETE /api/me` deletes the row directly with
 - Test: `api/tests/routes/admin-users-delete.test.ts`
 
 **Interfaces:**
-- Consumes: `withMembershipLock` (T4), `syncEmail` (T6), `LifecycleError`/`Actor`/`inAdminLockedTxn`-equivalent (T11/T12).
+- Consumes: `withMembershipLock` (T4), `syncEmail` (T6), `LifecycleError`/`Actor`/`inAdminLockedTxn` (T11/T12).
 - Produces: `deleteUser(targetId: string, actor: Actor): Promise<{ id: string; previous_token_count: number }>`
+
+> **`inAdminLockedTxn` is EXPORTED from `userLifecycle.ts`, not re-implemented here.** Task 12 left
+> it module-private and the first draft of this task hand-rolled a byte-identical
+> `BEGIN` → `pg_advisory_xact_lock` → `COMMIT` / `ROLLBACK` / `release` copy inside `deleteUser`.
+> Two copies of the lock ORDER is exactly the thing Q26 exists to make single: a later change to
+> the order would have to be found twice. Step 3 flips the `async function` to
+> `export async function` and imports it.
+>
+> It deliberately does **not** reuse `assertAdminRemains`. That helper throws whenever no OTHER
+> active admin exists, which is right for a demotion and wrong here: deleting a **member** removes
+> no admin, so refusing it because the installation happens to have zero active admins would block
+> an unrelated user's self-deletion. Only a target who IS currently an active admin can breach I2,
+> which is what the `cur.role === 'admin' && cur.status === 'active'` guard says.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -6116,20 +6129,11 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
     expect(ev.rows[0].n).toBe(1); // the original requester is preserved
   });
 
-  it('Q27: with the cascade mocked to fail, user_deleted is rolled back with it', async () => {
+  it('Q27: with the cascade blocked, user_deleted is rolled back with it', async () => {
     const email = freshEmail('cascfail');
     const id = await seed(email, 'active');
-    const spy = vi.spyOn(db, 'connect');
-    // Fail the DELETE statement only, inside the final transaction.
-    spy.mockImplementationOnce(async () => {
-      const real = await (spy.getMockImplementation() ? Promise.reject(new Error('x')) : Promise.reject(new Error('x')));
-      return real as never;
-    });
-    spy.mockRestore();
-    // Simpler and deterministic: block the cascade with a NO ACTION child row.
-    await db.query(
-      `CREATE TABLE IF NOT EXISTS w9_block (user_id UUID REFERENCES users(id) ON DELETE NO ACTION)`,
-    );
+    // A NO ACTION child row makes the DELETE inside the final transaction
+    // raise, deterministically, with no mocking of the db layer.
     await db.query(`INSERT INTO w9_block (user_id) VALUES ($1)`, [id]);
     const r = await del(id);
     expect(r.statusCode).toBe(500);
@@ -6261,6 +6265,16 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
       config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
     });
     expect((await del(id)).statusCode).toBe(204);
+
+    // The bearer this user held is recorded on the audit row before the
+    // cascade wipes device_tokens — the count is unrecoverable afterwards, so
+    // reading it late would silently always be 0. This case is the only one
+    // that mints a token, so it is the only place the field is falsifiable.
+    const ev = await db.query<{ meta: { previous_token_count?: number } }>(
+      `SELECT meta FROM account_events
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+    );
+    expect(ev.rows[0].meta.previous_token_count).toBe(1);
   });
 });
 ```
@@ -6276,7 +6290,16 @@ async function del(id: string, asEmail = ADMIN) {
 }
 ```
 
-> Delete the abandoned `vi.spyOn(db, 'connect')` fragment in the cascade-failure test when writing the file — the `w9_block` NO ACTION child row is the deterministic mechanism. Drop the table in `afterAll`.
+> Delete the abandoned `vi.spyOn(db, 'connect')` fragment in the cascade-failure test when writing the file — the `w9_block` NO ACTION child row is the deterministic mechanism. Create it once in `beforeAll` (it FKs `users`, so it must outlive every case that seeds one) and `DROP TABLE IF EXISTS w9_block` in `afterAll`, before `db.end()`.
+
+> **An assertion added to the Q37 case after mutation-testing: `previous_token_count`.** The 13
+> cases above never assert it. Replacing `tok.rows[0]?.n ?? 0` with a literal `0` leaves **all 13
+> passing** — the
+> field is on the service's return type AND in the `user_deleted` audit meta, and nothing
+> falsifies it. The Q37 case is the only one that mints a token, so it is the only place the value
+> can be anything but zero; it now re-reads the `user_deleted` row and asserts
+> `meta.previous_token_count === 1`. This matters beyond coverage: `device_tokens` is CASCADE-wiped
+> by Phase 3, so the count is unrecoverable afterwards — a late read would silently always be 0.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -6302,11 +6325,11 @@ Create `api/src/services/deleteUser.ts`:
 // self-delete" is what makes the two paths reconcilable: the self-action bans
 // were a cruder proxy for it.
 import { db } from '../db/client.js';
-import { withMembershipLock, ADMIN_COUNT_LOCK_KEY } from './membershipLock.js';
+import { withMembershipLock } from './membershipLock.js';
 import { syncEmail } from './cfAccessSync.js';
 import { CfPolicyError } from './cfAccessPolicy.js';
 import { recordAccountEventTx, humanActor } from './accountEvents.js';
-import { LifecycleError, type Actor } from './userLifecycle.js';
+import { LifecycleError, inAdminLockedTxn, type Actor } from './userLifecycle.js';
 
 export async function deleteUser(
   targetId: string,
@@ -6332,17 +6355,23 @@ export async function deleteUser(
     // would attribute the whole operation to whoever finished it and lose the
     // original requester (Q27).
     if (cur.status !== 'deleting') {
-      const client = await db.connect();
-      try {
-        await client.query('BEGIN');
-        // Lock order (Q26): session lock -> BEGIN -> transaction lock.
-        await client.query('SELECT pg_advisory_xact_lock($1)', [ADMIN_COUNT_LOCK_KEY]);
+      // Lock order (Q26): session lock -> BEGIN -> transaction lock. This is
+      // the SAME helper patchUser uses rather than a second hand-rolled copy,
+      // so the order cannot drift between the two files.
+      await inAdminLockedTxn(async (client) => {
         const remaining = await client.query<{ c: number }>(
           `SELECT count(*)::int c FROM users
             WHERE role='admin' AND status='active' AND id <> $1`,
           [targetId],
         );
         // I2 — refused BEFORE any mutation.
+        //
+        // Deliberately NOT assertAdminRemains(): that helper throws whenever no
+        // other active admin exists, which is right for a demotion but wrong
+        // here. Deleting a MEMBER removes no admin, so refusing it because the
+        // installation happens to have zero active admins would block an
+        // unrelated user's self-deletion. Only a target who IS currently an
+        // active admin can breach the invariant.
         if (cur.role === 'admin' && cur.status === 'active' && remaining.rows[0].c === 0) {
           throw new LifecycleError(409, 'last_admin');
         }
@@ -6358,13 +6387,7 @@ export async function deleteUser(
           ip: actor.ip,
           meta: { ...humanActor(actor.userId, actor.email) },
         });
-        await client.query('COMMIT');
-      } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
-        throw err;
-      } finally {
-        client.release();
-      }
+      });
     }
 
     // ---- Phase 2: CF policy removal ----
@@ -6438,22 +6461,28 @@ Append to `api/src/routes/adminUsers.ts` (import `deleteUser`):
 Replace the body of `DELETE /me` in `api/src/routes/account.ts` (lines 314–365), keeping the preHandler chain, the confirm-phrase check, the cookie clear and the 204:
 
 ```ts
-  // DELETE /api/me — self-service deletion.
+  // DELETE /api/me — full-cascade account deletion (Task 9).
   //
-  // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
-  // deleteUser service so the self-service and admin paths produce identical
-  // end state — same events, same CF removal, same cascade — and so the
-  // "at least one active admin remains" invariant cannot be bypassed here.
+  // Auth: CF-Access-JWT-only (per C-SIGNOUT-CFACCESS-ONLY) — a stolen bearer
+  // must NEVER be able to delete a user's account. requireCfAccessOnly 403s
+  // any Authorization: Bearer header before JWT validation and stamps
+  // authMode='cf_access' so the chained csrfOrigin guard runs.
   //
-  // W6's own path recorded account_deleted only as a log line with no
-  // account_events row; the service does not inherit that gap.
+  // Body: { confirm: "DELETE my account" } — exact-match typed-confirm phrase
+  // (per I-CONFIRM-PHRASE-CONST) so a misclicked DELETE without the dialog
+  // never lands.
   //
-  // Q37: once status='deleting' commits, both auth paths reject this user, so
-  // they cannot call this route again. A failed self-delete tells them the
-  // account is already disabled and gives the contact path from the invite
-  // email. Letting a `deleting` user re-authenticate to finish deleting
-  // themselves would punch a hole through the gate for the one status that
-  // most needs it shut.
+  // Cascade: DB-level ON DELETE CASCADE on users.id (per D8 + the migration
+  // FK shapes — every per-user table FKs back to users with CASCADE) does the
+  // wipe. account_events FK is ON DELETE SET NULL with user_id_at_event +
+  // user_email_at_event preserved — forensic survival.
+  //
+  // Atomicity: W9 Q33 moved the mechanism into services/deleteUser.ts. This
+  // handler no longer opens a transaction of its own; the service runs the
+  // whole state machine (lock -> deleting + user_delete_requested -> CF
+  // removal -> user_deleted + cascade in one txn) and this route only maps its
+  // errors. The structured log still fires AFTER the cascade commits (per
+  // I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
   app.delete(
     '/me',
     { preHandler: [requireCfAccessOnly, csrfOrigin] },
@@ -6469,6 +6498,21 @@ Replace the body of `DELETE /me` in `api/src/routes/account.ts` (lines 314–365
           .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
       }
 
+      // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
+      // deleteUser service so the self-service and admin paths produce
+      // identical end state — same events, same CF removal, same cascade — and
+      // so the "at least one active admin remains" invariant cannot be
+      // bypassed here.
+      //
+      // W6's own path recorded account_deleted only as a log line with no
+      // account_events row; the service does not inherit that gap.
+      //
+      // Q37: once status='deleting' commits, both auth paths reject this user,
+      // so they cannot call this route again. A failed self-delete tells them
+      // the account is already disabled and gives the contact path from the
+      // invite email. Letting a `deleting` user re-authenticate to finish
+      // deleting themselves would punch a hole through the gate for the one
+      // status that most needs it shut.
       let previousTokenCount = 0;
       try {
         const out = await deleteUser(userId, { userId, email: userEmail, ip: req.ip ?? null });
@@ -6493,7 +6537,13 @@ Replace the body of `DELETE /me` in `api/src/routes/account.ts` (lines 314–365
       // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
       // deleted on a half-committed state.
       req.log.info(
-        { event: 'account_deleted', userId, userEmail, previous_token_count: previousTokenCount, ip: req.ip },
+        {
+          event: 'account_deleted',
+          userId,
+          userEmail,
+          previous_token_count: previousTokenCount,
+          ip: req.ip,
+        },
         'account_deleted',
       );
 
@@ -6518,15 +6568,44 @@ import { SUPPORT_CONTACT } from '../services/inviteMailer.js';
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-delete.test.ts`
-Expected: PASS, 13 tests.
+Expected: PASS, 13 tests. (The `previous_token_count` note above adds an assertion to the existing
+Q37 case, not a new case — the count stays 13.)
 
-Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/integration/account-deletion-cascade.test.ts tests/integration/contamination/account-deletion-contamination.test.ts`
-Expected: PASS — the W6 cascade assertions still hold through the new service. Update them only where they assert the *absence* of `account_events` rows.
+Run: `cd /var/home/jason/Projects/RepOS/api && npm run test:integration -- tests/integration/account-deletion-cascade.test.ts tests/integration/contamination/account-deletion-contamination.test.ts`
+(The integration suite needs `--config vitest.integration.config.ts`, which the `test:integration`
+script supplies; a bare `npx vitest run` on those paths uses the unit config.)
+
+**Both W6 suites DO break, and not for the reason predicted.** The earlier text said to update them
+"only where they assert the *absence* of `account_events` rows" — neither file contains such an
+assertion. The actual break is the CF step: `deleteUser` Phase 2 calls `syncEmail`, `fetchPolicy`
+calls `policyUrl()`, and that throws `cf_not_configured` **before any I/O** when `CF_API_TOKEN` /
+`CF_ACCOUNT_ID` / `CF_ACCESS_POLICY_ID` are unset — none of which is in `api/.env`. So both suites
+return **502 instead of 204** on a fail-closed policy client that is behaving exactly as Q19/Q22
+specify. Fix the tests, not the client:
+
+- Both files gain `import * as policy from '.../cfAccessPolicy.js'` plus `vi` and, in `beforeAll`
+  after `buildApp()`, the same `fetchPolicy` / `putPolicyEmails` spies the W9 route suites use,
+  backed by a mutable `policyEmails` seeded with the suite's addresses.
+- Seeding the address in means the stub is falsifiable rather than decorative, so each file also
+  gains one assertion: the cascade suite asserts `policyEmails` no longer contains `TEST_EMAIL`
+  (Q33 — the address is removed, not orphaned), and the contamination suite asserts A is gone from
+  `include[]` while **B is still in it** — the G2 boundary applied to the CF policy.
+
+**Generalisable:** a task that inserts an external call into an existing path breaks every test that
+already covered that path, in the *transport* layer, regardless of what those tests assert about the
+domain. Predicting the fallout from the assertions alone missed it entirely; running them found it
+in one command.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /var/home/jason/Projects/RepOS && git add api/src/services/deleteUser.ts api/src/routes/adminUsers.ts api/src/routes/account.ts api/tests/routes/admin-users-delete.test.ts
+cd /var/home/jason/Projects/RepOS && git add \
+  api/src/services/deleteUser.ts api/src/services/userLifecycle.ts \
+  api/src/routes/adminUsers.ts api/src/routes/account.ts \
+  api/tests/routes/admin-users-delete.test.ts \
+  api/tests/integration/account-deletion-cascade.test.ts \
+  api/tests/integration/contamination/account-deletion-contamination.test.ts \
+  docs/superpowers/plans/2026-07-26-w9-user-management.md
 git commit -m "$(cat <<'EOF'
 feat(w9): one deletion service for both paths (Q33, Q37)
 
@@ -6537,7 +6616,7 @@ the cascade in one transaction. The last-active-admin invariant now applies to
 self-deletion, closing the zero-admin lockout that the old direct DELETE
 allowed, and no deleted user's email is left orphaned in the CF policy.
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```

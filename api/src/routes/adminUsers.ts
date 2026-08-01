@@ -8,6 +8,7 @@ import {
   inviteUser, resendInvite, patchUser, LifecycleError, type Actor,
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
+import { deleteUser } from '../services/deleteUser.js';
 
 function actorOf(req: FastifyRequest): Actor {
   return {
@@ -88,6 +89,26 @@ export async function adminUsersRoutes(app: FastifyInstance) {
       }
       try {
         return reply.code(200).send(await patchUser(req.params.id, parsed.data, actor));
+      } catch (err) {
+        return sendLifecycleError(reply, err);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    '/admin/users/:id',
+    // Q20 + Q32: CF Access + role='admin', X-Admin-Key rejected, and a bearer
+    // rejected before JWT validation. This makes NO re-authentication
+    // guarantee — it performs no token-age check.
+    { preHandler: [requireCfAccessAdmin({ rejectBearer: true }), csrfOrigin] },
+    async (req, reply) => {
+      const actor = actorOf(req);
+      if (req.params.id === actor.userId) {
+        return reply.code(409).send({ error: 'self_target_forbidden' });
+      }
+      try {
+        await deleteUser(req.params.id, actor);
+        return reply.code(204).send();
       } catch (err) {
         return sendLifecycleError(reply, err);
       }
