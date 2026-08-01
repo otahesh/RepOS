@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   buildInviteRequest,
   sendInviteRequest,
+  serializeInviteRequest,
+  parseInviteRequest,
   renderInviteHtml,
   renderInviteText,
   initialIdempotencyKey,
@@ -153,10 +155,11 @@ describe('copy (G14)', () => {
 });
 
 describe('buildInviteRequest / sendInviteRequest', () => {
-  const copy = { toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test' };
+  const TO = 'new@repos.test';
+  const copy = { toEmail: TO, invitedByEmail: 'admin@repos.test' };
 
   it('POSTs the built request with the from address, both parts and the key', async () => {
-    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1');
+    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1', TO);
     expect(r.messageId).toBe('msg_123');
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
@@ -175,12 +178,12 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     // must still produce the SAME key and the SAME bytes, so Resend collapses
     // it into the original delivery instead of sending a second one.
     const persisted = buildInviteRequest(copy);
-    await sendInviteRequest(persisted, 'k-1');
+    await sendInviteRequest(persisted, 'k-1', TO);
 
     process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
     // Round-trip through JSON exactly as a JSONB column would.
     const replayed = JSON.parse(JSON.stringify(persisted));
-    await sendInviteRequest(replayed, 'k-1');
+    await sendInviteRequest(replayed, 'k-1', TO);
 
     const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
     expect(h[1]).toBe(h[0]);
@@ -204,14 +207,54 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     ['an empty recipient list', { from: 'a', to: [], subject: 'c', html: 'd', text: 'e' }],
   ])('refuses to send a persisted request that is %s', async (_label, bad) => {
     await expect(
-      sendInviteRequest(bad as never, 'k-1'),
-    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+      sendInviteRequest(bad as never, 'k-1', TO),
+    ).rejects.toMatchObject({ code: 'mail_request_invalid' });
     expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['two recipients', ['a@x.test', 'b@x.test']],
+    ['the wrong recipient', ['someone-else@x.test']],
+    ['no recipients', []],
+  ])('refuses a persisted request addressed to %s', async (_label, to) => {
+    const req = { ...buildInviteRequest(copy), to: to as string[] };
+    await expect(sendInviteRequest(req, 'k-1', TO)).rejects.toMatchObject({
+      code: 'mail_request_invalid',
+    });
+    // Being wrong about the recipient is the one corruption that actively
+    // harms a third party, so nothing may reach the wire.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('serializes in a fixed field order, so a storage round-trip cannot change the bytes', async () => {
+    // PostgreSQL jsonb sorts keys by length then bytewise, rewriting
+    // {from,to,subject,html,text} as {to,from,html,text,subject}. A replay
+    // rebuilt from that ordering must still produce identical bytes.
+    const original = buildInviteRequest(copy);
+    const pgOrdered = JSON.parse(
+      JSON.stringify({
+        to: original.to, from: original.from, html: original.html,
+        text: original.text, subject: original.subject,
+      }),
+    );
+    expect(Object.keys(pgOrdered)).not.toEqual(Object.keys(original));
+    expect(serializeInviteRequest(pgOrdered)).toBe(serializeInviteRequest(original));
+
+    await sendInviteRequest(original, 'k-1', TO);
+    await sendInviteRequest(pgOrdered, 'k-1', TO);
+    expect(String(calls[1].init.body)).toBe(String(calls[0].init.body));
+  });
+
+  it('parseInviteRequest fails closed on unparseable or mis-addressed storage', () => {
+    const good = serializeInviteRequest(buildInviteRequest(copy));
+    expect(parseInviteRequest(good, TO).to).toEqual([TO]);
+    expect(() => parseInviteRequest('not json', TO)).toThrow(/valid JSON/);
+    expect(() => parseInviteRequest(good, 'other@x.test')).toThrow(/exactly the invited user/);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {
     delete process.env.RESEND_API_KEY;
-    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
       code: 'mail_not_configured',
     });
   });
@@ -223,7 +266,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
 
   it('surfaces a non-2xx as mail_http_error', async () => {
     respond = async () => new Response(JSON.stringify({ message: 'nope' }), { status: 422 });
-    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
       code: 'mail_http_error',
     });
   });
@@ -243,7 +286,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     it(`rejects a 200 carrying ${label}`, async () => {
       respond = async () =>
         new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
-      await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
         code: 'mail_http_error',
       });
     });
@@ -252,7 +295,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
-      sendInviteRequest(buildInviteRequest(copy), 'k', { timeoutMs: 40 }),
+      sendInviteRequest(buildInviteRequest(copy), 'k', TO, { timeoutMs: 40 }),
     ).rejects.toMatchObject({ code: 'mail_timeout' });
   });
 });

@@ -3151,6 +3151,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   buildInviteRequest,
   sendInviteRequest,
+  serializeInviteRequest,
+  parseInviteRequest,
   renderInviteHtml,
   renderInviteText,
   initialIdempotencyKey,
@@ -3301,10 +3303,11 @@ describe('copy (G14)', () => {
 });
 
 describe('buildInviteRequest / sendInviteRequest', () => {
-  const copy = { toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test' };
+  const TO = 'new@repos.test';
+  const copy = { toEmail: TO, invitedByEmail: 'admin@repos.test' };
 
   it('POSTs the built request with the from address, both parts and the key', async () => {
-    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1');
+    const r = await sendInviteRequest(buildInviteRequest(copy), 'k-1', TO);
     expect(r.messageId).toBe('msg_123');
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
@@ -3323,12 +3326,12 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     // must still produce the SAME key and the SAME bytes, so Resend collapses
     // it into the original delivery instead of sending a second one.
     const persisted = buildInviteRequest(copy);
-    await sendInviteRequest(persisted, 'k-1');
+    await sendInviteRequest(persisted, 'k-1', TO);
 
     process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
     // Round-trip through JSON exactly as a JSONB column would.
     const replayed = JSON.parse(JSON.stringify(persisted));
-    await sendInviteRequest(replayed, 'k-1');
+    await sendInviteRequest(replayed, 'k-1', TO);
 
     const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
     expect(h[1]).toBe(h[0]);
@@ -3352,14 +3355,54 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     ['an empty recipient list', { from: 'a', to: [], subject: 'c', html: 'd', text: 'e' }],
   ])('refuses to send a persisted request that is %s', async (_label, bad) => {
     await expect(
-      sendInviteRequest(bad as never, 'k-1'),
-    ).rejects.toMatchObject({ code: 'mail_not_configured' });
+      sendInviteRequest(bad as never, 'k-1', TO),
+    ).rejects.toMatchObject({ code: 'mail_request_invalid' });
     expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['two recipients', ['a@x.test', 'b@x.test']],
+    ['the wrong recipient', ['someone-else@x.test']],
+    ['no recipients', []],
+  ])('refuses a persisted request addressed to %s', async (_label, to) => {
+    const req = { ...buildInviteRequest(copy), to: to as string[] };
+    await expect(sendInviteRequest(req, 'k-1', TO)).rejects.toMatchObject({
+      code: 'mail_request_invalid',
+    });
+    // Being wrong about the recipient is the one corruption that actively
+    // harms a third party, so nothing may reach the wire.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('serializes in a fixed field order, so a storage round-trip cannot change the bytes', async () => {
+    // PostgreSQL jsonb sorts keys by length then bytewise, rewriting
+    // {from,to,subject,html,text} as {to,from,html,text,subject}. A replay
+    // rebuilt from that ordering must still produce identical bytes.
+    const original = buildInviteRequest(copy);
+    const pgOrdered = JSON.parse(
+      JSON.stringify({
+        to: original.to, from: original.from, html: original.html,
+        text: original.text, subject: original.subject,
+      }),
+    );
+    expect(Object.keys(pgOrdered)).not.toEqual(Object.keys(original));
+    expect(serializeInviteRequest(pgOrdered)).toBe(serializeInviteRequest(original));
+
+    await sendInviteRequest(original, 'k-1', TO);
+    await sendInviteRequest(pgOrdered, 'k-1', TO);
+    expect(String(calls[1].init.body)).toBe(String(calls[0].init.body));
+  });
+
+  it('parseInviteRequest fails closed on unparseable or mis-addressed storage', () => {
+    const good = serializeInviteRequest(buildInviteRequest(copy));
+    expect(parseInviteRequest(good, TO).to).toEqual([TO]);
+    expect(() => parseInviteRequest('not json', TO)).toThrow(/valid JSON/);
+    expect(() => parseInviteRequest(good, 'other@x.test')).toThrow(/exactly the invited user/);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {
     delete process.env.RESEND_API_KEY;
-    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
       code: 'mail_not_configured',
     });
   });
@@ -3371,7 +3414,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
 
   it('surfaces a non-2xx as mail_http_error', async () => {
     respond = async () => new Response(JSON.stringify({ message: 'nope' }), { status: 422 });
-    await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+    await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
       code: 'mail_http_error',
     });
   });
@@ -3391,7 +3434,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     it(`rejects a 200 carrying ${label}`, async () => {
       respond = async () =>
         new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
-      await expect(sendInviteRequest(buildInviteRequest(copy), 'k')).rejects.toMatchObject({
+      await expect(sendInviteRequest(buildInviteRequest(copy), 'k', TO)).rejects.toMatchObject({
         code: 'mail_http_error',
       });
     });
@@ -3400,7 +3443,7 @@ describe('buildInviteRequest / sendInviteRequest', () => {
   it('Q38: aborts on deadline', async () => {
     respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
     await expect(
-      sendInviteRequest(buildInviteRequest(copy), 'k', { timeoutMs: 40 }),
+      sendInviteRequest(buildInviteRequest(copy), 'k', TO, { timeoutMs: 40 }),
     ).rejects.toMatchObject({ code: 'mail_timeout' });
   });
 });
@@ -3435,7 +3478,12 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 export const INVITE_SUBJECT = 'You have been invited to RepOS (Beta)';
 
-export type MailerErrorCode = 'mail_not_configured' | 'mail_http_error' | 'mail_timeout';
+export type MailerErrorCode =
+  | 'mail_not_configured'
+  | 'mail_http_error'
+  | 'mail_timeout'
+  /** A persisted request is missing, unparseable, or addressed to the wrong user. */
+  | 'mail_request_invalid';
 
 export class MailerError extends Error {
   readonly code: MailerErrorCode;
@@ -3594,27 +3642,76 @@ export function buildInviteRequest(input: InviteCopyInput): InviteRequest {
 }
 
 /**
- * A persisted request round-trips through JSONB, so it is untrusted input by
- * the time it comes back. Validate, never default: sending a half-shaped body
- * under the original key is how a "replay" quietly becomes a different
- * request.
+ * The canonical wire form. Byte-identity is the whole point, so the body is
+ * serialized in a FIXED field order rather than relying on the object's own
+ * key order — which does not survive storage. (PostgreSQL's jsonb sorts keys
+ * by length then bytewise: PG16 rewrites {from,to,subject,html,text} as
+ * {to,from,html,text,subject}. A replay reconstructed from such a round-trip
+ * would stringify differently and Resend would treat it as a new request.)
  */
-function assertInviteRequest(r: unknown): asserts r is InviteRequest {
+export function serializeInviteRequest(request: InviteRequest): string {
+  return JSON.stringify({
+    from: request.from,
+    to: request.to,
+    subject: request.subject,
+    html: request.html,
+    text: request.text,
+  });
+}
+
+/**
+ * Validate a persisted request before replaying it. It has round-tripped
+ * through storage, so it is untrusted input by the time it comes back:
+ * validate, never default — sending a half-shaped body under the original key
+ * is how a "replay" quietly becomes a different request.
+ *
+ * `expectedTo` is required because the recipient is the one field where being
+ * wrong is actively harmful: a corrupted or mismatched row must never mail a
+ * third party. Exactly one recipient, and it must be the lifecycle target.
+ */
+export function assertInviteRequest(
+  r: unknown,
+  expectedTo: string,
+): asserts r is InviteRequest {
   const o = r as Record<string, unknown> | null;
-  const ok =
+  const shaped =
     o !== null && typeof o === 'object' && !Array.isArray(o) &&
     typeof o.from === 'string' && o.from !== '' &&
-    Array.isArray(o.to) && o.to.length > 0 && o.to.every((x) => typeof x === 'string' && x !== '') &&
     typeof o.subject === 'string' && o.subject !== '' &&
     typeof o.html === 'string' && o.html !== '' &&
-    typeof o.text === 'string' && o.text !== '';
-  if (!ok) {
+    typeof o.text === 'string' && o.text !== '' &&
+    Array.isArray(o.to);
+  if (!shaped) {
     throw new MailerError(
-      'mail_not_configured',
+      'mail_request_invalid',
       'the persisted invite request is missing or malformed — refusing to send',
       JSON.stringify(r)?.slice(0, 200),
     );
   }
+  const to = o.to as unknown[];
+  if (to.length !== 1 || to[0] !== expectedTo) {
+    throw new MailerError(
+      'mail_request_invalid',
+      'the persisted invite request does not address exactly the invited user',
+      `expected [${expectedTo}], found ${JSON.stringify(to)?.slice(0, 120)}`,
+    );
+  }
+}
+
+/** Parse a request frozen as TEXT, failing closed on anything unusable. */
+export function parseInviteRequest(stored: string, expectedTo: string): InviteRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    throw new MailerError(
+      'mail_request_invalid',
+      'the persisted invite request is not valid JSON',
+      stored.slice(0, 200),
+    );
+  }
+  assertInviteRequest(parsed, expectedTo);
+  return parsed;
 }
 
 /**
@@ -3626,6 +3723,7 @@ function assertInviteRequest(r: unknown): asserts r is InviteRequest {
 export async function sendInviteRequest(
   request: InviteRequest,
   idempotencyKey: string,
+  expectedTo: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<{ messageId: string }> {
   const key = process.env.RESEND_API_KEY;
@@ -3637,7 +3735,7 @@ export async function sendInviteRequest(
       'RESEND_API_KEY must be set to send invites',
     );
   }
-  assertInviteRequest(request);
+  assertInviteRequest(request, expectedTo);
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
@@ -3657,7 +3755,7 @@ export async function sendInviteRequest(
           // Q30 — transport retry protection, scoped to this exact body.
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify(request),
+        body: serializeInviteRequest(request),
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
@@ -3719,7 +3817,7 @@ export async function sendInviteRequest(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/invite-mailer.test.ts`
-Expected: PASS, 26 tests. (Runtime count. A static grep for `it(` under-reports this
+Expected: PASS, 31 tests. (Runtime count. A static grep for `it(` under-reports this
 file — the malformed-2xx and malformed-request cases are generated by a loop and by
 `it.each`.)
 
@@ -3762,6 +3860,7 @@ EOF
 The full grant path: count under the lock, insert non-activatable, CF add, stamp, mail. Grants take effect **last** (Q17).
 
 **Files:**
+- Create: `api/src/db/migrations/081_invite_request.sql` (the frozen-request column, Q30)
 - Create: `api/src/services/userLifecycle.ts`
 - Create: `api/src/schemas/adminUsers.ts`
 - Create: `api/src/routes/adminUsers.ts`
@@ -3862,7 +3961,7 @@ beforeEach(() => {
   sentMail = [];
   mailImpl = async () => ({ messageId: 'msg_x' });
   vi.spyOn(mailer, 'sendInviteRequest').mockImplementation(
-    async (request: never, idempotencyKey: never) => {
+    async (request: never, idempotencyKey: never, _expectedTo: never) => {
       sentMail.push({
         request: request as unknown as { to: string[]; from: string; html: string; text: string },
         idempotencyKey: idempotencyKey as unknown as string,
@@ -4191,10 +4290,45 @@ describe('duplicate invite — all five cases (Q29)', () => {
     expect(sentMail[1].request).toEqual(sentMail[0].request);
     // And the frozen copy is the one that was persisted, not the new config.
     expect(sentMail[1].request.from).not.toContain('rotated@');
-    const { rows } = await db.query<{ meta: Record<string, unknown> }>(
+    const { rows } = await db.query<{ invite_request: string }>(
+      `SELECT invite_request FROM users WHERE id=$1`, [id],
+    );
+    // Stored as TEXT so the bytes survive verbatim — jsonb would reorder keys.
+    expect(JSON.parse(rows[0].invite_request)).toEqual(sentMail[0].request);
+    // And the audit row is untouched: 060 declares account_events append-only.
+    const ev = await db.query<{ meta: Record<string, unknown> }>(
       `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`, [id],
     );
-    expect(rows[0].meta.invite_request).toEqual(sentMail[0].request);
+    expect(ev.rows[0].meta.invite_request).toBeUndefined();
+  });
+
+  it('a missing INVITE_FROM_EMAIL leaves the invitation DURABLE, not rolled back', async () => {
+    // Freezing the request can fail on a config gap. The frozen error contract
+    // says a mail-side failure leaves an invited row with invite_sent_at NULL
+    // and a retry affordance — building the request inside the creation
+    // transaction would instead unwind the row and discard admin intent.
+    const email = freshEmail('nofrom');
+    const savedFrom = process.env.INVITE_FROM_EMAIL;
+    delete process.env.INVITE_FROM_EMAIL;
+    let r;
+    try {
+      r = await invite(email);
+    } finally {
+      if (savedFrom !== undefined) process.env.INVITE_FROM_EMAIL = savedFrom;
+    }
+
+    expect(r.statusCode).toBe(201);
+    const body = r.json<{ invite_sent: boolean; mail_error: string | null }>();
+    expect(body.invite_sent).toBe(false);
+    expect(body.mail_error).toBe('mail_not_configured');
+    expect(sentMail).toHaveLength(0);
+
+    const { rows } = await db.query<{ status: string; invite_sent_at: Date | null }>(
+      `SELECT status, invite_sent_at FROM users WHERE lower(email)=$1`, [email],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('invited');
+    expect(rows[0].invite_sent_at).toBeNull();
   });
 
   it('fails closed when the durable provenance is missing entirely', async () => {
@@ -4422,6 +4556,8 @@ import { CfPolicyError } from './cfAccessPolicy.js';
 import {
   buildInviteRequest,
   sendInviteRequest,
+  serializeInviteRequest,
+  parseInviteRequest,
   initialIdempotencyKey,
   resendIdempotencyKey,
   MailerError,
@@ -4542,44 +4678,54 @@ async function originalSender(userId: string): Promise<string> {
 }
 
 /**
- * Load the frozen request for this invite, building and persisting one on
- * first use.
+ * Load the frozen request for this invite, minting one on first use.
  *
  * Q30 says a retry after a lost acknowledgement must not deliver twice, and
- * Resend collapses two requests only when they are BYTE-IDENTICAL under one
- * key. Re-rendering cannot meet that bar: INVITE_FROM_EMAIL is read from the
- * environment and the copy ships with the deployment, so a redeploy inside the
- * 24h window would either drift the body (409, invite stuck for a day) or force
- * a new key (a second delivery — the very thing Q30 forbids). Freezing the
- * request the first time and replaying it is the only option that keeps Q30
- * intact, and `meta` is already permissive enough to hold it without a
- * migration.
+ * Resend collapses two sends only when they are BYTE-IDENTICAL under one key.
+ * Re-rendering cannot meet that bar: INVITE_FROM_EMAIL is environment-supplied
+ * and the copy ships with the deployment, so a redeploy inside the 24h window
+ * would either drift the body (409, invite stuck for a day) or force a new key
+ * (a second delivery — the thing Q30 forbids). Freeze once, replay thereafter.
  *
- * The build happens BEFORE any I/O and is committed on its own, so a crash
- * between persisting and sending simply replays on the next attempt.
+ * Stored as TEXT on `users` (migration 081), NOT as jsonb and NOT in
+ * account_events:
+ *   - jsonb canonicalises key order — PG16 rewrites {from,to,subject,html,text}
+ *     as {to,from,html,text,subject} — so a jsonb round-trip would itself
+ *     destroy the byte-identity the column exists to preserve.
+ *   - 060 declares account_events append-only ("no UPDATE"), and a frozen
+ *     payload is operational state, not an audit event: it has no business in
+ *     a user's visible timeline.
+ *
+ * Called OUTSIDE the creation transaction, on the send path. A missing
+ * INVITE_FROM_EMAIL therefore surfaces as a mail failure on a durable invited
+ * row rather than rolling back the invitation — the frozen error contract says
+ * a mail-side failure leaves the row with invite_sent_at NULL and a retry
+ * affordance, and discarding admin intent over a config gap would break it.
  */
 async function frozenInviteRequest(userId: string, email: string): Promise<InviteRequest> {
-  const { rows } = await db.query<{ id: string; meta: Record<string, unknown> | null }>(
-    `SELECT id, meta FROM account_events
-      WHERE user_id=$1 AND kind IN ('user_invited','user_imported')
-      ORDER BY id ASC LIMIT 1`,
+  const { rows } = await db.query<{ invite_request: string | null }>(
+    `SELECT invite_request FROM users WHERE id=$1`,
     [userId],
   );
-  const stored = rows[0]?.meta?.invite_request;
-  if (stored !== undefined && stored !== null) return stored as InviteRequest;
+  const stored = rows[0]?.invite_request;
+  if (stored !== null && stored !== undefined) return parseInviteRequest(stored, email);
 
-  // Q31b imports never had one built (no mail is sent at cutover), so the
-  // first real invite mints it.
   const request = buildInviteRequest({
     toEmail: email,
     invitedByEmail: await originalSender(userId),
   });
+  // Commit the freeze before any I/O, so a crash between here and the send
+  // replays these exact bytes rather than re-rendering them.
   await db.query(
-    `UPDATE account_events SET meta = meta || jsonb_build_object('invite_request', $2::jsonb)
-      WHERE id=$1`,
-    [rows[0].id, JSON.stringify(request)],
+    `UPDATE users SET invite_request=$2 WHERE id=$1 AND invite_request IS NULL`,
+    [userId, serializeInviteRequest(request)],
   );
-  return request;
+  // Re-read: if a concurrent attempt won the freeze, replay ITS bytes, not ours.
+  const { rows: after } = await db.query<{ invite_request: string | null }>(
+    `SELECT invite_request FROM users WHERE id=$1`,
+    [userId],
+  );
+  return parseInviteRequest(after[0].invite_request as string, email);
 }
 
 /**
@@ -4605,7 +4751,7 @@ async function provisionAndMail(
   await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [userId]);
 
   try {
-    const { messageId } = await sendInviteRequest(request, idempotencyKey);
+    const { messageId } = await sendInviteRequest(request, idempotencyKey, email);
     await db.query(
       `UPDATE users SET invite_sent_at = now(), invite_message_id = $2 WHERE id=$1`,
       [userId, messageId],
@@ -4679,10 +4825,21 @@ export async function inviteUser(
         : resendIdempotencyKey(row.id);
       // A never-delivered invite REPLAYS its frozen request; a known-successful
       // prior delivery is a deliberate new one, so it renders fresh under a
-      // fresh key and has no earlier request to match.
-      const request = neverDelivered
-        ? await frozenInviteRequest(row.id, target)
-        : buildInviteRequest({ toEmail: target, invitedByEmail: actor.email });
+      // fresh key and has no earlier request to match. Either can fail on a
+      // missing INVITE_FROM_EMAIL, which is a MAIL failure on a durable row —
+      // never a reason to unwind the invitation.
+      let request: InviteRequest;
+      try {
+        request = neverDelivered
+          ? await frozenInviteRequest(row.id, target)
+          : buildInviteRequest({ toEmail: target, invitedByEmail: actor.email });
+      } catch (err) {
+        return {
+          id: row.id, email: target, status: 'invited', created: false,
+          cf_synced: row.cf_synced_at !== null, invite_sent: false,
+          sync_error: null, mail_error: mailErrorCode(err), resent: false,
+        };
+      }
 
       if (row.cf_synced_at === null) {
         // Provisioning failed last time: retry the sync FIRST and send only if
@@ -4701,7 +4858,7 @@ export async function inviteUser(
       let invite_sent = false;
       let mail_error: string | null = null;
       try {
-        const { messageId } = await sendInviteRequest(request, idempotencyKey);
+        const { messageId } = await sendInviteRequest(request, idempotencyKey, email);
         await db.query(
           `UPDATE users SET invite_sent_at = now(), invite_message_id=$2 WHERE id=$1`,
           [row.id, messageId],
@@ -4747,17 +4904,13 @@ export async function inviteUser(
         userEmail: target,
         kind: 'user_invited',
         ip: actor.ip,
-        meta: {
-          ...humanActor(actor.userId, actor.email),
-          role,
-          // Q30 — freeze the exact request in the same transaction as the row,
-          // before any I/O, so every later attempt replays these bytes instead
-          // of re-rendering against a possibly-changed template or from-address.
-          invite_request: buildInviteRequest({
-            toEmail: target,
-            invitedByEmail: actor.email,
-          }),
-        },
+        // Q30's frozen request is deliberately NOT built here. buildInviteRequest
+        // throws mail_not_configured when INVITE_FROM_EMAIL is unset, and inside
+        // this transaction that exception reaches the catch below and rolls the
+        // invitation back — discarding admin intent over a config gap, which the
+        // error contract forbids. It is frozen on the send path instead, where a
+        // failure leaves a durable invited row with invite_sent_at NULL.
+        meta: { ...humanActor(actor.userId, actor.email), role },
       });
       await client.query('COMMIT');
     } catch (err) {
@@ -4767,10 +4920,21 @@ export async function inviteUser(
       client.release();
     }
 
+    // Freezing happens here, AFTER the row and its audit event are committed,
+    // so a config gap yields a durable invited row with a mail_error rather
+    // than a rolled-back invitation.
+    let freshRequest: InviteRequest;
+    try {
+      freshRequest = await frozenInviteRequest(userId, target);
+    } catch (err) {
+      return {
+        id: userId, email: target, status: 'invited', created: true,
+        cf_synced: false, invite_sent: false,
+        sync_error: null, mail_error: mailErrorCode(err),
+      };
+    }
     const r = await provisionAndMail(
-      userId, target, invitedAt,
-      await frozenInviteRequest(userId, target),
-      initialIdempotencyKey(userId, invitedAt),
+      userId, target, invitedAt, freshRequest, initialIdempotencyKey(userId, invitedAt),
     );
     // The only path that INSERTs, so the only one that is a 201.
     return { id: userId, email: target, status: 'invited', created: true, ...r };
@@ -4879,7 +5043,7 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
-Expected: PASS, 27 tests. (Measured from the block itself. The originally stated 18 was
+Expected: PASS, 28 tests. (Measured from the block itself. The originally stated 18 was
 already stale before any of the replay cases were added — trust the measured count, not the prose.)
 
 > **Why the retry replays its sender from the audit snapshot.** Reusing the deterministic key obliges us to reproduce the original request body: Resend deduplicates only *identical* requests sharing a key, and returns **409 `invalid_idempotent_request`** otherwise. Rendering the retry with the *current* admin's address breaks the cross-admin lost-ack case — A's send accepted, response lost, B retries — by pairing A's key with a body naming B.

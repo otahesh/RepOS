@@ -17,7 +17,12 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 export const INVITE_SUBJECT = 'You have been invited to RepOS (Beta)';
 
-export type MailerErrorCode = 'mail_not_configured' | 'mail_http_error' | 'mail_timeout';
+export type MailerErrorCode =
+  | 'mail_not_configured'
+  | 'mail_http_error'
+  | 'mail_timeout'
+  /** A persisted request is missing, unparseable, or addressed to the wrong user. */
+  | 'mail_request_invalid';
 
 export class MailerError extends Error {
   readonly code: MailerErrorCode;
@@ -176,27 +181,76 @@ export function buildInviteRequest(input: InviteCopyInput): InviteRequest {
 }
 
 /**
- * A persisted request round-trips through JSONB, so it is untrusted input by
- * the time it comes back. Validate, never default: sending a half-shaped body
- * under the original key is how a "replay" quietly becomes a different
- * request.
+ * The canonical wire form. Byte-identity is the whole point, so the body is
+ * serialized in a FIXED field order rather than relying on the object's own
+ * key order — which does not survive storage. (PostgreSQL's jsonb sorts keys
+ * by length then bytewise: PG16 rewrites {from,to,subject,html,text} as
+ * {to,from,html,text,subject}. A replay reconstructed from such a round-trip
+ * would stringify differently and Resend would treat it as a new request.)
  */
-function assertInviteRequest(r: unknown): asserts r is InviteRequest {
+export function serializeInviteRequest(request: InviteRequest): string {
+  return JSON.stringify({
+    from: request.from,
+    to: request.to,
+    subject: request.subject,
+    html: request.html,
+    text: request.text,
+  });
+}
+
+/**
+ * Validate a persisted request before replaying it. It has round-tripped
+ * through storage, so it is untrusted input by the time it comes back:
+ * validate, never default — sending a half-shaped body under the original key
+ * is how a "replay" quietly becomes a different request.
+ *
+ * `expectedTo` is required because the recipient is the one field where being
+ * wrong is actively harmful: a corrupted or mismatched row must never mail a
+ * third party. Exactly one recipient, and it must be the lifecycle target.
+ */
+export function assertInviteRequest(
+  r: unknown,
+  expectedTo: string,
+): asserts r is InviteRequest {
   const o = r as Record<string, unknown> | null;
-  const ok =
+  const shaped =
     o !== null && typeof o === 'object' && !Array.isArray(o) &&
     typeof o.from === 'string' && o.from !== '' &&
-    Array.isArray(o.to) && o.to.length > 0 && o.to.every((x) => typeof x === 'string' && x !== '') &&
     typeof o.subject === 'string' && o.subject !== '' &&
     typeof o.html === 'string' && o.html !== '' &&
-    typeof o.text === 'string' && o.text !== '';
-  if (!ok) {
+    typeof o.text === 'string' && o.text !== '' &&
+    Array.isArray(o.to);
+  if (!shaped) {
     throw new MailerError(
-      'mail_not_configured',
+      'mail_request_invalid',
       'the persisted invite request is missing or malformed — refusing to send',
       JSON.stringify(r)?.slice(0, 200),
     );
   }
+  const to = o.to as unknown[];
+  if (to.length !== 1 || to[0] !== expectedTo) {
+    throw new MailerError(
+      'mail_request_invalid',
+      'the persisted invite request does not address exactly the invited user',
+      `expected [${expectedTo}], found ${JSON.stringify(to)?.slice(0, 120)}`,
+    );
+  }
+}
+
+/** Parse a request frozen as TEXT, failing closed on anything unusable. */
+export function parseInviteRequest(stored: string, expectedTo: string): InviteRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    throw new MailerError(
+      'mail_request_invalid',
+      'the persisted invite request is not valid JSON',
+      stored.slice(0, 200),
+    );
+  }
+  assertInviteRequest(parsed, expectedTo);
+  return parsed;
 }
 
 /**
@@ -208,6 +262,7 @@ function assertInviteRequest(r: unknown): asserts r is InviteRequest {
 export async function sendInviteRequest(
   request: InviteRequest,
   idempotencyKey: string,
+  expectedTo: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<{ messageId: string }> {
   const key = process.env.RESEND_API_KEY;
@@ -219,7 +274,7 @@ export async function sendInviteRequest(
       'RESEND_API_KEY must be set to send invites',
     );
   }
-  assertInviteRequest(request);
+  assertInviteRequest(request, expectedTo);
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
@@ -239,7 +294,7 @@ export async function sendInviteRequest(
           // Q30 — transport retry protection, scoped to this exact body.
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify(request),
+        body: serializeInviteRequest(request),
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {

@@ -1,0 +1,25 @@
+-- Beta W9 — the frozen invite request (Q30).
+-- Numbering: W9 claims 080–089; 080 built the lifecycle columns, this is 081.
+--
+-- Q30 requires that a retry after a lost acknowledgement cannot deliver twice,
+-- and Resend collapses two sends into one delivery only when the requests are
+-- BYTE-IDENTICAL under a shared idempotency key. The invite body cannot be
+-- re-rendered on a retry to meet that bar: INVITE_FROM_EMAIL comes from the
+-- environment and the copy ships with the deployment, so a redeploy inside
+-- Resend's 24h window would either drift the body (409, invite stuck for a
+-- day) or force a new key (a second delivery — the thing Q30 forbids). The
+-- first attempt therefore freezes the exact request here and every later
+-- attempt replays it.
+--
+-- TEXT, not JSONB, deliberately. jsonb canonicalises key order — PostgreSQL 16
+-- rewrites {from,to,subject,html,text} as {to,from,html,text,subject} — so a
+-- JSONB round-trip would itself destroy the byte-identity this column exists
+-- to preserve. The value is the serialized request body exactly as it was, and
+-- must be sent verbatim.
+--
+-- It lives on `users` beside invite_sent_at / invite_message_id, not in
+-- account_events, for two reasons: 060 declares that table append-only ("no
+-- UPDATE"), and freezing a payload is operational state rather than an audit
+-- event — it has no place in a user's visible timeline.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS invite_request TEXT NULL;
