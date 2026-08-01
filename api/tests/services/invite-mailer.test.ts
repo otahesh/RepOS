@@ -108,6 +108,15 @@ describe('copy (G14)', () => {
     expect(html).toContain('#10141C');
   });
 
+  it('renders deterministically — identical input yields identical output', () => {
+    // The key is a fingerprint of the rendered body, so a template that varied
+    // per render (a timestamp, a nonce) would mint a new key on every attempt
+    // and resend without bound. Pin purity here rather than discover it as
+    // duplicate mail.
+    expect(renderInviteHtml(input)).toBe(renderInviteHtml(input));
+    expect(renderInviteText(input)).toBe(renderInviteText(input));
+  });
+
   it('the plain-text alternative contains no markup', () => {
     expect(renderInviteText(input)).not.toMatch(/<[a-z]/i);
   });
@@ -137,12 +146,60 @@ describe('sendInviteEmail', () => {
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer test-key');
-    expect(headers['Idempotency-Key']).toBe('k-1');
+    // The caller's key is a prefix: the mailer appends a fingerprint of the
+    // rendered body so one key can never span two different requests.
+    expect(headers['Idempotency-Key']).toMatch(/^k-1-[0-9a-f]{12}$/);
     const body = JSON.parse(String(calls[0].init.body));
     expect(body.from).toContain('repos@send.jpmtech.com');
     expect(body.to).toEqual(['new@repos.test']);
     expect(body.html).toBeTruthy();
     expect(body.text).toBeTruthy();
+  });
+
+  it('binds the key to the body: identical requests reuse one key', async () => {
+    const args = {
+      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
+    };
+    await sendInviteEmail(args);
+    await sendInviteEmail(args);
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).toBe(h[0]);
+    expect(h[0].startsWith('k-1-')).toBe(true);
+  });
+
+  it('binds the key to the body: a changed from-address yields a different key', async () => {
+    // INVITE_FROM_EMAIL is read at call time, so a config change inside
+    // Resend's 24h window would otherwise pair the original key with a
+    // different request and hard-fail with 409. A new key delivers instead.
+    const args = {
+      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
+    };
+    await sendInviteEmail(args);
+    process.env.INVITE_FROM_EMAIL = 'other@send.jpmtech.com';
+    await sendInviteEmail(args);
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).not.toBe(h[0]);
+  });
+
+  it('binds the key to the body: a different inviter yields a different key', async () => {
+    await sendInviteEmail({
+      toEmail: 'new@repos.test', invitedByEmail: 'a@repos.test', idempotencyKey: 'k-1',
+    });
+    await sendInviteEmail({
+      toEmail: 'new@repos.test', invitedByEmail: 'b@repos.test', idempotencyKey: 'k-1',
+    });
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).not.toBe(h[0]);
+  });
+
+  it('the scoped key still fits Resend’s 256-character limit', async () => {
+    await sendInviteEmail({
+      toEmail: 'new@repos.test',
+      invitedByEmail: 'admin@repos.test',
+      idempotencyKey: resendIdempotencyKey('3f2504e0-4f89-11d3-9a0c-0305e82c3301'),
+    });
+    const h = (calls[0].init.headers as Record<string, string>)['Idempotency-Key'];
+    expect(h.length).toBeLessThanOrEqual(256);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {

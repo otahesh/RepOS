@@ -2083,7 +2083,7 @@ export async function syncEmailToStatus(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-access-sync.test.ts`
-Expected: PASS, 17 tests.
+Expected: PASS, 22 tests.
 
 > **Note for the implementer:** `vi.spyOn` on an ESM namespace import works in vitest only when the consuming module imports the same binding at runtime. `cfAccessSync.ts` imports `{ fetchPolicy, putPolicyEmails }` directly, which vitest's ESM interop makes spyable — verified working on vitest 4.1.5. If the spies do not take effect, switch the test to `vi.mock('../../src/services/cfAccessPolicy.js', ...)` with an explicit factory — do **not** change the production import style to work around it.
 >
@@ -3255,6 +3255,15 @@ describe('copy (G14)', () => {
     expect(html).toContain('#10141C');
   });
 
+  it('renders deterministically — identical input yields identical output', () => {
+    // The key is a fingerprint of the rendered body, so a template that varied
+    // per render (a timestamp, a nonce) would mint a new key on every attempt
+    // and resend without bound. Pin purity here rather than discover it as
+    // duplicate mail.
+    expect(renderInviteHtml(input)).toBe(renderInviteHtml(input));
+    expect(renderInviteText(input)).toBe(renderInviteText(input));
+  });
+
   it('the plain-text alternative contains no markup', () => {
     expect(renderInviteText(input)).not.toMatch(/<[a-z]/i);
   });
@@ -3284,12 +3293,60 @@ describe('sendInviteEmail', () => {
     expect(calls[0].url).toBe('https://api.resend.com/emails');
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer test-key');
-    expect(headers['Idempotency-Key']).toBe('k-1');
+    // The caller's key is a prefix: the mailer appends a fingerprint of the
+    // rendered body so one key can never span two different requests.
+    expect(headers['Idempotency-Key']).toMatch(/^k-1-[0-9a-f]{12}$/);
     const body = JSON.parse(String(calls[0].init.body));
     expect(body.from).toContain('repos@send.jpmtech.com');
     expect(body.to).toEqual(['new@repos.test']);
     expect(body.html).toBeTruthy();
     expect(body.text).toBeTruthy();
+  });
+
+  it('binds the key to the body: identical requests reuse one key', async () => {
+    const args = {
+      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
+    };
+    await sendInviteEmail(args);
+    await sendInviteEmail(args);
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).toBe(h[0]);
+    expect(h[0].startsWith('k-1-')).toBe(true);
+  });
+
+  it('binds the key to the body: a changed from-address yields a different key', async () => {
+    // INVITE_FROM_EMAIL is read at call time, so a config change inside
+    // Resend's 24h window would otherwise pair the original key with a
+    // different request and hard-fail with 409. A new key delivers instead.
+    const args = {
+      toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test', idempotencyKey: 'k-1',
+    };
+    await sendInviteEmail(args);
+    process.env.INVITE_FROM_EMAIL = 'other@send.jpmtech.com';
+    await sendInviteEmail(args);
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).not.toBe(h[0]);
+  });
+
+  it('binds the key to the body: a different inviter yields a different key', async () => {
+    await sendInviteEmail({
+      toEmail: 'new@repos.test', invitedByEmail: 'a@repos.test', idempotencyKey: 'k-1',
+    });
+    await sendInviteEmail({
+      toEmail: 'new@repos.test', invitedByEmail: 'b@repos.test', idempotencyKey: 'k-1',
+    });
+    const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
+    expect(h[1]).not.toBe(h[0]);
+  });
+
+  it('the scoped key still fits Resend’s 256-character limit', async () => {
+    await sendInviteEmail({
+      toEmail: 'new@repos.test',
+      invitedByEmail: 'admin@repos.test',
+      idempotencyKey: resendIdempotencyKey('3f2504e0-4f89-11d3-9a0c-0305e82c3301'),
+    });
+    const h = (calls[0].init.headers as Record<string, string>)['Idempotency-Key'];
+    expect(h.length).toBeLessThanOrEqual(256);
   });
 
   it('throws mail_not_configured when RESEND_API_KEY is unset — never at boot', async () => {
@@ -3362,6 +3419,8 @@ export const APP_URL = 'https://repos.jpmtech.com';
 export const SUPPORT_CONTACT = 'jason.meyer1@gmail.com';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+export const INVITE_SUBJECT = 'You have been invited to RepOS (Beta)';
 
 export type MailerErrorCode = 'mail_not_configured' | 'mail_http_error' | 'mail_timeout';
 
@@ -3502,6 +3561,32 @@ export async function sendInviteEmail(
     );
   }
 
+  // The caller's key identifies the INTENT (this invite, never yet delivered).
+  // Resend, though, deduplicates only byte-identical requests sharing a key and
+  // returns 409 invalid_idempotent_request otherwise — so a key that outlives
+  // the body it was minted for is a liability. INVITE_FROM_EMAIL is read here
+  // at call time and the subject/HTML/text come from whatever template is
+  // deployed, both of which can change inside Resend's 24h window and leave a
+  // retry pairing the original key with a different request.
+  //
+  // Binding a fingerprint of the ACTUAL body to the key makes "same key => same
+  // request" true by construction rather than by convention: an unchanged
+  // deployment retries into a dedupe, and a changed template or from-address
+  // yields a new key and simply delivers. That trades an unrecoverable 409 —
+  // which would block the invite for 24h — for at most one extra delivery per
+  // deliberate change, which is the safer of the two failures.
+  const requestBody = JSON.stringify({
+    from: `RepOS <${from}>`,
+    to: [input.toEmail],
+    subject: INVITE_SUBJECT,
+    html: renderInviteHtml(input),
+    text: renderInviteText(input),
+  });
+  const scopedKey = `${input.idempotencyKey}-${createHash('sha256')
+    .update(requestBody)
+    .digest('hex')
+    .slice(0, 12)}`;
+
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -3517,16 +3602,10 @@ export async function sendInviteEmail(
         headers: {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json',
-          // Q30 — transport retry protection.
-          'Idempotency-Key': input.idempotencyKey,
+          // Q30 — transport retry protection, scoped to this exact body.
+          'Idempotency-Key': scopedKey,
         },
-        body: JSON.stringify({
-          from: `RepOS <${from}>`,
-          to: [input.toEmail],
-          subject: 'You have been invited to RepOS (Beta)',
-          html: renderInviteHtml(input),
-          text: renderInviteText(input),
-        }),
+        body: requestBody,
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
@@ -3588,7 +3667,7 @@ export async function sendInviteEmail(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/invite-mailer.test.ts`
-Expected: PASS, 17 tests.
+Expected: PASS, 22 tests.
 
 > **Resend contract verified against the live docs on 2026-07-30, before writing the client** (the Task 5 lesson). Everything this task assumed is correct: `POST https://api.resend.com/emails`, `Authorization: Bearer`, the `Idempotency-Key` header, `{from, to, subject, html, text}` with `from` accepting `Name <addr>`, and `{ "id": "<uuid>" }` on success. No client changes were needed — recorded here so a future run does not re-litigate it.
 >
@@ -3596,6 +3675,10 @@ Expected: PASS, 17 tests.
 >
 > - **Idempotency keys must be 1–256 characters**; outside that Resend returns a 400 `invalid_idempotency_key`. Both generators are derived (39 and ~80 chars today), so a format change could silently cross the limit and turn every invite into a hard failure. The added test pins the external constraint.
 > - **Keys expire after 24 hours.** That is fine for `initialIdempotencyKey` even though it is stable forever: within the window a transport retry dedupes, and beyond it a genuinely later re-send *should* deliver. Worth knowing rather than assuming the key protects indefinitely. Note also that reusing one key with a *different* payload yields 409 `invalid_idempotent_request`, which this client surfaces as the generic `mail_http_error` — acceptable fail-closed behaviour, but it is not distinguishable from a transport failure.
+>
+> **The key is scoped to the rendered body, which is what makes "same key ⟹ same request" true by construction.** The caller's key identifies the *intent* (this invite, never yet delivered), but `INVITE_FROM_EMAIL` is read at call time and the subject/HTML/text come from whatever template is deployed — all of which can change inside Resend's 24h window and leave a retry pairing the original key with a different request. `sendInviteEmail` therefore appends a 12-hex fingerprint of the actual body, so an unchanged deployment retries into a dedupe while a changed template or from-address yields a new key and simply delivers. That trades an unrecoverable 409 — which would block the invite for a day — for at most one extra delivery per deliberate change.
+>
+> This only holds while the renderers are pure, so there is a test asserting two renders of identical input are identical. A template that ever grew a timestamp or nonce would mint a fresh key on every attempt and resend without bound.
 >
 > Separately, `renderInviteHtml` escapes both addresses rather than interpolating them raw. A local part may legally be a quoted string, so `"a<b"@example.test` is a valid address that would open a tag mid-document, and the same hole lets an admin inject markup into a message delivered to someone else. The text part needs no equivalent.
 
@@ -3749,18 +3832,32 @@ function freshEmail(tag: string) { return `inv-${tag}-${randomUUID().slice(0, 8)
 
 async function seed(
   email: string, status: string, cfSynced: Date | null, sentAt: Date | null = null,
-  // Defaults to ADMIN because the real INSERT always stamps invited_by. Note
-  // the replayed sender does NOT come from this column — it comes from the
-  // user_invited / user_imported audit snapshot, which is why these tests
-  // insert that event explicitly. Pass null to model a Q31b import.
+  // Defaults to ADMIN because the real INSERT always stamps invited_by. The
+  // replayed sender does NOT come from this column, though — it comes from the
+  // audit snapshot written below.
   invitedBy: string | null = adminId,
+  // Every real `invited` row carries exactly one user_invited or user_imported
+  // event, committed with the row (Q27), and originalSender() FAILS CLOSED
+  // without one. Seeding it here is therefore not incidental setup — a fixture
+  // missing it does not model any state the system can actually produce. A
+  // string writes the human shape naming that address; null writes the Q31b
+  // system-actor import shape.
+  inviterEmail: string | null = ADMIN,
 ) {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO users (email, status, cf_synced_at, invited_at, invite_sent_at, invited_by)
      VALUES ($1,$2,$3, now(), $4, $5) RETURNING id`,
     [email, status, cfSynced, sentAt, invitedBy],
   );
-  return rows[0].id;
+  const id = rows[0].id;
+  await db.query(
+    `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
+     VALUES ($1,$2,$3,$4::jsonb)`,
+    inviterEmail === null
+      ? [id, email, 'user_imported', JSON.stringify(systemActor('cf_reconciliation', 'cutover'))]
+      : [id, email, 'user_invited', JSON.stringify(humanActor(invitedBy ?? adminId, inviterEmail))],
+  );
+  return id;
 }
 
 describe('POST /api/admin/users/invite — happy path', () => {
@@ -3922,22 +4019,19 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // retries. Reusing A's deterministic key with a body naming B is precisely
     // what Resend rejects with 409 invalid_idempotent_request — the key would
     // be dead for 24h and the invite could not complete. The retry must
-    // reproduce A's payload, recovered from invited_by.
+    // reproduce A's payload, recovered from the durable audit snapshot.
     const adminA = `inv-origadmin-${randomUUID().slice(0, 8)}@repos.test`;
     const { rows: aRows } = await db.query<{ id: string }>(
       `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`,
       [adminA],
     );
     const email = freshEmail('crossadmin');
-    const id = await seed(email, 'invited', new Date(), null, aRows[0].id);
-    // The sender is replayed from this frozen snapshot, not from invited_by —
-    // which is why deleting Admin A below must not change the outcome.
-    await db.query(
-      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
-       VALUES ($1,$2,'user_invited',$3::jsonb)`,
-      [id, email, JSON.stringify(humanActor(aRows[0].id, adminA))],
-    );
+    // seed() writes the user_invited snapshot naming Admin A. The sender is
+    // replayed from that frozen row, not from invited_by — which is why
+    // deleting Admin A below must not change the outcome.
+    const id = await seed(email, 'invited', new Date(), null, aRows[0].id, adminA);
     policyEmails.push(email);
+    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
     const { rows } = await db.query<{ invited_at: Date }>(
       `SELECT invited_at FROM users WHERE id=$1`, [id],
     );
@@ -3969,16 +4063,23 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // key and the SAME body, or Resend treats it as a new request and delivers
     // a second time.
     const email = freshEmail('imported');
-    const id = await seed(email, 'invited', new Date(), null, null);
-    await db.query(
-      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
-       VALUES ($1,$2,'user_imported',$3::jsonb)`,
-      [id, email, JSON.stringify(systemActor('cf_reconciliation', 'cutover'))],
-    );
+    const id = await seed(email, 'invited', new Date(), null, null, null);
     policyEmails.push(email);
+    // The lost ACK has to be simulated, not assumed: Resend accepts the send
+    // but the response never arrives, so invite_sent_at is never stamped and
+    // the row is byte-for-byte what it was. With the default success stub the
+    // first attempt STAMPS invite_sent_at and the second becomes an
+    // intentional resend on a fresh key — a different branch that proves
+    // nothing about replay.
+    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
 
     await invite(email);
-    await invite(email); // the lost-ack retry: nothing about the row changed
+    const mid = await db.query<{ invite_sent_at: Date | null }>(
+      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+    );
+    expect(mid.rows[0].invite_sent_at).toBeNull();
+
+    await invite(email); // the retry: nothing about the row changed
 
     expect(sentMail).toHaveLength(2);
     expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
@@ -3993,18 +4094,51 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // frozen user_invited meta, so repeated attempts cannot drift.
     const email = freshEmail('replay');
     const id = await seed(email, 'invited', new Date(), null);
-    await db.query(
-      `INSERT INTO account_events (user_id, user_email_at_event, kind, meta)
-       VALUES ($1,$2,'user_invited',$3::jsonb)`,
-      [id, email, JSON.stringify(humanActor(adminId, ADMIN))],
-    );
     policyEmails.push(email);
+    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
 
     await invite(email);
+    const mid = await db.query<{ invite_sent_at: Date | null }>(
+      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+    );
+    expect(mid.rows[0].invite_sent_at).toBeNull();
+
     await invite(email);
 
     expect(sentMail[1].idempotencyKey).toBe(sentMail[0].idempotencyKey);
     expect(sentMail[1].invitedByEmail).toBe(sentMail[0].invitedByEmail);
+  });
+
+  it('fails closed when the durable provenance is missing entirely', async () => {
+    // Q27 guarantees exactly one user_invited/user_imported event per invited
+    // row. If it is absent the original body cannot be reproduced, so reusing
+    // the original key would pair it with a guessed payload — the 409 this
+    // machinery exists to avoid, hidden behind a plausible send. Refuse.
+    const email = freshEmail('noprov');
+    const id = await seed(email, 'invited', new Date(), null);
+    await db.query(`DELETE FROM account_events WHERE user_id=$1`, [id]);
+    policyEmails.push(email);
+
+    const r = await invite(email);
+    expect(r.statusCode).toBe(500);
+    expect(r.json<{ error: string }>().error).toBe('invite_provenance_invalid');
+    expect(sentMail).toHaveLength(0);
+  });
+
+  it('fails closed on a user_invited carrying the wrong actor shape', async () => {
+    // A system-shaped user_invited has no actor_email. Defaulting it to the
+    // support constant would send a body that never matches the original.
+    const email = freshEmail('badshape');
+    const id = await seed(email, 'invited', new Date(), null);
+    await db.query(
+      `UPDATE account_events SET meta=$2::jsonb WHERE user_id=$1`,
+      [id, JSON.stringify(systemActor('cf_reconciliation', 'cutover'))],
+    );
+    policyEmails.push(email);
+
+    const r = await invite(email);
+    expect(r.statusCode).toBe(500);
+    expect(sentMail).toHaveLength(0);
   });
 
   it('an unsynced retry whose mail never landed also reuses the INITIAL key', async () => {
@@ -4279,15 +4413,42 @@ async function countCohort(): Promise<number> {
  * equally stable across attempts.
  */
 async function originalSender(userId: string): Promise<string> {
-  const { rows } = await db.query<{ meta: Record<string, unknown> | null }>(
-    `SELECT meta FROM account_events
+  const { rows } = await db.query<{ kind: string; meta: Record<string, unknown> | null }>(
+    `SELECT kind, meta FROM account_events
       WHERE user_id=$1 AND kind IN ('user_invited','user_imported')
-      ORDER BY id ASC LIMIT 1`,
+      ORDER BY id ASC`,
     [userId],
   );
-  const meta = rows[0]?.meta;
-  const email = meta && meta.actor_kind === 'user' ? meta.actor_email : null;
-  return typeof email === 'string' && email !== '' ? email : SUPPORT_CONTACT;
+  // Validate, never default. Collapsing "no event", "null meta" or "a
+  // user_invited carrying the wrong actor shape" onto the support constant
+  // would silently pair the ORIGINAL key with a DIFFERENT body — recreating
+  // the 409 this function exists to prevent — while hiding a broken Q27
+  // invariant behind a plausible-looking send. Exactly one event must exist,
+  // and its shape must match its kind.
+  if (rows.length !== 1) {
+    throw new LifecycleError(500, 'invite_provenance_invalid', {
+      reason: rows.length === 0 ? 'no_user_invited_or_imported_event' : 'multiple_events',
+      count: rows.length,
+    });
+  }
+  const { kind, meta } = rows[0];
+  if (kind === 'user_invited') {
+    // Q23 human shape. The address is the payload, so it must be present.
+    if (
+      !meta || meta.actor_kind !== 'user' ||
+      typeof meta.actor_email !== 'string' || meta.actor_email === ''
+    ) {
+      throw new LifecycleError(500, 'invite_provenance_invalid', { reason: 'malformed_human_actor' });
+    }
+    return meta.actor_email;
+  }
+  // Q31b import: the Q23 SYSTEM shape carries no actor_email by design, so the
+  // constant IS the durable answer here — but only for a correctly shaped
+  // system event, never as a catch-all.
+  if (!meta || meta.actor_kind !== 'system') {
+    throw new LifecycleError(500, 'invite_provenance_invalid', { reason: 'malformed_system_actor' });
+  }
+  return SUPPORT_CONTACT;
 }
 
 /**
@@ -4577,8 +4738,8 @@ import { adminUsersRoutes } from './routes/adminUsers.js';
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-invite.test.ts`
-Expected: PASS, 24 tests. (The block holds 23 `it()` cases as written — the previously
-stated 18 was already stale before the two lost-ack cases were added. Trust the measured count.)
+Expected: PASS, 26 tests. (Measured from the block itself. The originally stated 18 was
+already stale before any of the replay cases were added — trust the measured count, not the prose.)
 
 > **Why the retry replays its sender from the audit snapshot.** Reusing the deterministic key obliges us to reproduce the original request body: Resend deduplicates only *identical* requests sharing a key, and returns **409 `invalid_idempotent_request`** otherwise. Rendering the retry with the *current* admin's address breaks the cross-admin lost-ack case — A's send accepted, response lost, B retries — by pairing A's key with a body naming B.
 >
@@ -5216,7 +5377,7 @@ Add to `api/src/routes/adminUsers.ts`, and extend the import to pull in `UserPat
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-patch.test.ts`
-Expected: PASS, 17 tests.
+Expected: PASS, 22 tests.
 
 - [ ] **Step 6: Commit**
 

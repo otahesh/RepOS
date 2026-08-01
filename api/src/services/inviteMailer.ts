@@ -15,6 +15,8 @@ export const SUPPORT_CONTACT = 'jason.meyer1@gmail.com';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+export const INVITE_SUBJECT = 'You have been invited to RepOS (Beta)';
+
 export type MailerErrorCode = 'mail_not_configured' | 'mail_http_error' | 'mail_timeout';
 
 export class MailerError extends Error {
@@ -154,6 +156,32 @@ export async function sendInviteEmail(
     );
   }
 
+  // The caller's key identifies the INTENT (this invite, never yet delivered).
+  // Resend, though, deduplicates only byte-identical requests sharing a key and
+  // returns 409 invalid_idempotent_request otherwise — so a key that outlives
+  // the body it was minted for is a liability. INVITE_FROM_EMAIL is read here
+  // at call time and the subject/HTML/text come from whatever template is
+  // deployed, both of which can change inside Resend's 24h window and leave a
+  // retry pairing the original key with a different request.
+  //
+  // Binding a fingerprint of the ACTUAL body to the key makes "same key => same
+  // request" true by construction rather than by convention: an unchanged
+  // deployment retries into a dedupe, and a changed template or from-address
+  // yields a new key and simply delivers. That trades an unrecoverable 409 —
+  // which would block the invite for 24h — for at most one extra delivery per
+  // deliberate change, which is the safer of the two failures.
+  const requestBody = JSON.stringify({
+    from: `RepOS <${from}>`,
+    to: [input.toEmail],
+    subject: INVITE_SUBJECT,
+    html: renderInviteHtml(input),
+    text: renderInviteText(input),
+  });
+  const scopedKey = `${input.idempotencyKey}-${createHash('sha256')
+    .update(requestBody)
+    .digest('hex')
+    .slice(0, 12)}`;
+
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -169,16 +197,10 @@ export async function sendInviteEmail(
         headers: {
           Authorization: `Bearer ${key}`,
           'Content-Type': 'application/json',
-          // Q30 — transport retry protection.
-          'Idempotency-Key': input.idempotencyKey,
+          // Q30 — transport retry protection, scoped to this exact body.
+          'Idempotency-Key': scopedKey,
         },
-        body: JSON.stringify({
-          from: `RepOS <${from}>`,
-          to: [input.toEmail],
-          subject: 'You have been invited to RepOS (Beta)',
-          html: renderInviteHtml(input),
-          text: renderInviteText(input),
-        }),
+        body: requestBody,
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
