@@ -86,6 +86,14 @@ export async function deleteUser(
     } catch (err) {
       throw new LifecycleError(502, 'cf_sync_failed', {
         sync_error: err instanceof CfPolicyError ? err.code : 'cf_unknown_error',
+        // `disabled` is the fact the caller has to act on: Phase 1 has already
+        // committed status='deleting', so this identity is refused on both auth
+        // paths whatever happens next. It is a property of WHERE the failure
+        // landed, not of the error code — patchUser's reinstate branch throws
+        // the same `cf_sync_failed` and is NOT disabled by it (the row stays
+        // suspended, exactly as it was). Routes must therefore branch on this,
+        // never on the code.
+        disabled: true,
         resumable: true,
       });
     }
@@ -109,7 +117,21 @@ export async function deleteUser(
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      throw err;
+      if (err instanceof LifecycleError) throw err;
+      // A raw rethrow here reaches the routes as an unrecognised error and
+      // becomes a bare 500 `delete_failed` — which strands a self-deleting
+      // user. Phase 1 committed status='deleting' before this transaction ran
+      // (or found it already committed on the resume path), so the account is
+      // ALREADY disabled on both auth paths: the user cannot sign in to retry
+      // and cannot discover who has to finish it. Q37 owes them the same
+      // "already disabled, here is the contact" response as a CF failure, so
+      // this failure has to arrive at the route carrying the same facts.
+      throw new LifecycleError(
+        500,
+        'delete_finalize_failed',
+        { disabled: true, resumable: true },
+        { cause: err },
+      );
     } finally {
       client.release();
     }

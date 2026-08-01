@@ -354,10 +354,25 @@ export async function accountRoutes(app: FastifyInstance) {
         previousTokenCount = out.previous_token_count;
       } catch (err) {
         if (err instanceof LifecycleError) {
+          // Q37 keys on the STATE, not on one error code. Any failure past the
+          // status='deleting' commit leaves this user denied on both auth
+          // paths with no way to retry, so every such failure — a CF removal
+          // that failed, a cascade that failed, an audit insert that failed —
+          // owes them the same "already disabled, here is who can finish it"
+          // response. Matching `cf_sync_failed` instead covered exactly the
+          // one failure the tests happened to inject; `last_admin` and the
+          // other pre-mutation refusals correctly carry no `disabled` flag
+          // because they roll back and the account still works.
+          const disabled = err.details.disabled === true;
+          if (disabled) {
+            // The client contract is now typed, but the operator still needs
+            // the underlying fault — LifecycleError carries it as `cause`.
+            req.log.error({ err, userId }, 'account_delete_finalize_failed');
+          }
           return reply.code(err.statusCode).send({
             error: err.code,
             ...err.details,
-            ...(err.code === 'cf_sync_failed'
+            ...(disabled
               ? { message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.` }
               : {}),
           });

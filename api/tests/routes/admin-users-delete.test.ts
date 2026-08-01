@@ -21,6 +21,7 @@ const { buildApp } = await import('../../src/app.js');
 const { db } = await import('../../src/db/client.js');
 const policy = await import('../../src/services/cfAccessPolicy.js');
 const { setupTestJwks } = await import('../helpers/cf-access-jwt.js');
+const { SUPPORT_CONTACT } = await import('../../src/services/inviteMailer.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 let jwks: Awaited<ReturnType<typeof setupTestJwks>>;
@@ -290,7 +291,15 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     const token = mint.json<{ token: string }>().token;
 
     fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
-    expect((await selfDelete(email)).statusCode).toBe(502);
+    const failed = await selfDelete(email);
+    expect(failed.statusCode).toBe(502);
+    // The Q37 contract, asserted rather than assumed: this is the response the
+    // user is left holding, and it is the only thing that tells them the
+    // account is already disabled and who can finish the job. It rides on the
+    // `disabled` flag now, so nothing else pins it down.
+    const failedBody = failed.json<{ disabled?: boolean; message?: string }>();
+    expect(failedBody.disabled).toBe(true);
+    expect(failedBody.message).toContain(SUPPORT_CONTACT);
 
     // Both auth paths now reject them.
     const cf = await app.inject({
@@ -322,5 +331,37 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
         WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
     );
     expect(ev.rows[0].meta.previous_token_count).toBe(1);
+  });
+
+  it('Q37: a cascade failure AFTER the disable also returns the contact path', async () => {
+    // The CF-failure case above is not the only way to strand a self-deleting
+    // user. Phase 1 has already committed status='deleting' by the time the
+    // cascade runs, so ANY finalization failure leaves them denied on both
+    // auth paths with no way to retry. Q37 owes them the same message, which
+    // means it must key on that STATE, not on one error code.
+    const email = freshEmail('selffinal');
+    const id = await seed(email, 'active');
+    await db.query(`INSERT INTO w9_block (user_id) VALUES ($1)`, [id]);
+
+    const r = await selfDelete(email);
+    expect(r.statusCode).toBe(500);
+    const body = r.json<{ error: string; disabled?: boolean; resumable?: boolean; message?: string }>();
+    expect(body.error).toBe('delete_finalize_failed');
+    expect(body.disabled).toBe(true);
+    expect(body.resumable).toBe(true);
+    expect(body.message).toContain(SUPPORT_CONTACT);
+
+    // Durably disabled, and no event describing a deletion that did not happen.
+    const u = await db.query<{ status: string }>(
+      `SELECT status FROM users WHERE id=$1`, [id],
+    );
+    expect(u.rows[0].status).toBe('deleting');
+    const ev = await db.query<{ n: number }>(
+      `SELECT count(*)::int n FROM account_events
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+    );
+    expect(ev.rows[0].n).toBe(0);
+
+    await db.query(`DELETE FROM w9_block WHERE user_id=$1`, [id]);
   });
 });

@@ -38,8 +38,17 @@ export class LifecycleError extends Error {
   readonly statusCode: number;
   readonly code: string;
   readonly details: Record<string, unknown>;
-  constructor(statusCode: number, code: string, details: Record<string, unknown> = {}) {
-    super(code);
+  constructor(
+    statusCode: number,
+    code: string,
+    details: Record<string, unknown> = {},
+    // `cause` carries the underlying fault when this wraps one. Only the code
+    // and details reach the client; the cause exists so wrapping a raw error
+    // to give the CLIENT a usable contract does not cost the OPERATOR the
+    // stack trace they need — see deleteUser's finalization catch.
+    options?: { cause?: unknown },
+  ) {
+    super(code, options);
     this.name = 'LifecycleError';
     this.statusCode = statusCode;
     this.code = code;

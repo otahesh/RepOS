@@ -4757,8 +4757,17 @@ export class LifecycleError extends Error {
   readonly statusCode: number;
   readonly code: string;
   readonly details: Record<string, unknown>;
-  constructor(statusCode: number, code: string, details: Record<string, unknown> = {}) {
-    super(code);
+  constructor(
+    statusCode: number,
+    code: string,
+    details: Record<string, unknown> = {},
+    // `cause` carries the underlying fault when this wraps one. Only the code
+    // and details reach the client; the cause exists so wrapping a raw error
+    // to give the CLIENT a usable contract does not cost the OPERATOR the
+    // stack trace they need — see deleteUser's finalization catch.
+    options?: { cause?: unknown },
+  ) {
+    super(code, options);
     this.name = 'LifecycleError';
     this.statusCode = statusCode;
     this.code = code;
@@ -6243,7 +6252,15 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     const token = mint.json<{ token: string }>().token;
 
     fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
-    expect((await selfDelete(email)).statusCode).toBe(502);
+    const failed = await selfDelete(email);
+    expect(failed.statusCode).toBe(502);
+    // The Q37 contract, asserted rather than assumed: this is the response the
+    // user is left holding, and it is the only thing that tells them the
+    // account is already disabled and who can finish the job. It rides on the
+    // `disabled` flag now, so nothing else pins it down.
+    const failedBody = failed.json<{ disabled?: boolean; message?: string }>();
+    expect(failedBody.disabled).toBe(true);
+    expect(failedBody.message).toContain(SUPPORT_CONTACT);
 
     // Both auth paths now reject them.
     const cf = await app.inject({
@@ -6276,6 +6293,38 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     );
     expect(ev.rows[0].meta.previous_token_count).toBe(1);
   });
+
+  it('Q37: a cascade failure AFTER the disable also returns the contact path', async () => {
+    // The CF-failure case above is not the only way to strand a self-deleting
+    // user. Phase 1 has already committed status='deleting' by the time the
+    // cascade runs, so ANY finalization failure leaves them denied on both
+    // auth paths with no way to retry. Q37 owes them the same message, which
+    // means it must key on that STATE, not on one error code.
+    const email = freshEmail('selffinal');
+    const id = await seed(email, 'active');
+    await db.query(`INSERT INTO w9_block (user_id) VALUES ($1)`, [id]);
+
+    const r = await selfDelete(email);
+    expect(r.statusCode).toBe(500);
+    const body = r.json<{ error: string; disabled?: boolean; resumable?: boolean; message?: string }>();
+    expect(body.error).toBe('delete_finalize_failed');
+    expect(body.disabled).toBe(true);
+    expect(body.resumable).toBe(true);
+    expect(body.message).toContain(SUPPORT_CONTACT);
+
+    // Durably disabled, and no event describing a deletion that did not happen.
+    const u = await db.query<{ status: string }>(
+      `SELECT status FROM users WHERE id=$1`, [id],
+    );
+    expect(u.rows[0].status).toBe('deleting');
+    const ev = await db.query<{ n: number }>(
+      `SELECT count(*)::int n FROM account_events
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+    );
+    expect(ev.rows[0].n).toBe(0);
+
+    await db.query(`DELETE FROM w9_block WHERE user_id=$1`, [id]);
+  });
 });
 ```
 
@@ -6307,6 +6356,16 @@ Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin
 Expected: FAIL — the admin DELETE route 404s and `/api/me` deletes without a status transition.
 
 - [ ] **Step 3: Write the shared service**
+
+This step makes **two edits to `api/src/services/userLifecycle.ts`** that Task 13's code depends
+on, so a run that regenerates Task 11 or 12 from the plan without them will not compile:
+
+1. `async function inAdminLockedTxn` → `export async function inAdminLockedTxn` (see the
+   Interfaces note above for why it is reused rather than copied).
+2. `LifecycleError`'s constructor gains an optional 4th `options?: { cause?: unknown }` forwarded
+   to `super(code, options)`. Task 13's finalization catch wraps a raw driver error to give the
+   client a usable contract; without a cause the operator loses the stack trace that wrapping
+   discarded. The Task 11 block above already shows the updated class.
 
 Create `api/src/services/deleteUser.ts`:
 
@@ -6399,6 +6458,14 @@ export async function deleteUser(
     } catch (err) {
       throw new LifecycleError(502, 'cf_sync_failed', {
         sync_error: err instanceof CfPolicyError ? err.code : 'cf_unknown_error',
+        // `disabled` is the fact the caller has to act on: Phase 1 has already
+        // committed status='deleting', so this identity is refused on both auth
+        // paths whatever happens next. It is a property of WHERE the failure
+        // landed, not of the error code — patchUser's reinstate branch throws
+        // the same `cf_sync_failed` and is NOT disabled by it (the row stays
+        // suspended, exactly as it was). Routes must therefore branch on this,
+        // never on the code.
+        disabled: true,
         resumable: true,
       });
     }
@@ -6422,7 +6489,21 @@ export async function deleteUser(
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      throw err;
+      if (err instanceof LifecycleError) throw err;
+      // A raw rethrow here reaches the routes as an unrecognised error and
+      // becomes a bare 500 `delete_failed` — which strands a self-deleting
+      // user. Phase 1 committed status='deleting' before this transaction ran
+      // (or found it already committed on the resume path), so the account is
+      // ALREADY disabled on both auth paths: the user cannot sign in to retry
+      // and cannot discover who has to finish it. Q37 owes them the same
+      // "already disabled, here is the contact" response as a CF failure, so
+      // this failure has to arrive at the route carrying the same facts.
+      throw new LifecycleError(
+        500,
+        'delete_finalize_failed',
+        { disabled: true, resumable: true },
+        { cause: err },
+      );
     } finally {
       client.release();
     }
@@ -6519,10 +6600,25 @@ Replace the body of `DELETE /me` in `api/src/routes/account.ts` (lines 314–365
         previousTokenCount = out.previous_token_count;
       } catch (err) {
         if (err instanceof LifecycleError) {
+          // Q37 keys on the STATE, not on one error code. Any failure past the
+          // status='deleting' commit leaves this user denied on both auth
+          // paths with no way to retry, so every such failure — a CF removal
+          // that failed, a cascade that failed, an audit insert that failed —
+          // owes them the same "already disabled, here is who can finish it"
+          // response. Matching `cf_sync_failed` instead covered exactly the
+          // one failure the tests happened to inject; `last_admin` and the
+          // other pre-mutation refusals correctly carry no `disabled` flag
+          // because they roll back and the account still works.
+          const disabled = err.details.disabled === true;
+          if (disabled) {
+            // The client contract is now typed, but the operator still needs
+            // the underlying fault — LifecycleError carries it as `cause`.
+            req.log.error({ err, userId }, 'account_delete_finalize_failed');
+          }
           return reply.code(err.statusCode).send({
             error: err.code,
             ...err.details,
-            ...(err.code === 'cf_sync_failed'
+            ...(disabled
               ? { message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.` }
               : {}),
           });
@@ -6568,8 +6664,36 @@ import { SUPPORT_CONTACT } from '../services/inviteMailer.js';
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-delete.test.ts`
-Expected: PASS, 13 tests. (The `previous_token_count` note above adds an assertion to the existing
-Q37 case, not a new case — the count stays 13.)
+Expected: PASS, **14** tests. (The `previous_token_count` note above adds an assertion to the
+existing Q37 case rather than a new case; the 14th is the post-disable finalization case below.)
+
+> **P1 from review, and the reason it is the same shape as every other finding in this wave.**
+> The first shipped version reported the Q37 "already disabled, contact X" message only when
+> `err.code === 'cf_sync_failed'`. But Phase 1 commits `status='deleting'` **before** Phase 2 runs,
+> so EVERY later failure leaves the user disabled — and Phase 3 rethrew its driver error raw, which
+> the `/api/me` handler did not recognise and answered with a bare 500 `delete_failed`. That user is
+> refused on both auth paths, cannot retry, and is told nothing about who can finish the deletion:
+> the exact outcome Q37 exists to prevent, reachable through the cascade instead of through
+> Cloudflare.
+>
+> The fix is not another error code in the condition. `disabled` is a property of **where the
+> failure landed**, not of what failed, so the service states it and the route branches on it:
+> Phase 2's `cf_sync_failed` and Phase 3's new `delete_finalize_failed` both carry
+> `{ disabled: true, resumable: true }`, and `/api/me` keys the message on
+> `err.details.disabled === true`. Pre-mutation refusals like `last_admin` correctly carry neither,
+> because they roll back and the account still works. **This is why keying on the code was wrong in
+> principle and not just incomplete: `patchUser`'s reinstate branch throws the very same
+> `cf_sync_failed` and is NOT disabled by it** — the row stays suspended, exactly as it was. One
+> code, two states; only the state is safe to branch on.
+>
+> Two test lessons came with it. The new case uses the existing `w9_block` mechanism on the
+> `/api/me` path and asserts the message, the durable `deleting` status, and the rolled-back
+> `user_deleted` event. And moving the condition from the code to the flag **silently un-covered the
+> CF path** — the message had been guaranteed by the shape of the `if`, and afterwards depended on a
+> flag nothing asserted. Confirmed by mutation: dropping `disabled` from `cf_sync_failed` broke
+> nothing until the interrupted-self-delete case was extended to assert the body it had only ever
+> status-checked. **A refactor that replaces a structural guarantee with a data-carried one moves
+> the burden of proof onto the tests; check what the old shape was silently proving.**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npm run test:integration -- tests/integration/account-deletion-cascade.test.ts tests/integration/contamination/account-deletion-contamination.test.ts`
 (The integration suite needs `--config vitest.integration.config.ts`, which the `test:integration`
