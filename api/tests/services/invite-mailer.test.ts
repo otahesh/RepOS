@@ -181,8 +181,11 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     await sendInviteRequest(persisted, 'k-1', TO);
 
     process.env.INVITE_FROM_EMAIL = 'somewhere-else@send.jpmtech.com';
-    // Round-trip through JSON exactly as a JSONB column would.
-    const replayed = JSON.parse(JSON.stringify(persisted));
+    // Round-trip through storage exactly as the real path does: serialized to
+    // the TEXT column `users.invite_request` (migration 081) and parsed back.
+    // TEXT, not jsonb — jsonb canonicalises key order, which is why the
+    // canonical field order lives in serializeInviteRequest.
+    const replayed = parseInviteRequest(serializeInviteRequest(persisted), TO);
     await sendInviteRequest(replayed, 'k-1', TO);
 
     const h = calls.map((c) => (c.init.headers as Record<string, string>)['Idempotency-Key']);
