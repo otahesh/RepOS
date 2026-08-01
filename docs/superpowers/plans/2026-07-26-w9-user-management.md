@@ -4794,7 +4794,7 @@ function mailErrorCode(err: unknown): string {
 }
 
 /** Q12 — the counted set is active + invited + deleting. */
-async function countCohort(): Promise<number> {
+export async function countCohort(): Promise<number> {
   const { rows } = await db.query<{ c: number }>(
     `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
   );
@@ -5598,20 +5598,39 @@ describe('the one invariant: at least one active admin (Q13, I2)', () => {
     expect(r.json<{ error: string }>().error).toBe('self_target_forbidden');
   });
 
-  it('409 last_admin when demoting the only active admin', async () => {
+  it('a SEQUENTIAL demotion can never be the last admin — the self-target guard sees to that', async () => {
+    // Why there is no single-request `last_admin` case to write: the actor must
+    // be an ACTIVE ADMIN to reach this route at all (requireCfAccessAdmin), and
+    // self-targeting is refused before the service runs. So on any one request
+    // the actor is an active admin who is NOT the target, and
+    // assertAdminRemains — which counts active admins EXCLUDING the target —
+    // can never see zero. The invariant is unreachable sequentially and bites
+    // only in the concurrent case below, which is why that one is the real
+    // coverage for it.
+    //
+    // This case pins the two halves of that reasoning rather than the
+    // invariant: self-target is refused, and a fellow admin stepping down while
+    // two exist is allowed.
     const other = await seed(freshEmail('other'), 'active', 'admin');
-    // Demote `other` first so ADMIN is the sole remaining admin, then have
-    // `other`... no: demote ADMIN via `other`, who is an admin.
-    const r = await patch(adminId, { role: 'member' }, ADMIN);
-    expect(r.statusCode).toBe(409); // self-target, checked before the invariant
-    const r2 = await app.inject({
-      method: 'PATCH', url: `/api/admin/users/${adminId}`,
-      headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(await emailOf(other)), 'x-repos-csrf': '1' },
-      payload: { role: 'member' },
-    });
-    expect(r2.statusCode).toBe(200); // two admins existed, one may step down
-    const r3 = await patch(other, { role: 'member' }, await emailOf(other));
-    expect(r3.statusCode).toBe(409); // self-target again
+    const otherEmail = await emailOf(other);
+
+    const selfTarget = await patch(adminId, { role: 'member' }, ADMIN);
+    expect(selfTarget.statusCode).toBe(409);
+    expect(selfTarget.json<{ error: string }>().error).toBe('self_target_forbidden');
+
+    // `other` demotes ADMIN: two active admins exist, so one may step down.
+    const stepDown = await patch(adminId, { role: 'member' }, otherEmail);
+    expect(stepDown.statusCode).toBe(200);
+    expect(stepDown.json<{ role: string }>().role).toBe('member');
+
+    // `other` is now the only active admin — and cannot demote itself.
+    const soloSelf = await patch(other, { role: 'member' }, otherEmail);
+    expect(soloSelf.statusCode).toBe(409);
+    expect(soloSelf.json<{ error: string }>().error).toBe('self_target_forbidden');
+    const { rows } = await db.query<{ c: number }>(
+      `SELECT count(*)::int c FROM users WHERE role='admin' AND status='active'`,
+    );
+    expect(rows[0].c).toBe(1);
   });
 
   it('409 last_admin when suspending the last active admin from another admin account', async () => {
@@ -5636,16 +5655,26 @@ describe('the one invariant: at least one active admin (Q13, I2)', () => {
     await db.query(`UPDATE users SET role='admin', status='active' WHERE email=$1`, [ADMIN]);
     const b = await seed(freshEmail('adminb'), 'active', 'admin');
     const bEmail = await emailOf(b);
+    // This is the ONLY place the last-admin invariant can actually fire, so it
+    // is the only place that can prove it works. Both requests authenticate
+    // while both callers are still admins, then serialize on the membership
+    // lock; the loser's locked re-count sees the winner's commit and finds zero
+    // other active admins. Without assertAdminRemains both succeed and the
+    // deployment is left with no admin at all — recoverable only by SSH.
     const [r1, r2] = await Promise.all([
       patch(b, { role: 'member' }, ADMIN),
       patch(adminId, { role: 'member' }, bEmail),
     ]);
     const codes = [r1.statusCode, r2.statusCode].sort();
     expect(codes).toEqual([200, 409]);
+    // Specifically last_admin — a bare 409 would also match self_target or the
+    // cohort cap, neither of which has anything to do with this invariant.
+    const loser = r1.statusCode === 409 ? r1 : r2;
+    expect(loser.json<{ error: string }>().error).toBe('last_admin');
     const { rows } = await db.query<{ c: number }>(
       `SELECT count(*)::int c FROM users WHERE role='admin' AND status='active'`,
     );
-    expect(rows[0].c).toBeGreaterThanOrEqual(1);
+    expect(rows[0].c).toBe(1);
     // restore for later tests
     await db.query(`UPDATE users SET role='admin', status='active' WHERE email=$1`, [ADMIN]);
   });
@@ -5962,6 +5991,16 @@ Add to `api/src/routes/adminUsers.ts`, and extend the import to pull in `UserPat
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-patch.test.ts`
 Expected: PASS, 23 tests.
+
+> **`last_admin` is unreachable through this route in a single request — and the test that claimed to prove it proved nothing.** The case originally named *"409 last_admin when demoting the only active admin"* asserted `self_target_forbidden` twice and one successful demotion; it never asserted `last_admin` at all, and its own comment trailed off mid-sentence (`then have other... no:`). Disabling `assertAdminRemains` entirely left it **passing**.
+>
+> The reason no such single-request case can be written: the actor must be an **active admin** to clear `requireCfAccessAdmin`, and self-targeting is refused *before* the service runs — so on any one request there is always an active admin who is not the target, and a count that excludes the target can never reach zero. The invariant bites **only** in the concurrent case, where both callers authenticate while both are still admins and then serialize on the membership lock: the loser's locked re-count sees the winner's commit. That case is therefore the sole real coverage, and it now asserts the error is specifically `last_admin` — a bare 409 would equally match `self_target_forbidden` or `cohort_cap_reached`, neither of which involves this invariant. With `assertAdminRemains` disabled it returns `[200, 200]`: **zero admins, recoverable only by SSH break-glass.** The vacuous case was rewritten to pin what is actually true (self-target refused; a fellow admin may step down while two exist).
+>
+> **One preamble deviation, same as Task 11:** the suite must set `PUBLIC_ORIGIN` itself. It is not in `api/.env` and `csrfOrigin` fails closed without it, *before* checking `X-RepOS-CSRF`, so every PATCH would 403 for a reason unrelated to the transition matrix. `INVITE_FROM_EMAIL` is not needed here — no path mails. A `beforeEach` also restores ADMIN to `role='admin', status='active'`, because several cases deliberately demote or suspend admins and test order is not worth depending on.
+>
+> **Mutation-tested, five mutations, each killing only its intended cases:** disabling the last-admin invariant fails only the concurrent demotion; removing the CF call from after the DB commit (revoking in Cloudflare *first*) fails both "DB revocation already committed" and "denied on the very next request"; dropping the `cf_synced_at = NULL` that precedes the reinstate sync fails the failed-reinstate resting-state case; removing the Q28 role-scope guard fails both invited-row role cases; and skipping the reinstate cohort-cap check fails the cap case.
+>
+> **Note on the shipped file vs. this block:** Step 3's `import` line is the one intentional difference — Task 11 ships `import { withMembershipLock }` and this task extends it to add `ADMIN_COUNT_LOCK_KEY`, exactly as Step 3 instructs. `countCohort` is exported in the Task 11 block itself so both blocks stay byte-identical to the shipped file.
 
 - [ ] **Step 6: Commit**
 

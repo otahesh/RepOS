@@ -12,7 +12,7 @@
 import { db } from '../db/client.js';
 import { COHORT_CAP } from '../constants/users.js';
 import type { UserRole, UserStatus } from '../constants/users.js';
-import { withMembershipLock } from './membershipLock.js';
+import { withMembershipLock, ADMIN_COUNT_LOCK_KEY } from './membershipLock.js';
 import { syncEmail, syncEmailToStatus } from './cfAccessSync.js';
 import { CfPolicyError } from './cfAccessPolicy.js';
 import {
@@ -75,7 +75,7 @@ function mailErrorCode(err: unknown): string {
 }
 
 /** Q12 — the counted set is active + invited + deleting. */
-async function countCohort(): Promise<number> {
+export async function countCohort(): Promise<number> {
   const { rows } = await db.query<{ c: number }>(
     `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
   );
@@ -490,5 +490,242 @@ export async function resendInvite(targetId: string, actor: Actor): Promise<Invi
     );
     if (rows.length === 0) throw new LifecycleError(404, 'user_not_found');
     return resendExisting(rows[0], actor);
+  });
+}
+
+export interface PatchOutcome {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  cf_synced: boolean;
+  sync_error: string | null;
+}
+
+interface UserRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  cf_synced_at: Date | null;
+}
+
+async function readUser(targetId: string): Promise<UserRow> {
+  const { rows } = await db.query<UserRow>(
+    `SELECT id, email, role, status, cf_synced_at FROM users WHERE id=$1`,
+    [targetId],
+  );
+  if (rows.length === 0) throw new LifecycleError(404, 'user_not_found');
+  return rows[0];
+}
+
+/**
+ * I2 / Q13 — the ONE invariant every path shares: at least one `active` admin
+ * must always remain. Deny-by-default makes admin lockout unrecoverable except
+ * by SSH break-glass.
+ *
+ * The caller MUST already hold pg_advisory_xact_lock(ADMIN_COUNT_LOCK_KEY) in
+ * this transaction: this is a read-then-write check and races exactly like the
+ * cohort cap did — two admins can otherwise concurrently demote each other
+ * after each observes two admins, yielding zero.
+ */
+async function assertAdminRemains(
+  client: import('pg').PoolClient,
+  targetId: string,
+  next: { role: UserRole; status: UserStatus },
+): Promise<void> {
+  if (next.role === 'admin' && next.status === 'active') return; // still an admin
+  const { rows } = await client.query<{ c: number }>(
+    `SELECT count(*)::int c FROM users
+      WHERE role='admin' AND status='active' AND id <> $1`,
+    [targetId],
+  );
+  if (rows[0].c === 0) throw new LifecycleError(409, 'last_admin');
+}
+
+/**
+ * Lock order is fixed and single (Q26): session mutation lock -> BEGIN ->
+ * transaction-level admin-count lock. Every path that needs both takes them in
+ * exactly this order, so no two operations can deadlock.
+ */
+async function inAdminLockedTxn<T>(
+  fn: (client: import('pg').PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [ADMIN_COUNT_LOCK_KEY]);
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function patchUser(
+  targetId: string,
+  patch: { role?: UserRole; status?: UserStatus },
+  actor: Actor,
+): Promise<PatchOutcome> {
+  return withMembershipLock(async () => {
+    const cur = await readUser(targetId);
+
+    // Q28 — the matrix is closed. `deleting` is terminal here; delete owns it.
+    if (cur.status === 'deleting') {
+      throw new LifecycleError(409, 'invalid_transition', { from: 'deleting' });
+    }
+
+    const nextRole: UserRole = patch.role ?? cur.role;
+    const nextStatus: UserStatus = patch.status ?? cur.status;
+
+    if (patch.status !== undefined && patch.status !== cur.status) {
+      const permitted =
+        (cur.status === 'active' && patch.status === 'suspended') ||
+        (cur.status === 'suspended' && patch.status === 'active') ||
+        (cur.status === 'invited' && patch.status === 'suspended');
+      if (!permitted) {
+        // Notably invited -> active: activation happens ONLY through first
+        // sign-in (Q21). Hand-setting it would re-arm an activation that the
+        // conditional update assumes happens once. `-> invited` and
+        // `-> deleting` also land here rather than at schema validation, so
+        // they return 409 like every other rejected transition.
+        throw new LifecycleError(409, 'invalid_transition', {
+          from: cur.status,
+          to: patch.status,
+        });
+      }
+    }
+
+    // Q28 permits role changes on `active`/`suspended` ONLY. An `invited` row
+    // has no confirmed human behind it yet — its role is set at invite time
+    // and settles at first sign-in (Q21). Without this guard a role-only PATCH
+    // on an invited row falls straight through to the role branch below,
+    // because the status check above is skipped when `patch.status` is absent.
+    if (patch.role !== undefined && patch.role !== cur.role &&
+        cur.status !== 'active' && cur.status !== 'suspended') {
+      throw new LifecycleError(409, 'invalid_transition', {
+        from: cur.status,
+        role_change: true,
+      });
+    }
+
+    const roleChanged = nextRole !== cur.role;
+    const becomingSuspended = nextStatus === 'suspended' && cur.status !== 'suspended';
+    const becomingActive = nextStatus === 'active' && cur.status === 'suspended';
+
+    // ---- REINSTATE: a grant, so it takes effect LAST (Q17, Q34) ----
+    if (becomingActive) {
+      // Q26 — reinstating also grows the counted set: suspend one of ten,
+      // invite a replacement, reinstate the original -> eleven.
+      const count = await countCohort();
+      if (count >= COHORT_CAP) {
+        throw new LifecycleError(409, 'cohort_cap_reached', { count, cap: COHORT_CAP });
+      }
+
+      // Clear the stamp BEFORE the CF call. With the round-3 ordering a CF
+      // success followed by a DB failure left the email in the policy while
+      // the row kept a cf_synced_at earned while *suspended*, so it read as
+      // synced when it was not.
+      await db.query(`UPDATE users SET cf_synced_at = NULL WHERE id=$1`, [targetId]);
+
+      try {
+        await syncEmail(cur.email, 'present');
+      } catch (err) {
+        // Q8 is explicitly narrowed to grants that CREATE a row. An interrupted
+        // reinstate has a correct and safe resting state — still suspended,
+        // still denied on both paths — so it is simply retried, not modelled
+        // with a fifth status.
+        throw new LifecycleError(502, 'cf_sync_failed', { sync_error: syncErrorCode(err) });
+      }
+
+      return inAdminLockedTxn(async (client) => {
+        await client.query(
+          `UPDATE users SET status='active', role=$2, cf_synced_at=now() WHERE id=$1`,
+          [targetId, nextRole],
+        );
+        await recordAccountEventTx(client, {
+          userId: targetId, userEmail: cur.email, kind: 'user_reinstated',
+          ip: actor.ip, meta: { ...humanActor(actor.userId, actor.email) },
+        });
+        if (roleChanged) {
+          await recordAccountEventTx(client, {
+            userId: targetId, userEmail: cur.email, kind: 'role_changed',
+            ip: actor.ip,
+            meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
+          });
+        }
+        return {
+          id: targetId, email: cur.email, role: nextRole, status: 'active' as UserStatus,
+          cf_synced: true, sync_error: null,
+        };
+      });
+    }
+
+    // ---- SUSPEND: a revocation, so it takes effect FIRST (Q17) ----
+    if (becomingSuspended) {
+      await inAdminLockedTxn(async (client) => {
+        await assertAdminRemains(client, targetId, { role: nextRole, status: 'suspended' });
+        // Q24 — any status change that alters CF membership clears the stamp
+        // first; it is re-stamped only after a successful sync.
+        await client.query(
+          `UPDATE users SET status='suspended', role=$2, cf_synced_at=NULL WHERE id=$1`,
+          [targetId, nextRole],
+        );
+        await recordAccountEventTx(client, {
+          userId: targetId, userEmail: cur.email, kind: 'user_suspended',
+          ip: actor.ip, meta: { ...humanActor(actor.userId, actor.email) },
+        });
+        if (roleChanged) {
+          await recordAccountEventTx(client, {
+            userId: targetId, userEmail: cur.email, kind: 'role_changed',
+            ip: actor.ip,
+            meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
+          });
+        }
+      });
+
+      // The DB revocation has already committed and already denies access on
+      // every request. Policy removal only prevents NEW sessions; a live CF
+      // session may persist until it expires and is harmless (Q17a).
+      let cf_synced = false;
+      let sync_error: string | null = null;
+      try {
+        await syncEmail(cur.email, 'absent');
+        await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [targetId]);
+        cf_synced = true;
+      } catch (err) {
+        sync_error = syncErrorCode(err);
+      }
+      return {
+        id: targetId, email: cur.email, role: nextRole,
+        status: 'suspended' as UserStatus, cf_synced, sync_error,
+      };
+    }
+
+    // ---- ROLE ONLY: no CF membership change, so cf_synced_at is untouched ----
+    if (!roleChanged) {
+      return {
+        id: targetId, email: cur.email, role: cur.role, status: cur.status,
+        cf_synced: cur.cf_synced_at !== null, sync_error: null,
+      };
+    }
+
+    return inAdminLockedTxn(async (client) => {
+      await assertAdminRemains(client, targetId, { role: nextRole, status: cur.status });
+      await client.query(`UPDATE users SET role=$2 WHERE id=$1`, [targetId, nextRole]);
+      await recordAccountEventTx(client, {
+        userId: targetId, userEmail: cur.email, kind: 'role_changed',
+        ip: actor.ip,
+        meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
+      });
+      return {
+        id: targetId, email: cur.email, role: nextRole, status: cur.status,
+        cf_synced: cur.cf_synced_at !== null, sync_error: null,
+      };
+    });
   });
 }

@@ -3,9 +3,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireCfAccessAdmin } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
-import { InviteRequestSchema } from '../schemas/adminUsers.js';
+import { InviteRequestSchema, UserPatchSchema } from '../schemas/adminUsers.js';
 import {
-  inviteUser, resendInvite, LifecycleError, type Actor,
+  inviteUser, resendInvite, patchUser, LifecycleError, type Actor,
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
 
@@ -64,6 +64,30 @@ export async function adminUsersRoutes(app: FastifyInstance) {
     async (req, reply) => {
       try {
         return reply.code(200).send(await resendInvite(req.params.id, actorOf(req)));
+      } catch (err) {
+        return sendLifecycleError(reply, err);
+      }
+    },
+  );
+
+  app.patch<{ Params: { id: string } }>(
+    '/admin/users/:id',
+    { preHandler: [requireCfAccessAdmin(), csrfOrigin] },
+    async (req, reply) => {
+      const parsed = UserPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
+      }
+      const actor = actorOf(req);
+      // Q13 — the admin list rejects self-targeting outright. This is a UX
+      // policy, not the invariant: manage yourself in /settings/account. The
+      // invariant itself ("at least one active admin remains") is enforced
+      // inside the service and applies to every path including /api/me.
+      if (req.params.id === actor.userId) {
+        return reply.code(409).send({ error: 'self_target_forbidden' });
+      }
+      try {
+        return reply.code(200).send(await patchUser(req.params.id, parsed.data, actor));
       } catch (err) {
         return sendLifecycleError(reply, err);
       }
