@@ -39,19 +39,26 @@ suspected leak), see `cf-access-aud-drift.md`. After rotation, update
 
 ## CF_API_TOKEN (W9 — Access policy sync)
 
-**Scope (Q15):** attempt the beta resource-scoped "Access policy admin" role
-limited to policy `b4a92a15-27d5-477b-ad36-f78fcdae931c` only. Fall back to
-account-scoped `Access: Apps and Policies → Edit` if the resource-scoped role
-is unavailable.
+**Scope (Q15, amended 2026-08-02):** account-scoped `Access: Apps and Policies
+Write`. There is no narrower option: the `Access: Apps and Policies` permission
+group is account-scoped only, with no per-policy variant. "Cloudflare Access
+Policy Admin" is a **member role** granted to account members — it is not
+offered when minting an API token, so do not go looking for it under My Profile
+→ API Tokens. (The policy this token drives is
+`b4a92a15-27d5-477b-ad36-f78fcdae931c`.)
 
 **Never grant `Access: Organizations Revoke`.** RepOS makes no
 session-revocation call (Q17a) — that endpoint revokes access across *all*
 applications in the org, so using it here would also sign users out of
 `ha.jpmtech.com` and `jellyseerr.jpmtech.com`.
 
-Why the scope matters: the account-scoped permission also grants edit over
-`ha.jpmtech.com` and `jellyseerr.jpmtech.com`. A RepOS compromise holding it is
-a path into home automation.
+**This breadth is accepted, not solved.** The account-scoped permission also
+grants edit over `ha.jpmtech.com` and `jellyseerr.jpmtech.com`, so a RepOS
+compromise holding this token is a path into home automation. Since Cloudflare
+offers no narrower token, the containment is the application's own fail-closed
+policy guards (Q10/Q19/Q22/Q38) and the rotation cadence below — which is why
+the cadence is not negotiable and why a suspected container compromise means
+rotating this token immediately.
 
 **Rotation cadence:** every 180 days, or immediately on any suspected
 container compromise.
@@ -62,8 +69,13 @@ container compromise.
 2. Update `CF_API_TOKEN` in `/mnt/user/appdata/repos/.env` on Unraid.
 3. Recreate the container (env vars are fixed at create time — stop + rm + run,
    not restart; see the redeploy recipe).
-4. Verify: `/settings/users` shows a drift banner state of "in sync" rather
-   than a policy error.
+4. Verify: `/settings/users` loads and shows **no policy-error advisory** —
+   i.e. the response carries `drift.checked === true` and
+   `drift.policy_error === null`. There is deliberately no "in sync" banner to
+   look for: the UI renders a banner only for confirmed divergence, and a
+   separate advisory when `drift.checked === false` (Q36 — sync-pending is not
+   divergence, and a banner for the healthy case would train the operator to
+   ignore the signal).
 5. Delete the old token in the dashboard.
 
 **Blast radius if leaked:** edit rights on the RepOS Access policy — an
@@ -80,8 +92,15 @@ cannot break Proton-hosted mail on `jpmtech.com`.
 **Rotation cadence:** every 180 days.
 
 **Procedure:** create a new key in the Resend dashboard, update the `.env`,
-recreate the container, send a test invite to a disposable address, revoke the
-old key.
+recreate the container, send a test invite to a disposable address, confirm
+delivery, then **delete that test user from `/settings/users`** before revoking
+the old key.
+
+Do not skip the cleanup. A verification invite is not free: it leaves a durable
+`users` row, a real address added to the Cloudflare Access policy, and a
+consumed slot against `COHORT_CAP`. Deleting through `/settings/users` runs the
+Q33 deletion path, which removes the Cloudflare grant as well as the row —
+deleting the row directly in SQL would leave the address in the policy.
 
 **Blast radius if leaked:** an attacker can send mail as
 `repos@send.jpmtech.com`. It grants no access to RepOS — there is no invite

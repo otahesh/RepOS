@@ -7386,19 +7386,26 @@ per-secret procedures stranded below the file's general wrap-up:
 ```markdown
 ## CF_API_TOKEN (W9 — Access policy sync)
 
-**Scope (Q15):** attempt the beta resource-scoped "Access policy admin" role
-limited to policy `b4a92a15-27d5-477b-ad36-f78fcdae931c` only. Fall back to
-account-scoped `Access: Apps and Policies → Edit` if the resource-scoped role
-is unavailable.
+**Scope (Q15, amended 2026-08-02):** account-scoped `Access: Apps and Policies
+Write`. There is no narrower option: the `Access: Apps and Policies` permission
+group is account-scoped only, with no per-policy variant. "Cloudflare Access
+Policy Admin" is a **member role** granted to account members — it is not
+offered when minting an API token, so do not go looking for it under My Profile
+→ API Tokens. (The policy this token drives is
+`b4a92a15-27d5-477b-ad36-f78fcdae931c`.)
 
 **Never grant `Access: Organizations Revoke`.** RepOS makes no
 session-revocation call (Q17a) — that endpoint revokes access across *all*
 applications in the org, so using it here would also sign users out of
 `ha.jpmtech.com` and `jellyseerr.jpmtech.com`.
 
-Why the scope matters: the account-scoped permission also grants edit over
-`ha.jpmtech.com` and `jellyseerr.jpmtech.com`. A RepOS compromise holding it is
-a path into home automation.
+**This breadth is accepted, not solved.** The account-scoped permission also
+grants edit over `ha.jpmtech.com` and `jellyseerr.jpmtech.com`, so a RepOS
+compromise holding this token is a path into home automation. Since Cloudflare
+offers no narrower token, the containment is the application's own fail-closed
+policy guards (Q10/Q19/Q22/Q38) and the rotation cadence below — which is why
+the cadence is not negotiable and why a suspected container compromise means
+rotating this token immediately.
 
 **Rotation cadence:** every 180 days, or immediately on any suspected
 container compromise.
@@ -7409,8 +7416,13 @@ container compromise.
 2. Update `CF_API_TOKEN` in `/mnt/user/appdata/repos/.env` on Unraid.
 3. Recreate the container (env vars are fixed at create time — stop + rm + run,
    not restart; see the redeploy recipe).
-4. Verify: `/settings/users` shows a drift banner state of "in sync" rather
-   than a policy error.
+4. Verify: `/settings/users` loads and shows **no policy-error advisory** —
+   i.e. the response carries `drift.checked === true` and
+   `drift.policy_error === null`. There is deliberately no "in sync" banner to
+   look for: the UI renders a banner only for confirmed divergence, and a
+   separate advisory when `drift.checked === false` (Q36 — sync-pending is not
+   divergence, and a banner for the healthy case would train the operator to
+   ignore the signal).
 5. Delete the old token in the dashboard.
 
 **Blast radius if leaked:** edit rights on the RepOS Access policy — an
@@ -7427,8 +7439,15 @@ cannot break Proton-hosted mail on `jpmtech.com`.
 **Rotation cadence:** every 180 days.
 
 **Procedure:** create a new key in the Resend dashboard, update the `.env`,
-recreate the container, send a test invite to a disposable address, revoke the
-old key.
+recreate the container, send a test invite to a disposable address, confirm
+delivery, then **delete that test user from `/settings/users`** before revoking
+the old key.
+
+Do not skip the cleanup. A verification invite is not free: it leaves a durable
+`users` row, a real address added to the Cloudflare Access policy, and a
+consumed slot against `COHORT_CAP`. Deleting through `/settings/users` runs the
+Q33 deletion path, which removes the Cloudflare grant as well as the row —
+deleting the row directly in SQL would leave the address in the policy.
 
 **Blast radius if leaked:** an attacker can send mail as
 `repos@send.jpmtech.com`. It grants no access to RepOS — there is no invite
@@ -7448,6 +7467,19 @@ migration 080 line 71 already uses that exact form; and an `active` row with NUL
 `cf_synced_at IS NOT NULL` precondition on `status === 'invited'` and line 205
 rejects only non-`active`. If that gate is ever restructured, this runbook stops
 working — it is the recovery path, so re-verify it.
+
+Two further corrections from the review of `fc1c2c5`, both of which made the
+first version of this runbook unusable in the case it exists for. **The UPDATEs
+must set `cf_synced_at=NULL`** — Q24 requires clearing on any status change that
+alters CF membership, and a promotion from `suspended`/`deleting` to `active`
+does; reproduced a 3-day-old stamp surviving the promotion verbatim. And
+**retry-sync cannot be recommended to the recovered admin**: `adminUsers.ts`
+refuses self-targeting with `409 self_target_forbidden` before any policy access
+(Q13, the Task 14 fix), so during a total lockout Cloudflare membership must be
+added in the dashboard. **When a runbook tells the operator to use a route,
+check that route's guards against the runbook's own scenario** — here the
+scenario is "you are the only admin", which is exactly the case the guard
+refuses.
 
 ```markdown
 # Break-glass: recovering admin access
@@ -7482,7 +7514,7 @@ back to libpq defaults instead of the container's configured database.
 
 ```bash
 docker exec -it repos sh -c 'psql "$DATABASE_URL" -c \
-  "UPDATE users SET role='"'"'admin'"'"', status='"'"'active'"'"' WHERE lower(email)='"'"'<email>'"'"';"'
+  "UPDATE users SET role='"'"'admin'"'"', status='"'"'active'"'"', cf_synced_at=NULL WHERE lower(email)='"'"'<email>'"'"';"'
 ```
 
 If quoting that densely is uncomfortable, the equivalent heredoc form is easier
@@ -7490,9 +7522,18 @@ to get right and is what the runbook prefers:
 
 ```bash
 docker exec -i repos sh -c 'psql "$DATABASE_URL"' <<'SQL'
-UPDATE users SET role='admin', status='active' WHERE lower(email)='<email>';
+UPDATE users SET role='admin', status='active', cf_synced_at=NULL WHERE lower(email)='<email>';
 SQL
 ```
+
+`cf_synced_at=NULL` is not optional. Q24 defines the stamp as "this row's intent
+is reflected in the CF policy", and it must be cleared by **any** status change
+that alters CF membership. Promoting a `suspended` or `deleting` row to `active`
+does exactly that: the row should now be *present* in the policy, and nothing
+here has put it there. Without the clear, a stamp from before the suspension
+survives the promotion and `/settings/users` reports the row as synced when its
+membership is in fact unverified — the same stale-stamp defect fixed in
+`retrySync` (Q17b/Q24).
 
 If the identity has no row at all (deny-by-default means it cannot sign in to
 create one):
@@ -7503,17 +7544,29 @@ INSERT INTO users (email, role, status) VALUES ('<email>','admin','active');
 SQL
 ```
 
-`cf_synced_at` is left NULL deliberately: the row's Cloudflare membership is
-unknown until you either use **Retry sync** on `/settings/users` or run the
-reconciliation script. The row is `active`, not `invited`, so the
-`cf_synced_at IS NOT NULL` activation precondition (Q17b) does not apply — it
-gates activation of `invited` rows only.
+Either way the row ends with `cf_synced_at` NULL — cleared by the UPDATE, or
+never set on the INSERT. That is the honest state: its Cloudflare membership is
+unknown until something establishes it. The row is `active`, not `invited`, so
+the `cf_synced_at IS NOT NULL` activation precondition (Q17b) does not apply —
+it gates activation of `invited` rows only, so a NULL stamp does not stop the
+recovered admin signing in.
+
+**Do not expect to fix the sync state with Retry sync during a total lockout.**
+`POST /api/admin/users/:id/retry-sync` refuses self-targeting outright (Q13) and
+returns `409 self_target_forbidden` *before* any policy read or write — so the
+sole recovered admin cannot reconcile their own row. Retry sync is only
+available when a *second* operational admin targets the recovered row. In a
+total lockout, add the address to the Cloudflare Access policy in the dashboard
+(next section); the reconciliation script can stamp agreement afterwards, once
+dashboard membership exists.
 
 ## Then
 
 1. Confirm the email is in the Cloudflare Access policy — the DB gate will
-   admit them, but Cloudflare must issue a JWT first. Add it in the dashboard
-   or use **Retry sync**.
+   admit them, but Cloudflare must issue a JWT first. **Add it in the
+   dashboard**: during a total lockout this is the only route, since retry-sync
+   cannot target your own row (Q13). If another admin is still operational,
+   they can use **Retry sync** against the recovered row instead.
 2. Sign in and verify `/settings/users` loads.
 3. Record what happened in `docs/runbooks/beta-triage.md`; if the invariant was
    violated by code rather than by a manual DB edit, that is a bug worth a test.
