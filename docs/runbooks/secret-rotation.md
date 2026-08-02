@@ -40,7 +40,8 @@ suspected leak), see `cf-access-aud-drift.md`. After rotation, update
 ## CF_API_TOKEN (W9 — Access policy sync)
 
 **Scope (Q15, amended 2026-08-02):** account-scoped `Access: Apps and Policies
-Write`. There is no narrower option: the `Access: Apps and Policies` permission
+Edit` — that is the label in the token dashboard; the endpoint docs sometimes
+call the same permission *Write*. There is no narrower option: the permission
 group is account-scoped only, with no per-policy variant. "Cloudflare Access
 Policy Admin" is a **member role** granted to account members — it is not
 offered when minting an API token, so do not go looking for it under My Profile
@@ -52,20 +53,29 @@ session-revocation call (Q17a) — that endpoint revokes access across *all*
 applications in the org, so using it here would also sign users out of
 `ha.jpmtech.com` and `jellyseerr.jpmtech.com`.
 
-**This breadth is accepted, not solved.** The account-scoped permission also
-grants edit over `ha.jpmtech.com` and `jellyseerr.jpmtech.com`, so a RepOS
-compromise holding this token is a path into home automation. Since Cloudflare
-offers no narrower token, the containment is the application's own fail-closed
-policy guards (Q10/Q19/Q22/Q38) and the rotation cadence below — which is why
-the cadence is not negotiable and why a suspected container compromise means
-rotating this token immediately.
+**Set a 180-day expiry (`notAfter`) on the token when you create it.** That is
+the one restriction that actually bounds this token, and it makes the rotation
+cadence below self-enforcing instead of procedural.
+
+**The blast radius is accepted, and it is account-wide.** The permission also
+grants edit over `ha.jpmtech.com` and `jellyseerr.jpmtech.com`, so anyone
+holding a stolen `CF_API_TOKEN` has a path into home automation. **Do not think
+RepOS's fail-closed policy guards contain this.** Those guards (Q10/Q19/Q22/Q38)
+constrain *this application's* client — the compare-before-write, the abort
+deadline, the refusal to act on an unverifiable read. A stolen token is
+presented straight to Cloudflare's API with RepOS nowhere in the path, so it
+carries the token's full account scope and every one of those guards is
+irrelevant to it. Cloudflare offers no narrower Access permission, so the real
+controls are expiry, the cadence below, and immediate rotation on any suspected
+container compromise. IP restriction would narrow it further but is not used:
+the Unraid host's address is residential and dynamic.
 
 **Rotation cadence:** every 180 days, or immediately on any suspected
 container compromise.
 
 **Procedure:**
 1. Create the replacement token in the Cloudflare dashboard (My Profile → API
-   Tokens) with the scope above.
+   Tokens) with the scope above, and set its **expiry 180 days out**.
 2. Update `CF_API_TOKEN` in `/mnt/user/appdata/repos/.env` on Unraid.
 3. Recreate the container (env vars are fixed at create time — stop + rm + run,
    not restart; see the redeploy recipe).
