@@ -44,6 +44,14 @@ async function seed(status: string, stamped = true): Promise<string> {
   return rows[0].id;
 }
 
+async function userColumns(p: pg.Pool): Promise<string[]> {
+  const { rows } = await p.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_name='users' ORDER BY column_name`,
+  );
+  return rows.map((r) => r.column_name);
+}
+
 async function stampOf(id: string): Promise<Date | null> {
   const { rows } = await pool.query<{ cf_synced_at: Date | null }>(
     `SELECT cf_synced_at FROM users WHERE id=$1`, [id],
@@ -141,15 +149,30 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
 
   // The guard on the guard. A partial unwind leaves a `_migrations` row behind,
   // the re-run skips that file, and every test built on the harness then runs
-  // against a schema missing something it believes is present — silently. This
-  // asserts the unwind is COMPLETE by naming all three W9 migrations and
-  // requiring each to re-apply, so adding 083 without extending the helper
-  // fails here rather than somewhere unrelated much later.
+  // against a schema missing something it believes is present — silently.
+  //
+  // The expected set is DISCOVERED from the migration runner's own output, not
+  // read from W9_MIGRATIONS. An earlier version of this test asserted the
+  // constant against itself: `unwindToPreW9` deletes the rows named by
+  // W9_MIGRATIONS and the test then required exactly those names back, so
+  // removing an entry shrank the requirement in lockstep and the test still
+  // passed. Verified — deleting '081_invite_request.sql' from the constant left
+  // this file 15/15 green. **A list the subject also reads cannot audit the
+  // subject.**
   it('unwindToPreW9 re-arms every W9 migration, and the trigger comes back live', async () => {
     const eph = await createEphemeralDb('m082unwind');
     const p2 = new pg.Pool({ connectionString: eph.url, max: 3 });
     cleanups.push(async () => { await p2.end(); await eph.drop(); });
-    await runMigrations(p2);
+
+    // Independent source of truth: what the runner actually applies in the
+    // 080–089 range on a fresh database.
+    const firstRun = await runMigrations(p2);
+    const discovered = firstRun.filter((f) => /^08\d_/.test(f)).sort();
+    expect(discovered.length).toBeGreaterThan(0);
+    // Pins the constant against reality. Add 083 without listing it here and
+    // this fails, which is the whole point.
+    expect(discovered).toEqual([...W9_MIGRATIONS].sort());
+    const columnsBefore = await userColumns(p2);
 
     await unwindToPreW9(p2);
     for (const col of W9_USER_COLUMNS) {
@@ -161,7 +184,10 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
     }
 
     const applied = await runMigrations(p2);
-    for (const m of W9_MIGRATIONS) expect(applied).toContain(m);
+    for (const m of discovered) expect(applied).toContain(m);
+    // Independent of both constants: unwind + reapply must round-trip the
+    // schema exactly, so a column dropped but never restored is caught here.
+    expect(await userColumns(p2)).toEqual(columnsBefore);
 
     // Re-applied, not merely recorded: the trigger enforces again.
     const { rows } = await p2.query<{ id: string }>(

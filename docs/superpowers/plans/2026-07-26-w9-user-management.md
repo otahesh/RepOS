@@ -7648,7 +7648,11 @@ Expected red: **8 of 14** — the seven rejections and the SQLSTATE case. The si
 
 Do **not** fix this by patching that file's private copy — Task 17 needs the same unwind, and a per-file copy is exactly how 081 and then 082 got left applied. Extract `api/tests/helpers/migration-unwind.ts` exporting `unwindToPreW9` plus the `W9_MIGRATIONS` and `W9_USER_COLUMNS` lists, covering **all three** migrations, **all nine** columns, the trigger and function (dropped *before* the columns they depend on), and `users_status_idx`. Import it in `migration-080.test.ts` now and in Task 17's DR harness later.
 
-Add the assertion that makes the helper self-policing: unwind, confirm every W9 column is gone, re-run migrations, and require all three filenames back in the applied list — then prove the trigger is live again rather than merely recorded. Mutation-check it by dropping one filename from `W9_MIGRATIONS`; that case must fail. Without it, a future 083 added without extending the helper fails somewhere unrelated, much later.
+Add the assertion that makes the helper self-policing — and **derive its expected set independently of the helper**. The obvious version is circular and silently useless: `unwindToPreW9` deletes the `_migrations` rows named by `W9_MIGRATIONS`, so a test that then requires exactly those names back shrinks its own requirement whenever the constant loses an entry. Verified — removing `081_invite_request.sql` from the constant left that version **15/15 green**, and an unlisted future `083` would have been equally invisible. **A list the subject also reads cannot audit the subject.**
+
+Instead: capture the first fresh-database `runMigrations()` result, filter it to `/^08\d_/`, and assert that discovered set **equals** `W9_MIGRATIONS` — that pins the constant against what the runner actually applies. Then unwind, confirm every W9 column is gone, re-run, and require every *discovered* filename back in the applied list, plus a schema round-trip (`users` columns after == before, which depends on neither constant) and a live-trigger check proving re-application rather than mere recording.
+
+Two mutations, both of which must fail: delete one filename from `W9_MIGRATIONS`, and drop a stray `083_*.sql` into `src/db/migrations/` without listing it. The second is the case this assertion exists for.
 
 - [ ] **Step 5: Mutation-test, then full verification**
 
