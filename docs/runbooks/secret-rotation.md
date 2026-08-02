@@ -88,10 +88,14 @@ container compromise.
    ignore the signal).
 5. Delete the old token in the dashboard.
 
-**Blast radius if leaked:** edit rights on the RepOS Access policy — an
-attacker could add their own email to the policy. They would still be stopped
-by the DB gate (`403 not_invited`), because Cloudflare is not the security
-boundary (Q17).
+**Blast radius if leaked:** see the paragraph above — it is account-wide edit
+over every Cloudflare Access application, not just RepOS's policy. The DB gate
+is worth one clarification and no more: it means an attacker who adds their own
+address to the *RepOS* policy still gets `403 not_invited`, because Cloudflare
+is not RepOS's security boundary (Q17). It does nothing for
+`ha.jpmtech.com` or `jellyseerr.jpmtech.com`, which have no such gate — so it
+narrows the consequences for this one application and leaves the account-wide
+exposure untouched. Treat a leak as a compromise of all three.
 
 ## RESEND_API_KEY / INVITE_FROM_EMAIL (W9 — invite delivery)
 

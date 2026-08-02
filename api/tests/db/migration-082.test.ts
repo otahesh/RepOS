@@ -19,6 +19,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
+import { unwindToPreW9, W9_MIGRATIONS, W9_USER_COLUMNS } from '../helpers/migration-unwind.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 
 let pool: pg.Pool;
@@ -136,6 +137,40 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
       client.release();
     }
     expect(await stampOf(id)).not.toBeNull();
+  });
+
+  // The guard on the guard. A partial unwind leaves a `_migrations` row behind,
+  // the re-run skips that file, and every test built on the harness then runs
+  // against a schema missing something it believes is present — silently. This
+  // asserts the unwind is COMPLETE by naming all three W9 migrations and
+  // requiring each to re-apply, so adding 083 without extending the helper
+  // fails here rather than somewhere unrelated much later.
+  it('unwindToPreW9 re-arms every W9 migration, and the trigger comes back live', async () => {
+    const eph = await createEphemeralDb('m082unwind');
+    const p2 = new pg.Pool({ connectionString: eph.url, max: 3 });
+    cleanups.push(async () => { await p2.end(); await eph.drop(); });
+    await runMigrations(p2);
+
+    await unwindToPreW9(p2);
+    for (const col of W9_USER_COLUMNS) {
+      const { rows } = await p2.query<{ n: number }>(
+        `SELECT count(*)::int n FROM information_schema.columns
+          WHERE table_name='users' AND column_name=$1`, [col],
+      );
+      expect(rows[0].n, `${col} should be gone after the unwind`).toBe(0);
+    }
+
+    const applied = await runMigrations(p2);
+    for (const m of W9_MIGRATIONS) expect(applied).toContain(m);
+
+    // Re-applied, not merely recorded: the trigger enforces again.
+    const { rows } = await p2.query<{ id: string }>(
+      `INSERT INTO users (email, role, status, cf_synced_at)
+       VALUES ('m082.unwind@repos.test','member','active',now()) RETURNING id`,
+    );
+    await expect(
+      p2.query(`UPDATE users SET status='suspended' WHERE id=$1`, [rows[0].id]),
+    ).rejects.toThrow(/Q24/);
   });
 
   it('rejects with a check_violation SQLSTATE, not a bare raise', async () => {

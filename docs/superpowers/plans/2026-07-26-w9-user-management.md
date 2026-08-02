@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Migration range:** `080–089`. Two migrations are added by this plan: `080_users_roles_status.sql` (Task 2) and `081_invite_request.sql` (the frozen invite request, Q30 — listed under Task 11). Any harness that reconstructs a pre-W9 database must unwind **both**, or it silently proves nothing about the second.
+- **Migration range:** `080–089`. **Three** migrations are added by this plan: `080_users_roles_status.sql` (Task 2), `081_invite_request.sql` (the frozen invite request, Q30 — listed under Task 11), and `082_cf_sync_stamp_guard.sql` (Q24 as a trigger, Task 15b). Any harness that reconstructs a pre-W9 database must unwind **all three**, or it silently proves nothing about the ones it left applied — which has now happened twice, to 081 and then to 082. There is exactly one unwind: `unwindToPreW9` in `api/tests/helpers/migration-unwind.ts`. Do not write a second; extend that one, and note it drops 082's trigger and function **before** the columns they depend on.
 - **Founding admin email constant:** `jason.meyer1@gmail.com` (Q35). Hard-coded in migration 080 and exported from `api/src/constants/users.ts`.
 - **Cohort cap:** `10`, counted as `status IN ('active','invited','deleting')` (Q12). Applies to invite **and** reinstate.
 - **Cloudflare account id:** `400d0b4a35d63a32b86ab774b9feb4ab`. **Access policy id:** `b4a92a15-27d5-477b-ad36-f78fcdae931c`.
@@ -367,6 +367,7 @@ import 'dotenv/config';
 import { describe, it, expect, afterAll } from 'vitest';
 import pg from 'pg';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
+import { unwindToPreW9 } from '../helpers/migration-unwind.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 
@@ -380,10 +381,20 @@ async function freshPool(tag: string): Promise<pg.Pool> {
   return pool;
 }
 
-/** Apply 001..079 only, so a test can seed pre-080 rows before 080 lands. */
+/**
+ * Applies the FULL migration set — there is no partial runner. Callers that
+ * need a pre-080 database follow this with the explicit unwind below (drop the
+ * 080 columns and its _migrations row), which is what actually re-arms the
+ * data step. Named for the state the caller is working toward, not for what
+ * this call alone does.
+ */
 async function migrateTo079(pool: pg.Pool): Promise<void> {
   await runMigrations(pool);
 }
+
+// The unwind lives in tests/helpers/migration-unwind.ts so this file and the DR
+// restore harness (Task 17) share ONE definition — a per-file copy is how 081
+// and then 082 got left applied.
 
 describe('migration 080 — schema', () => {
   it('adds every column with the documented defaults and CHECKs', async () => {
@@ -443,11 +454,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
     const pool = await freshPool('m080promote');
     await migrateTo079(pool);
     // Simulate a pre-080 dump: wipe what 080 just did, re-seed, re-apply.
-    await pool.query(`DELETE FROM users`);
-    await pool.query(`DELETE FROM _migrations WHERE filename='080_users_roles_status.sql'`);
-    await pool.query(`ALTER TABLE users DROP COLUMN role, DROP COLUMN status,
-                        DROP COLUMN invited_by, DROP COLUMN invited_at, DROP COLUMN activated_at,
-                        DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at, DROP COLUMN invite_message_id`);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ($1), ('someone.else@repos.test')`, [FOUNDING_ADMIN_EMAIL]);
 
@@ -464,11 +471,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
   it('clause 3 on a populated dump: never promotes an arbitrary existing user', async () => {
     const pool = await freshPool('m080noarb');
     await migrateTo079(pool);
-    await pool.query(`DELETE FROM users`);
-    await pool.query(`DELETE FROM _migrations WHERE filename='080_users_roles_status.sql'`);
-    await pool.query(`ALTER TABLE users DROP COLUMN role, DROP COLUMN status,
-                        DROP COLUMN invited_by, DROP COLUMN invited_at, DROP COLUMN activated_at,
-                        DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at, DROP COLUMN invite_message_id`);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ('beta.one@repos.test'), ('beta.two@repos.test')`);
 
@@ -511,11 +514,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
   it('pre-existing rows keep access — every legacy row becomes member/active', async () => {
     const pool = await freshPool('m080legacy');
     await migrateTo079(pool);
-    await pool.query(`DELETE FROM users`);
-    await pool.query(`DELETE FROM _migrations WHERE filename='080_users_roles_status.sql'`);
-    await pool.query(`ALTER TABLE users DROP COLUMN role, DROP COLUMN status,
-                        DROP COLUMN invited_by, DROP COLUMN invited_at, DROP COLUMN activated_at,
-                        DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at, DROP COLUMN invite_message_id`);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ('legacy@repos.test')`);
     await runMigrations(pool);
@@ -7435,10 +7434,14 @@ container compromise.
    ignore the signal).
 5. Delete the old token in the dashboard.
 
-**Blast radius if leaked:** edit rights on the RepOS Access policy — an
-attacker could add their own email to the policy. They would still be stopped
-by the DB gate (`403 not_invited`), because Cloudflare is not the security
-boundary (Q17).
+**Blast radius if leaked:** see the paragraph above — it is account-wide edit
+over every Cloudflare Access application, not just RepOS's policy. The DB gate
+is worth one clarification and no more: it means an attacker who adds their own
+address to the *RepOS* policy still gets `403 not_invited`, because Cloudflare
+is not RepOS's security boundary (Q17). It does nothing for
+`ha.jpmtech.com` or `jellyseerr.jpmtech.com`, which have no such gate — so it
+narrows the consequences for this one application and leaves the account-wide
+exposure untouched. Treat a leak as a compromise of all three.
 
 ## RESEND_API_KEY / INVITE_FROM_EMAIL (W9 — invite delivery)
 
@@ -7620,7 +7623,8 @@ Crossing between groups changes membership intent and must clear `cf_synced_at` 
 - Create: `api/src/db/migrations/082_cf_sync_stamp_guard.sql`
 - Create: `api/tests/db/migration-082.test.ts`
 - Modify: `api/src/services/userLifecycle.ts` (reinstate split into two statements)
-- Modify: `api/tests/db/migration-080.test.ts` (shared `unwindTo079` helper)
+- Create: `api/tests/helpers/migration-unwind.ts` (the single shared unwind)
+- Modify: `api/tests/db/migration-080.test.ts` (drop its private unwind, import the shared one)
 
 **Interfaces:**
 - Consumes: `createEphemeralDb`/`runMigrations` (T1), migration 080's columns (T2).
@@ -7640,7 +7644,11 @@ Expected red: **8 of 14** — the seven rejections and the SQLSTATE case. The si
 
 - [ ] **Step 4: Fix the 080 unwind harness**
 
-`migration-080.test.ts` unwinds to a pre-080 schema by dropping 080's columns; the trigger depends on `users.status`, so the DROP now fails with `cannot drop column status ... other objects depend on it`. Replace the three copied unwind blocks with **one** `unwindTo079` helper that drops the trigger and function, deletes **both** 080's and 082's `_migrations` rows, then drops the columns. Deleting only 080's row would let the re-run silently skip 082 and leave the test believing a guard is present that is not — the partial-unwind trap from round six.
+`migration-080.test.ts` unwinds to a pre-080 schema by dropping 080's columns; the trigger depends on `users.status`, so the DROP now fails with `cannot drop column status ... other objects depend on it`.
+
+Do **not** fix this by patching that file's private copy — Task 17 needs the same unwind, and a per-file copy is exactly how 081 and then 082 got left applied. Extract `api/tests/helpers/migration-unwind.ts` exporting `unwindToPreW9` plus the `W9_MIGRATIONS` and `W9_USER_COLUMNS` lists, covering **all three** migrations, **all nine** columns, the trigger and function (dropped *before* the columns they depend on), and `users_status_idx`. Import it in `migration-080.test.ts` now and in Task 17's DR harness later.
+
+Add the assertion that makes the helper self-policing: unwind, confirm every W9 column is gone, re-run migrations, and require all three filenames back in the applied list — then prove the trigger is live again rather than merely recorded. Mutation-check it by dropping one filename from `W9_MIGRATIONS`; that case must fail. Without it, a future 083 added without extending the helper fails somewhere unrelated, much later.
 
 - [ ] **Step 5: Mutation-test, then full verification**
 
@@ -8221,7 +8229,7 @@ EOF
 - Consumes: `createEphemeralDb`/`runMigrations` (T1), `reconcileCfBaseline` (T16), `FOUNDING_ADMIN_EMAIL` (T2).
 - Produces: no exports.
 
-> **Unwind note (Task 15b, 2026-08-02):** this test reconstructs a pre-080 database by dropping 080's columns, and migration **082**'s trigger depends on `users.status` — so the drop fails unless the trigger and its function are dropped first and 082's `_migrations` row is deleted alongside 080's. Reuse the `unwindTo079` helper Task 15b extracts in `migration-080.test.ts` rather than writing a fourth copy. Deleting only 080's row makes the re-run silently skip 082, and the restore path is then proved only for the migrations someone remembered to remove.
+> **Unwind note (Task 15b, 2026-08-02):** do not inline an unwind here. Import `unwindToPreW9` from `api/tests/helpers/migration-unwind.ts` — the single shared definition, which drops 082's trigger and function *before* the nine columns they depend on and re-arms all three W9 migrations. The version originally written into this task unwound 080 and 081 only and would fail on `DROP COLUMN status` while the trigger existed. `migration-082.test.ts` asserts the helper stays complete, so extending the 080–089 range means extending the helper, not forking it.
 
 > **Adaptation note:** the spec calls for restoring a real pre-080 dump into an ephemeral Postgres. `pg_dump`/`pg_restore`/`psql` are **not installed on this workstation** (verified 2026-07-26), so this test reconstructs a pre-080 database structurally — apply all migrations, then drop the 080 columns and its `_migrations` row — which exercises the same code path 080 takes on a real dump. Add the binary-level `pg_restore` variant to `tests/integration/restore.test.ts` when running in CI, where the Postgres client tools are present.
 
@@ -8239,6 +8247,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
+import { unwindToPreW9 } from '../helpers/migration-unwind.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 
@@ -8252,15 +8261,19 @@ afterAll(async () => { for (const c of cleanups.reverse()) await c(); });
 
 /**
  * Reconstruct a pre-W9 database: full schema, then unwind EVERY migration this
- * wave adds — 080 and 081 both.
+ * wave adds — 080, 081 and 082.
  *
- * Unwinding only 080 would leave `invite_request` and 081's `_migrations` row
- * in place, so the re-run below would replay 080 alone and the test would
- * quietly stop covering 081. A real pre-080 dump contains neither migration,
- * and the whole point of this harness is to be indistinguishable from one; a
- * partial unwind proves the restore path only for the migration someone
- * remembered to remove. Anything added in the 080–089 range must be unwound
- * here too.
+ * The unwind itself lives in `tests/helpers/migration-unwind.ts` and is shared
+ * with `tests/db/migration-080.test.ts`. It was a per-file copy twice and was
+ * incomplete both times: the first left 081's `_migrations` row applied, the
+ * second left 082's. Either way the re-run skips that file and the test quietly
+ * stops covering it, while still reading as though it covered everything. A
+ * real pre-080 dump contains none of the three, and the whole point of this
+ * harness is to be indistinguishable from one.
+ *
+ * `migration-082.test.ts` asserts the helper is complete — it unwinds, re-runs,
+ * and requires all three filenames back in the applied list. Extend the helper
+ * when the range grows; do not fork it.
  *
  * Returns the URL alongside the pool because cases (b)–(d) must point
  * `DATABASE_URL` at THIS database before importing the singleton db client.
@@ -8270,16 +8283,11 @@ async function preO80Database(tag: string): Promise<{ pool: pg.Pool; url: string
   const pool = new pg.Pool({ connectionString: eph.url, max: 3 });
   cleanups.push(async () => { await pool.end(); await eph.drop(); });
   await runMigrations(pool);
-  await pool.query(`DELETE FROM users`);
-  await pool.query(
-    `DELETE FROM _migrations
-      WHERE filename IN ('080_users_roles_status.sql', '081_invite_request.sql')`,
-  );
-  await pool.query(`ALTER TABLE users
-      DROP COLUMN role, DROP COLUMN status, DROP COLUMN invited_by, DROP COLUMN invited_at,
-      DROP COLUMN activated_at, DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at,
-      DROP COLUMN invite_message_id, DROP COLUMN invite_request`);
-  await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
+  // The ONE unwind (tests/helpers/migration-unwind.ts) — do not inline a copy.
+  // It drops 082's trigger and function before the columns they depend on, and
+  // re-arms all three W9 migrations; an inlined 080/081-only version fails on
+  // `DROP COLUMN status` because the trigger still references it.
+  await unwindToPreW9(pool);
   return { pool, url: eph.url };
 }
 

@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { describe, it, expect, afterAll } from 'vitest';
 import pg from 'pg';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
+import { unwindToPreW9 } from '../helpers/migration-unwind.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 
@@ -29,28 +30,9 @@ async function migrateTo079(pool: pg.Pool): Promise<void> {
   await runMigrations(pool);
 }
 
-/**
- * Unwind to a pre-080 schema so the next runMigrations re-arms 080's data step.
- *
- * Every migration that DEPENDS on 080's columns has to be unwound here too, or
- * the DROP fails — and if its `_migrations` row is left behind, the re-run
- * silently skips it and the test proceeds against a schema missing a guard it
- * believes is present. 082's trigger reads `users.status`, so it is dropped and
- * re-armed alongside 080. A partial unwind only ever proves the restore path
- * for the migrations someone remembered to remove.
- */
-async function unwindTo079(pool: pg.Pool): Promise<void> {
-  await pool.query(`DELETE FROM users`);
-  await pool.query(`DROP TRIGGER IF EXISTS users_cf_stamp_guard ON users`);
-  await pool.query(`DROP FUNCTION IF EXISTS users_cf_stamp_guard()`);
-  await pool.query(
-    `DELETE FROM _migrations WHERE filename IN
-       ('080_users_roles_status.sql','082_cf_sync_stamp_guard.sql')`,
-  );
-  await pool.query(`ALTER TABLE users DROP COLUMN role, DROP COLUMN status,
-                      DROP COLUMN invited_by, DROP COLUMN invited_at, DROP COLUMN activated_at,
-                      DROP COLUMN cf_synced_at, DROP COLUMN invite_sent_at, DROP COLUMN invite_message_id`);
-}
+// The unwind lives in tests/helpers/migration-unwind.ts so this file and the DR
+// restore harness (Task 17) share ONE definition — a per-file copy is how 081
+// and then 082 got left applied.
 
 describe('migration 080 — schema', () => {
   it('adds every column with the documented defaults and CHECKs', async () => {
@@ -110,7 +92,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
     const pool = await freshPool('m080promote');
     await migrateTo079(pool);
     // Simulate a pre-080 dump: wipe what 080 just did, re-seed, re-apply.
-    await unwindTo079(pool);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ($1), ('someone.else@repos.test')`, [FOUNDING_ADMIN_EMAIL]);
 
@@ -127,7 +109,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
   it('clause 3 on a populated dump: never promotes an arbitrary existing user', async () => {
     const pool = await freshPool('m080noarb');
     await migrateTo079(pool);
-    await unwindTo079(pool);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ('beta.one@repos.test'), ('beta.two@repos.test')`);
 
@@ -170,7 +152,7 @@ describe('migration 080 — Q35 admin guarantee', () => {
   it('pre-existing rows keep access — every legacy row becomes member/active', async () => {
     const pool = await freshPool('m080legacy');
     await migrateTo079(pool);
-    await unwindTo079(pool);
+    await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
     await pool.query(`INSERT INTO users (email) VALUES ('legacy@repos.test')`);
     await runMigrations(pool);
