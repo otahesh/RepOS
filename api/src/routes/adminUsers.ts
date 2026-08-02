@@ -52,8 +52,17 @@ export async function adminUsersRoutes(app: FastifyInstance) {
     '/admin/users/:id/retry-sync',
     { preHandler: [requireCfAccessAdmin(), csrfOrigin] },
     async (req, reply) => {
+      const actor = actorOf(req);
+      // Q13 — the admin list rejects self-targeting outright, on EVERY targeted
+      // operation and not only the ones that mutate status. Reconciling your
+      // own row is a Cloudflare write performed on yourself from the user list,
+      // which is the surface Q13 closes; manage yourself in /settings/account.
+      // Refused before the service runs, so no policy read or write occurs.
+      if (req.params.id === actor.userId) {
+        return reply.code(409).send({ error: 'self_target_forbidden' });
+      }
       try {
-        return reply.code(200).send(await retrySync(req.params.id, actorOf(req)));
+        return reply.code(200).send(await retrySync(req.params.id, actor));
       } catch (err) {
         return sendLifecycleError(reply, err);
       }

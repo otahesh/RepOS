@@ -855,14 +855,14 @@ export async function listUsers(): Promise<UserListResponse> {
  * added would silently restore CF access to a suspended user — the operation
  * meant to repair drift would create a security regression.
  *
- * `actor` is accepted but unused: this writes no account_events row, because
- * the frozen design's Q23 event list has no kind for a reconciliation and
- * adding one is a spec decision, not this task's. The parameter stays so the
- * route is uniform with every other mutating admin operation and so adding the
- * event later is a one-line change rather than a signature change at the call
- * site. See the note in the plan — this is worth revisiting, since retry-sync
- * on an `invited` row is a CF GRANT and every other grant in this wave is
- * audited.
+ * `actor` is accepted but unused, and deliberately so: retry-sync is NOT a
+ * lifecycle transition, and Q23 enumerates the lifecycle kinds. Auditing
+ * reconciliation is not a missing line here — it needs its own Q settling
+ * whether attempts, successes and failures are each recorded, and how such an
+ * event relates atomically to the stamp this function writes outside any
+ * transaction. Until that exists, emitting something would be inventing
+ * semantics. The parameter stays so the route matches every other targeted
+ * admin operation.
  */
 export async function retrySync(
   targetId: string,
@@ -872,6 +872,17 @@ export async function retrySync(
   return withMembershipLock(async () => {
     const cur = await readUser(targetId);
     const direction = desiredPresence(cur.status);
+    // Q24 — clear BEFORE the call, re-stamp only after success. Stamping only
+    // on success is not the same rule: a retry that fails leaves whatever
+    // timestamp was already there, so the row keeps asserting "intent IS
+    // reflected in the policy" immediately after we failed to establish that.
+    // It also re-satisfies Q17b's activation precondition
+    // (status='invited' AND cf_synced_at IS NOT NULL) for a row Cloudflare may
+    // not actually hold. The stamp is a claim about the last CONFIRMED sync,
+    // and an attempted-and-failed reconciliation retires the old confirmation
+    // — the honest resting state is "unknown", which is exactly what the drift
+    // report is built to show. Same order patchUser's reinstate already uses.
+    await db.query(`UPDATE users SET cf_synced_at = NULL WHERE id=$1`, [targetId]);
     try {
       await syncEmailToStatus(cur.email, cur.status);
       await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [targetId]);

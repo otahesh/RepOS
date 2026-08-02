@@ -33,6 +33,10 @@ let fetchPolicyImpl: () => Promise<unknown>;
 // than on their side effects. beforeEach re-creates it, so `mock.calls` is
 // always scoped to the current test.
 let putSpy: ReturnType<typeof vi.spyOn>;
+// The self-target case proves no CF work happened at all, which means proving
+// the policy was never even READ — a guard that ran after fetchPolicy would
+// still be a guard, but not the one Q13 asks for.
+let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 // PUBLIC_ORIGIN is not in api/.env, and csrfOrigin fails CLOSED without it —
 // before it ever looks at the X-RepOS-CSRF header — so every retry-sync below
@@ -73,7 +77,7 @@ beforeEach(async () => {
     emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
     config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
   });
-  vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never);
+  fetchSpy = vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never) as never;
   putSpy = vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
     policyEmails = [...emails];
   }) as never;
@@ -247,21 +251,38 @@ describe('POST /api/admin/users/:id/retry-sync (Q36)', () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
-  it('a failure leaves the stamp NULL and reports the code', async () => {
+  it('a failure CLEARS an existing stamp — it must not survive as stale (Q24, Q17b)', async () => {
     const email = freshEmail('retryfail');
+    // Seeded NON-NULL deliberately. Starting from NULL, this case passes
+    // against a service that never clears the stamp at all: the column is
+    // already NULL and "did not stamp on failure" is indistinguishable from
+    // "cleared before trying". The stale-stamp bug lives entirely in the gap.
     const { rows } = await db.query<{ id: string }>(
-      `INSERT INTO users (email, status, cf_synced_at, invited_at) VALUES ($1,'invited',NULL, now()) RETURNING id`, [email],
+      `INSERT INTO users (email, status, cf_synced_at, invited_at)
+       VALUES ($1,'invited', now() - interval '1 day', now()) RETURNING id`, [email],
     );
     fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_timeout', 'slow'); };
     const r = await retrySync(rows[0].id);
     expect(r.json<{ cf_synced: boolean; sync_error: string }>()).toMatchObject({
       cf_synced: false, sync_error: 'cf_timeout',
     });
-    // The stamp is the claim "we know CF agrees" — a failed retry may not make it.
+    // cf_synced_at means "this row's intent IS reflected in the policy" (Q24).
+    // After a failed reconciliation that claim is false, and leaving it set
+    // also re-satisfies Q17b's activation precondition
+    // (status='invited' AND cf_synced_at IS NOT NULL) for a row Cloudflare may
+    // not have.
     const u = await db.query<{ cf_synced_at: Date | null }>(
       `SELECT cf_synced_at FROM users WHERE id=$1`, [rows[0].id],
     );
     expect(u.rows[0].cf_synced_at).toBeNull();
+  });
+
+  it('Q13: rejects self-targeting, and does no CF work at all', async () => {
+    const r = await retrySync(adminId);
+    expect(r.statusCode).toBe(409);
+    expect(r.json<{ error: string }>().error).toBe('self_target_forbidden');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
   });
 
   it('does NOT change users.status — retry-sync is not a reinstate', async () => {

@@ -6922,21 +6922,38 @@ describe('POST /api/admin/users/:id/retry-sync (Q36)', () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
-  it('a failure leaves the stamp NULL and reports the code', async () => {
+  it('a failure CLEARS an existing stamp — it must not survive as stale (Q24, Q17b)', async () => {
     const email = freshEmail('retryfail');
+    // Seeded NON-NULL deliberately. Starting from NULL, this case passes
+    // against a service that never clears the stamp at all: the column is
+    // already NULL and "did not stamp on failure" is indistinguishable from
+    // "cleared before trying". The stale-stamp bug lives entirely in the gap.
     const { rows } = await db.query<{ id: string }>(
-      `INSERT INTO users (email, status, cf_synced_at, invited_at) VALUES ($1,'invited',NULL, now()) RETURNING id`, [email],
+      `INSERT INTO users (email, status, cf_synced_at, invited_at)
+       VALUES ($1,'invited', now() - interval '1 day', now()) RETURNING id`, [email],
     );
     fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_timeout', 'slow'); };
     const r = await retrySync(rows[0].id);
     expect(r.json<{ cf_synced: boolean; sync_error: string }>()).toMatchObject({
       cf_synced: false, sync_error: 'cf_timeout',
     });
-    // The stamp is the claim "we know CF agrees" — a failed retry may not make it.
+    // cf_synced_at means "this row's intent IS reflected in the policy" (Q24).
+    // After a failed reconciliation that claim is false, and leaving it set
+    // also re-satisfies Q17b's activation precondition
+    // (status='invited' AND cf_synced_at IS NOT NULL) for a row Cloudflare may
+    // not have.
     const u = await db.query<{ cf_synced_at: Date | null }>(
       `SELECT cf_synced_at FROM users WHERE id=$1`, [rows[0].id],
     );
     expect(u.rows[0].cf_synced_at).toBeNull();
+  });
+
+  it('Q13: rejects self-targeting, and does no CF work at all', async () => {
+    const r = await retrySync(adminId);
+    expect(r.statusCode).toBe(409);
+    expect(r.json<{ error: string }>().error).toBe('self_target_forbidden');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
   });
 
   it('does NOT change users.status — retry-sync is not a reinstate', async () => {
@@ -6972,7 +6989,7 @@ async function retrySync(id: string) {
 }
 ```
 
-The harness must expose `putSpy` (the `vi.spyOn(policy, 'putPolicyEmails')` handle) as a module-level `let` so these tests can inspect `putSpy.mock.calls`. `beforeEach` **re-creates** it after `vi.restoreAllMocks()`, so `mock.calls` is always scoped to the current case and the Q9 assertion means what it says.
+The harness must expose `putSpy` (the `vi.spyOn(policy, 'putPolicyEmails')` handle) **and `fetchSpy`** (the `fetchPolicy` handle) as module-level `let`s so these tests can inspect `mock.calls`. `beforeEach` **re-creates** both after `vi.restoreAllMocks()`, so the calls are always scoped to the current case and the Q9 assertion means what it says. `fetchSpy` exists for the Q13 self-target case: proving "no CF work occurred" means proving the policy was never even **read**, since a guard that ran after `fetchPolicy` would still return 409 while having touched Cloudflare.
 
 > **Three cases were strengthened after mutation-testing; the count is 15, not 13.**
 >
@@ -7123,14 +7140,14 @@ export async function listUsers(): Promise<UserListResponse> {
  * added would silently restore CF access to a suspended user — the operation
  * meant to repair drift would create a security regression.
  *
- * `actor` is accepted but unused: this writes no account_events row, because
- * the frozen design's Q23 event list has no kind for a reconciliation and
- * adding one is a spec decision, not this task's. The parameter stays so the
- * route is uniform with every other mutating admin operation and so adding the
- * event later is a one-line change rather than a signature change at the call
- * site. See the note in the plan — this is worth revisiting, since retry-sync
- * on an `invited` row is a CF GRANT and every other grant in this wave is
- * audited.
+ * `actor` is accepted but unused, and deliberately so: retry-sync is NOT a
+ * lifecycle transition, and Q23 enumerates the lifecycle kinds. Auditing
+ * reconciliation is not a missing line here — it needs its own Q settling
+ * whether attempts, successes and failures are each recorded, and how such an
+ * event relates atomically to the stamp this function writes outside any
+ * transaction. Until that exists, emitting something would be inventing
+ * semantics. The parameter stays so the route matches every other targeted
+ * admin operation.
  */
 export async function retrySync(
   targetId: string,
@@ -7140,6 +7157,17 @@ export async function retrySync(
   return withMembershipLock(async () => {
     const cur = await readUser(targetId);
     const direction = desiredPresence(cur.status);
+    // Q24 — clear BEFORE the call, re-stamp only after success. Stamping only
+    // on success is not the same rule: a retry that fails leaves whatever
+    // timestamp was already there, so the row keeps asserting "intent IS
+    // reflected in the policy" immediately after we failed to establish that.
+    // It also re-satisfies Q17b's activation precondition
+    // (status='invited' AND cf_synced_at IS NOT NULL) for a row Cloudflare may
+    // not actually hold. The stamp is a claim about the last CONFIRMED sync,
+    // and an attempted-and-failed reconciliation retires the old confirmation
+    // — the honest resting state is "unknown", which is exactly what the drift
+    // report is built to show. Same order patchUser's reinstate already uses.
+    await db.query(`UPDATE users SET cf_synced_at = NULL WHERE id=$1`, [targetId]);
     try {
       await syncEmailToStatus(cur.email, cur.status);
       await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [targetId]);
@@ -7153,14 +7181,15 @@ export async function retrySync(
 
 Extend the module's imports with `fetchPolicy` from `./cfAccessPolicy.js` and `desiredPresence` from `./cfAccessSync.js`.
 
-> **`retrySync` accepts `actor` and does not use it, and that is a live question rather than dead
-> code.** It writes no `account_events` row because the Q23 kind list has no value for a
-> reconciliation, and adding one is a spec decision this task may not make unilaterally. But
-> retry-sync on an `invited` or `active` row is a **Cloudflare grant**, and every other grant in this
-> wave is audited — an admin can restore policy membership with no record of who did it. The
-> parameter stays so the route matches every other mutating admin operation and so adding the event
-> is later a one-line change rather than a signature change at the call site. **Flagged for a Q, not
-> resolved here.**
+> **`retrySync` accepts `actor` and does not use it. Settled at review: do NOT add an event in this
+> task.** Retry-sync is not a lifecycle transition, and Q23 enumerates the *lifecycle* kinds, so
+> there is deliberately no value for a reconciliation. Auditing it is not a missing line — it
+> requires a new Q defining whether attempts, successes and failures are each recorded, and how such
+> an event relates **atomically** to the `cf_synced_at` stamp, which this function writes on the pool
+> outside any transaction. Emitting something before those semantics exist would be inventing them.
+> The retained parameter is harmless and keeps the route uniform with every other targeted admin
+> operation. (The earlier claim here that adding it later would be "a one-line change" was wrong,
+> for the atomicity reason above.)
 
 - [ ] **Step 4: Append the routes**
 
@@ -7183,8 +7212,17 @@ Extend the module's imports with `fetchPolicy` from `./cfAccessPolicy.js` and `d
     '/admin/users/:id/retry-sync',
     { preHandler: [requireCfAccessAdmin(), csrfOrigin] },
     async (req, reply) => {
+      const actor = actorOf(req);
+      // Q13 — the admin list rejects self-targeting outright, on EVERY targeted
+      // operation and not only the ones that mutate status. Reconciling your
+      // own row is a Cloudflare write performed on yourself from the user list,
+      // which is the surface Q13 closes; manage yourself in /settings/account.
+      // Refused before the service runs, so no policy read or write occurs.
+      if (req.params.id === actor.userId) {
+        return reply.code(409).send({ error: 'self_target_forbidden' });
+      }
       try {
-        return reply.code(200).send(await retrySync(req.params.id, actorOf(req)));
+        return reply.code(200).send(await retrySync(req.params.id, actor));
       } catch (err) {
         return sendLifecycleError(reply, err);
       }
@@ -7195,8 +7233,37 @@ Extend the module's imports with `fetchPolicy` from `./cfAccessPolicy.js` and `d
 - [ ] **Step 5: Run tests and the whole API suite**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-list.test.ts && npm test && npm run test:integration`
-Expected: PASS, **15** new tests plus a green suite. (Ten list cases plus five retry-sync cases —
-the stated 13 was a miscount of the block above, not tests that were later dropped.)
+Expected: PASS, **16** new tests plus a green suite. (Ten list cases plus six retry-sync cases; the
+stated 13 was a miscount of the block above, and the 16th is the Q13 self-target case added at
+review.)
+
+> **Two P1s from review, both in `retrySync`, and both invisible to the planned tests.**
+>
+> **1. A failed retry preserved a stale stamp (Q24, Q17b).** The planned service stamped
+> `cf_synced_at` on success and simply did not stamp on failure — which is NOT the same rule as
+> clearing it first. A retry that failed left whatever timestamp was already there, so the row went
+> on asserting "intent IS reflected in the policy" immediately after we failed to establish that,
+> and an `invited` row kept satisfying Q17b's activation precondition
+> (`status='invited' AND cf_synced_at IS NOT NULL`) for an identity Cloudflare may not hold. Fixed by
+> clearing to NULL **before** the CF call and re-stamping only after success — the order
+> `patchUser`'s reinstate branch already uses.
+>
+> **The planned test could not see it: it seeded `cf_synced_at NULL`.** Starting from NULL, "never
+> cleared" and "cleared before trying" are indistinguishable, because the column is already NULL
+> either way. The case now seeds a non-null stamp, which strictly dominates — it still catches a
+> wrongly-written stamp AND catches the stale one. **Generalisable: a test asserting a field ends at
+> its DEFAULT value proves nothing about the code path that is supposed to reset it. Start from the
+> other value.**
+>
+> **2. retry-sync permitted self-targeting (Q13).** Every other targeted admin-list operation
+> compares `req.params.id` to `actor.userId` and returns `409 self_target_forbidden`; this route
+> went straight to the service, and an admin retrying their own id got a 200 and a live Cloudflare
+> write. Q13 says the admin list rejects self-targeting **outright** — it is not scoped to
+> operations that mutate status. Fixed at the route, before the service runs.
+>
+> The case asserts `fetchSpy` and `putSpy` were **not called**, not merely that the status is 409.
+> Mutation-checked: moving the guard to after the service call still returns 409 and still fails the
+> case, which is the point — Q13 is about not performing the operation, not about the response code.
 
 - [ ] **Step 6: Commit**
 
