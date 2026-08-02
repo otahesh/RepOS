@@ -13,8 +13,8 @@ import { db } from '../db/client.js';
 import { COHORT_CAP } from '../constants/users.js';
 import type { UserRole, UserStatus } from '../constants/users.js';
 import { withMembershipLock, ADMIN_COUNT_LOCK_KEY } from './membershipLock.js';
-import { syncEmail, syncEmailToStatus } from './cfAccessSync.js';
-import { CfPolicyError } from './cfAccessPolicy.js';
+import { syncEmail, syncEmailToStatus, desiredPresence } from './cfAccessSync.js';
+import { CfPolicyError, fetchPolicy } from './cfAccessPolicy.js';
 import {
   buildInviteRequest,
   sendInviteRequest,
@@ -736,5 +736,148 @@ export async function patchUser(
         cf_synced: cur.cf_synced_at !== null, sync_error: null,
       };
     });
+  });
+}
+
+export interface UserListRow {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: UserRole;
+  status: UserStatus;
+  invited_at: string | null;
+  activated_at: string | null;
+  last_seen_at: string | null;
+  cf_synced_at: string | null;
+  invite_sent_at: string | null;
+  invited_by_email: string | null;
+}
+
+export interface DriftReport {
+  /** false when the live policy could not be read at all. */
+  checked: boolean;
+  policy_error: string | null;
+  divergent: Array<{
+    email: string;
+    reason: 'in_policy_unexpected' | 'missing_from_policy' | 'in_policy_no_row';
+  }>;
+  /** Q36 — sync state UNKNOWN (stamp missing), which is NOT divergence. */
+  unknown: string[];
+}
+
+export interface UserListResponse {
+  users: UserListRow[];
+  cohort: { count: number; cap: number };
+  drift: DriftReport;
+}
+
+/**
+ * Q9 — drift is SURFACED, never auto-healed. Auto-healing would silently
+ * revert a deliberate dashboard edit; showing it lets a human decide.
+ */
+export async function listUsers(): Promise<UserListResponse> {
+  const { rows } = await db.query<UserListRow>(
+    `SELECT u.id::text, u.email, u.display_name, u.role, u.status,
+            to_char(u.invited_at   AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS invited_at,
+            to_char(u.activated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS activated_at,
+            to_char(u.last_seen_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_seen_at,
+            to_char(u.cf_synced_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS cf_synced_at,
+            to_char(u.invite_sent_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS invite_sent_at,
+            inv.email AS invited_by_email
+       FROM users u
+       LEFT JOIN users inv ON inv.id = u.invited_by
+      ORDER BY u.status, u.email`,
+  );
+
+  const cohort = { count: await countCohort(), cap: COHORT_CAP };
+
+  const drift: DriftReport = { checked: false, policy_error: null, divergent: [], unknown: [] };
+
+  let snapshot;
+  try {
+    snapshot = await fetchPolicy();
+    drift.checked = true;
+  } catch (err) {
+    // The policy could not be read, so membership is genuinely unknown for
+    // EVERY row — not just the unstamped ones.
+    drift.policy_error = syncErrorCode(err);
+    for (const r of rows) drift.unknown.push(r.email);
+    return { users: rows, cohort, drift };
+  }
+
+  // Once the policy HAS been read we hold ground truth, and live membership
+  // decides. `cf_synced_at` records our confidence in our own last write; it
+  // says nothing about what Cloudflare currently contains. Skipping unstamped
+  // rows here hid real divergence behind "sync pending" — e.g. a suspend whose
+  // DB half committed and whose CF removal failed leaves a `suspended` row with
+  // a NULL stamp still sitting in the policy. Q34 asks for precisely the
+  // opposite: it clears the stamp first so the row "surfaces as drift (policy
+  // contains an email for a non-active user)".
+  //
+  // So: disagreement is ALWAYS divergent. A missing stamp downgrades to
+  // `unknown` only when membership already agrees — there the stamp is the
+  // only thing outstanding and there is nothing for an operator to fix beyond
+  // a retry.
+  //
+  // Deliberate consequence: an `invited` row whose CF add failed (the Q8
+  // sync-pending case) now reaches the drift banner instead of only the
+  // per-row SYNC PENDING chip. That is correct and not a Q8 violation — Q8
+  // governs whether the invite ROLLS BACK, not whether the resulting gap is
+  // shown, and Q9 says drift is surfaced. The invitee genuinely cannot sign
+  // in until Cloudflare has them, so it is actionable, not noise. The chip
+  // itself is unaffected: it renders off `cf_synced_at`, not off this report.
+  const inPolicy = new Set(snapshot.emails);
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const email = r.email.toLowerCase();
+    seen.add(email);
+    const expected = desiredPresence(r.status);
+    const present = inPolicy.has(email);
+    if (expected === 'present' && !present) {
+      drift.divergent.push({ email: r.email, reason: 'missing_from_policy' });
+    } else if (expected === 'absent' && present) {
+      drift.divergent.push({ email: r.email, reason: 'in_policy_unexpected' });
+    } else if (r.cf_synced_at === null) {
+      drift.unknown.push(r.email);
+    }
+  }
+  for (const email of snapshot.emails) {
+    if (!seen.has(email)) drift.divergent.push({ email, reason: 'in_policy_no_row' });
+  }
+
+  return { users: rows, cohort, drift };
+}
+
+/**
+ * Q36 — reconcile Cloudflare TO the row's current status. This is NOT a
+ * reinstate: it never changes users.status, and for a suspended or deleting
+ * row it REMOVES the email rather than adding it. A retry-sync that always
+ * added would silently restore CF access to a suspended user — the operation
+ * meant to repair drift would create a security regression.
+ *
+ * `actor` is accepted but unused: this writes no account_events row, because
+ * the frozen design's Q23 event list has no kind for a reconciliation and
+ * adding one is a spec decision, not this task's. The parameter stays so the
+ * route is uniform with every other mutating admin operation and so adding the
+ * event later is a one-line change rather than a signature change at the call
+ * site. See the note in the plan — this is worth revisiting, since retry-sync
+ * on an `invited` row is a CF GRANT and every other grant in this wave is
+ * audited.
+ */
+export async function retrySync(
+  targetId: string,
+  actor: Actor,
+): Promise<{ id: string; cf_synced: boolean; sync_error: string | null; direction: 'present' | 'absent' }> {
+  void actor;
+  return withMembershipLock(async () => {
+    const cur = await readUser(targetId);
+    const direction = desiredPresence(cur.status);
+    try {
+      await syncEmailToStatus(cur.email, cur.status);
+      await db.query(`UPDATE users SET cf_synced_at = now() WHERE id=$1`, [targetId]);
+      return { id: targetId, cf_synced: true, sync_error: null, direction };
+    } catch (err) {
+      return { id: targetId, cf_synced: false, sync_error: syncErrorCode(err), direction };
+    }
   });
 }

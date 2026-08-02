@@ -5,7 +5,8 @@ import { requireCfAccessAdmin } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
 import { InviteRequestSchema, UserPatchSchema } from '../schemas/adminUsers.js';
 import {
-  inviteUser, resendInvite, patchUser, LifecycleError, type Actor,
+  inviteUser, resendInvite, patchUser, listUsers, retrySync,
+  LifecycleError, type Actor,
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
 import { deleteUser } from '../services/deleteUser.js';
@@ -33,6 +34,32 @@ export function sendLifecycleError(reply: import('fastify').FastifyReply, err: u
 }
 
 export async function adminUsersRoutes(app: FastifyInstance) {
+  app.get(
+    '/admin/users',
+    // No csrfOrigin: this is a GET and mutates nothing. Q9's guarantee that a
+    // list never heals drift is what makes that safe to say.
+    { preHandler: requireCfAccessAdmin() },
+    async (req, reply) => {
+      try {
+        return reply.code(200).send(await listUsers());
+      } catch (err) {
+        return sendLifecycleError(reply, err);
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admin/users/:id/retry-sync',
+    { preHandler: [requireCfAccessAdmin(), csrfOrigin] },
+    async (req, reply) => {
+      try {
+        return reply.code(200).send(await retrySync(req.params.id, actorOf(req)));
+      } catch (err) {
+        return sendLifecycleError(reply, err);
+      }
+    },
+  );
+
   app.post(
     '/admin/users/invite',
     { preHandler: [requireCfAccessAdmin(), csrfOrigin] },

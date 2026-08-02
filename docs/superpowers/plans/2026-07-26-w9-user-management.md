@@ -6774,9 +6774,14 @@ describe('GET /api/admin/users', () => {
   it('returns rows, the cohort count and the cap', async () => {
     const r = await list();
     expect(r.statusCode).toBe(200);
-    const body = r.json<{ users: unknown[]; cohort: { count: number; cap: number } }>();
+    const body = r.json<{ users: Array<{ email: string }>; cohort: { count: number; cap: number } }>();
     expect(body.cohort.cap).toBe(10);
-    expect(body.users.length).toBeGreaterThan(0);
+    // Named, not merely non-empty: `length > 0` would pass on any row at all.
+    expect(body.users.map((u) => u.email)).toContain(ADMIN);
+    const { rows } = await db.query<{ c: number }>(
+      `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
+    );
+    expect(body.cohort.count).toBe(rows[0].c);
   });
 
   it('resolves invited_by to an email', async () => {
@@ -6845,8 +6850,15 @@ describe('GET /api/admin/users', () => {
   });
 
   it('never auto-heals — the policy is untouched by a list call (Q9)', async () => {
+    // Seed BOTH directions of divergence first, so the call has something it
+    // could plausibly "fix". Against an already-correct policy this assertion
+    // would hold for a service that auto-heals too.
+    const stale = freshEmail('autoheal');
+    await db.query(`INSERT INTO users (email, status, cf_synced_at) VALUES ($1,'suspended',NULL)`, [stale]);
+    policyEmails.push(stale, 'ghost@repos.test');
     const before = [...policyEmails];
-    await list();
+    const body = (await list()).json<{ drift: { divergent: unknown[] } }>();
+    expect(body.drift.divergent.length).toBeGreaterThan(0);
     expect(policyEmails).toEqual(before);
     expect(putSpy).not.toHaveBeenCalled();
   });
@@ -6859,7 +6871,8 @@ describe('GET /api/admin/users', () => {
     expect(body.drift.checked).toBe(false);
     expect(body.drift.policy_error).toBe('app_count_not_one');
     // Unreadable policy means membership is unknown for EVERY row, stamped or
-    // not — and nothing may be claimed divergent without ground truth.
+    // not — and nothing may be claimed divergent without ground truth. ADMIN is
+    // stamped and would otherwise be neither unknown nor divergent.
     expect(body.drift.unknown).toContain(ADMIN);
     expect(body.drift.divergent).toEqual([]);
   });
@@ -6877,6 +6890,7 @@ describe('POST /api/admin/users/:id/retry-sync (Q36)', () => {
     expect(r.json<{ direction: string }>().direction).toBe('absent');
     expect(policyEmails).not.toContain(email);
     // It must NEVER re-add. Check the actual PUT payload, not just the status.
+    expect(putSpy).toHaveBeenCalled();
     for (const call of putSpy.mock.calls) {
       expect(call[0]).not.toContain(email);
     }
@@ -6918,6 +6932,11 @@ describe('POST /api/admin/users/:id/retry-sync (Q36)', () => {
     expect(r.json<{ cf_synced: boolean; sync_error: string }>()).toMatchObject({
       cf_synced: false, sync_error: 'cf_timeout',
     });
+    // The stamp is the claim "we know CF agrees" — a failed retry may not make it.
+    const u = await db.query<{ cf_synced_at: Date | null }>(
+      `SELECT cf_synced_at FROM users WHERE id=$1`, [rows[0].id],
+    );
+    expect(u.rows[0].cf_synced_at).toBeNull();
   });
 
   it('does NOT change users.status — retry-sync is not a reinstate', async () => {
@@ -6925,7 +6944,10 @@ describe('POST /api/admin/users/:id/retry-sync (Q36)', () => {
     const { rows } = await db.query<{ id: string }>(
       `INSERT INTO users (email, status, cf_synced_at) VALUES ($1,'suspended',NULL) RETURNING id`, [email],
     );
-    await retrySync(rows[0].id);
+    // The 200 is load-bearing: without it this case passes against a service
+    // that has no retry-sync at all, since a 404 also leaves the status alone.
+    const r = await retrySync(rows[0].id);
+    expect(r.statusCode).toBe(200);
     const u = await db.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [rows[0].id]);
     expect(u.rows[0].status).toBe('suspended');
   });
@@ -6941,6 +6963,7 @@ async function list() {
     headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(ADMIN) },
   });
 }
+
 async function retrySync(id: string) {
   return app.inject({
     method: 'POST', url: `/api/admin/users/${id}/retry-sync`,
@@ -6949,7 +6972,30 @@ async function retrySync(id: string) {
 }
 ```
 
-The harness must expose `putSpy` (the `vi.spyOn(policy, 'putPolicyEmails')` handle) as a module-level `let` so these tests can inspect `putSpy.mock.calls`.
+The harness must expose `putSpy` (the `vi.spyOn(policy, 'putPolicyEmails')` handle) as a module-level `let` so these tests can inspect `putSpy.mock.calls`. `beforeEach` **re-creates** it after `vi.restoreAllMocks()`, so `mock.calls` is always scoped to the current case and the Q9 assertion means what it says.
+
+> **Three cases were strengthened after mutation-testing; the count is 15, not 13.**
+>
+> 1. `does NOT change users.status` passed against a service with **no retry-sync route at all** — a
+>    404 also leaves the status alone. It now asserts the `200` first. A case whose subject is "X is
+>    unchanged" must prove the operation ran.
+> 2. `returns rows, the cohort count and the cap` asserted only `users.length > 0`, which holds for
+>    any row whatsoever. It now asserts ADMIN is present **by name** and that `cohort.count` equals a
+>    directly-computed count of the counted statuses.
+> 3. `never auto-heals` compared `policyEmails` before and after against a policy the test never made
+>    divergent. It now seeds **both** directions (a suspended row still in the policy, and a policy
+>    address with no row) and asserts `divergent.length > 0` before asserting no PUT — so the call
+>    demonstrably had something it could have "fixed".
+>
+> On (3), one thing checked rather than assumed: the original form **does** kill a real auto-healer,
+> but only because migration 080 *inserts* the founding admin (Q35.3), whose address is active and
+> absent from the stubbed policy — so a divergence always exists incidentally. Seeding it explicitly
+> makes the guarantee the case's own rather than a side effect of another task's migration.
+>
+> Also worth recording: the first auto-heal mutation attempted — healing `rows[0]` — **survived**,
+> and the test was not at fault. `ORDER BY u.status` puts an `active` row first, that row already
+> agreed with the policy, and `syncEmail` issues no PUT when the policy already agrees. *A surviving
+> mutation is a question about the mutation before it is a question about the test.*
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -7076,6 +7122,15 @@ export async function listUsers(): Promise<UserListResponse> {
  * row it REMOVES the email rather than adding it. A retry-sync that always
  * added would silently restore CF access to a suspended user — the operation
  * meant to repair drift would create a security regression.
+ *
+ * `actor` is accepted but unused: this writes no account_events row, because
+ * the frozen design's Q23 event list has no kind for a reconciliation and
+ * adding one is a spec decision, not this task's. The parameter stays so the
+ * route is uniform with every other mutating admin operation and so adding the
+ * event later is a one-line change rather than a signature change at the call
+ * site. See the note in the plan — this is worth revisiting, since retry-sync
+ * on an `invited` row is a CF GRANT and every other grant in this wave is
+ * audited.
  */
 export async function retrySync(
   targetId: string,
@@ -7098,11 +7153,22 @@ export async function retrySync(
 
 Extend the module's imports with `fetchPolicy` from `./cfAccessPolicy.js` and `desiredPresence` from `./cfAccessSync.js`.
 
+> **`retrySync` accepts `actor` and does not use it, and that is a live question rather than dead
+> code.** It writes no `account_events` row because the Q23 kind list has no value for a
+> reconciliation, and adding one is a spec decision this task may not make unilaterally. But
+> retry-sync on an `invited` or `active` row is a **Cloudflare grant**, and every other grant in this
+> wave is audited — an admin can restore policy membership with no record of who did it. The
+> parameter stays so the route matches every other mutating admin operation and so adding the event
+> is later a one-line change rather than a signature change at the call site. **Flagged for a Q, not
+> resolved here.**
+
 - [ ] **Step 4: Append the routes**
 
 ```ts
   app.get(
     '/admin/users',
+    // No csrfOrigin: this is a GET and mutates nothing. Q9's guarantee that a
+    // list never heals drift is what makes that safe to say.
     { preHandler: requireCfAccessAdmin() },
     async (req, reply) => {
       try {
@@ -7129,12 +7195,13 @@ Extend the module's imports with `fetchPolicy` from `./cfAccessPolicy.js` and `d
 - [ ] **Step 5: Run tests and the whole API suite**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/routes/admin-users-list.test.ts && npm test && npm run test:integration`
-Expected: PASS, 13 new tests plus a green suite.
+Expected: PASS, **15** new tests plus a green suite. (Ten list cases plus five retry-sync cases —
+the stated 13 was a miscount of the block above, not tests that were later dropped.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /var/home/jason/Projects/RepOS && git add api/src/services/userLifecycle.ts api/src/routes/adminUsers.ts api/tests/routes/admin-users-list.test.ts
+cd /var/home/jason/Projects/RepOS && git add api/src/services/userLifecycle.ts api/src/routes/adminUsers.ts api/tests/routes/admin-users-list.test.ts docs/superpowers/plans/2026-07-26-w9-user-management.md
 git commit -m "$(cat <<'EOF'
 feat(w9): user list with drift reporting, and status-aware retry-sync
 
@@ -7144,7 +7211,7 @@ disagrees) — a failed reinstate leaves the former, not the latter (Q36).
 retry-sync reconciles toward the row's status, so invoking it on a suspended
 row removes the email and can never re-grant access.
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
