@@ -119,6 +119,20 @@ if ! (cd "${API_DIR}" && node dist/db/migrate.js); then
   mark_failed 'migrations failed after restore'
 fi
 
+# 5b. W9 Q35 — reconcile the CF policy after migrations and BEFORE maintenance
+#     is cleared. A restore of a pre-080 dump has no row for any identity that
+#     was granted CF access out of band, so without this the restore silently
+#     re-creates the deny-by-default lockout that Q31b exists to prevent. It
+#     also clears stale cf_synced_at stamps carried in by a post-080 dump.
+#
+#     A reconciliation failure is SURFACED, NOT FATAL: the data restore itself
+#     is valid, and migration 080 has already guaranteed an active admin with
+#     no Cloudflare dependency, so the operator can clear maintenance and fix
+#     the sync from /settings/users.
+if ! (cd "${API_DIR}" && node dist/services/cfReconcile-cli.js --source=restore); then
+  echo "⚠ CF reconciliation failed after restore — data is valid; fix sync from /settings/users" >&2
+fi
+
 # 6. C-DEVICE-TOKENS-RESTORE — wipe device_tokens, close restore-replay vector.
 if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
 UPDATE device_tokens

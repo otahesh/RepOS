@@ -7695,7 +7695,7 @@ This step consults live Cloudflare state, which is why it is a script rather tha
 
 - [ ] **Step 1: Write the failing test**
 
-Create `api/tests/services/cf-reconcile.test.ts` with the ephemeral-DB preamble (tag `'reconcile'`), spying on `fetchPolicy` only. The preamble additionally needs `import { withMembershipLock, MEMBERSHIP_LOCK_KEY } from '../../src/services/membershipLock.js';` for the lock assertions at the end:
+Create `api/tests/services/cf-reconcile.test.ts` with the ephemeral-DB preamble (tag `'reconcile'`), spying on `fetchPolicy` only. The preamble additionally needs `withMembershipLock` and `MEMBERSHIP_LOCK_KEY` for the lock assertions at the end — as a **dynamic** `await import('../../src/services/membershipLock.js')` alongside the others, **not** a static top-level import: `membershipLock.ts` pulls in `src/db/client.js`, so a static import binds the pool to the dev `DATABASE_URL` before the preamble repoints it at the ephemeral DB, and the lock assertions then query a different database than the one the run locks.
 
 ```ts
 describe('baseline stamping is STATUS-AWARE (Q31a)', () => {
@@ -7749,16 +7749,27 @@ describe('baseline stamping is STATUS-AWARE (Q31a)', () => {
     expect(r.cleared).toContain(email);
   });
 
-  it('is idempotent — a second run changes nothing', async () => {
+  it('is idempotent — a second run re-imports nothing and leaves the stamp in place', async () => {
+    // Execution deviation: the original version seeded the row FIRST, so the
+    // email was already `known` on run one and `imported` was [] on BOTH runs.
+    // The assertion could not distinguish a working already-known filter from
+    // a missing one — it would have passed with the filter deleted entirely.
+    // Importing on run one and asserting run two imports nothing is what makes
+    // the case discriminating: without the filter, run two raises a unique
+    // violation on users.email. Mutation-checked (`toImport = [...emails]`).
     const email = freshEmail('idem');
-    const id = await seed(email, 'active', null);
     policyEmails = [email];
-    await reconcileCfBaseline('cutover');
-    const first = await stampOf(id);
-    const r = await reconcileCfBaseline('cutover');
-    expect(r.imported).toEqual([]);
+    const first = await reconcileCfBaseline('cutover');
+    expect(first.imported).toEqual([email]);
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM users WHERE email=$1`, [email]);
+    const id = rows[0].id;
     expect(await stampOf(id)).not.toBeNull();
-    expect(first).not.toBeNull();
+
+    const second = await reconcileCfBaseline('cutover');
+    expect(second.imported).toEqual([]);
+    expect(await stampOf(id)).not.toBeNull();
+    const { rows: after } = await db.query(`SELECT id FROM users WHERE email=$1`, [email]);
+    expect(after).toHaveLength(1);
   });
 });
 
@@ -8168,7 +8179,10 @@ Create `scripts/cutover/002-w9-cf-baseline.sh` (`chmod +x`):
 # restore that never runs this script still yields a working admin.
 set -euo pipefail
 
-API_DIR="${API_DIR:-/app/api}"
+# REPOS_API_DIR, not API_DIR: run-restore.sh:37 already reads that name for the
+# same directory, and two sibling scripts honouring different overrides for one
+# path is a trap for whoever relocates it.
+API_DIR="${REPOS_API_DIR:-/app/api}"
 cd "${API_DIR}"
 exec node dist/services/cfReconcile-cli.js --source=cutover
 ```
