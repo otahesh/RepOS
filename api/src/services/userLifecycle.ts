@@ -652,10 +652,18 @@ export async function patchUser(
       }
 
       return inAdminLockedTxn(async (client) => {
+        // Two statements, not one, because migration 082 forbids a status
+        // change that crosses CF membership groups from carrying a non-NULL
+        // stamp: suspended -> active is exactly such a crossing. Split into
+        // "cross with the stamp clear" then "stamp", both inside this
+        // transaction — the commit is still atomic, so Q7's ordering guarantee
+        // that the grant takes effect last is unchanged, and no reader ever
+        // observes the intermediate NULL.
         await client.query(
-          `UPDATE users SET status='active', role=$2, cf_synced_at=now() WHERE id=$1`,
+          `UPDATE users SET status='active', role=$2, cf_synced_at=NULL WHERE id=$1`,
           [targetId, nextRole],
         );
+        await client.query(`UPDATE users SET cf_synced_at=now() WHERE id=$1`, [targetId]);
         await recordAccountEventTx(client, {
           userId: targetId, userEmail: cur.email, kind: 'user_reinstated',
           ip: actor.ip, meta: { ...humanActor(actor.userId, actor.email) },

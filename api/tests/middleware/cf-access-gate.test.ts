@@ -171,7 +171,11 @@ describe('activation (Q21 + Q17b)', () => {
     // entered — it does not reach the re-read at all. Kept because it is a
     // legitimate case, but the interleaving one below is what actually covers
     // the zero-row re-read.
-    await db.query(`UPDATE users SET status='suspended' WHERE id=$1`, [u.id]);
+    // cf_synced_at=NULL because migration 082 requires it on any status change
+    // that crosses CF membership groups, and because patchUser's suspend does
+    // exactly this — a fixture that only set status was modelling a transition
+    // production cannot perform.
+    await db.query(`UPDATE users SET status='suspended', cf_synced_at=NULL WHERE id=$1`, [u.id]);
     const r = await me(email);
     expect(r.statusCode).toBe(403);
     expect(r.json<{ error: string }>().error).toBe('access_suspended');
@@ -197,7 +201,7 @@ describe('activation (Q21 + Q17b)', () => {
       const sql = typeof args[0] === 'string' ? args[0] : '';
       if (sql.includes('FROM users WHERE lower(email)')) {
         await (realQuery as (...a: unknown[]) => Promise<unknown>)(
-          `UPDATE users SET status='suspended' WHERE id=$1`,
+          `UPDATE users SET status='suspended', cf_synced_at=NULL WHERE id=$1`,
           [u.id],
         );
       }
@@ -222,7 +226,7 @@ describe('activation (Q21 + Q17b)', () => {
     const email = freshEmail('lostdel');
     const u = await mkUserWithEmail(email, { status: 'invited', cfSyncedAt: new Date() });
     created.push(u.id);
-    await db.query(`UPDATE users SET status='deleting' WHERE id=$1`, [u.id]);
+    await db.query(`UPDATE users SET status='deleting', cf_synced_at=NULL WHERE id=$1`, [u.id]);
     const r = await me(email);
     expect(r.statusCode).toBe(403);
   });

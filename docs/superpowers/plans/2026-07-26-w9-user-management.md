@@ -7603,6 +7603,63 @@ EOF
 ```
 
 ---
+### Task 15b: Q24 as a database invariant (migration 082)
+
+**Added 2026-08-02, from the review of `88ed01f`.** The stale-stamp defect appeared **three times** in this wave — `retrySync` preserving a stamp after a failed reconcile (Task 14), and both break-glass UPDATEs promoting without clearing (Task 15). A finding that recurs that often means the rule is not encoded anywhere a writer is forced to pass; per the fix-the-layer rule, Q24 moves into the schema.
+
+**Why not a static grep over `SET status=`.** That was the first proposal and it is both unsatisfiable and imprecise: `invited -> active` must **preserve** the stamp (both statuses require policy presence), migration 080 promotes while the column it just added is still NULL, fixtures set status without modelling Cloudflare, and multiline/reordered/dynamically-built SQL evades text matching. The invariant is about **membership groups**, so the database enforces those.
+
+```
+presence group: active, invited      -- address SHOULD be in the CF policy
+absence  group: suspended, deleting  -- address should NOT be
+```
+
+Crossing between groups changes membership intent and must clear `cf_synced_at` in the same statement; moving within a group must **not** be disturbed.
+
+**Files:**
+- Create: `api/src/db/migrations/082_cf_sync_stamp_guard.sql`
+- Create: `api/tests/db/migration-082.test.ts`
+- Modify: `api/src/services/userLifecycle.ts` (reinstate split into two statements)
+- Modify: `api/tests/db/migration-080.test.ts` (shared `unwindTo079` helper)
+
+**Interfaces:**
+- Consumes: `createEphemeralDb`/`runMigrations` (T1), migration 080's columns (T2).
+- Produces: trigger `users_cf_stamp_guard` and function of the same name; SQLSTATE `23514` on violation.
+
+- [ ] **Step 1: Write the failing test** — `api/tests/db/migration-082.test.ts`, 14 cases: seven cross-group REJECT cases (both directions, seeded with a **non-NULL** stamp — seeding NULL would make "never cleared" and "cleared first" indistinguishable), the crossing-that-clears ALLOW, the break-glass command verbatim, and four controls the guard must **not** catch: `invited -> active` preserving its stamp, `suspended -> deleting`, a role-only change, and the two-statement re-stamp shape. Plus one asserting SQLSTATE `23514` rather than a bare raise.
+
+Expected red: **8 of 14** — the seven rejections and the SQLSTATE case. The six ALLOW cases pass before the trigger exists; they are there to catch an **over-broad** trigger, which is the real risk.
+
+- [ ] **Step 2: Create migration 082**
+
+`BEFORE UPDATE OF status ... FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)`, raising with `ERRCODE = 'check_violation'` when the group membership flips and `NEW.cf_synced_at IS NOT NULL`. The `WHEN` clause matters: `UPDATE OF status` fires whenever `status` appears in the SET list, so without it a no-op rewrite of the same status would trip the guard.
+
+- [ ] **Step 3: Split reinstate into two statements**
+
+`patchUser`'s reinstate branch does `SET status='active', role=$2, cf_synced_at=now()` in one statement — a `suspended -> active` crossing carrying a stamp, which the trigger now refuses. Split it inside the **existing** transaction: cross with `cf_synced_at=NULL`, then stamp. The commit stays atomic, so Q7's "the grant takes effect last" is unchanged and no reader observes the intermediate NULL. Suspend (Task 12) and delete (Task 13) already clear in-statement and need no change.
+
+- [ ] **Step 4: Fix the 080 unwind harness**
+
+`migration-080.test.ts` unwinds to a pre-080 schema by dropping 080's columns; the trigger depends on `users.status`, so the DROP now fails with `cannot drop column status ... other objects depend on it`. Replace the three copied unwind blocks with **one** `unwindTo079` helper that drops the trigger and function, deletes **both** 080's and 082's `_migrations` rows, then drops the columns. Deleting only 080's row would let the re-run silently skip 082 and leave the test believing a guard is present that is not — the partial-unwind trap from round six.
+
+- [ ] **Step 5: Mutation-test, then full verification**
+
+Three mutations, each of which must kill only its own cases: drop `invited` from the presence group (kills the `invited -> active` control plus the three `invited` rejections); guard only the presence→absence direction (kills the three absence→presence rejections); and revert the reinstate split (kills `clears the stamp, adds to CF, then flips to active with a fresh stamp` in `admin-users-patch.test.ts` — this is the one that proves the invariant reaches **production** code and not just synthetic rows).
+
+Run `npm run migrate` against the local dev DB before the integration suite: `restore-migration-failure.test.ts` compares the dump's schema rev against the code's max migration number, so a dev DB still at 81 fails on an unmigrated database rather than a defect.
+
+```bash
+git add api/src/db/migrations/082_cf_sync_stamp_guard.sql api/tests/db/migration-082.test.ts \
+        api/src/services/userLifecycle.ts api/tests/db/migration-080.test.ts
+git commit -m "$(cat <<'EOF'
+feat(w9): enforce Q24 in the schema — cf_synced_at must clear when CF membership changes
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
 
 ### Task 16: CF reconciliation — cutover and restore
 
@@ -8163,6 +8220,8 @@ EOF
 **Interfaces:**
 - Consumes: `createEphemeralDb`/`runMigrations` (T1), `reconcileCfBaseline` (T16), `FOUNDING_ADMIN_EMAIL` (T2).
 - Produces: no exports.
+
+> **Unwind note (Task 15b, 2026-08-02):** this test reconstructs a pre-080 database by dropping 080's columns, and migration **082**'s trigger depends on `users.status` — so the drop fails unless the trigger and its function are dropped first and 082's `_migrations` row is deleted alongside 080's. Reuse the `unwindTo079` helper Task 15b extracts in `migration-080.test.ts` rather than writing a fourth copy. Deleting only 080's row makes the re-run silently skip 082, and the restore path is then proved only for the migrations someone remembered to remove.
 
 > **Adaptation note:** the spec calls for restoring a real pre-080 dump into an ephemeral Postgres. `pg_dump`/`pg_restore`/`psql` are **not installed on this workstation** (verified 2026-07-26), so this test reconstructs a pre-080 database structurally — apply all migrations, then drop the 080 columns and its `_migrations` row — which exercises the same code path 080 takes on a real dump. Add the binary-level `pg_restore` variant to `tests/integration/restore.test.ts` when running in CI, where the Postgres client tools are present.
 
