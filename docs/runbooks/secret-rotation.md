@@ -37,6 +37,56 @@ If the CF Access app's Audience tag (AUD) or service-token must rotate (e.g.
 suspected leak), see `cf-access-aud-drift.md`. After rotation, update
 `CF_ACCESS_AUD` in `.env`, recreate, and verify `/api/me` returns the identity.
 
+## CF_API_TOKEN (W9 — Access policy sync)
+
+**Scope (Q15):** attempt the beta resource-scoped "Access policy admin" role
+limited to policy `b4a92a15-27d5-477b-ad36-f78fcdae931c` only. Fall back to
+account-scoped `Access: Apps and Policies → Edit` if the resource-scoped role
+is unavailable.
+
+**Never grant `Access: Organizations Revoke`.** RepOS makes no
+session-revocation call (Q17a) — that endpoint revokes access across *all*
+applications in the org, so using it here would also sign users out of
+`ha.jpmtech.com` and `jellyseerr.jpmtech.com`.
+
+Why the scope matters: the account-scoped permission also grants edit over
+`ha.jpmtech.com` and `jellyseerr.jpmtech.com`. A RepOS compromise holding it is
+a path into home automation.
+
+**Rotation cadence:** every 180 days, or immediately on any suspected
+container compromise.
+
+**Procedure:**
+1. Create the replacement token in the Cloudflare dashboard (My Profile → API
+   Tokens) with the scope above.
+2. Update `CF_API_TOKEN` in `/mnt/user/appdata/repos/.env` on Unraid.
+3. Recreate the container (env vars are fixed at create time — stop + rm + run,
+   not restart; see the redeploy recipe).
+4. Verify: `/settings/users` shows a drift banner state of "in sync" rather
+   than a policy error.
+5. Delete the old token in the dashboard.
+
+**Blast radius if leaked:** edit rights on the RepOS Access policy — an
+attacker could add their own email to the policy. They would still be stopped
+by the DB gate (`403 not_invited`), because Cloudflare is not the security
+boundary (Q17).
+
+## RESEND_API_KEY / INVITE_FROM_EMAIL (W9 — invite delivery)
+
+**Scope:** a Resend sending key restricted to the `send.jpmtech.com` domain.
+The subdomain keeps root-domain SPF/DKIM untouched, so a misconfiguration here
+cannot break Proton-hosted mail on `jpmtech.com`.
+
+**Rotation cadence:** every 180 days.
+
+**Procedure:** create a new key in the Resend dashboard, update the `.env`,
+recreate the container, send a test invite to a disposable address, revoke the
+old key.
+
+**Blast radius if leaked:** an attacker can send mail as
+`repos@send.jpmtech.com`. It grants no access to RepOS — there is no invite
+token and no magic link (Q6); authorization is the pre-created `users` row.
+
 ## After any rotation
 
 - Re-run an outside-in smoke (`curl https://repos.jpmtech.com/health`).

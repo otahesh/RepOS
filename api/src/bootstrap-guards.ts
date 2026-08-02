@@ -3,8 +3,9 @@
 //
 // Beta W0.3: extends the original two-guard set (ADMIN_API_KEY in prod,
 // CF_ACCESS_AUD+TEAM_DOMAIN when CF_ACCESS_ENABLED=true) with three more
-// (DATABASE_URL set, POSTGRES_PASSWORD not "changeme") plus one info log
-// (CF_ACCESS_ALLOWED_EMAILS count at boot).
+// (DATABASE_URL set, POSTGRES_PASSWORD not "changeme") plus advisory info logs
+// for optional integrations (W9 removed the CF_ACCESS_ALLOWED_EMAILS count —
+// the allow-list is now users.status).
 
 export interface StartupGuardResult {
   fatal: string[];
@@ -35,11 +36,17 @@ export function validateStartupEnv(env: NodeJS.ProcessEnv): StartupGuardResult {
     fatal.push('POSTGRES_PASSWORD must not be the placeholder "changeme"');
   }
 
-  const allowList = (env.CF_ACCESS_ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  info.push({ allowListCount: allowList.length });
+  // W9 — user management credentials. Advisory, not fatal, matching the
+  // Healthchecks and feedback-webhook precedent: missing credentials fail at
+  // USE time with a specific error rather than preventing boot. An API that
+  // refuses to start because it cannot send invites is strictly worse than one
+  // that starts and reports the invite failure.
+  if (!env.CF_API_TOKEN) {
+    info.push({ msg: 'CF_API_TOKEN unset — Cloudflare Access policy sync disabled' });
+  }
+  if (!env.RESEND_API_KEY) {
+    info.push({ msg: 'RESEND_API_KEY unset — invite email delivery disabled' });
+  }
 
   // W5 ABS-5 — Healthchecks.io alerting is optional (alerting, not gating).
   // Surface an INFO line when a UUID is unset so an operator notices the

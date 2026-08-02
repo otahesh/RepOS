@@ -7290,7 +7290,7 @@ EOF
 Five new env vars, all **set-once infrastructure identity** — none of them change when users change, so none reintroduce the redeploy coupling this wave removes.
 
 **Files:**
-- Modify: `api/src/bootstrap-guards.ts:39-47`
+- Modify: `api/src/bootstrap-guards.ts:38-42`
 - Modify: `api/tests/unit/startup-guards.test.ts`
 - Modify: `docs/runbooks/secret-rotation.md`
 - Create: `docs/runbooks/admin-break-glass.md`
@@ -7301,7 +7301,15 @@ Five new env vars, all **set-once infrastructure identity** — none of them cha
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `api/tests/unit/startup-guards.test.ts`:
+First **delete** the three now-obsolete cases in `api/tests/unit/startup-guards.test.ts`
+— `emits an info log entry for allow-list count`, `emits 0 allow-list count when
+CF_ACCESS_ALLOWED_EMAILS unset`, and `emits 0 allow-list count when
+CF_ACCESS_ALLOWED_EMAILS is whitespace-only`. All three assert
+`toContainEqual({ allowListCount: N })`, which Step 3 stops emitting; leaving them
+makes Step 6 fail. Also drop the now-dead `CF_ACCESS_ALLOWED_EMAILS: 'a@b.c'` key
+from the `envBase` fixture — no code reads it after this task.
+
+Then add to `api/tests/unit/startup-guards.test.ts`:
 
 ```ts
 describe('W9 credential advisories', () => {
@@ -7340,11 +7348,18 @@ describe('W9 credential advisories', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/unit/startup-guards.test.ts`
-Expected: FAIL — `allowListCount` is still emitted and neither advisory exists.
+Expected: FAIL — precisely **3 of the 5 new cases**, 12 passed: `allowListCount` is
+still emitted and neither advisory exists. The other two pass *before* the fix and
+are regression guards, not red-to-green cases — `silent when both are configured`
+holds trivially while the strings are absent, and `missing credentials never block
+boot` asserts `fatal` stays at its empty default. Both were mutation-checked
+(making the advisory `fatal.push` kills the boot guard plus `passes a fully-valid
+prod env`; dropping the `if` kills only the silence case), so neither is vacuous.
 
 - [ ] **Step 3: Update the guards**
 
-In `api/src/bootstrap-guards.ts`, delete the `allowList` block (lines 39–47) and add:
+In `api/src/bootstrap-guards.ts`, delete the `allowList` block (lines 38–42 — locate
+it by content, not line number) and add:
 
 ```ts
   // W9 — user management credentials. Advisory, not fatal, matching the
@@ -7364,7 +7379,9 @@ Update the file header comment: replace `plus one info log (CF_ACCESS_ALLOWED_EM
 
 - [ ] **Step 4: Document the new secrets**
 
-Append to `docs/runbooks/secret-rotation.md`:
+Insert into `docs/runbooks/secret-rotation.md` **immediately before its trailing
+`## After any rotation` section** — not appended at the end, which would leave two
+per-secret procedures stranded below the file's general wrap-up:
 
 ```markdown
 ## CF_API_TOKEN (W9 — Access policy sync)
@@ -7420,7 +7437,17 @@ token and no magic link (Q6); authorization is the pre-created `users` row.
 
 - [ ] **Step 5: Write the break-glass runbook**
 
-Create `docs/runbooks/admin-break-glass.md`:
+Create `docs/runbooks/admin-break-glass.md`. Three claims in it were verified against
+the code rather than assumed, and should stay that way on any rewrite: the `'"'"'`
+one-liner does parse (it delivers exactly three argv entries — connection string,
+`-c`, and the whole statement as one argument; the `\` inside the single-quoted
+string is consumed by the *inner* shell); the bare `INSERT INTO users (email, role,
+status)` is valid because every other column has a default (`001_users.sql`) and
+migration 080 line 71 already uses that exact form; and an `active` row with NULL
+`cf_synced_at` really can sign in, because `cfAccess.ts:137` gates the
+`cf_synced_at IS NOT NULL` precondition on `status === 'invited'` and line 205
+rejects only non-`active`. If that gate is ever restructured, this runbook stops
+working — it is the recovery path, so re-verify it.
 
 ```markdown
 # Break-glass: recovering admin access
@@ -7507,7 +7534,7 @@ CF_API_TOKEN and RESEND_API_KEY — missing credentials fail at use time with a
 specific error rather than preventing boot. Documents the deliberately narrow
 CF token scope and the fact that RepOS must never hold Organizations Revoke.
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
