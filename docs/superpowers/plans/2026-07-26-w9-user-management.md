@@ -8308,7 +8308,9 @@ EOF
 
 > **Unwind note (Task 15b, 2026-08-02):** do not inline an unwind here. Import `unwindToPreW9` from `api/tests/helpers/migration-unwind.ts` — the single shared definition, which drops 082's trigger and function *before* the nine columns they depend on and re-arms all three W9 migrations. The version originally written into this task unwound 080 and 081 only and would fail on `DROP COLUMN status` while the trigger existed. `migration-082.test.ts` asserts the helper stays complete, so extending the 080–089 range means extending the helper, not forking it.
 
-> **Adaptation note:** the spec calls for restoring a real pre-080 dump into an ephemeral Postgres. `pg_dump`/`pg_restore`/`psql` are **not installed on this workstation** (verified 2026-07-26), so this test reconstructs a pre-080 database structurally — apply all migrations, then drop the 080 columns and its `_migrations` row — which exercises the same code path 080 takes on a real dump. Add the binary-level `pg_restore` variant to `tests/integration/restore.test.ts` when running in CI, where the Postgres client tools are present.
+> **Adaptation note:** the spec calls for restoring a real pre-080 dump into an ephemeral Postgres. This test instead reconstructs a pre-080 database structurally — apply all migrations, then unwind 080/081/082 via `unwindToPreW9` — which exercises the same code path 080 takes on a real dump.
+>
+> **The original justification for that adaptation is now stale and must not be re-cited:** it read "`pg_dump`/`pg_restore`/`psql` are not installed on this workstation (verified 2026-07-26)". They **are** installed as of 2026-07-27 (`brew install postgresql@16`, keg-only — every shell needs the `PATH` export), which is why `tests/integration/restore.test.ts` already runs real `pg_restore` locally. Re-verified 2026-08-02: all three binaries resolve. The structural harness is retained on its own merits — it is faster, it pins the exact pre-W9 shape, and it shares the one audited unwind — **not** because the tooling is missing. A binary-level `pg_restore` variant in `tests/integration/restore.test.ts` is now possible locally and remains open as separate scope; it was not added here, since this task's Files list creates exactly one test file.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -8406,7 +8408,11 @@ describe('restore of a pre-080 dump (Q35)', () => {
     // process would then boot into maintenance mode.
     const savedFlagPath = process.env.MAINTENANCE_FLAG_PATH;
 
-    const flag = join(await mkdtemp(join(tmpdir(), 'repos-dr-')), 'maintenance.flag');
+    // Keep the directory, not just the file: cleanup below removes the whole
+    // temp dir. Deleting only the flag leaks one empty /tmp/repos-dr-* per run
+    // (found by the post-run hygiene check — seven had accumulated).
+    const flagDir = await mkdtemp(join(tmpdir(), 'repos-dr-'));
+    const flag = join(flagDir, 'maintenance.flag');
     await writeFile(flag, 'restore in progress');
     process.env.MAINTENANCE_FLAG_PATH = flag;
 
@@ -8438,7 +8444,7 @@ describe('restore of a pre-080 dump (Q35)', () => {
       // later suite can pick up either.
       if (savedFlagPath === undefined) delete process.env.MAINTENANCE_FLAG_PATH;
       else process.env.MAINTENANCE_FLAG_PATH = savedFlagPath;
-      await rm(flag, { force: true });
+      await rm(flagDir, { recursive: true, force: true }); // the dir, not just the flag
       await app.close();
       await db.end();
       await jwks.teardown();
