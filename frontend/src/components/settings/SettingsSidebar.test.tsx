@@ -2,10 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { SETTINGS_SECTIONS } from './SettingsSidebar';
 
 describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
-  it('ships the W6 lineup plus the W2 Health entry (slotted after Account)', () => {
+  it('ships the W6 lineup plus W2 Health and the W9 admin-only Users entry', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.label)).toEqual([
-      'Account','Health','Equipment','Integrations','Program prefs','Backups','Feedback','Storage','Injuries',
+      'Account','Health','Equipment','Integrations','Program prefs','Backups','Feedback','Users','Storage','Injuries',
     ]);
+  });
+
+  it('Users is admin-only and every other entry is not', () => {
+    const users = SETTINGS_SECTIONS.find((s) => s.label === 'Users');
+    expect(users?.adminOnly).toBe(true);
+    expect(users?.ownerWave).toBe('W9');
+    expect(SETTINGS_SECTIONS.filter((s) => s.adminOnly).map((s) => s.label)).toEqual(['Users']);
   });
 
   it('Health is a live W2 entry (navigable, not a disabled placeholder)', () => {

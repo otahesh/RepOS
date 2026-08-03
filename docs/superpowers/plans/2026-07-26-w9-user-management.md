@@ -8622,6 +8622,8 @@ EOF
 - Modify: `frontend/src/components/settings/SettingsSidebar.test.tsx`
 - Modify: `frontend/src/components/layout/Sidebar.tsx` (filter admin-only entries)
 - Modify: `frontend/src/App.tsx` (route)
+- Modify: `frontend/src/components/common/ConfirmDialog.tsx` (add the `warn` severity the medium tier needs)
+- Modify: `frontend/src/__smoke__/navigation.smoke.test.tsx` (member vs admin sub-nav)
 - Test: `frontend/src/pages/SettingsUsersPage.test.tsx`
 
 **Interfaces:**
@@ -8637,7 +8639,7 @@ Create `frontend/src/pages/SettingsUsersPage.test.tsx`:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import SettingsUsersPage from './SettingsUsersPage';
@@ -8682,13 +8684,34 @@ function renderPage(user: Partial<auth.User> = {}) {
   return render(<MemoryRouter><SettingsUsersPage /></MemoryRouter>);
 }
 
+/**
+ * The <tr> for a given user. Keyed by testid rather than by
+ * `getByText(email).closest('tr')` because an address appears in BOTH its
+ * owner's email cell and in some other row's "invited by" cell, so the text
+ * query matches two elements and throws.
+ */
+function rowFor(email: string): HTMLElement {
+  return screen.getByTestId(`user-row-${email}`);
+}
+
 describe('SettingsUsersPage', () => {
   it('renders email, status, role, last seen, invited by and sync state', async () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     renderPage();
-    expect(await screen.findByText('admin@repos.test')).toBeInTheDocument();
+    // NB: `findByText('admin@repos.test')` matches TWO nodes — that row's own
+    // email cell and the "invited by" cell of the row it invited.
+    expect(await screen.findByTestId('user-row-admin@repos.test')).toBeInTheDocument();
     expect(screen.getByText('pending@repos.test')).toBeInTheDocument();
-    expect(screen.getAllByText(/invited/i).length).toBeGreaterThan(0);
+    // Asserted per-row, not as a page-wide /invited/i match: the "Invited by"
+    // COLUMN HEADER also matches that regex, so a page rendering no status at
+    // all would have satisfied it.
+    expect(within(rowFor('pending@repos.test')).getByText('INVITED')).toBeInTheDocument();
+    expect(within(rowFor('admin@repos.test')).getByText('ACTIVE')).toBeInTheDocument();
+    expect(within(rowFor('pending@repos.test')).getByText('MEMBER')).toBeInTheDocument();
+    expect(within(rowFor('admin@repos.test')).getByText('ADMIN')).toBeInTheDocument();
+    // last seen + invited by
+    expect(within(rowFor('admin@repos.test')).getByText(/2026-07-26/)).toBeInTheDocument();
+    expect(within(rowFor('pending@repos.test')).getByText('admin@repos.test')).toBeInTheDocument();
     expect(screen.getByText(/2 \/ 10/)).toBeInTheDocument();
   });
 
@@ -8696,7 +8719,10 @@ describe('SettingsUsersPage', () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     renderPage();
     expect(await screen.findByText(/sync pending/i)).toBeInTheDocument();
-    expect(screen.queryByText(/diverge/i)).not.toBeInTheDocument();
+    expect(within(rowFor('admin@repos.test')).getByText('SYNCED')).toBeInTheDocument();
+    // Q36 — `unknown` is sync-pending, NOT divergence. No banner, no advisory.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('shows the drift banner only for CONFIRMED divergence', async () => {
@@ -8706,8 +8732,10 @@ describe('SettingsUsersPage', () => {
         divergent: [{ email: 'ghost@repos.test', reason: 'in_policy_no_row' }] },
     } as never);
     renderPage();
-    expect(await screen.findByText(/ghost@repos.test/)).toBeInTheDocument();
-    expect(screen.getByText(/diverge/i)).toBeInTheDocument();
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent(/diverge/i);
+    expect(banner).toHaveTextContent('ghost@repos.test');
+    expect(banner).toHaveTextContent(/in_policy_no_row/);
   });
 
   it('surfaces a policy read failure without hiding the table', async () => {
@@ -8716,8 +8744,11 @@ describe('SettingsUsersPage', () => {
       drift: { checked: false, policy_error: 'app_count_not_one', divergent: [], unknown: [] },
     } as never);
     renderPage();
-    expect(await screen.findByText('admin@repos.test')).toBeInTheDocument();
-    expect(screen.getByText(/app_count_not_one/)).toBeInTheDocument();
+    expect(await screen.findByTestId('user-row-admin@repos.test')).toBeInTheDocument();
+    const advisory = screen.getByRole('status');
+    expect(advisory).toHaveTextContent(/app_count_not_one/);
+    // An unread policy is UNKNOWN, not divergence — it must not claim drift.
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('403 renders "Not authorized" rather than an empty table', async () => {
@@ -8754,19 +8785,63 @@ describe('SettingsUsersPage', () => {
     await userEvent.click((await screen.findAllByRole('button', { name: /^delete$/i }))[0]);
     const confirmBtn = screen.getByRole('button', { name: /delete user/i });
     expect(confirmBtn).toBeDisabled();
-    await userEvent.type(screen.getByLabelText(/type the email/i), 'pending@repos.test');
+    // ConfirmDialog's heavy tier owns the typed-confirm input (one textbox).
+    await userEvent.type(screen.getByRole('textbox'), 'pending@repos.test');
     expect(confirmBtn).toBeEnabled();
     await userEvent.click(confirmBtn);
     await waitFor(() => expect(del).toHaveBeenCalledWith('2'));
   });
 
+  it('light actions fire without a confirmation step', async () => {
+    const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({ id: '2' } as never);
+    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' } as never);
+    renderPage();
+    const row = () => within(rowFor('pending@repos.test'));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    await userEvent.click(row().getByRole('button', { name: /^resend$/i }));
+    await waitFor(() => expect(resend).toHaveBeenCalledWith('2'));
+    await userEvent.click(row().getByRole('button', { name: /^retry sync$/i }));
+    await waitFor(() => expect(retry).toHaveBeenCalledWith('2'));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
+  });
+
+  it('suspend is a medium action — confirmed, then PATCHed', async () => {
+    const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '2' } as never);
+    renderPage();
+    await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
+    expect(patch).not.toHaveBeenCalled();          // the dialog gates the call
+    await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('2', { status: 'suspended' }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
+  it('reinstate PATCHes a suspended row back to active', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue({
+      ...baseResponse,
+      users: [
+        baseResponse.users[0],
+        { ...baseResponse.users[1], id: '3', email: 'gone@repos.test', status: 'suspended' },
+      ],
+    } as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '3' } as never);
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /^reinstate$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /reinstate user/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('3', { status: 'active' }));
+  });
+
   it('offers no row action that targets the signed-in admin', async () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     renderPage();
-    await screen.findByText('admin@repos.test');
+    await screen.findByTestId('user-row-admin@repos.test');
     // Self-management lives in /settings/account (Q13).
-    const row = screen.getByText('admin@repos.test').closest('tr')!;
-    expect(row.querySelectorAll('button')).toHaveLength(0);
+    expect(rowFor('admin@repos.test').querySelectorAll('button')).toHaveLength(0);
+    // Positive control: the assertion above is only meaningful if OTHER rows
+    // do carry actions. Without this a page that renders no buttons at all
+    // passes.
+    expect(rowFor('pending@repos.test').querySelectorAll('button').length).toBeGreaterThan(0);
   });
 });
 ```
@@ -8790,19 +8865,26 @@ Update `frontend/src/components/settings/SettingsSidebar.test.tsx`:
 
 The `useCurrentUser` mock in that suite is not needed — `SETTINGS_SECTIONS` is data. The filtering test belongs to `Sidebar`, so add to `frontend/src/__smoke__/navigation.smoke.test.tsx`: a member sees 9 sub-nav entries, an admin sees 10.
 
+That file already mocks the whole `../auth` module with a **static** `vi.mock` factory returning a user with no `is_admin`, so one factory has to serve both cases. `vi.mock` is hoisted above the imports, so the state it closes over must be hoisted too — `const authState = vi.hoisted(() => ({ isAdmin: false }))`, read inside the factory, reset in a `beforeEach`, and flipped by the admin case. Count the entries by intersecting `SETTINGS_SECTIONS` labels with what the sidebar actually renders, not by counting `<a>` elements: the top-level Settings nav item is itself a link to `/settings/account`, so an href-based count is off by one.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run src/pages/SettingsUsersPage.test.tsx src/components/settings/SettingsSidebar.test.tsx`
-Expected: FAIL — the page module does not exist and the label list has no `Users`.
+Run: `npx vitest run src/pages/SettingsUsersPage.test.tsx src/components/settings/SettingsSidebar.test.tsx src/__smoke__/navigation.smoke.test.tsx`
+Expected: FAIL — the page module does not resolve (so that file contributes 0 tests, not failing ones), the label list has no `Users`, `adminOnly` is `undefined`, and the admin sub-nav count is 9 rather than 10. **Measured: 3 failed / 8 passed across the two collectible files.**
 
 - [ ] **Step 3: Write the API client**
 
-Create `frontend/src/lib/api/adminUsers.ts`:
+Create `frontend/src/lib/api/adminUsers.ts`. **The return types are NOT interchangeable with the list row** — `patchUser` returns `PatchOutcome` (six fields, no `display_name`/timestamps), `inviteUser`/`resendInvite` return `InviteOutcome`, and `retrySync` returns `{ id, cf_synced, sync_error, direction }`. Verified against `api/src/services/userLifecycle.ts` before writing the client:
 
 ```ts
 // frontend/src/lib/api/adminUsers.ts
 // Beta W9 — typed client for /api/admin/users. Every state-changing call
 // carries X-RepOS-CSRF:1 (csrfOrigin requires it on the CF Access path).
+//
+// The response types below mirror `api/src/services/userLifecycle.ts` exactly
+// — InviteOutcome, PatchOutcome and retrySync's return are NOT the list row
+// shape, and typing them as one would silently promise fields the API never
+// sends.
 import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 
@@ -8824,9 +8906,11 @@ export interface AdminUserRow {
 }
 
 export interface DriftReport {
+  /** false when the live policy could not be read at all. */
   checked: boolean;
   policy_error: string | null;
   divergent: Array<{ email: string; reason: 'in_policy_unexpected' | 'missing_from_policy' | 'in_policy_no_row' }>;
+  /** Q36 — sync state UNKNOWN (stamp missing), which is NOT divergence. */
   unknown: string[];
 }
 
@@ -8836,43 +8920,75 @@ export interface AdminUserList {
   drift: DriftReport;
 }
 
+/** Mirrors InviteOutcome. A 200/201 can still carry a mail or sync failure. */
+export interface InviteOutcome {
+  id: string;
+  email: string;
+  status: UserStatus;
+  created: boolean;
+  cf_synced: boolean;
+  invite_sent: boolean;
+  sync_error: string | null;
+  mail_error: string | null;
+  resent?: boolean;
+  resynced?: boolean;
+}
+
+/** Mirrors PatchOutcome — a summary, not a full list row. */
+export interface PatchOutcome {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  cf_synced: boolean;
+  sync_error: string | null;
+}
+
+export interface RetrySyncOutcome {
+  id: string;
+  cf_synced: boolean;
+  sync_error: string | null;
+  /** Q36 — reconciliation is status-aware; it does not blindly re-add. */
+  direction: 'present' | 'absent';
+}
+
 export async function listUsers(): Promise<AdminUserList> {
   return jsonOrThrow<AdminUserList>(await apiFetch('/api/admin/users'));
 }
 
-export async function inviteUser(email: string, role: UserRole): Promise<{ id: string }> {
+export async function inviteUser(email: string, role: UserRole): Promise<InviteOutcome> {
   const res = await apiFetch('/api/admin/users/invite', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-RepOS-CSRF': '1' },
     body: JSON.stringify({ email, role }),
   });
-  return jsonOrThrow<{ id: string }>(res);
+  return jsonOrThrow<InviteOutcome>(res);
 }
 
 export async function patchUser(
   id: string,
   patch: { role?: UserRole; status?: 'active' | 'suspended' },
-): Promise<AdminUserRow> {
+): Promise<PatchOutcome> {
   const res = await apiFetch(`/api/admin/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', 'X-RepOS-CSRF': '1' },
     body: JSON.stringify(patch),
   });
-  return jsonOrThrow<AdminUserRow>(res);
+  return jsonOrThrow<PatchOutcome>(res);
 }
 
-export async function resendInvite(id: string): Promise<{ id: string }> {
+export async function resendInvite(id: string): Promise<InviteOutcome> {
   const res = await apiFetch(`/api/admin/users/${id}/resend-invite`, {
     method: 'POST', headers: { 'X-RepOS-CSRF': '1' },
   });
-  return jsonOrThrow<{ id: string }>(res);
+  return jsonOrThrow<InviteOutcome>(res);
 }
 
-export async function retrySync(id: string): Promise<{ cf_synced: boolean; sync_error: string | null }> {
+export async function retrySync(id: string): Promise<RetrySyncOutcome> {
   const res = await apiFetch(`/api/admin/users/${id}/retry-sync`, {
     method: 'POST', headers: { 'X-RepOS-CSRF': '1' },
   });
-  return jsonOrThrow<{ cf_synced: boolean; sync_error: string | null }>(res);
+  return jsonOrThrow<RetrySyncOutcome>(res);
 }
 
 export async function deleteUser(id: string): Promise<void> {
@@ -8887,11 +9003,22 @@ export async function deleteUser(id: string): Promise<void> {
 
 Create `frontend/src/components/settings/UsersTable.tsx` — a table of `email · status · role · last seen · invited by · sync state`, with per-row actions rendered only when `row.id !== currentUserId` (Q13). Follow `AdminFeedbackPage.tsx` for styling conventions: `TOKENS`/`FONTS` from `../../tokens`, inline styles, `JetBrains Mono` for data columns and `Inter Tight` for labels. Action weights per the architecture diagram — light: `RESEND` / `RETRY SYNC` (plain buttons); medium: `SUSPEND` / `REINSTATE` (confirm dialog, warn colour `#F5B544`); heavy: `DELETE` (typed-confirmation dialog, danger colour `#FF6A6A`). Sync state cell: `cf_synced_at === null` renders `SYNC PENDING` in warn, otherwise `SYNCED` in good `#6BE28B`.
 
+The medium and heavy dialogs are **W6's `components/common/ConfirmDialog`**, which the design doc's architecture block already names — do not hand-roll a second one. It is used always-mounted with an `open` prop (the DeleteAccountSection pattern; conditionally unmounting the whole FocusTrap desyncs it under StrictMode), its heavy tier owns the typed-confirm input, and `severity` needed **one additive extension** to carry the medium tier's warn colour: `'accent' | 'danger' | 'warn'`, with dark text on the warn fill because white on `#F5B544` is unreadable (the MaintenanceBanner already puts dark text on its warn/accent fills).
+
+Two behaviours that follow from the API rather than from the visual spec:
+
+- **Which action each status offers** must match the closed Q28 matrix, or the UI offers calls that can only 409: `RESEND` on `invited` only; `SUSPEND` on `active`+`invited`; `REINSTATE` on `suspended`; `RETRY SYNC` on all four (Q36 is status-aware in both directions). **`DELETE` is offered on a `deleting` row too** — Q37 says an interrupted self-deletion can only be completed by an admin, and `deleteUser` resumes rather than restarting (`deleteUser.ts:44`).
+- Give each `<tr>` `data-testid={'user-row-' + row.email}`. An address appears in **two** cells — its owner's email cell and the "invited by" cell of every row it invited — so `getByText(email).closest('tr')` throws `Found multiple elements`, which is what the plan's original test text did in three cases.
+
 Create `frontend/src/components/settings/InviteUserModal.tsx` — an email input (`<label htmlFor>` wired so `getByLabelText(/email/i)` finds it), a `member`/`admin` role select, and a `SEND INVITE` submit. On `ApiError` with status 409 and `body.error === 'cohort_cap_reached'`, render `Cohort is full — {count} / {cap}.`; on 409 `already_active` / `suspended_use_reinstate` / `deletion_in_progress`, render the matching plain-English line.
 
 Create `frontend/src/pages/SettingsUsersPage.tsx` — loads on mount, renders `denied` for 401/403, an actionable retry for anything else, the cohort chip `{count} / {cap}`, the drift banner (only when `drift.divergent.length > 0`, or a distinct advisory line when `drift.checked === false` showing `drift.policy_error`), `<InviteUserModal>` and `<UsersTable>`. Refresh by re-calling `listUsers()` after every successful mutation.
 
 **Do not** render a drift banner for `drift.unknown` — that is sync-pending, not divergence (Q36), and conflating them is the false alarm that trains the operator to ignore the signal.
+
+Give the two surfaces **different ARIA roles** — `role="alert"` for confirmed divergence, `role="status"` for the unread-policy advisory. That is what makes "banner only on divergence" and "the advisory is not nested under the failure branch" separately assertable; a test that matched banner *text* would pass with the two branches collapsed into one. The advisory branch is a sibling of the divergence branch, never a child of it — the same shape as `MaintenanceBanner`'s warning branch.
+
+Refresh with `listUsers()` after **every** mutation including a failed one: a suspend whose CF half failed still committed its DB half, so the row on screen is stale either way. Keep the existing `data` while the re-read is in flight rather than nulling it, or the table flashes back to `Loading…` after each action.
 
 - [ ] **Step 5: Wire navigation**
 
@@ -8934,6 +9061,12 @@ import SettingsUsersPage from './pages/SettingsUsersPage'
 
 Run: `cd /var/home/jason/Projects/RepOS/frontend && npx vitest run && npm run build`
 Expected: PASS across the frontend suite; build clean.
+
+**Measured: 69 files / 414 passed** (from the 68 / 399 baseline — +1 file and +15 tests: 12 in `SettingsUsersPage.test.tsx`, +1 in `SettingsSidebar.test.tsx`, +2 in the navigation smoke). Build clean; the chunk-size warning is pre-existing. `npm run check-pages` and `scripts/check-term-coverage.mjs` also pass — the reachability gate is the one that would catch a page shipped without its route.
+
+Three of the plan's twelve cases were **added during execution**, because the plan's nine covered the invite and delete paths and left every other row action — resend, retry sync, suspend, reinstate — with no test at all: `light actions fire without a confirmation step`, `suspend is a medium action — confirmed, then PATCHed`, and `reinstate PATCHes a suspended row back to active`.
+
+Six mutations were run and each killed only its intended cases: rendering actions on every row (kills the Q13 case + delete + suspend, which index the *other* row's buttons); a sync cell hard-coded to `SYNCED`; firing the drift banner for `drift.unknown` as well; nesting the unread-policy advisory under the divergence branch; dropping the post-mutation `load()`; and dropping the `adminOnly` filter in `Sidebar.tsx`.
 
 - [ ] **Step 7: Commit**
 

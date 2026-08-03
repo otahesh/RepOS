@@ -15,8 +15,12 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   /** Defaults to "Cancel". */
   cancelLabel?: string;
-  /** Visual severity for the confirm button. Defaults to 'accent'. */
-  severity?: 'accent' | 'danger';
+  /**
+   * Visual severity for the confirm button. Defaults to 'accent'.
+   * W9 added 'warn' for medium-tier reversible-but-consequential actions
+   * (suspend), which the design system colours #F5B544.
+   */
+  severity?: 'accent' | 'danger' | 'warn';
   onConfirm: (typed?: string) => void;
   onCancel: () => void;
 }
@@ -97,7 +101,11 @@ export function ConfirmDialog({
   const isHeavy = tier === 'heavy';
   const typedOk = !isHeavy || (requireTyped !== undefined && typed === requireTyped);
   const confirmDisabled = !typedOk;
-  const confirmColor = severity === 'danger' ? TOKENS.danger : TOKENS.accent;
+  const confirmColor =
+    severity === 'danger' ? TOKENS.danger : severity === 'warn' ? TOKENS.warn : TOKENS.accent;
+  // Warn is a light fill; white text on it is unreadable. Matches the
+  // MaintenanceBanner, which also puts dark text on its warn/accent fills.
+  const confirmTextColor = severity === 'warn' ? TOKENS.bg : '#fff';
 
   const handleConfirm = (): void => {
     if (confirmDisabled) return;
@@ -263,7 +271,7 @@ export function ConfirmDialog({
                   background: confirmDisabled ? 'transparent' : confirmColor,
                   border: `1px solid ${confirmDisabled ? TOKENS.line : confirmColor}`,
                   borderRadius: 6,
-                  color: confirmDisabled ? TOKENS.textMute : '#fff',
+                  color: confirmDisabled ? TOKENS.textMute : confirmTextColor,
                   fontFamily: FONTS.ui,
                   fontSize: 13,
                   fontWeight: 600,
