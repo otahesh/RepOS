@@ -46,11 +46,17 @@ interface Scenario {
 /**
  * Build a throwaway environment the script can actually run in: a real gzip
  * dump whose name satisfies the allow-list, a stubbed snapshot script, and
- * stubs for pg_restore/psql/node earlier on PATH than anything real.
+ * stubs for pg_restore/psql/node/s6-rc earlier on PATH than anything real.
  *
- * s6-rc is deliberately NOT stubbed — it is absent on the workstation, so the
- * script's `command -v s6-rc` guards skip the service stop/start. Providing a
- * stub would only add a way for this test to lie about production.
+ * s6-rc IS stubbed. An earlier version left it out on the reasoning that it is
+ * absent from this workstation — but absence here is a property of one machine,
+ * not of the test. On any CI image or inside the container itself the script's
+ * `command -v s6-rc` guard would succeed and the run would issue a real
+ * `s6-rc -d change api`, stopping a live service and then polling `-a list`
+ * up to 35 times per scenario. The supervisor is not this test's subject; the
+ * sentinel and the control flow are. Stubbing it makes the harness hermetic
+ * AND exercises the stop/wait/boot branch, which the unstubbed version skipped
+ * entirely.
  */
 async function sandbox(scn: Scenario): Promise<{ run: () => number; sentinel: () => Promise<Sentinel> }> {
   const root = await mkdtemp(join(tmpdir(), 'repos-restore-orch-'));
@@ -87,6 +93,12 @@ async function sandbox(scn: Scenario): Promise<{ run: () => number; sentinel: ()
       'esac',
     ].join('\n'),
   );
+
+  // `-a list` must print NOTHING: the script greps its output for '^api$' and
+  // breaks the 35×1s wait as soon as the service is gone, so silence means
+  // "already stopped" and the loop exits on its first iteration. Every other
+  // subcommand (`-d change api`, `-u change api`) just succeeds.
+  await stub('s6-rc', 'exit 0');
 
   const snapshot = join(scripts, 'pre-restore-snapshot.sh');
   await writeFile(snapshot, '#!/usr/bin/env bash\nexit 0\n');
