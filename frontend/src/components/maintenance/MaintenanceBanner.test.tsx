@@ -55,6 +55,38 @@ describe('MaintenanceBanner', () => {
     expect(screen.getByText(/Your last set is queued locally/)).toBeInTheDocument();
   });
 
+  // W9 Q35 — the restore SUCCEEDED and still needs operator action. Gating this
+  // on status === 'failed' is what made a failed CF reconciliation invisible.
+  it('shows the warning copy when a successful restore carries warning_message', async () => {
+    (api.getMaintenanceStatus as any).mockResolvedValue({
+      active: true,
+      restore: {
+        status: 'ok',
+        error_message: null,
+        warning_message: 'CF reconciliation failed after restore. Repair it from /settings/users.',
+      },
+      recovery_available: false,
+    });
+    render(<MaintenanceBanner />);
+    await waitFor(() => screen.getByText(/Restore complete, with a warning/));
+    expect(screen.getByText(/Repair it from \/settings\/users/)).toBeInTheDocument();
+    // Not the generic in-progress copy, and not the failure copy.
+    expect(screen.queryByText(/Your last set is queued locally/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Restore failed/)).not.toBeInTheDocument();
+  });
+
+  it('shows no warning copy for a clean successful restore', async () => {
+    // Without this, a banner that always warns would satisfy the case above.
+    (api.getMaintenanceStatus as any).mockResolvedValue({
+      active: true,
+      restore: { status: 'ok', error_message: null, warning_message: null },
+      recovery_available: false,
+    });
+    render(<MaintenanceBanner />);
+    await waitFor(() => screen.getByText(/RepOS is down for a database restore/));
+    expect(screen.queryByText(/with a warning/)).not.toBeInTheDocument();
+  });
+
   it('shows failed-restore copy with Roll back button when recovery available', async () => {
     (api.getMaintenanceStatus as any).mockResolvedValue({
       active: true,

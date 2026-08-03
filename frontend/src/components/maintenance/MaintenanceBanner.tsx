@@ -123,9 +123,18 @@ export function MaintenanceBanner({
   if (!status?.active) return null;
 
   const failed = status.restore?.status === 'failed';
+  // W9 Q35 — a non-fatal warning rides alongside a SUCCESSFUL restore, so this
+  // cannot be a branch of `failed`. The restore worked; something the operator
+  // must repair did not. Gating it on status === 'failed' is what made the
+  // failed CF reconciliation invisible in the first place.
+  const warning = !failed ? (status.restore?.warning_message ?? null) : null;
 
   return (
-    <div role="status" aria-live="polite" style={bannerStyle(failed ? TOKENS.danger : TOKENS.accent)}>
+    <div
+      role="status"
+      aria-live="polite"
+      style={bannerStyle(failed ? TOKENS.danger : warning ? TOKENS.warn : TOKENS.accent)}
+    >
       {failed ? (
         <>
           <span>Restore failed: {status.restore?.error_message ?? 'unknown error'}.</span>
@@ -135,6 +144,8 @@ export function MaintenanceBanner({
             </button>
           )}
         </>
+      ) : warning ? (
+        <span>Restore complete, with a warning: {warning}</span>
       ) : (
         <span>RepOS is down for a database restore. ~60 seconds. Your last set is queued locally.</span>
       )}

@@ -49,11 +49,11 @@ case "$SRC" in
     ;;
 esac
 
-# Merge status+error_message+finished_at into the sentinel atomically (fsync).
-mark_status() {
-  local new_status="$1"
-  local msg="${2:-}"
-  REPOS_NEW_STATUS="$new_status" REPOS_ERR_MSG="$msg" \
+# Merge fields into the sentinel atomically (fsync). Every field is optional and
+# an empty one is left untouched, so a warning recorded mid-run survives a later
+# mark_status — the sentinel is read-modify-write, not overwrite.
+sentinel_merge() {
+  REPOS_NEW_STATUS="${1:-}" REPOS_ERR_MSG="${2:-}" REPOS_WARN_MSG="${3:-}" \
   python3 - "$SENTINEL_PATH" "$RESTORE_ID" <<'PY'
 import datetime, json, os, sys
 path, restore_id = sys.argv[1], sys.argv[2]
@@ -64,11 +64,16 @@ if os.path.exists(path):
             state = json.load(fh)
     except Exception:
         pass
-state["status"] = os.environ["REPOS_NEW_STATUS"]
+status = os.environ.get("REPOS_NEW_STATUS", "")
+if status:
+    state["status"] = status
+    state["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
 err = os.environ.get("REPOS_ERR_MSG", "")
 if err:
     state["error_message"] = err
-state["finished_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+warn = os.environ.get("REPOS_WARN_MSG", "")
+if warn:
+    state["warning_message"] = warn
 tmp = path + ".tmp"
 with open(tmp, "w") as fh:
     json.dump(state, fh)
@@ -77,6 +82,17 @@ with open(tmp, "w") as fh:
 os.replace(tmp, path)
 PY
   sync
+}
+
+# Set status (+ optional error_message) and stamp finished_at.
+mark_status() {
+  sentinel_merge "$1" "${2:-}" ""
+}
+
+# Record a NON-FATAL warning without touching status. Written the moment the
+# warning occurs rather than at the end, so it survives any later mark_failed.
+mark_warning() {
+  sentinel_merge "" "" "$1"
 }
 
 boot_api() {
@@ -129,8 +145,18 @@ fi
 #     is valid, and migration 080 has already guaranteed an active admin with
 #     no Cloudflare dependency, so the operator can clear maintenance and fix
 #     the sync from /settings/users.
+#
+#     "Surfaced" means WRITTEN TO THE SENTINEL, not echoed. restoreRunner.ts
+#     spawns this script detached with `stdio: 'ignore'`, so stderr goes to the
+#     void; the original version of this step only echoed, and the run then
+#     recorded an ordinary `ok` sentinel. The operator saw a clean restore and
+#     never learned that Cloudflare membership was unreconciled — the exact
+#     silent-lockout class Q31b exists to prevent. The echo is kept for anyone
+#     running the script by hand.
 if ! (cd "${API_DIR}" && node dist/services/cfReconcile-cli.js --source=restore); then
-  echo "⚠ CF reconciliation failed after restore — data is valid; fix sync from /settings/users" >&2
+  RECONCILE_WARNING='CF reconciliation failed after restore. The restored data is valid and migration 080 guarantees an active admin, so it is safe to clear maintenance. Cloudflare Access membership may be out of sync — review and repair it from /settings/users.'
+  echo "⚠ ${RECONCILE_WARNING}" >&2
+  mark_warning "${RECONCILE_WARNING}"
 fi
 
 # 6. C-DEVICE-TOKENS-RESTORE — wipe device_tokens, close restore-replay vector.

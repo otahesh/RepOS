@@ -8248,7 +8248,9 @@ exec node dist/services/cfReconcile-cli.js --source=cutover
 
 - [ ] **Step 5: Wire the restore path**
 
-Verified: `scripts/run-restore.sh:118` runs `node dist/db/migrate.js` and nothing else. Insert a new step immediately after it (before the step-6 `device_tokens` wipe):
+Verified: `scripts/run-restore.sh:118` runs `node dist/db/migrate.js` and nothing else. Insert a new step immediately after it (before the step-6 `device_tokens` wipe).
+
+> **This step also requires a `mark_warning` helper and its exposure through the API and UI — wiring it as an `echo` alone is a no-op.** `restoreRunner.ts` spawns the script with `stdio: 'ignore'`, so a warning on stderr is discarded and the run still writes an ordinary `ok` sentinel; the operator sees a green restore over an unreconciled policy. Refactor `mark_status` into a `sentinel_merge` that merges any subset of `{status, error_message, warning_message}` (empty fields left untouched, so a warning written mid-run survives a later `mark_failed`), then add `warning_message` to `RestoreSentinel` and the `GET /maintenance/status` payload **ungated on status**, copy it into `backup_runs.error_message` on clear (the sentinel is unlinked there, so an uncopied warning is lost), and give `MaintenanceBanner` a warning branch that is *not* nested under `failed`. Covered by `tests/dr/restore-orchestration.test.ts`, which executes the real script against stubbed `pg_restore`/`psql`/`node` on `PATH`.
 
 ```bash
 # 5b. W9 Q35 — reconcile the CF policy after migrations and BEFORE maintenance
@@ -8261,8 +8263,18 @@ Verified: `scripts/run-restore.sh:118` runs `node dist/db/migrate.js` and nothin
 #     is valid, and migration 080 has already guaranteed an active admin with
 #     no Cloudflare dependency, so the operator can clear maintenance and fix
 #     the sync from /settings/users.
+#
+#     "Surfaced" means WRITTEN TO THE SENTINEL, not echoed. restoreRunner.ts
+#     spawns this script detached with `stdio: 'ignore'`, so stderr goes to the
+#     void; the original version of this step only echoed, and the run then
+#     recorded an ordinary `ok` sentinel. The operator saw a clean restore and
+#     never learned that Cloudflare membership was unreconciled — the exact
+#     silent-lockout class Q31b exists to prevent. The echo is kept for anyone
+#     running the script by hand.
 if ! (cd "${API_DIR}" && node dist/services/cfReconcile-cli.js --source=restore); then
-  echo "⚠ CF reconciliation failed after restore — data is valid; fix sync from /settings/users" >&2
+  RECONCILE_WARNING='CF reconciliation failed after restore. The restored data is valid and migration 080 guarantees an active admin, so it is safe to clear maintenance. Cloudflare Access membership may be out of sync — review and repair it from /settings/users.'
+  echo "⚠ ${RECONCILE_WARNING}" >&2
+  mark_warning "${RECONCILE_WARNING}"
 fi
 ```
 
