@@ -122,7 +122,15 @@ async function reconcileLocked(
   }
 
   // (b) Import every policy email that has no row.
-  const toImport = snapshot.emails.filter((e) => !known.has(e));
+  //
+  // From `inPolicy`, NOT from snapshot.emails: Cloudflare's include[] is an
+  // array of rules with no uniqueness constraint, and toSnapshot flattens it
+  // in policy order without deduplicating, so one address listed twice arrives
+  // as two entries. Off the raw array the first INSERT committed and the
+  // second broke on users_email_key; worse, at a cohort of nine the cap check
+  // read 9 + 2 = 11 and aborted the whole run indefinitely. The Set preserves
+  // policy order, so the imported list is unchanged for a well-formed policy.
+  const toImport = [...inPolicy].filter((e) => !known.has(e));
   if (toImport.length > 0) {
     const { rows: countRows } = await db.query<{ c: number }>(
       `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,

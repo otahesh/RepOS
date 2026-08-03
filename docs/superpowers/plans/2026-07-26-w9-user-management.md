@@ -7830,6 +7830,57 @@ describe('CF-only import (Q31b)', () => {
     expect(putSpy).not.toHaveBeenCalled();
     expect(policyEmails).toEqual([]);
   });
+
+  it('rolls the users row back when its audit event cannot be written (Q27)', async () => {
+    // Added by review: the happy-path row/event pair proves nothing about
+    // atomicity. Moving COMMIT ahead of recordAccountEventTx left all fifteen
+    // original cases green, because both rows exist either way. Rejecting the
+    // event AT THE DATABASE is what forces the question.
+    const email = 'atomic.import@repos.test';
+    policyEmails = [email];
+    await db.query(`
+      CREATE FUNCTION reject_user_imported() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'audit rejected: user_imported'; END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_user_imported_trg
+        BEFORE INSERT ON account_events
+        FOR EACH ROW WHEN (NEW.kind = 'user_imported')
+        EXECUTE FUNCTION reject_user_imported();
+    `);
+    try {
+      await expect(reconcileCfBaseline('cutover')).rejects.toThrow(/audit rejected/);
+      const { rows } = await db.query(`SELECT id FROM users WHERE email=$1`, [email]);
+      expect(rows).toHaveLength(0);
+    } finally {
+      // Dropped even on failure, or every later case inherits the rejection.
+      await db.query(`DROP TRIGGER reject_user_imported_trg ON account_events`);
+      await db.query(`DROP FUNCTION reject_user_imported()`);
+    }
+  });
+
+  it('imports ONE row for a policy naming the same selector twice, and counts it once (Q12)', async () => {
+    // Added by review. Cloudflare's include[] has no uniqueness constraint and
+    // toSnapshot flattens it in policy order without deduplicating. NINE
+    // existing cohort rows is the discriminating fixture: off the raw array
+    // the cap check read 9 + 2 = 11 and aborted, and with the cap lifted the
+    // second INSERT broke on users_email_key instead.
+    await db.query(`DELETE FROM users`);
+    for (let i = 0; i < 9; i++) {
+      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [freshEmail(`c${i}`)]);
+    }
+    const email = 'dupe.selector@repos.test';
+    policyEmails = [email, email];
+
+    const r = await reconcileCfBaseline('cutover');
+
+    expect(r.imported).toEqual([email]);
+    const { rows } = await db.query(`SELECT id FROM users WHERE email=$1`, [email]);
+    expect(rows).toHaveLength(1);
+    const { rows: [c] } = await db.query<{ c: number }>(
+      `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
+    );
+    expect(c.c).toBe(10); // nine existing plus exactly one import — not an abort at 11
+  });
 });
 
 describe('it aborts rather than importing from a broadened policy', () => {
@@ -8066,7 +8117,15 @@ async function reconcileLocked(
   }
 
   // (b) Import every policy email that has no row.
-  const toImport = snapshot.emails.filter((e) => !known.has(e));
+  //
+  // From `inPolicy`, NOT from snapshot.emails: Cloudflare's include[] is an
+  // array of rules with no uniqueness constraint, and toSnapshot flattens it
+  // in policy order without deduplicating, so one address listed twice arrives
+  // as two entries. Off the raw array the first INSERT committed and the
+  // second broke on users_email_key; worse, at a cohort of nine the cap check
+  // read 9 + 2 = 11 and aborted the whole run indefinitely. The Set preserves
+  // policy order, so the imported list is unchanged for a well-formed policy.
+  const toImport = [...inPolicy].filter((e) => !known.has(e));
   if (toImport.length > 0) {
     const { rows: countRows } = await db.query<{ c: number }>(
       `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
@@ -8210,7 +8269,7 @@ fi
 - [ ] **Step 6: Run tests, build, and commit**
 
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/services/cf-reconcile.test.ts && npm run build`
-Expected: PASS, 15 tests; `dist/services/cfReconcile-cli.js` exists.
+Expected: PASS, 17 tests; `dist/services/cfReconcile-cli.js` exists. (15 as planned, plus the two review-added cases above: audit-rollback atomicity and the duplicate policy selector.)
 
 Run: `bash -n /var/home/jason/Projects/RepOS/scripts/run-restore.sh && bash -n /var/home/jason/Projects/RepOS/scripts/cutover/002-w9-cf-baseline.sh`
 Expected: no output (both parse).

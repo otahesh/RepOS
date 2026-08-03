@@ -234,6 +234,62 @@ describe('CF-only import (Q31b)', () => {
     expect(putSpy).not.toHaveBeenCalled();
     expect(policyEmails).toEqual([]);
   });
+
+  it('rolls the users row back when its audit event cannot be written (Q27)', async () => {
+    // The happy-path row/event pair proves nothing about atomicity: moving
+    // COMMIT ahead of recordAccountEventTx left all fifteen original cases
+    // green, because both rows exist either way. Rejecting the event AT THE
+    // DATABASE is what forces the question — the imported row must not survive
+    // a missing audit record.
+    const email = 'atomic.import@repos.test';
+    policyEmails = [email];
+    await db.query(`
+      CREATE FUNCTION reject_user_imported() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'audit rejected: user_imported'; END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_user_imported_trg
+        BEFORE INSERT ON account_events
+        FOR EACH ROW WHEN (NEW.kind = 'user_imported')
+        EXECUTE FUNCTION reject_user_imported();
+    `);
+    try {
+      await expect(reconcileCfBaseline('cutover')).rejects.toThrow(/audit rejected/);
+      const { rows } = await db.query(`SELECT id FROM users WHERE email=$1`, [email]);
+      expect(rows).toHaveLength(0);
+    } finally {
+      // Dropped even on failure, or every later case inherits the rejection.
+      await db.query(`DROP TRIGGER reject_user_imported_trg ON account_events`);
+      await db.query(`DROP FUNCTION reject_user_imported()`);
+    }
+  });
+
+  it('imports ONE row for a policy naming the same selector twice, and counts it once (Q12)', async () => {
+    // Cloudflare's include[] has no uniqueness constraint and toSnapshot
+    // flattens it in policy order without deduplicating. Nine existing cohort
+    // rows is the discriminating fixture: off the raw array the cap check read
+    // 9 + 2 = 11 and aborted, and with the cap lifted the second INSERT broke
+    // on users_email_key instead.
+    await db.query(`DELETE FROM users`);
+    for (let i = 0; i < 9; i++) {
+      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [
+        freshEmail(`c${i}`),
+      ]);
+    }
+    const email = 'dupe.selector@repos.test';
+    policyEmails = [email, email];
+
+    const r = await reconcileCfBaseline('cutover');
+
+    expect(r.imported).toEqual([email]);
+    const { rows } = await db.query(`SELECT id FROM users WHERE email=$1`, [email]);
+    expect(rows).toHaveLength(1);
+    const {
+      rows: [c],
+    } = await db.query<{ c: number }>(
+      `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
+    );
+    expect(c.c).toBe(10); // nine existing plus exactly one import — not an abort at 11
+  });
 });
 
 describe('it aborts rather than importing from a broadened policy', () => {
