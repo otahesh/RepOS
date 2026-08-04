@@ -9261,12 +9261,18 @@ Create `api/tests/integration/contamination/admin-users-contamination.test.ts` �
 // G2 contamination matrix — six rows. A CF-Access-authenticated `member` must
 // be refused on every user-management route, and the X-Admin-Key escape hatch
 // must not work on any of them (Q20).
-import 'dotenv/config';
+//
+// Why the admin-key half matters as much as the role half: that branch returns
+// WITHOUT setting req.userId/req.userEmail, so there is no actor — the Q13
+// self-target guards would have no "self" to compare against and every audit
+// row would be unattributed. It is refused on header presence alone, before
+// any CF Access check.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../../../src/app.js';
 import { setupTestJwks, type TestJwksHandle } from '../../helpers/cf-access-jwt.js';
 import { mkUserWithEmail, cleanupUser } from '../../helpers/program-fixtures.js';
+import { db } from '../../../src/db/client.js';
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 let jwks: TestJwksHandle;
@@ -9314,6 +9320,8 @@ describe('W9 contamination matrix — six rows toward G2', () => {
     });
 
     it(`${r.name}: the X-Admin-Key path is rejected`, async () => {
+      // ADMIN_API_KEY is set to the value we then present, so this proves a
+      // *correct* admin key is refused — not merely that a wrong one is.
       const saved = process.env.ADMIN_API_KEY;
       process.env.ADMIN_API_KEY = 'contam-key';
       try {
@@ -9331,8 +9339,11 @@ describe('W9 contamination matrix — six rows toward G2', () => {
     });
   }
 
+  // The rejections above assert a response code. This asserts the operation
+  // did not happen — a route that mutated and *then* refused would satisfy
+  // every case above and fail here.
   it('the victim is untouched by every rejected attempt', async () => {
-    const { rows } = await (await import('../../../src/db/client.js')).db.query<{ status: string; role: string }>(
+    const { rows } = await db.query<{ status: string; role: string }>(
       `SELECT status, role FROM users WHERE id=$1`, [victimId],
     );
     expect(rows[0]).toEqual({ status: 'active', role: 'member' });
@@ -9345,39 +9356,104 @@ Create `api/tests/integration/w9-env-sweep.test.ts`:
 ```ts
 // The two env vars W9 removes must be read NOWHERE. A stale reader would
 // reintroduce exactly the redeploy coupling this wave exists to remove.
+//
+// The patterns below are anchored on the READ, never on the bare name:
+// migration 080's mapping header, the cfAccess.ts replacement comment and
+// bootstrap-guards.ts all cite the removed variables on purpose, to record
+// what replaced them. A bare-name assertion would force deleting that history
+// to go green.
 import { describe, it, expect } from 'vitest';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+
+const REMOVED = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
+
+/** `process.env.X` and `process.env['X']` — both real read forms in this repo. */
+const JS_READ = new RegExp(`process\\.env(\\.|\\[['"\`])(${REMOVED})`);
+/** `$X` / `${X}` — the shell read form, for the container's s6 scripts. */
+const SH_READ = new RegExp(`\\$\\{?(${REMOVED})\\b`);
+
+const SCANNED_EXTENSIONS = /\.(ts|tsx|mjs|sql|sh|md|yml|yaml|conf)$/;
+
+/**
+ * Extensionless files are scanned too. `docker/root/etc/s6-overlay/scripts/*`
+ * (init-migrations, run-api, wait-for-postgres…) and `docker/Dockerfile` carry
+ * no extension, and those are precisely the files that plumb an env var into
+ * the container — an extension allowlist alone would skip every one of them.
+ */
+function shouldScan(name: string): boolean {
+  return SCANNED_EXTENSIONS.test(name) || !name.includes('.');
+}
 
 async function walk(dir: string, out: string[] = []): Promise<string[]> {
   for (const e of await readdir(dir)) {
     if (e === 'node_modules' || e === 'dist' || e === '.git') continue;
     const p = join(dir, e);
     if ((await stat(p)).isDirectory()) await walk(p, out);
-    else if (/\.(ts|tsx|sql|sh|md|yml|yaml)$/.test(e)) out.push(p);
+    else if (shouldScan(e)) out.push(p);
   }
   return out;
 }
 
+const ROOTS = ['api/src', 'api/tests', 'frontend/src', 'docker', 'scripts'];
+const repoRoot = join(process.cwd(), '..');
+
+async function scanAll(): Promise<{ files: string[]; offenders: string[] }> {
+  const files: string[] = [];
+  const offenders: string[] = [];
+  for (const root of ROOTS) {
+    for (const f of await walk(join(repoRoot, root)).catch(() => [] as string[])) {
+      files.push(f);
+      const body = await readFile(f, 'utf8');
+      if (JS_READ.test(body) || (SH_READ.test(body) && !f.endsWith('.md'))) offenders.push(f);
+    }
+  }
+  return { files, offenders };
+}
+
 describe('W9 env-var removal is complete', () => {
   it('no source file READS CF_ACCESS_ALLOWED_EMAILS or REPOS_ADMIN_EMAILS', async () => {
-    const roots = ['api/src', 'api/tests', 'frontend/src', 'docker', 'scripts'];
-    const offenders: string[] = [];
-    for (const root of roots) {
-      for (const f of await walk(join(process.cwd(), '..', root)).catch(() => [])) {
-        const body = await readFile(f, 'utf8');
-        if (/process\.env\.(CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS)/.test(body)) {
-          offenders.push(f);
-        }
-      }
-    }
+    const { offenders } = await scanAll();
     expect(offenders).toEqual([]);
   });
 
-  // The reader sweep above matches `process.env.X` in code files, so it can
-  // never catch the tracked env template — `.env.example` has no scanned
-  // extension and declares rather than reads. Assert it separately or the
-  // template keeps advertising both removed vars to every future operator.
+  // `expect([]).toEqual([])` is also what a sweep that scanned NOTHING returns.
+  // These assertions prove the sweep reached the tree it claims to police —
+  // including the extensionless container scripts, which the obvious
+  // extension-allowlist implementation silently skips.
+  it('the sweep actually reaches the files it claims to cover', async () => {
+    const { files } = await scanAll();
+    expect(files.length).toBeGreaterThan(200);
+    for (const expected of [
+      'api/src/middleware/cfAccess.ts',
+      'frontend/src/lib/api/adminUsers.ts',
+      'docker/root/etc/s6-overlay/scripts/run-api',   // extensionless
+      'docker/Dockerfile',                             // extensionless
+      'scripts/run-restore.sh',
+    ]) {
+      expect(files.some((f) => f.endsWith(expected)), `never scanned ${expected}`).toBe(true);
+    }
+  });
+
+  // The history mentions must SURVIVE the sweep — if they ever start failing
+  // it, the patterns have stopped being anchored on the read.
+  it('deliberate history mentions are not offenders', async () => {
+    const { offenders } = await scanAll();
+    for (const historical of [
+      'api/src/db/migrations/080_users_roles_status.sql',
+      'api/src/middleware/cfAccess.ts',
+      'api/src/bootstrap-guards.ts',
+    ]) {
+      const body = await readFile(join(repoRoot, historical), 'utf8');
+      expect(body).toMatch(new RegExp(REMOVED));                 // still records it
+      expect(offenders.some((f) => f.endsWith(historical))).toBe(false);
+    }
+  });
+
+  // The reader sweep matches read syntax in code files, so it can never catch
+  // the tracked env template — `.env.example` declares rather than reads.
+  // Assert it separately or the template keeps advertising both removed vars
+  // to every future operator.
   it('api/.env.example advertises the five new vars and neither removed one', async () => {
     const tpl = await readFile(join(process.cwd(), '.env.example'), 'utf8');
     expect(tpl).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
@@ -9397,9 +9473,22 @@ describe('W9 env-var removal is complete', () => {
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/integration/contamination/admin-users-contamination.test.ts tests/integration/w9-env-sweep.test.ts --config vitest.integration.config.ts`
 Expected: the contamination suite passes if Tasks 9–14 are correct — run it and read the failures rather than assuming. The env sweep fails if any reader survives; delete the reader, never the assertion.
 
+**Measured: 16 passed / 1 failed.** All 13 contamination cases passed first time, and so did three of the four sweep cases — by Task 19 **no `process.env` reader of either variable is left anywhere**, so that assertion lands as a regression guard rather than red-to-green. The single genuine failure was `api/.env.example`, which is the one artifact no code sweep can reach.
+
+**Most of this task's assertions therefore pass before any change is made, which is exactly the condition under which a test proves nothing.** Two structural consequences, both of which the original plan text got wrong:
+
+1. **`expect(offenders).toEqual([])` is also what a sweep that scanned NOTHING returns.** The sweep needs its own reachability case — assert the file count and that specific known paths were opened. Verified by pointing `repoRoot` at a non-existent directory: the reader assertion **still passed** while the reachability case failed. Without it the whole sweep is one typo away from being decorative.
+2. **The extension allowlist skipped the files most likely to plumb a container env var.** `docker/root/etc/s6-overlay/scripts/*` (`run-api`, `init-migrations`, `wait-for-postgres`…) and `docker/Dockerfile` carry **no extension**, so an allowlist of `.ts|.sql|.sh|.md|…` opens none of them. Scan extensionless files too, and add the shell read form (`$VAR` / `${VAR}`) alongside the JS one — a plumbed `$REPOS_ADMIN_EMAILS` in an s6 script is precisely the reintroduction this gate exists to stop. Also widen the JS pattern to bracket notation: `process.env['REPOS_ADMIN_EMAILS']` evades a `process\.env\.` anchor completely.
+
+Each of those was mutation-verified by planting the corresponding reader and watching the sweep go red.
+
 - [ ] **Step 3: Fix whatever the sweep finds**
 
-Remove every surviving reader, plus `api/.env.example` (there is no template under `docker/` — see the Files list above) and any documentation that instructs an operator to *set* these variables. Replace those doc lines with a pointer to `/settings/users`. Documentation that merely records what the variables *were*, and what replaced them, stays — the greps above are anchored on `process.env.` precisely so that history survives.
+Remove every surviving reader, plus `api/.env.example` (there is no template under `docker/` — see the Files list above) and any documentation that instructs an operator to *set* these variables.
+
+**The template's rule is stricter than the code's, deliberately.** The code sweep is anchored on the read so migration 080's mapping header survives; the `.env.example` assertion is on the **bare name**, because that file gets copied to `.env` by an operator and a name in it is an invitation to set it. Writing the mapping into the template as a helpful comment fails the test — correctly. Cite migration 080 by number instead. (This cost one cycle during execution.)
+
+Also state the boot behaviour accurately rather than uniformly: **all five fail at USE time and never at boot**, but only `CF_API_TOKEN` and `RESEND_API_KEY` emit a boot advisory (`bootstrap-guards.ts:44-49`). `CF_ACCOUNT_ID`, `CF_ACCESS_POLICY_ID` and `INVITE_FROM_EMAIL` are silent until used. Replace those doc lines with a pointer to `/settings/users`. Documentation that merely records what the variables *were*, and what replaced them, stays — the greps above are anchored on `process.env.` precisely so that history survives.
 
 - [ ] **Step 4: Update the Beta dashboard and scope docs**
 
@@ -9411,7 +9500,11 @@ In `docs/superpowers/goals/beta.md`:
 
 In `CLAUDE.md`, update the Scope section: move user management from the implicit env-var workflow into Beta's shipped list, and update the "Beta (in-flight)" pointer to name this plan.
 
-Add a reachability assertion to the existing G7 test file so the claim is enforced, not asserted in prose only.
+Add a reachability assertion to the existing G7 test file so the claim is enforced, not asserted in prose only. **There is no api-side G7 file** — the G7 comments live in the frontend, so the claim splits in two: `SettingsSidebar.test.tsx` asserts Users is a live top-level entry with no deeper tier (which is what makes it 2 clicks), and `navigation.smoke.test.tsx` asserts the rendered entry is an `<a href="/settings/users">`. **Reachable means clickable, not rendered** — the existing label assertion would pass on a `<div>`.
+
+G14 needs the same precision: W9 mechanizes **three of its four clauses** — the cap (`COHORT_CAP = 10`, enforced on invite *and* reinstate), the contact path (`SUPPORT_CONTACT` in every invite body) and the Beta disclaimer (fixed invite copy). **PAR-Q-lite signing is not W9's** and stays cutover-time, so the gate moves to `[~]`, not `[x]`.
+
+Adding a W9 row to the wave table also contradicts the status checklist above it, which lists W0–W8 and calls W8 "the last wave". Add the `[~]` W9 line there too, or the document disagrees with itself.
 
 - [ ] **Step 5: Full verification**
 
@@ -9425,6 +9518,10 @@ cd /var/home/jason/Projects/RepOS && grep -rnE "process\.env\.(REPOS_ADMIN_EMAIL
 
 Expected: all green; the final grep returns **nothing**.
 
+**Measured:** api unit 81 files / 733 (unchanged — this task adds integration tests only), api integration **74 / 287 / 7 skipped** (from 72 / 270: +2 files, +17 tests), frontend **69 / 421** (+1 G7 case), both builds clean, `check-pages` and `check-term-coverage` OK, final grep empty. Post-run hygiene clean: 0 advisory locks, 0 ephemeral DBs, 0 stray `/tmp/repos-*`, 0 leftover `w9.contam%` rows.
+
+Six mutations, each killing only its intended cases: a dot-notation reader, a **bracket-notation** reader, a **shell** reader planted in an extensionless s6 script, a broken scan root (kills the reachability case while the reader case still passes), dropping the gate from `GET /admin/users`, and dropping it from `PATCH` — the last one also **suspends the victim**, which is what proves the "victim is untouched" case is not vacuous.
+
 Same reasoning as Task 9's grep: this matches **reads**, not the names. Migration
 080's mapping header and the `cfAccess.ts` replacement comment both cite the
 removed variables on purpose, to record what they were replaced by. A
@@ -9432,8 +9529,15 @@ bare-name grep would force deleting that history to go green.
 
 - [ ] **Step 6: Commit**
 
+**Never `git add -A` in this repo** — `.gitignore` is intentionally modified and uncommitted in the working tree. Stage by explicit path.
+
 ```bash
-git add -A
+git add api/tests/integration/contamination/admin-users-contamination.test.ts \
+        api/tests/integration/w9-env-sweep.test.ts api/.env.example \
+        docs/superpowers/goals/beta.md CLAUDE.md \
+        frontend/src/components/settings/SettingsSidebar.test.tsx \
+        frontend/src/__smoke__/navigation.smoke.test.tsx \
+        docs/superpowers/plans/2026-07-26-w9-user-management.md
 git commit -m "$(cat <<'EOF'
 test(w9): contamination matrix, env sweep, and dashboard updates
 

@@ -125,5 +125,11 @@ describe('navigation smoke', () => {
     const sidebar = screen.getByRole('complementary')
     expect(within(sidebar).getByText('Users')).toBeInTheDocument()
     expect(renderedSectionLabels(sidebar)).toHaveLength(10)
+    // G7 — reachable means clickable, not merely rendered. Asserting the href
+    // is what makes this a reachability test rather than a label test.
+    expect(within(sidebar).getByText('Users').closest('a')).toHaveAttribute(
+      'href',
+      '/settings/users',
+    )
   })
 })
