@@ -5,7 +5,7 @@
 // (userLifecycle.ts): the cohort cap, an address that is already active, a
 // suspended address that must be reinstated rather than re-invited, and one
 // mid-deletion. Showing the raw code would make each of them look like a bug.
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { TOKENS, FONTS } from '../../tokens';
 import type { UserRole } from '../../lib/api/adminUsers';
@@ -52,6 +52,20 @@ export function InviteUserModal({ open, busy, error, onSubmit, onCancel }: Props
   const titleId = useId();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('member');
+
+  // The page keeps this component mounted and toggles `open`, so closing does
+  // NOT discard the fields. Reset them on the closed→open transition instead
+  // of on close: an in-modal API error (the 409 branch below) keeps `open`
+  // true, so the address the admin typed survives the failure it caused.
+  // Resetting only here also stops a retained `admin` role from being applied
+  // to whatever address is typed next. Same render-phase pattern as
+  // ConfirmDialog's typed-confirm reset.
+  const wasOpen = useRef(open);
+  if (open && !wasOpen.current) {
+    if (email !== '') setEmail('');
+    if (role !== 'member') setRole('member');
+  }
+  wasOpen.current = open;
 
   if (!open) return null;
 

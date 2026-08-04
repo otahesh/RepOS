@@ -17,15 +17,65 @@ import { useCallback, useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../tokens';
 import { useCurrentUser } from '../auth';
 import { pushToast } from '../components/common/ToastHost';
+import type { ToastSpec } from '../components/common/ToastHost';
 import { UsersTable, type RowAction } from '../components/settings/UsersTable';
 import { InviteUserModal, inviteErrorMessage } from '../components/settings/InviteUserModal';
 import {
   listUsers, inviteUser, patchUser, resendInvite, retrySync, deleteUser,
   type AdminUserList, type AdminUserRow, type UserRole,
+  type InviteOutcome, type PatchOutcome,
 } from '../lib/api/adminUsers';
 
 function statusOf(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
+}
+
+/**
+ * A 2xx from the invite path does NOT mean the invitation happened.
+ * `provisionAndMail` (userLifecycle.ts) *returns* both partial failures rather
+ * than throwing, because each leaves a durable row that must not roll back:
+ *
+ *   cf_synced=false — the row exists but is absent from the Cloudflare policy
+ *                     and unstamped, so Q17b refuses activation. No email was
+ *                     attempted. They cannot sign in.
+ *   invite_sent=false — provisioned and able to sign in; only the mail failed.
+ *
+ * The two are opposite instructions to the operator, so they cannot share
+ * copy, and neither may be reported as plain success.
+ */
+function inviteOutcomeToast(out: InviteOutcome, email: string, success: string): ToastSpec {
+  if (!out.cf_synced) {
+    return {
+      severity: 'error',
+      body: `${email} was created but NOT added to the Cloudflare policy (${out.sync_error ?? 'unknown error'}). No invitation was sent and they cannot sign in — use Retry sync, then Resend.`,
+    };
+  }
+  if (!out.invite_sent) {
+    return {
+      severity: 'error',
+      body: `${email} is provisioned and can sign in, but the invitation email failed (${out.mail_error ?? 'unknown error'}). Use Resend.`,
+    };
+  }
+  return { severity: 'success', body: success };
+}
+
+/**
+ * Suspend commits the DB revocation and then attempts the policy removal,
+ * reporting a failed removal in the body rather than throwing (patchUser).
+ * That is a WARNING, not an error: per the governing model the DB transition
+ * IS the security event — the user is already refused on both auth paths — and
+ * what remains is a stale policy entry to reconcile.
+ *
+ * Reinstate cannot reach the false branch today (Q34 makes a failed CF add a
+ * thrown 502), but it shares this helper so it can never silently gain a
+ * success-shaped lie either.
+ */
+function patchOutcomeToast(out: PatchOutcome, email: string, success: string): ToastSpec {
+  if (out.cf_synced) return { severity: 'success', body: success };
+  return {
+    severity: 'warn',
+    body: `${email} is now ${out.status} and the change is enforced on every request, but the Cloudflare policy update failed (${out.sync_error ?? 'unknown error'}). Sync is pending — use Retry sync.`,
+  };
 }
 
 export default function SettingsUsersPage(): JSX.Element {
@@ -60,8 +110,9 @@ export default function SettingsUsersPage(): JSX.Element {
     try {
       switch (action) {
         case 'resend':
-          await resendInvite(row.id);
-          pushToast({ severity: 'success', body: `Invite resent to ${row.email}.` });
+          pushToast(inviteOutcomeToast(
+            await resendInvite(row.id), row.email, `Invite resent to ${row.email}.`,
+          ));
           break;
         case 'retry-sync': {
           const out = await retrySync(row.id);
@@ -73,12 +124,14 @@ export default function SettingsUsersPage(): JSX.Element {
           break;
         }
         case 'suspend':
-          await patchUser(row.id, { status: 'suspended' });
-          pushToast({ severity: 'success', body: `${row.email} suspended.` });
+          pushToast(patchOutcomeToast(
+            await patchUser(row.id, { status: 'suspended' }), row.email, `${row.email} suspended.`,
+          ));
           break;
         case 'reinstate':
-          await patchUser(row.id, { status: 'active' });
-          pushToast({ severity: 'success', body: `${row.email} reinstated.` });
+          pushToast(patchOutcomeToast(
+            await patchUser(row.id, { status: 'active' }), row.email, `${row.email} reinstated.`,
+          ));
           break;
         case 'delete':
           await deleteUser(row.id);
@@ -107,11 +160,9 @@ export default function SettingsUsersPage(): JSX.Element {
     try {
       const out = await inviteUser(email, role);
       setInviteOpen(false);
-      // Q7 — a mail failure leaves a real, provisioned invitee. Reporting it
-      // as a failed invite would be wrong; they can sign in.
-      pushToast(out.mail_error
-        ? { severity: 'error', body: `${email} was provisioned, but the email failed (${out.mail_error}). Use Resend.` }
-        : { severity: 'success', body: `Invited ${email}.` });
+      // Q7/Q8 — the row is durable on every 2xx path, but "durable" is not
+      // "invited": both partial failures arrive here as a 201, not a throw.
+      pushToast(inviteOutcomeToast(out, email, `Invited ${email}.`));
       await load();
     } catch (err) {
       setInviteError(inviteErrorMessage(err));

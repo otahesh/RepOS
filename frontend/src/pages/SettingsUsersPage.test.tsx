@@ -5,6 +5,20 @@ import { MemoryRouter } from 'react-router-dom';
 import SettingsUsersPage from './SettingsUsersPage';
 import * as api from '../lib/api/adminUsers';
 import * as auth from '../auth';
+import * as toast from '../components/common/ToastHost';
+
+// Fully-shaped success envelopes. A partial `{ id } as never` cast would hide
+// exactly the defect these fixtures exist to expose: every field below can
+// come back false on a 2xx, and the UI has to read them.
+const inviteOk = (email: string, id = '9'): api.InviteOutcome => ({
+  id, email, status: 'invited', created: true,
+  cf_synced: true, invite_sent: true, sync_error: null, mail_error: null,
+});
+const patchOk = (id: string, email: string, status: 'active' | 'suspended'): api.PatchOutcome => ({
+  id, email, role: 'member', status, cf_synced: true, sync_error: null,
+});
+const spyToast = () => vi.spyOn(toast, 'pushToast').mockReturnValue('toast-id');
+const lastToast = (s: ReturnType<typeof spyToast>) => s.mock.calls[s.mock.calls.length - 1][0];
 
 const baseResponse = {
   users: [
@@ -119,13 +133,72 @@ describe('SettingsUsersPage', () => {
 
   it('invite modal posts the email and role, then refreshes', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue({ id: '3' } as never);
+    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue(inviteOk('new@repos.test'));
+    const toasted = spyToast();
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
     await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
     await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
     await waitFor(() => expect(invite).toHaveBeenCalledWith('new@repos.test', 'member'));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(lastToast(toasted).severity).toBe('success');
+  });
+
+  // A 201 whose CF sync failed: no policy grant, no stamp, no email attempted.
+  // Reporting "Invited" here tells the admin to wait for someone who was never
+  // asked and could not act on it if they had been.
+  it('a 201 with cf_synced=false is NOT reported as an invitation', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'inviteUser').mockResolvedValue({
+      ...inviteOk('new@repos.test'),
+      cf_synced: false, invite_sent: false, sync_error: 'cf_http_403',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('error');
+    expect(t.body).toMatch(/cf_http_403/);
+    expect(t.body).toMatch(/cannot sign in/i);
+  });
+
+  // The opposite partial failure, and the opposite instruction: provisioned,
+  // so they CAN sign in — only the email failed.
+  it('a 201 with invite_sent=false says they can sign in but must be resent', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'inviteUser').mockResolvedValue({
+      ...inviteOk('new@repos.test'),
+      invite_sent: false, mail_error: 'mail_http_error',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('error');
+    expect(t.body).toMatch(/mail_http_error/);
+    expect(t.body).toMatch(/can sign in/i);
+  });
+
+  it('a resend that did not deliver is not reported as resent', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'resendInvite').mockResolvedValue({
+      ...inviteOk('pending@repos.test', '2'),
+      created: false, invite_sent: false, mail_error: 'mail_http_error',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(
+      within(await screen.findByTestId('user-row-pending@repos.test')).getByRole('button', { name: /^resend$/i }),
+    );
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    expect(lastToast(toasted).severity).toBe('error');
+    expect(lastToast(toasted).body).toMatch(/mail_http_error/);
   });
 
   it('surfaces a 409 cohort_cap_reached with the count', async () => {
@@ -136,6 +209,39 @@ describe('SettingsUsersPage', () => {
     await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
     await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
     expect(await screen.findByText(/10 \/ 10/)).toBeInTheDocument();
+    // The modal stays open on an in-modal error, and the address that caused
+    // it must survive — retyping it to read the error is not a fix workflow.
+    expect(screen.getByLabelText(/email/i)).toHaveValue('new@repos.test');
+  });
+
+  it('clears the invite form between openings', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue(inviteOk('first@repos.test'));
+    spyToast();
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'first@repos.test');
+    await userEvent.selectOptions(screen.getByLabelText(/role/i), 'admin');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(invite).toHaveBeenCalledWith('first@repos.test', 'admin'));
+
+    // Reopening must not re-offer the previous address (resubmitting it hits
+    // the duplicate-invite path) or the previous role (which would silently
+    // make the NEXT address an admin).
+    await userEvent.click(screen.getByRole('button', { name: /invite user/i }));
+    expect(screen.getByLabelText(/email/i)).toHaveValue('');
+    expect(screen.getByLabelText(/role/i)).toHaveValue('member');
+  });
+
+  it('clears the invite form after a cancel', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'typo@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /invite user/i }));
+    expect(screen.getByLabelText(/email/i)).toHaveValue('');
   });
 
   it('delete requires typed confirmation (heavy action)', async () => {
@@ -154,8 +260,10 @@ describe('SettingsUsersPage', () => {
 
   it('light actions fire without a confirmation step', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({ id: '2' } as never);
-    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' } as never);
+    const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({
+      ...inviteOk('pending@repos.test', '2'), created: false, resent: true,
+    });
+    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' });
     renderPage();
     const row = () => within(rowFor('pending@repos.test'));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
@@ -168,13 +276,35 @@ describe('SettingsUsersPage', () => {
 
   it('suspend is a medium action — confirmed, then PATCHed', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '2' } as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('2', 'pending@repos.test', 'suspended'));
+    const toasted = spyToast();
     renderPage();
     await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
     expect(patch).not.toHaveBeenCalled();          // the dialog gates the call
     await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith('2', { status: 'suspended' }));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(lastToast(toasted).severity).toBe('success');
+  });
+
+  // The DB revocation committed — they are already refused on both auth paths
+  // — but the policy still lists them. That is a warning with follow-up work,
+  // not an error, and certainly not plain success.
+  it('a suspend whose policy removal failed warns that sync is pending', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'patchUser').mockResolvedValue({
+      ...patchOk('2', 'pending@repos.test', 'suspended'),
+      cf_synced: false, sync_error: 'cf_http_500',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
+    await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('warn');
+    expect(t.body).toMatch(/cf_http_500/);
+    expect(t.body).toMatch(/retry sync/i);
   });
 
   it('reinstate PATCHes a suspended row back to active', async () => {
@@ -185,7 +315,7 @@ describe('SettingsUsersPage', () => {
         { ...baseResponse.users[1], id: '3', email: 'gone@repos.test', status: 'suspended' },
       ],
     } as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '3' } as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('3', 'gone@repos.test', 'active'));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /^reinstate$/i }));
     await userEvent.click(screen.getByRole('button', { name: /reinstate user/i }));

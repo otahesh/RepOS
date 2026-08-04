@@ -8645,6 +8645,20 @@ import { MemoryRouter } from 'react-router-dom';
 import SettingsUsersPage from './SettingsUsersPage';
 import * as api from '../lib/api/adminUsers';
 import * as auth from '../auth';
+import * as toast from '../components/common/ToastHost';
+
+// Fully-shaped success envelopes. A partial `{ id } as never` cast would hide
+// exactly the defect these fixtures exist to expose: every field below can
+// come back false on a 2xx, and the UI has to read them.
+const inviteOk = (email: string, id = '9'): api.InviteOutcome => ({
+  id, email, status: 'invited', created: true,
+  cf_synced: true, invite_sent: true, sync_error: null, mail_error: null,
+});
+const patchOk = (id: string, email: string, status: 'active' | 'suspended'): api.PatchOutcome => ({
+  id, email, role: 'member', status, cf_synced: true, sync_error: null,
+});
+const spyToast = () => vi.spyOn(toast, 'pushToast').mockReturnValue('toast-id');
+const lastToast = (s: ReturnType<typeof spyToast>) => s.mock.calls[s.mock.calls.length - 1][0];
 
 const baseResponse = {
   users: [
@@ -8759,13 +8773,72 @@ describe('SettingsUsersPage', () => {
 
   it('invite modal posts the email and role, then refreshes', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue({ id: '3' } as never);
+    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue(inviteOk('new@repos.test'));
+    const toasted = spyToast();
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
     await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
     await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
     await waitFor(() => expect(invite).toHaveBeenCalledWith('new@repos.test', 'member'));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(lastToast(toasted).severity).toBe('success');
+  });
+
+  // A 201 whose CF sync failed: no policy grant, no stamp, no email attempted.
+  // Reporting "Invited" here tells the admin to wait for someone who was never
+  // asked and could not act on it if they had been.
+  it('a 201 with cf_synced=false is NOT reported as an invitation', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'inviteUser').mockResolvedValue({
+      ...inviteOk('new@repos.test'),
+      cf_synced: false, invite_sent: false, sync_error: 'cf_http_403',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('error');
+    expect(t.body).toMatch(/cf_http_403/);
+    expect(t.body).toMatch(/cannot sign in/i);
+  });
+
+  // The opposite partial failure, and the opposite instruction: provisioned,
+  // so they CAN sign in — only the email failed.
+  it('a 201 with invite_sent=false says they can sign in but must be resent', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'inviteUser').mockResolvedValue({
+      ...inviteOk('new@repos.test'),
+      invite_sent: false, mail_error: 'mail_http_error',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('error');
+    expect(t.body).toMatch(/mail_http_error/);
+    expect(t.body).toMatch(/can sign in/i);
+  });
+
+  it('a resend that did not deliver is not reported as resent', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'resendInvite').mockResolvedValue({
+      ...inviteOk('pending@repos.test', '2'),
+      created: false, invite_sent: false, mail_error: 'mail_http_error',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click(
+      within(await screen.findByTestId('user-row-pending@repos.test')).getByRole('button', { name: /^resend$/i }),
+    );
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    expect(lastToast(toasted).severity).toBe('error');
+    expect(lastToast(toasted).body).toMatch(/mail_http_error/);
   });
 
   it('surfaces a 409 cohort_cap_reached with the count', async () => {
@@ -8776,6 +8849,39 @@ describe('SettingsUsersPage', () => {
     await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
     await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
     expect(await screen.findByText(/10 \/ 10/)).toBeInTheDocument();
+    // The modal stays open on an in-modal error, and the address that caused
+    // it must survive — retyping it to read the error is not a fix workflow.
+    expect(screen.getByLabelText(/email/i)).toHaveValue('new@repos.test');
+  });
+
+  it('clears the invite form between openings', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    const invite = vi.spyOn(api, 'inviteUser').mockResolvedValue(inviteOk('first@repos.test'));
+    spyToast();
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'first@repos.test');
+    await userEvent.selectOptions(screen.getByLabelText(/role/i), 'admin');
+    await userEvent.click(screen.getByRole('button', { name: /^send invite$/i }));
+    await waitFor(() => expect(invite).toHaveBeenCalledWith('first@repos.test', 'admin'));
+
+    // Reopening must not re-offer the previous address (resubmitting it hits
+    // the duplicate-invite path) or the previous role (which would silently
+    // make the NEXT address an admin).
+    await userEvent.click(screen.getByRole('button', { name: /invite user/i }));
+    expect(screen.getByLabelText(/email/i)).toHaveValue('');
+    expect(screen.getByLabelText(/role/i)).toHaveValue('member');
+  });
+
+  it('clears the invite form after a cancel', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
+    await userEvent.type(screen.getByLabelText(/email/i), 'typo@repos.test');
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /invite user/i }));
+    expect(screen.getByLabelText(/email/i)).toHaveValue('');
   });
 
   it('delete requires typed confirmation (heavy action)', async () => {
@@ -8794,8 +8900,10 @@ describe('SettingsUsersPage', () => {
 
   it('light actions fire without a confirmation step', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({ id: '2' } as never);
-    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' } as never);
+    const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({
+      ...inviteOk('pending@repos.test', '2'), created: false, resent: true,
+    });
+    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' });
     renderPage();
     const row = () => within(rowFor('pending@repos.test'));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
@@ -8808,13 +8916,35 @@ describe('SettingsUsersPage', () => {
 
   it('suspend is a medium action — confirmed, then PATCHed', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '2' } as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('2', 'pending@repos.test', 'suspended'));
+    const toasted = spyToast();
     renderPage();
     await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
     expect(patch).not.toHaveBeenCalled();          // the dialog gates the call
     await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith('2', { status: 'suspended' }));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(lastToast(toasted).severity).toBe('success');
+  });
+
+  // The DB revocation committed — they are already refused on both auth paths
+  // — but the policy still lists them. That is a warning with follow-up work,
+  // not an error, and certainly not plain success.
+  it('a suspend whose policy removal failed warns that sync is pending', async () => {
+    vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
+    vi.spyOn(api, 'patchUser').mockResolvedValue({
+      ...patchOk('2', 'pending@repos.test', 'suspended'),
+      cf_synced: false, sync_error: 'cf_http_500',
+    });
+    const toasted = spyToast();
+    renderPage();
+    await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
+    await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
+    await waitFor(() => expect(toasted).toHaveBeenCalled());
+    const t = lastToast(toasted);
+    expect(t.severity).toBe('warn');
+    expect(t.body).toMatch(/cf_http_500/);
+    expect(t.body).toMatch(/retry sync/i);
   });
 
   it('reinstate PATCHes a suspended row back to active', async () => {
@@ -8825,7 +8955,7 @@ describe('SettingsUsersPage', () => {
         { ...baseResponse.users[1], id: '3', email: 'gone@repos.test', status: 'suspended' },
       ],
     } as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue({ id: '3' } as never);
+    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('3', 'gone@repos.test', 'active'));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /^reinstate$/i }));
     await userEvent.click(screen.getByRole('button', { name: /reinstate user/i }));
@@ -9010,13 +9140,25 @@ Two behaviours that follow from the API rather than from the visual spec:
 - **Which action each status offers** must match the closed Q28 matrix, or the UI offers calls that can only 409: `RESEND` on `invited` only; `SUSPEND` on `active`+`invited`; `REINSTATE` on `suspended`; `RETRY SYNC` on all four (Q36 is status-aware in both directions). **`DELETE` is offered on a `deleting` row too** — Q37 says an interrupted self-deletion can only be completed by an admin, and `deleteUser` resumes rather than restarting (`deleteUser.ts:44`).
 - Give each `<tr>` `data-testid={'user-row-' + row.email}`. An address appears in **two** cells — its owner's email cell and the "invited by" cell of every row it invited — so `getByText(email).closest('tr')` throws `Found multiple elements`, which is what the plan's original test text did in three cases.
 
-Create `frontend/src/components/settings/InviteUserModal.tsx` — an email input (`<label htmlFor>` wired so `getByLabelText(/email/i)` finds it), a `member`/`admin` role select, and a `SEND INVITE` submit. On `ApiError` with status 409 and `body.error === 'cohort_cap_reached'`, render `Cohort is full — {count} / {cap}.`; on 409 `already_active` / `suspended_use_reinstate` / `deletion_in_progress`, render the matching plain-English line.
+Create `frontend/src/components/settings/InviteUserModal.tsx` — an email input (`<label htmlFor>` wired so `getByLabelText(/email/i)` finds it), a `member`/`admin` role select, and a `SEND INVITE` submit. **The page keeps it mounted and toggles `open`, so returning `null` while closed does not discard the fields** — reset them on the closed→open transition (the render-phase `wasOpen` ref pattern `ConfirmDialog` already uses for its typed-confirm input). Not on close and not on submit: an in-modal 409 keeps `open` true, and the address that caused the error has to survive it. Otherwise reopening re-offers the previous address — resubmitting it takes the duplicate-invite path — and a retained `admin` role silently applies to whatever address is typed next. On `ApiError` with status 409 and `body.error === 'cohort_cap_reached'`, render `Cohort is full — {count} / {cap}.`; on 409 `already_active` / `suspended_use_reinstate` / `deletion_in_progress`, render the matching plain-English line.
 
 Create `frontend/src/pages/SettingsUsersPage.tsx` — loads on mount, renders `denied` for 401/403, an actionable retry for anything else, the cohort chip `{count} / {cap}`, the drift banner (only when `drift.divergent.length > 0`, or a distinct advisory line when `drift.checked === false` showing `drift.policy_error`), `<InviteUserModal>` and `<UsersTable>`. Refresh by re-calling `listUsers()` after every successful mutation.
 
 **Do not** render a drift banner for `drift.unknown` — that is sync-pending, not divergence (Q36), and conflating them is the false alarm that trains the operator to ignore the signal.
 
 Give the two surfaces **different ARIA roles** — `role="alert"` for confirmed divergence, `role="status"` for the unread-policy advisory. That is what makes "banner only on divergence" and "the advisory is not nested under the failure branch" separately assertable; a test that matched banner *text* would pass with the two branches collapsed into one. The advisory branch is a sibling of the divergence branch, never a child of it — the same shape as `MaintenanceBanner`'s warning branch.
+
+**A 2xx does not mean the lifecycle work succeeded, and the page must read the outcome body rather than the HTTP status.** `provisionAndMail` *returns* both partial failures instead of throwing, because each leaves a durable row that must not roll back — and the two are opposite instructions to the operator:
+
+| Outcome | Reality | What the operator must do |
+|---|---|---|
+| `cf_synced: false` | Row exists, absent from the CF policy, unstamped (Q17b refuses activation). **No email was attempted.** | Retry sync, then Resend. They **cannot** sign in. |
+| `invite_sent: false` | Provisioned and stamped; only the mail failed. | Resend. They **can** sign in. |
+| `patchUser` suspend, `cf_synced: false` | DB revocation committed — refused on both auth paths — but the policy still lists them. | Retry sync. A **warning**, not an error: per the governing model the DB transition *is* the security event. |
+
+Route invite and resend through one `inviteOutcomeToast`, and suspend and reinstate through one `patchOutcomeToast`. Reinstate cannot reach the failure branch today (Q34 makes a failed CF add a thrown 502), which is exactly why it should share the helper rather than carry its own unconditional success message that a later service change would turn into a lie. **`retrySync` has the same shape** — it reports `cf_synced: false` in a 200 body.
+
+The corresponding test trap: **mocking these with `{ id } as never` conceals every one of these branches**, because the cast fabricates an envelope the API cannot return. Fixtures must be fully shaped, and each partial failure needs its own case asserting the toast severity and the code in its body.
 
 Refresh with `listUsers()` after **every** mutation including a failed one: a suspend whose CF half failed still committed its DB half, so the row on screen is stale either way. Keep the existing `data` while the re-read is in flight rather than nulling it, or the table flashes back to `Loading…` after each action.
 
@@ -9062,11 +9204,11 @@ import SettingsUsersPage from './pages/SettingsUsersPage'
 Run: `cd /var/home/jason/Projects/RepOS/frontend && npx vitest run && npm run build`
 Expected: PASS across the frontend suite; build clean.
 
-**Measured: 69 files / 414 passed** (from the 68 / 399 baseline — +1 file and +15 tests: 12 in `SettingsUsersPage.test.tsx`, +1 in `SettingsSidebar.test.tsx`, +2 in the navigation smoke). Build clean; the chunk-size warning is pre-existing. `npm run check-pages` and `scripts/check-term-coverage.mjs` also pass — the reachability gate is the one that would catch a page shipped without its route.
+**Measured: 69 files / 420 passed** (from the 68 / 399 baseline — +1 file and +21 tests: 18 in `SettingsUsersPage.test.tsx`, +1 in `SettingsSidebar.test.tsx`, +2 in the navigation smoke). Six of those 18 came from Jason's review round — four for the 2xx partial-failure contracts above and two for the invite-form reset. Build clean; the chunk-size warning is pre-existing. `npm run check-pages` and `scripts/check-term-coverage.mjs` also pass — the reachability gate is the one that would catch a page shipped without its route.
 
-Three of the plan's twelve cases were **added during execution**, because the plan's nine covered the invite and delete paths and left every other row action — resend, retry sync, suspend, reinstate — with no test at all: `light actions fire without a confirmation step`, `suspend is a medium action — confirmed, then PATCHed`, and `reinstate PATCHes a suspended row back to active`.
+Nine of the shipped eighteen cases are **not** in the plan's original nine. Three were added during execution, because the plan covered the invite and delete paths and left every other row action — resend, retry sync, suspend, reinstate — with no test at all: `light actions fire without a confirmation step`, `suspend is a medium action — confirmed, then PATCHed`, and `reinstate PATCHes a suspended row back to active`. Six more came from Jason's review round: four asserting the 2xx partial-failure toasts and two the invite-form reset.
 
-Six mutations were run and each killed only its intended cases: rendering actions on every row (kills the Q13 case + delete + suspend, which index the *other* row's buttons); a sync cell hard-coded to `SYNCED`; firing the drift banner for `drift.unknown` as well; nesting the unread-policy advisory under the divergence branch; dropping the post-mutation `load()`; and dropping the `adminOnly` filter in `Sidebar.tsx`.
+Ten mutations were run in total and each killed only its intended cases. Six on the original build: rendering actions on every row (kills the Q13 case + delete + suspend, which index the *other* row's buttons); a sync cell hard-coded to `SYNCED`; firing the drift banner for `drift.unknown` as well; nesting the unread-policy advisory under the divergence branch; dropping the post-mutation `load()`; and dropping the `adminOnly` filter in `Sidebar.tsx`. Four more on the review fixes: unconditional success from `inviteOutcomeToast` (kills all three partial-failure cases) and from `patchOutcomeToast`; deleting the modal's reset (kills both form-clearing cases and, correctly, **not** the preserve-through-error assertion); and clearing the form on submit instead of on reopen, which kills the preserve-through-error assertion alone — that pairing is what proves neither assertion is vacuous.
 
 - [ ] **Step 7: Commit**
 
