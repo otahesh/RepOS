@@ -1,78 +1,131 @@
 // The two env vars W9 removes must be read NOWHERE. A stale reader would
 // reintroduce exactly the redeploy coupling this wave exists to remove.
 //
-// The patterns below are anchored on the READ, never on the bare name:
-// migration 080's mapping header, the cfAccess.ts replacement comment and
+// CORPUS SELECTION IS THE HARD PART, NOT THE PATTERN. The first version of
+// this sweep listed five subtrees (api/src, api/tests, frontend/src, docker,
+// scripts) and passed with a live REPOS_ADMIN_EMAILS read sitting in
+// `frontend/playwright.config.ts` — a file no root covered. (Spelling that
+// read out literally here would make this very file an offender, which is the
+// pattern doing its job.) A reach assertion
+// over a hand-picked list only proves the list was scanned; it cannot prove
+// the list is complete. So the walk is now EXCLUSION-based: everything in the
+// repo is scanned unless a directory is explicitly ruled out, which fails
+// toward over-scanning instead of toward a silent blind spot.
+//
+// The patterns are anchored on the READ, never on the bare name: migration
+// 080's mapping header, the cfAccess.ts replacement comment and
 // bootstrap-guards.ts all cite the removed variables on purpose, to record
-// what replaced them. A bare-name assertion would force deleting that history
-// to go green.
+// what replaced them. A bare-name assertion would force deleting that history.
 import { describe, it, expect } from 'vitest';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, extname, basename } from 'node:path';
 
-const REMOVED = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
-
-/** `process.env.X` and `process.env['X']` — both real read forms in this repo. */
-const JS_READ = new RegExp(`process\\.env(\\.|\\[['"\`])(${REMOVED})`);
-/** `$X` / `${X}` — the shell read form, for the container's s6 scripts. */
-const SH_READ = new RegExp(`\\$\\{?(${REMOVED})\\b`);
-
-const SCANNED_EXTENSIONS = /\.(ts|tsx|mjs|sql|sh|md|yml|yaml|conf)$/;
+const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
 
 /**
- * Extensionless files are scanned too. `docker/root/etc/s6-overlay/scripts/*`
- * (init-migrations, run-api, wait-for-postgres…) and `docker/Dockerfile` carry
- * no extension, and those are precisely the files that plumb an env var into
- * the container — an extension allowlist alone would skip every one of them.
+ * JS/TS read forms. All three tolerate whitespace, because a formatter will
+ * happily produce `process.env[ 'X' ]` and the original pattern matched only
+ * the tight form.
  */
-function shouldScan(name: string): boolean {
-  return SCANNED_EXTENSIONS.test(name) || !name.includes('.');
+const JS_READS = [
+  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`),                       // process.env.X
+  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`),                // process.env['X']
+  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`),    // const { X } = process.env
+];
+
+/**
+ * Shell / CI / container read AND declaration forms. A workflow that declares
+ * `REPOS_ADMIN_EMAILS: ${{ secrets.X }}`, a Dockerfile `ENV X=`, or a
+ * `export X=` in an s6 script all reintroduce the coupling just as surely as
+ * a `process.env` read does.
+ *
+ * Applied ONLY to shell-shaped files. On .ts the declaration form would flag
+ * `startup-guards.test.ts`, which passes the name as an object key precisely
+ * to prove it is IGNORED — a legitimate non-read that must keep passing.
+ */
+const SHELL_READS = [
+  new RegExp(`\\$\\{?(${NAMES})\\b`),                                        // $X / ${X}
+  new RegExp(`^\\s*(?:export\\s+|ENV\\s+|ARG\\s+)?(${NAMES})\\s*[:=]`, 'm'), // X= / X: / ENV X=
+];
+
+/** Build outputs, vendored code and VCS internals — never our source. */
+const EXCLUDED_DIRS = new Set([
+  'node_modules', 'dist', 'build', '.git', 'coverage',
+  'playwright-report', 'test-results', '.worktrees', '.vite', 'handoffs',
+]);
+
+const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const SHELL_SHAPED_EXTENSIONS = new Set(['.sh', '.yml', '.yaml', '.json', '.conf', '.sql']);
+
+/**
+ * Documentation is deliberately NOT scanned: it may name, quote and explain
+ * both variables — the plan quotes the old `.env.example` verbatim. The single
+ * tracked env TEMPLATE is covered by its own, stricter bare-name case below.
+ * `.env` itself is untracked local config and is skipped for the same reason
+ * a developer's machine is not the deployment.
+ */
+function classify(name: string): 'js' | 'shell' | null {
+  if (name.startsWith('.env')) return null;              // template has its own case
+  const ext = extname(name);
+  if (ext === '.md') return null;
+  if (JS_EXTENSIONS.has(ext)) return 'js';
+  if (SHELL_SHAPED_EXTENSIONS.has(ext)) return 'shell';
+  // Extensionless files are shell-shaped: docker/root/etc/s6-overlay/scripts/*
+  // (run-api, init-migrations, wait-for-postgres…) and docker/Dockerfile carry
+  // no extension, and those are exactly where a container env var is plumbed.
+  if (!basename(name).includes('.')) return 'shell';
+  return null;
 }
 
-async function walk(dir: string, out: string[] = []): Promise<string[]> {
-  for (const e of await readdir(dir)) {
-    if (e === 'node_modules' || e === 'dist' || e === '.git') continue;
-    const p = join(dir, e);
-    if ((await stat(p)).isDirectory()) await walk(p, out);
-    else if (shouldScan(e)) out.push(p);
-  }
-  return out;
-}
-
-const ROOTS = ['api/src', 'api/tests', 'frontend/src', 'docker', 'scripts'];
 const repoRoot = join(process.cwd(), '..');
 
-async function scanAll(): Promise<{ files: string[]; offenders: string[] }> {
-  const files: string[] = [];
-  const offenders: string[] = [];
-  for (const root of ROOTS) {
-    for (const f of await walk(join(repoRoot, root)).catch(() => [] as string[])) {
-      files.push(f);
-      const body = await readFile(f, 'utf8');
-      if (JS_READ.test(body) || (SH_READ.test(body) && !f.endsWith('.md'))) offenders.push(f);
+interface Scan { files: string[]; offenders: string[] }
+
+async function walk(dir: string, acc: Scan): Promise<void> {
+  for (const entry of await readdir(dir)) {
+    if (EXCLUDED_DIRS.has(entry)) continue;
+    const p = join(dir, entry);
+    if ((await stat(p)).isDirectory()) {
+      await walk(p, acc);
+      continue;
     }
+    const kind = classify(entry);
+    if (kind === null) continue;
+    acc.files.push(p);
+    const body = await readFile(p, 'utf8');
+    const patterns = kind === 'js' ? JS_READS : [...JS_READS, ...SHELL_READS];
+    if (patterns.some((re) => re.test(body))) acc.offenders.push(p);
   }
-  return { files, offenders };
 }
 
+// One walk for the whole file — it now covers the entire repo.
+const scan: Promise<Scan> = (async () => {
+  const acc: Scan = { files: [], offenders: [] };
+  await walk(repoRoot, acc);
+  return acc;
+})();
+
 describe('W9 env-var removal is complete', () => {
-  it('no source file READS CF_ACCESS_ALLOWED_EMAILS or REPOS_ADMIN_EMAILS', async () => {
-    const { offenders } = await scanAll();
-    expect(offenders).toEqual([]);
+  it('no file READS CF_ACCESS_ALLOWED_EMAILS or REPOS_ADMIN_EMAILS', async () => {
+    const { offenders } = await scan;
+    expect(offenders.map((f) => f.slice(repoRoot.length + 1))).toEqual([]);
   });
 
-  // `expect([]).toEqual([])` is also what a sweep that scanned NOTHING returns.
-  // These assertions prove the sweep reached the tree it claims to police —
-  // including the extensionless container scripts, which the obvious
-  // extension-allowlist implementation silently skips.
-  it('the sweep actually reaches the files it claims to cover', async () => {
-    const { files } = await scanAll();
-    expect(files.length).toBeGreaterThan(200);
+  // `expect([]).toEqual([])` is also what a sweep that scanned NOTHING
+  // returns. These paths are the specific blind spots the five-root version
+  // had — config and CI files that live beside the source, not under it.
+  it('the sweep reaches config and CI files, not just the source trees', async () => {
+    const { files } = await scan;
+    expect(files.length).toBeGreaterThan(400);
     for (const expected of [
+      'frontend/playwright.config.ts',                  // outside every original root
+      'api/vitest.integration.config.ts',               // ditto
+      '.github/workflows/test.yml',                     // ditto
+      'api/package.json',                               // ditto (npm scripts)
+      'docker/root/etc/s6-overlay/scripts/run-api',     // extensionless
+      'docker/Dockerfile',                              // extensionless
       'api/src/middleware/cfAccess.ts',
       'frontend/src/lib/api/adminUsers.ts',
-      'docker/root/etc/s6-overlay/scripts/run-api',   // extensionless
-      'docker/Dockerfile',                             // extensionless
       'scripts/run-restore.sh',
     ]) {
       expect(files.some((f) => f.endsWith(expected)), `never scanned ${expected}`).toBe(true);
@@ -82,22 +135,23 @@ describe('W9 env-var removal is complete', () => {
   // The history mentions must SURVIVE the sweep — if they ever start failing
   // it, the patterns have stopped being anchored on the read.
   it('deliberate history mentions are not offenders', async () => {
-    const { offenders } = await scanAll();
+    const { offenders } = await scan;
     for (const historical of [
       'api/src/db/migrations/080_users_roles_status.sql',
       'api/src/middleware/cfAccess.ts',
       'api/src/bootstrap-guards.ts',
+      'api/tests/unit/startup-guards.test.ts',   // passes the name as an IGNORED input
     ]) {
       const body = await readFile(join(repoRoot, historical), 'utf8');
-      expect(body).toMatch(new RegExp(REMOVED));                 // still records it
+      expect(body).toMatch(new RegExp(NAMES));                 // still records it
       expect(offenders.some((f) => f.endsWith(historical))).toBe(false);
     }
   });
 
   // The reader sweep matches read syntax in code files, so it can never catch
-  // the tracked env template — `.env.example` declares rather than reads.
-  // Assert it separately or the template keeps advertising both removed vars
-  // to every future operator.
+  // the tracked env template — `.env.example` declares rather than reads, and
+  // is held to the STRICTER bare-name rule: an operator copies it to `.env`,
+  // so a name there is an invitation to set it. Cite migration 080 instead.
   it('api/.env.example advertises the five new vars and neither removed one', async () => {
     const tpl = await readFile(join(process.cwd(), '.env.example'), 'utf8');
     expect(tpl).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);

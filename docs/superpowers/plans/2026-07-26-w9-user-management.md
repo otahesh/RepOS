@@ -16,7 +16,7 @@
 - **Founding admin email constant:** `jason.meyer1@gmail.com` (Q35). Hard-coded in migration 080 and exported from `api/src/constants/users.ts`.
 - **Cohort cap:** `10`, counted as `status IN ('active','invited','deleting')` (Q12). Applies to invite **and** reinstate.
 - **Cloudflare account id:** `400d0b4a35d63a32b86ab774b9feb4ab`. **Access policy id:** `b4a92a15-27d5-477b-ad36-f78fcdae931c`.
-- **New env vars (set-once):** `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ACCESS_POLICY_ID`, `RESEND_API_KEY`, `INVITE_FROM_EMAIL`. All advisory at boot — missing credentials fail at use time, never at boot.
+- **New env vars (set-once):** `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ACCESS_POLICY_ID`, `RESEND_API_KEY`, `INVITE_FROM_EMAIL`. All five fail at **use** time and never at boot. Only `CF_API_TOKEN` and `RESEND_API_KEY` emit a boot advisory naming what is disabled (`bootstrap-guards.ts:44-49`); the other three are silent until used. (Corrected 2026-08-04 — this line previously said all five were advisory at boot.)
 - **Removed env vars:** `CF_ACCESS_ALLOWED_EMAILS`, `REPOS_ADMIN_EMAILS`. Every read of either must be gone by Task 16.
 - **ESM:** all relative imports inside `api/src` end in `.js` even though the source is `.ts`.
 - **Fastify v5:** every hook and preHandler MUST be `async`. A non-async hook that doesn't call `done()` hangs the request.
@@ -9278,18 +9278,59 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let jwks: TestJwksHandle;
 let memberEmail: string;
 let victimId: string;
+let before: VictimState;
 const created: string[] = [];
+
+/** The address POST /invite would create. Nothing may bring it into existence. */
+const INVITE_TARGET = 'x@repos.test';
+
+/**
+ * `SELECT *`, not a column list. Status and role alone were not enough for
+ * the claim this test makes — four of the six routes move neither: retry-sync
+ * stamps `cf_synced_at`, resend writes `invite_sent_at` / `invite_message_id`
+ * / `invite_request`, invite targets a different address entirely. Naming
+ * columns also means the assertion silently narrows every time a migration
+ * adds one, so take the whole row.
+ *
+ * Plus the audit trail, since Q27 commits an `account_events` row in the same
+ * transaction as any real lifecycle change — a mutation that left the users
+ * row alone but wrote an event is still a breach of "the operation did not
+ * happen".
+ */
+interface VictimState {
+  row: Record<string, unknown>;
+  events: number;
+  inviteTargetExists: boolean;
+}
+
+async function readVictim(): Promise<VictimState> {
+  const { rows } = await db.query(`SELECT * FROM users WHERE id=$1`, [victimId]);
+  const { rows: ev } = await db.query<{ c: string }>(
+    `SELECT count(*)::int AS c FROM account_events WHERE user_id=$1`, [victimId],
+  );
+  const { rows: tgt } = await db.query<{ c: string }>(
+    `SELECT count(*)::int AS c FROM users WHERE email=$1`, [INVITE_TARGET],
+  );
+  return { row: rows[0], events: Number(ev[0].c), inviteTargetExists: Number(tgt[0].c) > 0 };
+}
 
 beforeAll(async () => {
   jwks = await setupTestJwks();
   app = await buildApp();
   memberEmail = `w9.contam-member-${randomUUID().slice(0, 8)}@repos.test`;
   created.push((await mkUserWithEmail(memberEmail, { role: 'member', status: 'active' })).id);
+  // cf_synced_at is seeded NON-NULL deliberately. retry-sync's first act is to
+  // CLEAR it (Q24, before the CF call), so a victim starting at NULL makes
+  // that write invisible to the state comparison below — "unchanged" and
+  // "cleared" are the same value. Start from the other value.
   const victim = await mkUserWithEmail(`w9.contam-victim-${randomUUID().slice(0, 8)}@repos.test`, {
-    role: 'member', status: 'active',
+    role: 'member', status: 'active', cfSyncedAt: new Date('2026-07-01T00:00:00Z'),
   });
   victimId = victim.id;
   created.push(victimId);
+  before = await readVictim();
+  // The invite case can only prove "no row was created" if none existed first.
+  expect(before.inviteTargetExists).toBe(false);
 });
 
 afterAll(async () => {
@@ -9342,11 +9383,32 @@ describe('W9 contamination matrix — six rows toward G2', () => {
   // The rejections above assert a response code. This asserts the operation
   // did not happen — a route that mutated and *then* refused would satisfy
   // every case above and fail here.
-  it('the victim is untouched by every rejected attempt', async () => {
-    const { rows } = await db.query<{ status: string; role: string }>(
-      `SELECT status, role FROM users WHERE id=$1`, [victimId],
-    );
-    expect(rows[0]).toEqual({ status: 'active', role: 'member' });
+  //
+  // Checking only status+role was not enough for that claim: four of the six
+  // routes move neither column. The whole row, the audit count, and the
+  // existence of the invite target are compared against the pre-request
+  // snapshot instead.
+  //
+  // Measured coverage, rather than assumed: dropping the gate from PATCH or
+  // from retry-sync fails THIS case on its own (suspended status; cleared
+  // stamp). Dropping it from invite does not reach here — the handler 500s on
+  // `actor.email.toLowerCase()` with no actor, so nothing is written; that
+  // mutation is caught by the 403 cases above. Both are refused; only one is
+  // refused by this assertion.
+  it('nothing the six routes could have touched moved', async () => {
+    const after = await readVictim();
+    expect(after.row).toEqual(before.row);           // covers sync + delivery columns
+    expect(after.events).toBe(before.events);        // Q27 writes one per real change
+    expect(after.inviteTargetExists).toBe(false);    // POST /invite targets this, not the victim
+  });
+
+  // A Cloudflare write would also be a breach, and it is covered structurally
+  // rather than by assertion: CF_* is unset in the test env, so the
+  // fail-closed policy client throws `cf_not_configured` before any I/O. Any
+  // route that reached it would return 502, failing the 403 cases above.
+  it('the victim row still exists — the comparison above was not vacuous', async () => {
+    expect(before.row).toBeDefined();
+    expect((await readVictim()).row.email).toBe(before.row.email);
   });
 });
 ```
@@ -9357,78 +9419,131 @@ Create `api/tests/integration/w9-env-sweep.test.ts`:
 // The two env vars W9 removes must be read NOWHERE. A stale reader would
 // reintroduce exactly the redeploy coupling this wave exists to remove.
 //
-// The patterns below are anchored on the READ, never on the bare name:
-// migration 080's mapping header, the cfAccess.ts replacement comment and
+// CORPUS SELECTION IS THE HARD PART, NOT THE PATTERN. The first version of
+// this sweep listed five subtrees (api/src, api/tests, frontend/src, docker,
+// scripts) and passed with a live REPOS_ADMIN_EMAILS read sitting in
+// `frontend/playwright.config.ts` — a file no root covered. (Spelling that
+// read out literally here would make this very file an offender, which is the
+// pattern doing its job.) A reach assertion
+// over a hand-picked list only proves the list was scanned; it cannot prove
+// the list is complete. So the walk is now EXCLUSION-based: everything in the
+// repo is scanned unless a directory is explicitly ruled out, which fails
+// toward over-scanning instead of toward a silent blind spot.
+//
+// The patterns are anchored on the READ, never on the bare name: migration
+// 080's mapping header, the cfAccess.ts replacement comment and
 // bootstrap-guards.ts all cite the removed variables on purpose, to record
-// what replaced them. A bare-name assertion would force deleting that history
-// to go green.
+// what replaced them. A bare-name assertion would force deleting that history.
 import { describe, it, expect } from 'vitest';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, extname, basename } from 'node:path';
 
-const REMOVED = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
-
-/** `process.env.X` and `process.env['X']` — both real read forms in this repo. */
-const JS_READ = new RegExp(`process\\.env(\\.|\\[['"\`])(${REMOVED})`);
-/** `$X` / `${X}` — the shell read form, for the container's s6 scripts. */
-const SH_READ = new RegExp(`\\$\\{?(${REMOVED})\\b`);
-
-const SCANNED_EXTENSIONS = /\.(ts|tsx|mjs|sql|sh|md|yml|yaml|conf)$/;
+const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
 
 /**
- * Extensionless files are scanned too. `docker/root/etc/s6-overlay/scripts/*`
- * (init-migrations, run-api, wait-for-postgres…) and `docker/Dockerfile` carry
- * no extension, and those are precisely the files that plumb an env var into
- * the container — an extension allowlist alone would skip every one of them.
+ * JS/TS read forms. All three tolerate whitespace, because a formatter will
+ * happily produce `process.env[ 'X' ]` and the original pattern matched only
+ * the tight form.
  */
-function shouldScan(name: string): boolean {
-  return SCANNED_EXTENSIONS.test(name) || !name.includes('.');
+const JS_READS = [
+  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`),                       // process.env.X
+  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`),                // process.env['X']
+  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`),    // const { X } = process.env
+];
+
+/**
+ * Shell / CI / container read AND declaration forms. A workflow that declares
+ * `REPOS_ADMIN_EMAILS: ${{ secrets.X }}`, a Dockerfile `ENV X=`, or a
+ * `export X=` in an s6 script all reintroduce the coupling just as surely as
+ * a `process.env` read does.
+ *
+ * Applied ONLY to shell-shaped files. On .ts the declaration form would flag
+ * `startup-guards.test.ts`, which passes the name as an object key precisely
+ * to prove it is IGNORED — a legitimate non-read that must keep passing.
+ */
+const SHELL_READS = [
+  new RegExp(`\\$\\{?(${NAMES})\\b`),                                        // $X / ${X}
+  new RegExp(`^\\s*(?:export\\s+|ENV\\s+|ARG\\s+)?(${NAMES})\\s*[:=]`, 'm'), // X= / X: / ENV X=
+];
+
+/** Build outputs, vendored code and VCS internals — never our source. */
+const EXCLUDED_DIRS = new Set([
+  'node_modules', 'dist', 'build', '.git', 'coverage',
+  'playwright-report', 'test-results', '.worktrees', '.vite', 'handoffs',
+]);
+
+const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const SHELL_SHAPED_EXTENSIONS = new Set(['.sh', '.yml', '.yaml', '.json', '.conf', '.sql']);
+
+/**
+ * Documentation is deliberately NOT scanned: it may name, quote and explain
+ * both variables — the plan quotes the old `.env.example` verbatim. The single
+ * tracked env TEMPLATE is covered by its own, stricter bare-name case below.
+ * `.env` itself is untracked local config and is skipped for the same reason
+ * a developer's machine is not the deployment.
+ */
+function classify(name: string): 'js' | 'shell' | null {
+  if (name.startsWith('.env')) return null;              // template has its own case
+  const ext = extname(name);
+  if (ext === '.md') return null;
+  if (JS_EXTENSIONS.has(ext)) return 'js';
+  if (SHELL_SHAPED_EXTENSIONS.has(ext)) return 'shell';
+  // Extensionless files are shell-shaped: docker/root/etc/s6-overlay/scripts/*
+  // (run-api, init-migrations, wait-for-postgres…) and docker/Dockerfile carry
+  // no extension, and those are exactly where a container env var is plumbed.
+  if (!basename(name).includes('.')) return 'shell';
+  return null;
 }
 
-async function walk(dir: string, out: string[] = []): Promise<string[]> {
-  for (const e of await readdir(dir)) {
-    if (e === 'node_modules' || e === 'dist' || e === '.git') continue;
-    const p = join(dir, e);
-    if ((await stat(p)).isDirectory()) await walk(p, out);
-    else if (shouldScan(e)) out.push(p);
-  }
-  return out;
-}
-
-const ROOTS = ['api/src', 'api/tests', 'frontend/src', 'docker', 'scripts'];
 const repoRoot = join(process.cwd(), '..');
 
-async function scanAll(): Promise<{ files: string[]; offenders: string[] }> {
-  const files: string[] = [];
-  const offenders: string[] = [];
-  for (const root of ROOTS) {
-    for (const f of await walk(join(repoRoot, root)).catch(() => [] as string[])) {
-      files.push(f);
-      const body = await readFile(f, 'utf8');
-      if (JS_READ.test(body) || (SH_READ.test(body) && !f.endsWith('.md'))) offenders.push(f);
+interface Scan { files: string[]; offenders: string[] }
+
+async function walk(dir: string, acc: Scan): Promise<void> {
+  for (const entry of await readdir(dir)) {
+    if (EXCLUDED_DIRS.has(entry)) continue;
+    const p = join(dir, entry);
+    if ((await stat(p)).isDirectory()) {
+      await walk(p, acc);
+      continue;
     }
+    const kind = classify(entry);
+    if (kind === null) continue;
+    acc.files.push(p);
+    const body = await readFile(p, 'utf8');
+    const patterns = kind === 'js' ? JS_READS : [...JS_READS, ...SHELL_READS];
+    if (patterns.some((re) => re.test(body))) acc.offenders.push(p);
   }
-  return { files, offenders };
 }
 
+// One walk for the whole file — it now covers the entire repo.
+const scan: Promise<Scan> = (async () => {
+  const acc: Scan = { files: [], offenders: [] };
+  await walk(repoRoot, acc);
+  return acc;
+})();
+
 describe('W9 env-var removal is complete', () => {
-  it('no source file READS CF_ACCESS_ALLOWED_EMAILS or REPOS_ADMIN_EMAILS', async () => {
-    const { offenders } = await scanAll();
-    expect(offenders).toEqual([]);
+  it('no file READS CF_ACCESS_ALLOWED_EMAILS or REPOS_ADMIN_EMAILS', async () => {
+    const { offenders } = await scan;
+    expect(offenders.map((f) => f.slice(repoRoot.length + 1))).toEqual([]);
   });
 
-  // `expect([]).toEqual([])` is also what a sweep that scanned NOTHING returns.
-  // These assertions prove the sweep reached the tree it claims to police —
-  // including the extensionless container scripts, which the obvious
-  // extension-allowlist implementation silently skips.
-  it('the sweep actually reaches the files it claims to cover', async () => {
-    const { files } = await scanAll();
-    expect(files.length).toBeGreaterThan(200);
+  // `expect([]).toEqual([])` is also what a sweep that scanned NOTHING
+  // returns. These paths are the specific blind spots the five-root version
+  // had — config and CI files that live beside the source, not under it.
+  it('the sweep reaches config and CI files, not just the source trees', async () => {
+    const { files } = await scan;
+    expect(files.length).toBeGreaterThan(400);
     for (const expected of [
+      'frontend/playwright.config.ts',                  // outside every original root
+      'api/vitest.integration.config.ts',               // ditto
+      '.github/workflows/test.yml',                     // ditto
+      'api/package.json',                               // ditto (npm scripts)
+      'docker/root/etc/s6-overlay/scripts/run-api',     // extensionless
+      'docker/Dockerfile',                              // extensionless
       'api/src/middleware/cfAccess.ts',
       'frontend/src/lib/api/adminUsers.ts',
-      'docker/root/etc/s6-overlay/scripts/run-api',   // extensionless
-      'docker/Dockerfile',                             // extensionless
       'scripts/run-restore.sh',
     ]) {
       expect(files.some((f) => f.endsWith(expected)), `never scanned ${expected}`).toBe(true);
@@ -9438,22 +9553,23 @@ describe('W9 env-var removal is complete', () => {
   // The history mentions must SURVIVE the sweep — if they ever start failing
   // it, the patterns have stopped being anchored on the read.
   it('deliberate history mentions are not offenders', async () => {
-    const { offenders } = await scanAll();
+    const { offenders } = await scan;
     for (const historical of [
       'api/src/db/migrations/080_users_roles_status.sql',
       'api/src/middleware/cfAccess.ts',
       'api/src/bootstrap-guards.ts',
+      'api/tests/unit/startup-guards.test.ts',   // passes the name as an IGNORED input
     ]) {
       const body = await readFile(join(repoRoot, historical), 'utf8');
-      expect(body).toMatch(new RegExp(REMOVED));                 // still records it
+      expect(body).toMatch(new RegExp(NAMES));                 // still records it
       expect(offenders.some((f) => f.endsWith(historical))).toBe(false);
     }
   });
 
   // The reader sweep matches read syntax in code files, so it can never catch
-  // the tracked env template — `.env.example` declares rather than reads.
-  // Assert it separately or the template keeps advertising both removed vars
-  // to every future operator.
+  // the tracked env template — `.env.example` declares rather than reads, and
+  // is held to the STRICTER bare-name rule: an operator copies it to `.env`,
+  // so a name there is an invitation to set it. Cite migration 080 instead.
   it('api/.env.example advertises the five new vars and neither removed one', async () => {
     const tpl = await readFile(join(process.cwd(), '.env.example'), 'utf8');
     expect(tpl).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
@@ -9479,8 +9595,11 @@ Expected: the contamination suite passes if Tasks 9–14 are correct — run it 
 
 1. **`expect(offenders).toEqual([])` is also what a sweep that scanned NOTHING returns.** The sweep needs its own reachability case — assert the file count and that specific known paths were opened. Verified by pointing `repoRoot` at a non-existent directory: the reader assertion **still passed** while the reachability case failed. Without it the whole sweep is one typo away from being decorative.
 2. **The extension allowlist skipped the files most likely to plumb a container env var.** `docker/root/etc/s6-overlay/scripts/*` (`run-api`, `init-migrations`, `wait-for-postgres`…) and `docker/Dockerfile` carry **no extension**, so an allowlist of `.ts|.sql|.sh|.md|…` opens none of them. Scan extensionless files too, and add the shell read form (`$VAR` / `${VAR}`) alongside the JS one — a plumbed `$REPOS_ADMIN_EMAILS` in an s6 script is precisely the reintroduction this gate exists to stop. Also widen the JS pattern to bracket notation: `process.env['REPOS_ADMIN_EMAILS']` evades a `process\.env\.` anchor completely.
+3. **AND THE ROOT LIST WAS STILL INCOMPLETE — this is the one that matters.** Findings 1 and 2 fixed the *pattern* and added a reach assertion over five hand-picked subtrees, and Jason's review then planted a live read in `frontend/playwright.config.ts`, which **no root covered**, and all four cases stayed green. **A reach assertion over a hand-picked list proves the list was scanned, never that the list is complete.** The corpus must be selected by **exclusion** — walk the whole repo, skip `node_modules`/`dist`/`.git`/build output — so the failure mode is over-scanning rather than a silent blind spot. Config and CI files live *beside* the source, not under it: `frontend/playwright.config.ts`, `api/vitest.integration.config.ts`, `.github/workflows/*.yml` and `package.json` scripts were all outside every root. That also means covering the **declaration** forms those files use (`X: ${{ secrets.Y }}`, `ENV X=`, `export X=`), applied to shell-shaped files only — on `.ts` the declaration form would flag `startup-guards.test.ts`, which passes the name as an object key precisely to prove it is IGNORED.
 
-Each of those was mutation-verified by planting the corresponding reader and watching the sweep go red.
+Each of those was mutation-verified. The final set is **eight** plants, all caught: dot-notation, whitespace-bracket, destructuring, `frontend/playwright.config.ts`, `api/vitest.integration.config.ts`, a `.github/workflows/test.yml` env declaration, an `npm` script shell expansion, and an `export` in an extensionless s6 script.
+
+**A caveat worth carrying about mutation harnesses**, learned here: the npm-script plant first reported as SURVIVING. It had not — appending a line to `api/package.json` made the JSON invalid, so vitest never started, and a harness that counts failing test lines read "no failures" as "not detected". **A mutation that prevents the suite from running is not a surviving mutation.** Re-planted as a valid JSON edit, it was caught immediately.
 
 - [ ] **Step 3: Fix whatever the sweep finds**
 
@@ -9502,7 +9621,7 @@ In `CLAUDE.md`, update the Scope section: move user management from the implicit
 
 Add a reachability assertion to the existing G7 test file so the claim is enforced, not asserted in prose only. **There is no api-side G7 file** — the G7 comments live in the frontend, so the claim splits in two: `SettingsSidebar.test.tsx` asserts Users is a live top-level entry with no deeper tier (which is what makes it 2 clicks), and `navigation.smoke.test.tsx` asserts the rendered entry is an `<a href="/settings/users">`. **Reachable means clickable, not rendered** — the existing label assertion would pass on a `<div>`.
 
-G14 needs the same precision: W9 mechanizes **three of its four clauses** — the cap (`COHORT_CAP = 10`, enforced on invite *and* reinstate), the contact path (`SUPPORT_CONTACT` in every invite body) and the Beta disclaimer (fixed invite copy). **PAR-Q-lite signing is not W9's** and stays cutover-time, so the gate moves to `[~]`, not `[x]`.
+G14 needs the same precision, and **"mechanized" has to be qualified by WHO it reaches.** The cap (`COHORT_CAP = 10`, enforced on invite *and* reinstate) applies to every member. The contact path (`SUPPORT_CONTACT`) and the Beta disclaimer do **not** — they live in the invite email body, and **two populations never traverse the mailer**: the Q31b identities `cfReconcile.ts` imports from the Cloudflare policy (inserted `invited`, deliberately unmailed — they were granted out of band) and any `users` row predating W9. Claiming those two clauses are mechanized "for the first cohort" is false for exactly the members an operator is most likely to forget. PAR-Q-lite signing is not W9's at all. So the gate is `[~]` with the residual named, and **Deployment gains a step** that lists `invite_sent_at IS NULL` and delivers or records both.
 
 Adding a W9 row to the wave table also contradicts the status checklist above it, which lists W0–W8 and calls W8 "the last wave". Add the `[~]` W9 line there too, or the document disagrees with itself.
 
@@ -9563,7 +9682,8 @@ Not a task — the operator runs this once, and it is the only redeploy this wav
 4. Migration 080 applies on boot. Confirm an active admin exists.
 5. Run the cutover: `docker exec -it repos /scripts/cutover/002-w9-cf-baseline.sh` (the Dockerfile COPYs `scripts` to `/scripts`, not `/app/scripts`). Expect `thesugardog@gmail.com` in `imported`.
 6. Open `/settings/users`, confirm no drift (no policy-error advisory; a banner appears only for confirmed divergence), and send one real invite to a disposable address to verify delivery end to end.
-7. **Delete that test user from `/settings/users`.** The verification invite is not free — it leaves a durable `users` row, a real address in the Cloudflare Access policy, and a consumed slot against `COHORT_CAP`. Delete through the UI so the Q33 path also removes the Cloudflare grant; deleting the row in SQL would strand the address in the policy. Same rule as the `RESEND_API_KEY` rotation in `docs/runbooks/secret-rotation.md`.
+7. **Close G14 for the identities the mailer never reached.** The cohort cap is enforced for everyone, but the documented contact path and the Beta disclaimer ride in the *invite email* — so anyone who never received one has neither. That is two populations by construction: the Q31b imports from step 5 (`cfReconcile.ts` inserts them `invited` and deliberately sends no mail, because they were granted out of band) and any `users` row predating W9. List them — `SELECT email, status, invited_at, invite_sent_at FROM users WHERE invite_sent_at IS NULL` — and deliver both out of band, or record in the PASSDOWN comms log that they already had them. PAR-Q-lite is separate and applies to everyone.
+8. **Delete that test user from `/settings/users`.** The verification invite is not free — it leaves a durable `users` row, a real address in the Cloudflare Access policy, and a consumed slot against `COHORT_CAP`. Delete through the UI so the Q33 path also removes the Cloudflare grant; deleting the row in SQL would strand the address in the policy. Same rule as the `RESEND_API_KEY` rotation in `docs/runbooks/secret-rotation.md`.
 
 **After this, no user-lifecycle change requires a container recreate.** That is the whole point of the wave.
 
@@ -9573,10 +9693,11 @@ Not a task — the operator runs this once, and it is the only redeploy this wav
 
 **Spec coverage.** Every locked decision maps to a task: Q1/Q2 → T8; Q3/Q20/Q32 → T9; Q4 → T2+T8; Q5/Q6/Q30 → T10; Q7/Q8/Q12/Q18/Q27/Q29 → T11; Q9/Q36 → T14; Q10/Q19/Q22/Q38 → T5; Q11 → T15; Q13/Q26/Q28/Q34 → T12; Q14/Q17/Q17a/Q24 → T12; Q15 → T15; Q16 → T4; Q17b/Q33/Q37 → T13; Q21 → T8; Q23 → T3; Q25 → T7; Q31/Q35 → T16+T17. Schema → T2; Configuration → T15; DNS → Deployment; Email content → T10; Error-handling table → T11–T14; Testing bullets → the task each belongs to; Invariant matrix → T2, T8, T11–T14, T16, T17.
 
-**Known gaps, stated rather than hidden:**
-- **The DR test is structural, not binary.** `pg_dump`/`pg_restore`/`psql` are absent on this workstation, so T17 reconstructs a pre-080 database by unwinding the migration instead of restoring a real dump. The binary-level variant belongs in CI. Flagged inline in T17.
-- **No Postgres is currently running.** Every task's verification step is blocked until the Prerequisite section is satisfied.
-- **`api/.env` names the old `192.168.88.2` host.** Known and deferred — local untracked config, not authoritative on topology. Repointing it is part of the Prerequisite purely so the suite has a reachable database, not a defect to fix.
+**Known gaps, stated rather than hidden.** The first three below were written on 2026-07-26 and were **all obsolete by 2026-07-27**; they are corrected in place rather than deleted, because a plan that still asserts a blocked environment after the environment was fixed is how a later reader re-derives a solved problem.
+
+- **The DR test is structural, not binary** — but ~~`pg_dump`/`pg_restore`/`psql` are absent on this workstation~~ **is no longer true** (`postgresql@16` installed 2026-07-27; the keg-only PATH export is in the Prerequisite). T17 reconstructs a pre-080 database by unwinding the migrations, and that harness stays **on its own merits** — it exercises the migrate-on-restore path directly. Jason confirmed 2026-08-02 that a binary `pg_restore` variant is deliberately NOT added: the existing integration test already covers that mechanism and it would not close the wiring gap.
+- ~~**No Postgres is currently running.**~~ **Corrected:** a `podman` container (`repos-pg`, postgres:16-alpine) has been up since 2026-07-27; every task in this plan was verified against it.
+- ~~**`api/.env` names the old `192.168.88.2` host.**~~ **Corrected:** repointed to `postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test` on 2026-07-27. The tracked template `api/.env.example` still carries the old host on line 1 — out of scope for this wave, which owns only the user-management variables, but worth a follow-up.
 - Invite expiry, Resend delivery webhooks, auto-healing drift, Access Groups, self-service signup and per-user permissions are all explicitly out of scope per the spec and appear in no task.
 
 **Type consistency.** `Actor`, `LifecycleError`, `UserStatus`, `UserRole`, `EventActor`, `CfPolicySnapshot`, `DriftReport` and `UserListRow` are each defined once and referenced by the same name everywhere. `desiredPresence` is the single source of the status→membership mapping and is consumed by `syncEmailToStatus` (T6), `listUsers` (T14) and `reconcileCfBaseline` (T16), so the three cannot drift apart.
