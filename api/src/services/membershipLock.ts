@@ -62,16 +62,19 @@ export async function withMembershipLock<T>(
         'SELECT pg_try_advisory_lock($1) AS locked',
         [MEMBERSHIP_LOCK_KEY],
       );
-      if (rows[0].locked) { held = true; break; }
+      if (rows[0].locked) {
+        held = true;
+        break;
+      }
       if (Date.now() >= deadline) throw new LockTimeoutError();
       await new Promise((r) => setTimeout(r, POLL_MS));
     }
     return await fn();
   } finally {
     if (held) {
-      await client
-        .query('SELECT pg_advisory_unlock($1)', [MEMBERSHIP_LOCK_KEY])
-        .catch(() => { /* connection already dead — session end released it */ });
+      await client.query('SELECT pg_advisory_unlock($1)', [MEMBERSHIP_LOCK_KEY]).catch(() => {
+        /* connection already dead — session end released it */
+      });
     }
     client.release();
   }

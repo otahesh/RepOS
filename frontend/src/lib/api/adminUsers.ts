@@ -30,7 +30,10 @@ export interface DriftReport {
   /** false when the live policy could not be read at all. */
   checked: boolean;
   policy_error: string | null;
-  divergent: Array<{ email: string; reason: 'in_policy_unexpected' | 'missing_from_policy' | 'in_policy_no_row' }>;
+  divergent: Array<{
+    email: string;
+    reason: 'in_policy_unexpected' | 'missing_from_policy' | 'in_policy_no_row';
+  }>;
   /** Q36 — sync state UNKNOWN (stamp missing), which is NOT divergence. */
   unknown: string[];
 }
@@ -100,21 +103,24 @@ export async function patchUser(
 
 export async function resendInvite(id: string): Promise<InviteOutcome> {
   const res = await apiFetch(`/api/admin/users/${id}/resend-invite`, {
-    method: 'POST', headers: { 'X-RepOS-CSRF': '1' },
+    method: 'POST',
+    headers: { 'X-RepOS-CSRF': '1' },
   });
   return jsonOrThrow<InviteOutcome>(res);
 }
 
 export async function retrySync(id: string): Promise<RetrySyncOutcome> {
   const res = await apiFetch(`/api/admin/users/${id}/retry-sync`, {
-    method: 'POST', headers: { 'X-RepOS-CSRF': '1' },
+    method: 'POST',
+    headers: { 'X-RepOS-CSRF': '1' },
   });
   return jsonOrThrow<RetrySyncOutcome>(res);
 }
 
 export async function deleteUser(id: string): Promise<void> {
   const res = await apiFetch(`/api/admin/users/${id}`, {
-    method: 'DELETE', headers: { 'X-RepOS-CSRF': '1' },
+    method: 'DELETE',
+    headers: { 'X-RepOS-CSRF': '1' },
   });
   if (!res.ok) await jsonOrThrow(res); // throws ApiError with the parsed body
 }

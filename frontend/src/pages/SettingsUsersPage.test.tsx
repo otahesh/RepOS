@@ -11,23 +11,54 @@ import * as toast from '../components/common/ToastHost';
 // exactly the defect these fixtures exist to expose: every field below can
 // come back false on a 2xx, and the UI has to read them.
 const inviteOk = (email: string, id = '9'): api.InviteOutcome => ({
-  id, email, status: 'invited', created: true,
-  cf_synced: true, invite_sent: true, sync_error: null, mail_error: null,
+  id,
+  email,
+  status: 'invited',
+  created: true,
+  cf_synced: true,
+  invite_sent: true,
+  sync_error: null,
+  mail_error: null,
 });
 const patchOk = (id: string, email: string, status: 'active' | 'suspended'): api.PatchOutcome => ({
-  id, email, role: 'member', status, cf_synced: true, sync_error: null,
+  id,
+  email,
+  role: 'member',
+  status,
+  cf_synced: true,
+  sync_error: null,
 });
 const spyToast = () => vi.spyOn(toast, 'pushToast').mockReturnValue('toast-id');
 const lastToast = (s: ReturnType<typeof spyToast>) => s.mock.calls[s.mock.calls.length - 1][0];
 
 const baseResponse = {
   users: [
-    { id: '1', email: 'admin@repos.test', display_name: 'Admin', role: 'admin', status: 'active',
-      invited_at: null, activated_at: '2026-07-01T00:00:00Z', last_seen_at: '2026-07-26T00:00:00Z',
-      cf_synced_at: '2026-07-26T00:00:00Z', invite_sent_at: null, invited_by_email: null },
-    { id: '2', email: 'pending@repos.test', display_name: null, role: 'member', status: 'invited',
-      invited_at: '2026-07-25T00:00:00Z', activated_at: null, last_seen_at: null,
-      cf_synced_at: null, invite_sent_at: null, invited_by_email: 'admin@repos.test' },
+    {
+      id: '1',
+      email: 'admin@repos.test',
+      display_name: 'Admin',
+      role: 'admin',
+      status: 'active',
+      invited_at: null,
+      activated_at: '2026-07-01T00:00:00Z',
+      last_seen_at: '2026-07-26T00:00:00Z',
+      cf_synced_at: '2026-07-26T00:00:00Z',
+      invite_sent_at: null,
+      invited_by_email: null,
+    },
+    {
+      id: '2',
+      email: 'pending@repos.test',
+      display_name: null,
+      role: 'member',
+      status: 'invited',
+      invited_at: '2026-07-25T00:00:00Z',
+      activated_at: null,
+      last_seen_at: null,
+      cf_synced_at: null,
+      invite_sent_at: null,
+      invited_by_email: 'admin@repos.test',
+    },
   ],
   cohort: { count: 2, cap: 10 },
   drift: { checked: true, policy_error: null, divergent: [], unknown: ['pending@repos.test'] },
@@ -46,7 +77,7 @@ function renderPage(user: Partial<auth.User> = {}) {
   vi.spyOn(auth, 'useCurrentUser').mockReturnValue({
     status: 'authenticated',
     user: {
-      id: '1',                       // matches baseResponse's admin row
+      id: '1', // matches baseResponse's admin row
       email: 'admin@repos.test',
       display_name: 'Admin',
       timezone: 'America/New_York',
@@ -55,7 +86,11 @@ function renderPage(user: Partial<auth.User> = {}) {
     },
     error: null,
   });
-  return render(<MemoryRouter><SettingsUsersPage /></MemoryRouter>);
+  return render(
+    <MemoryRouter>
+      <SettingsUsersPage />
+    </MemoryRouter>,
+  );
 }
 
 /**
@@ -102,8 +137,12 @@ describe('SettingsUsersPage', () => {
   it('shows the drift banner only for CONFIRMED divergence', async () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue({
       ...baseResponse,
-      drift: { checked: true, policy_error: null, unknown: [],
-        divergent: [{ email: 'ghost@repos.test', reason: 'in_policy_no_row' }] },
+      drift: {
+        checked: true,
+        policy_error: null,
+        unknown: [],
+        divergent: [{ email: 'ghost@repos.test', reason: 'in_policy_no_row' }],
+      },
     } as never);
     renderPage();
     const banner = await screen.findByRole('alert');
@@ -151,7 +190,9 @@ describe('SettingsUsersPage', () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     vi.spyOn(api, 'inviteUser').mockResolvedValue({
       ...inviteOk('new@repos.test'),
-      cf_synced: false, invite_sent: false, sync_error: 'cf_http_403',
+      cf_synced: false,
+      invite_sent: false,
+      sync_error: 'cf_http_403',
     });
     const toasted = spyToast();
     renderPage();
@@ -171,7 +212,8 @@ describe('SettingsUsersPage', () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     vi.spyOn(api, 'inviteUser').mockResolvedValue({
       ...inviteOk('new@repos.test'),
-      invite_sent: false, mail_error: 'mail_http_error',
+      invite_sent: false,
+      mail_error: 'mail_http_error',
     });
     const toasted = spyToast();
     renderPage();
@@ -189,12 +231,16 @@ describe('SettingsUsersPage', () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     vi.spyOn(api, 'resendInvite').mockResolvedValue({
       ...inviteOk('pending@repos.test', '2'),
-      created: false, invite_sent: false, mail_error: 'mail_http_error',
+      created: false,
+      invite_sent: false,
+      mail_error: 'mail_http_error',
     });
     const toasted = spyToast();
     renderPage();
     await userEvent.click(
-      within(await screen.findByTestId('user-row-pending@repos.test')).getByRole('button', { name: /^resend$/i }),
+      within(await screen.findByTestId('user-row-pending@repos.test')).getByRole('button', {
+        name: /^resend$/i,
+      }),
     );
     await waitFor(() => expect(toasted).toHaveBeenCalled());
     expect(lastToast(toasted).severity).toBe('error');
@@ -203,7 +249,10 @@ describe('SettingsUsersPage', () => {
 
   it('surfaces a 409 cohort_cap_reached with the count', async () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    vi.spyOn(api, 'inviteUser').mockRejectedValue({ status: 409, body: { error: 'cohort_cap_reached', count: 10, cap: 10 } });
+    vi.spyOn(api, 'inviteUser').mockRejectedValue({
+      status: 409,
+      body: { error: 'cohort_cap_reached', count: 10, cap: 10 },
+    });
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /invite user/i }));
     await userEvent.type(screen.getByLabelText(/email/i), 'new@repos.test');
@@ -261,9 +310,13 @@ describe('SettingsUsersPage', () => {
   it('light actions fire without a confirmation step', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     const resend = vi.spyOn(api, 'resendInvite').mockResolvedValue({
-      ...inviteOk('pending@repos.test', '2'), created: false, resent: true,
+      ...inviteOk('pending@repos.test', '2'),
+      created: false,
+      resent: true,
     });
-    const retry = vi.spyOn(api, 'retrySync').mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' });
+    const retry = vi
+      .spyOn(api, 'retrySync')
+      .mockResolvedValue({ id: '2', cf_synced: true, sync_error: null, direction: 'present' });
     renderPage();
     const row = () => within(rowFor('pending@repos.test'));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
@@ -276,11 +329,13 @@ describe('SettingsUsersPage', () => {
 
   it('suspend is a medium action — confirmed, then PATCHed', async () => {
     const list = vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('2', 'pending@repos.test', 'suspended'));
+    const patch = vi
+      .spyOn(api, 'patchUser')
+      .mockResolvedValue(patchOk('2', 'pending@repos.test', 'suspended'));
     const toasted = spyToast();
     renderPage();
     await userEvent.click((await screen.findAllByRole('button', { name: /^suspend$/i }))[0]);
-    expect(patch).not.toHaveBeenCalled();          // the dialog gates the call
+    expect(patch).not.toHaveBeenCalled(); // the dialog gates the call
     await userEvent.click(screen.getByRole('button', { name: /suspend user/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith('2', { status: 'suspended' }));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
@@ -294,7 +349,8 @@ describe('SettingsUsersPage', () => {
     vi.spyOn(api, 'listUsers').mockResolvedValue(baseResponse as never);
     vi.spyOn(api, 'patchUser').mockResolvedValue({
       ...patchOk('2', 'pending@repos.test', 'suspended'),
-      cf_synced: false, sync_error: 'cf_http_500',
+      cf_synced: false,
+      sync_error: 'cf_http_500',
     });
     const toasted = spyToast();
     renderPage();
@@ -315,7 +371,9 @@ describe('SettingsUsersPage', () => {
         { ...baseResponse.users[1], id: '3', email: 'gone@repos.test', status: 'suspended' },
       ],
     } as never);
-    const patch = vi.spyOn(api, 'patchUser').mockResolvedValue(patchOk('3', 'gone@repos.test', 'active'));
+    const patch = vi
+      .spyOn(api, 'patchUser')
+      .mockResolvedValue(patchOk('3', 'gone@repos.test', 'active'));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /^reinstate$/i }));
     await userEvent.click(screen.getByRole('button', { name: /reinstate user/i }));

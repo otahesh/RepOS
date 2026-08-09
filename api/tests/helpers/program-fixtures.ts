@@ -187,7 +187,9 @@ export async function mkUserWithEmail(
     cfSyncedAt?: Date | null;
   } = {},
 ): Promise<{ id: string; email: string }> {
-  const { rows: [u] } = await db.query<{ id: string; email: string }>(
+  const {
+    rows: [u],
+  } = await db.query<{ id: string; email: string }>(
     `INSERT INTO users (email, role, status, cf_synced_at)
      VALUES ($1, $2, $3, $4)
      RETURNING id, email`,

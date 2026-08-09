@@ -28,11 +28,16 @@ const cleanups: Array<() => Promise<void>> = [];
 beforeAll(async () => {
   const eph = await createEphemeralDb('m082');
   pool = new pg.Pool({ connectionString: eph.url, max: 3 });
-  cleanups.push(async () => { await pool.end(); await eph.drop(); });
+  cleanups.push(async () => {
+    await pool.end();
+    await eph.drop();
+  });
   await runMigrations(pool);
 });
 
-afterAll(async () => { for (const c of cleanups) await c(); });
+afterAll(async () => {
+  for (const c of cleanups) await c();
+});
 
 /** A row whose stamp is already set — the state that makes the guard meaningful. */
 async function seed(status: string, stamped = true): Promise<string> {
@@ -54,7 +59,8 @@ async function userColumns(p: pg.Pool): Promise<string[]> {
 
 async function stampOf(id: string): Promise<Date | null> {
   const { rows } = await pool.query<{ cf_synced_at: Date | null }>(
-    `SELECT cf_synced_at FROM users WHERE id=$1`, [id],
+    `SELECT cf_synced_at FROM users WHERE id=$1`,
+    [id],
   );
   return rows[0].cf_synced_at;
 }
@@ -68,11 +74,13 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
     ['invited', 'deleting'],
   ])('REJECTS %s -> %s while cf_synced_at is still set', async (from, to) => {
     const id = await seed(from);
-    await expect(
-      pool.query(`UPDATE users SET status=$2 WHERE id=$1`, [id, to]),
-    ).rejects.toThrow(/Q24/);
+    await expect(pool.query(`UPDATE users SET status=$2 WHERE id=$1`, [id, to])).rejects.toThrow(
+      /Q24/,
+    );
     // the statement is rejected, so the row is untouched
-    const { rows } = await pool.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [id]);
+    const { rows } = await pool.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [
+      id,
+    ]);
     expect(rows[0].status).toBe(from);
   });
 
@@ -83,9 +91,9 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
     ['suspended', 'invited'],
   ])('REJECTS %s -> %s while cf_synced_at is still set', async (from, to) => {
     const id = await seed(from);
-    await expect(
-      pool.query(`UPDATE users SET status=$2 WHERE id=$1`, [id, to]),
-    ).rejects.toThrow(/Q24/);
+    await expect(pool.query(`UPDATE users SET status=$2 WHERE id=$1`, [id, to])).rejects.toThrow(
+      /Q24/,
+    );
   });
 
   it('ALLOWS a crossing transition that clears the stamp in the same statement', async () => {
@@ -96,7 +104,9 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
 
   it('ALLOWS the break-glass promotion exactly as the runbook writes it', async () => {
     const id = await seed('deleting');
-    const { rows } = await pool.query<{ email: string }>(`SELECT email FROM users WHERE id=$1`, [id]);
+    const { rows } = await pool.query<{ email: string }>(`SELECT email FROM users WHERE id=$1`, [
+      id,
+    ]);
     await pool.query(
       `UPDATE users SET role='admin', status='active', cf_synced_at=NULL WHERE lower(email)=$1`,
       [rows[0].email],
@@ -162,7 +172,10 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
   it('unwindToPreW9 re-arms every W9 migration, and the trigger comes back live', async () => {
     const eph = await createEphemeralDb('m082unwind');
     const p2 = new pg.Pool({ connectionString: eph.url, max: 3 });
-    cleanups.push(async () => { await p2.end(); await eph.drop(); });
+    cleanups.push(async () => {
+      await p2.end();
+      await eph.drop();
+    });
 
     // Independent source of truth: what the runner actually applies in the
     // 080–089 range on a fresh database.
@@ -195,7 +208,8 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
     for (const col of W9_USER_COLUMNS) {
       const { rows } = await p2.query<{ n: number }>(
         `SELECT count(*)::int n FROM information_schema.columns
-          WHERE table_name='users' AND column_name=$1`, [col],
+          WHERE table_name='users' AND column_name=$1`,
+        [col],
       );
       expect(rows[0].n, `${col} should be gone after the unwind`).toBe(0);
     }

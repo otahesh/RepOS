@@ -61,14 +61,14 @@ vi.mock('../auth', () => {
 });
 
 beforeEach(() => {
-  authState.isAdmin = false
-})
+  authState.isAdmin = false;
+});
 
 /** Section labels currently rendered inside the sidebar's settings sub-nav. */
 function renderedSectionLabels(sidebar: HTMLElement): string[] {
   return SETTINGS_SECTIONS.map((s) => s.label).filter(
     (label) => within(sidebar).queryAllByText(label).length > 0,
-  )
+  );
 }
 
 vi.mock('../lib/api/equipment', () => ({

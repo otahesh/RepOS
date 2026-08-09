@@ -45,7 +45,8 @@ beforeAll(async () => {
   jwks = await setupTestJwks();
   app = await buildApp();
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`, [ADMIN],
+    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`,
+    [ADMIN],
   );
   adminId = rows[0].id;
 });
@@ -69,8 +70,16 @@ beforeEach(async () => {
   await db.query(`UPDATE users SET role='admin', status='active' WHERE id=$1`, [adminId]);
   policyEmails = [ADMIN];
   fetchPolicyImpl = async () => ({
-    emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
-    config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    emails: [...policyEmails],
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: policyEmails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
   });
   vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never);
   vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
@@ -78,17 +87,25 @@ beforeEach(async () => {
   });
 });
 
-function freshEmail(tag: string) { return `pt-${tag}-${randomUUID().slice(0, 8)}@repos.test`; }
+function freshEmail(tag: string) {
+  return `pt-${tag}-${randomUUID().slice(0, 8)}@repos.test`;
+}
 
 async function patch(id: string, body: Record<string, unknown>, asEmail = ADMIN) {
   return app.inject({
-    method: 'PATCH', url: `/api/admin/users/${id}`,
+    method: 'PATCH',
+    url: `/api/admin/users/${id}`,
     headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(asEmail), 'x-repos-csrf': '1' },
     payload: body,
   });
 }
 
-async function seed(email: string, status: string, role = 'member', cfSynced: Date | null = new Date()) {
+async function seed(
+  email: string,
+  status: string,
+  role = 'member',
+  cfSynced: Date | null = new Date(),
+) {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO users (email, status, role, cf_synced_at) VALUES ($1,$2,$3,$4) RETURNING id`,
     [email, status, role, cfSynced],
@@ -109,7 +126,8 @@ describe('suspend — revocation takes effect FIRST (Q17, Q24)', () => {
     const r = await patch(id, { status: 'suspended' });
     expect(r.statusCode).toBe(200);
     const { rows } = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(rows[0].status).toBe('suspended');
     expect(rows[0].cf_synced_at).not.toBeNull();
@@ -119,12 +137,15 @@ describe('suspend — revocation takes effect FIRST (Q17, Q24)', () => {
   it('with CF removal mocked to FAIL, the DB revocation has ALREADY committed', async () => {
     const email = freshEmail('suspfail');
     const id = await seed(email, 'active');
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     const r = await patch(id, { status: 'suspended' });
     expect(r.statusCode).toBe(200);
     expect(r.json<{ sync_error: string }>().sync_error).toBe('cf_http_error');
     const { rows } = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     // The opposite of what the round-2 draft asserted: the DB change stands.
     expect(rows[0].status).toBe('suspended');
@@ -134,10 +155,13 @@ describe('suspend — revocation takes effect FIRST (Q17, Q24)', () => {
   it('denies the suspended user on the VERY NEXT request, with CF still failing', async () => {
     const email = freshEmail('nextreq');
     const id = await seed(email, 'active');
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     await patch(id, { status: 'suspended' });
     const me = await app.inject({
-      method: 'GET', url: '/api/me',
+      method: 'GET',
+      url: '/api/me',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(email) },
     });
     expect(me.statusCode).toBe(403);
@@ -148,7 +172,8 @@ describe('suspend — revocation takes effect FIRST (Q17, Q24)', () => {
     const id = await seed(freshEmail('suspev'), 'active');
     await patch(id, { status: 'suspended' });
     const { rows } = await db.query<{ meta: Record<string, unknown> }>(
-      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_suspended'`, [id],
+      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_suspended'`,
+      [id],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].meta).toMatchObject({ actor_kind: 'user', actor_email: ADMIN });
@@ -167,13 +192,15 @@ describe('reinstate — grant takes effect LAST (Q34)', () => {
     const r = await patch(id, { status: 'active' });
     expect(r.statusCode).toBe(200);
     const { rows } = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(rows[0].status).toBe('active');
     expect(rows[0].cf_synced_at).not.toBeNull();
     expect(policyEmails).toContain(email);
     const ev = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_reinstated'`, [id],
+      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_reinstated'`,
+      [id],
     );
     expect(ev.rows[0].n).toBe(1);
   });
@@ -181,12 +208,15 @@ describe('reinstate — grant takes effect LAST (Q34)', () => {
   it('CF add fails -> row stays suspended with a NULL stamp; policy untouched', async () => {
     const email = freshEmail('reinstfail');
     const id = await seed(email, 'suspended', 'member', new Date());
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_timeout', 'slow'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_timeout', 'slow');
+    };
     const r = await patch(id, { status: 'active' });
     expect(r.statusCode).toBe(502);
     expect(r.json<{ error: string }>().error).toBe('cf_sync_failed');
     const { rows } = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     // Q34: an interrupted reinstate has a correct, safe resting state. The
     // NULL stamp reads as sync-UNKNOWN, not confirmed drift (Q36) — the policy
@@ -200,20 +230,25 @@ describe('reinstate — grant takes effect LAST (Q34)', () => {
     const email = freshEmail('reinstboth');
     const id = await seed(email, 'suspended', 'member', new Date());
     const mint = await app.inject({
-      method: 'POST', url: '/api/tokens',
+      method: 'POST',
+      url: '/api/tokens',
       body: { user_id: id, label: 't', scopes: ['health:weight:write'] },
     });
     const token = mint.json<{ token: string }>().token;
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_timeout', 'slow'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_timeout', 'slow');
+    };
     await patch(id, { status: 'active' });
 
     const cf = await app.inject({
-      method: 'GET', url: '/api/me',
+      method: 'GET',
+      url: '/api/me',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(email) },
     });
     expect(cf.statusCode).toBe(403);
     const bearer = await app.inject({
-      method: 'GET', url: '/api/account/sessions',
+      method: 'GET',
+      url: '/api/account/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
     expect(bearer.statusCode).toBe(401);
@@ -223,7 +258,9 @@ describe('reinstate — grant takes effect LAST (Q34)', () => {
     await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
     const id = await seed(freshEmail('capreinst'), 'suspended', 'member', new Date());
     for (let i = 0; i < 9; i++) {
-      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [freshEmail(`f${i}`)]);
+      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [
+        freshEmail(`f${i}`),
+      ]);
     }
     // ADMIN + 9 fills = 10 counted; the suspended row is not counted, and
     // reinstating it would make 11.

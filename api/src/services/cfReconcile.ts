@@ -44,9 +44,7 @@ export interface ReconcileResult {
 
 export const RECONCILE_ACTOR_NAME = 'cf_reconciliation';
 
-export async function reconcileCfBaseline(
-  source: 'cutover' | 'restore',
-): Promise<ReconcileResult> {
+export async function reconcileCfBaseline(source: 'cutover' | 'restore'): Promise<ReconcileResult> {
   // Q26 — reconciliation IMPORTS rows as `invited`, and `invited` is inside
   // the Q12 counted set, so this is a cohort-membership transition and takes
   // the Q16 mutation lock like every other one. The cutover runs against a
@@ -72,9 +70,7 @@ export async function reconcileCfBaseline(
   return withMembershipLock(() => reconcileLocked(source), { timeoutMs: 60_000 });
 }
 
-async function reconcileLocked(
-  source: 'cutover' | 'restore',
-): Promise<ReconcileResult> {
+async function reconcileLocked(source: 'cutover' | 'restore'): Promise<ReconcileResult> {
   // Q10 + Q22 are enforced by fetchPolicy itself: it refuses a policy attached
   // to more than one application, or one containing any non-email selector.
   // Abort rather than reconcile against a policy that has been broadened.
@@ -92,9 +88,12 @@ async function reconcileLocked(
   }
   const inPolicy = new Set(snapshot.emails);
 
-  const { rows } = await db.query<{ id: string; email: string; status: UserStatus; cf_synced_at: Date | null }>(
-    `SELECT id, email, status, cf_synced_at FROM users`,
-  );
+  const { rows } = await db.query<{
+    id: string;
+    email: string;
+    status: UserStatus;
+    cf_synced_at: Date | null;
+  }>(`SELECT id, email, status, cf_synced_at FROM users`);
 
   const result: ReconcileResult = { stamped: [], cleared: [], imported: [], divergent: [] };
   const known = new Set<string>();

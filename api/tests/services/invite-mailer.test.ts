@@ -22,7 +22,8 @@ beforeEach(() => {
   calls = [];
   respond = async () =>
     new Response(JSON.stringify({ id: 'msg_123' }), {
-      status: 200, headers: { 'content-type': 'application/json' },
+      status: 200,
+      headers: { 'content-type': 'application/json' },
     });
   __setMailFetchForTesting(async (input, init = {}) => {
     calls.push({ url: String(input), init });
@@ -209,9 +210,9 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     ['a missing html part', { from: 'a', to: ['b'], subject: 'c', text: 'd' }],
     ['an empty recipient list', { from: 'a', to: [], subject: 'c', html: 'd', text: 'e' }],
   ])('refuses to send a persisted request that is %s', async (_label, bad) => {
-    await expect(
-      sendInviteRequest(bad as never, 'k-1', TO),
-    ).rejects.toMatchObject({ code: 'mail_request_invalid' });
+    await expect(sendInviteRequest(bad as never, 'k-1', TO)).rejects.toMatchObject({
+      code: 'mail_request_invalid',
+    });
     expect(calls).toHaveLength(0);
   });
 
@@ -236,8 +237,11 @@ describe('buildInviteRequest / sendInviteRequest', () => {
     const original = buildInviteRequest(copy);
     const pgOrdered = JSON.parse(
       JSON.stringify({
-        to: original.to, from: original.from, html: original.html,
-        text: original.text, subject: original.subject,
+        to: original.to,
+        from: original.from,
+        html: original.html,
+        text: original.text,
+        subject: original.subject,
       }),
     );
     expect(Object.keys(pgOrdered)).not.toEqual(Object.keys(original));
@@ -296,7 +300,10 @@ describe('buildInviteRequest / sendInviteRequest', () => {
   }
 
   it('Q38: aborts on deadline', async () => {
-    respond = async () => { await new Promise((r) => setTimeout(r, 200)); return new Response('{}', { status: 200 }); };
+    respond = async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return new Response('{}', { status: 200 });
+    };
     await expect(
       sendInviteRequest(buildInviteRequest(copy), 'k', TO, { timeoutMs: 40 }),
     ).rejects.toMatchObject({ code: 'mail_timeout' });

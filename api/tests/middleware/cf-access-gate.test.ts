@@ -89,7 +89,9 @@ describe('activation (Q21 + Q17b)', () => {
     const r = await me(email);
     expect(r.statusCode).toBe(403);
     expect(r.json<{ error: string }>().error).toBe('not_provisioned');
-    const { rows } = await db.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [u.id]);
+    const { rows } = await db.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [
+      u.id,
+    ]);
     expect(rows[0].status).toBe('invited');
   });
 
@@ -100,12 +102,14 @@ describe('activation (Q21 + Q17b)', () => {
     const r = await me(email);
     expect(r.statusCode).toBe(200);
     const { rows } = await db.query<{ status: string; activated_at: Date | null }>(
-      `SELECT status, activated_at FROM users WHERE id=$1`, [u.id],
+      `SELECT status, activated_at FROM users WHERE id=$1`,
+      [u.id],
     );
     expect(rows[0].status).toBe('active');
     expect(rows[0].activated_at).not.toBeNull();
     const ev = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`, [u.id],
+      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`,
+      [u.id],
     );
     expect(ev.rows[0].n).toBe(1);
   });
@@ -116,7 +120,8 @@ describe('activation (Q21 + Q17b)', () => {
     created.push(u.id);
     await me(email);
     const { rows } = await db.query<{ meta: Record<string, unknown> }>(
-      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_activated'`, [u.id],
+      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_activated'`,
+      [u.id],
     );
     expect(rows[0].meta.actor_kind).toBe('user');
     expect(rows[0].meta.actor_user_id).toBe(u.id);
@@ -137,12 +142,14 @@ describe('activation (Q21 + Q17b)', () => {
       spy.mockRestore();
     }
     const { rows } = await db.query<{ status: string; activated_at: Date | null }>(
-      `SELECT status, activated_at FROM users WHERE id=$1`, [u.id],
+      `SELECT status, activated_at FROM users WHERE id=$1`,
+      [u.id],
     );
     expect(rows[0].status).toBe('invited');
     expect(rows[0].activated_at).toBeNull();
     const ev = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`, [u.id],
+      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`,
+      [u.id],
     );
     expect(ev.rows[0].n).toBe(0);
   });
@@ -154,7 +161,8 @@ describe('activation (Q21 + Q17b)', () => {
     const [a, b] = await Promise.all([me(email), me(email)]);
     expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
     const ev = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`, [u.id],
+      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_activated'`,
+      [u.id],
     );
     expect(ev.rows[0].n).toBe(1);
   });
@@ -216,7 +224,8 @@ describe('activation (Q21 + Q17b)', () => {
     }
     // And it must not have activated on the way past.
     const { rows } = await db.query<{ status: string; activated_at: Date | null }>(
-      `SELECT status, activated_at FROM users WHERE id=$1`, [u.id],
+      `SELECT status, activated_at FROM users WHERE id=$1`,
+      [u.id],
     );
     expect(rows[0].status).toBe('suspended');
     expect(rows[0].activated_at).toBeNull();

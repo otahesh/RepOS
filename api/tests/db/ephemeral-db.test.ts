@@ -7,7 +7,9 @@ import { createEphemeralDb } from '../helpers/ephemeral-db.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
 
 const created: Array<{ drop: () => Promise<void> }> = [];
-afterAll(async () => { for (const c of created) await c.drop(); });
+afterAll(async () => {
+  for (const c of created) await c.drop();
+});
 
 describe('ephemeral-db harness', () => {
   it('creates an empty database, applies every migration, and reports them', async () => {

@@ -28,10 +28,7 @@ export function humanActor(userId: string, email: string): EventActor {
  * accurate: the same code path runs at cutover and inside run-restore.sh, and
  * a hard-coded 'system:cutover' would simply lie in the restore case.
  */
-export function systemActor(
-  actor_name: string,
-  source: 'cutover' | 'restore',
-): EventActor {
+export function systemActor(actor_name: string, source: 'cutover' | 'restore'): EventActor {
   return { actor_kind: 'system', actor_name, source };
 }
 

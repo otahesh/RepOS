@@ -60,7 +60,8 @@ beforeAll(async () => {
   jwks = await setupTestJwks();
   app = await buildApp();
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`, [ADMIN],
+    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`,
+    [ADMIN],
   );
   adminId = rows[0].id;
 });
@@ -80,8 +81,16 @@ beforeEach(() => {
   vi.restoreAllMocks();
   policyEmails = [ADMIN];
   fetchPolicyImpl = async () => ({
-    emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
-    config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    emails: [...policyEmails],
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: policyEmails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
   });
   vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never);
   vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
@@ -102,7 +111,8 @@ beforeEach(() => {
 
 async function invite(email: string, role: 'member' | 'admin' = 'member') {
   return app.inject({
-    method: 'POST', url: '/api/admin/users/invite',
+    method: 'POST',
+    url: '/api/admin/users/invite',
     headers: {
       'cf-access-jwt-assertion': await jwks.mintJwt(ADMIN),
       'x-repos-csrf': '1',
@@ -111,10 +121,15 @@ async function invite(email: string, role: 'member' | 'admin' = 'member') {
   });
 }
 
-function freshEmail(tag: string) { return `inv-${tag}-${randomUUID().slice(0, 8)}@repos.test`; }
+function freshEmail(tag: string) {
+  return `inv-${tag}-${randomUUID().slice(0, 8)}@repos.test`;
+}
 
 async function seed(
-  email: string, status: string, cfSynced: Date | null, sentAt: Date | null = null,
+  email: string,
+  status: string,
+  cfSynced: Date | null,
+  sentAt: Date | null = null,
   // Defaults to ADMIN because the real INSERT always stamps invited_by. The
   // replayed sender does NOT come from this column, though — it comes from the
   // audit snapshot written below.
@@ -153,9 +168,17 @@ describe('POST /api/admin/users/invite — happy path', () => {
     expect(body.cf_synced).toBe(true);
     expect(body.invite_sent).toBe(true);
 
-    const { rows } = await db.query<{ status: string; cf_synced_at: Date | null; invited_by: string; invite_sent_at: Date | null; invite_message_id: string | null; invited_at: Date }>(
+    const { rows } = await db.query<{
+      status: string;
+      cf_synced_at: Date | null;
+      invited_by: string;
+      invite_sent_at: Date | null;
+      invite_message_id: string | null;
+      invited_at: Date;
+    }>(
       `SELECT status, cf_synced_at, invited_by, invite_sent_at, invite_message_id, invited_at
-         FROM users WHERE id=$1`, [body.id],
+         FROM users WHERE id=$1`,
+      [body.id],
     );
     expect(rows[0].status).toBe('invited');
     expect(rows[0].cf_synced_at).not.toBeNull();
@@ -170,16 +193,21 @@ describe('POST /api/admin/users/invite — happy path', () => {
     const r = await invite(email);
     const id = r.json<{ id: string }>().id;
     const { rows } = await db.query<{ meta: Record<string, unknown> }>(
-      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`, [id],
+      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`,
+      [id],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].meta).toMatchObject({
-      actor_kind: 'user', actor_user_id: adminId, actor_email: ADMIN,
+      actor_kind: 'user',
+      actor_user_id: adminId,
+      actor_email: ADMIN,
     });
   });
 
   it('Q27: a Resend failure still leaves the user_invited event committed', async () => {
-    mailImpl = async () => { throw new mailer.MailerError('mail_http_error', 'nope'); };
+    mailImpl = async () => {
+      throw new mailer.MailerError('mail_http_error', 'nope');
+    };
     const email = freshEmail('mailfail');
     const r = await invite(email);
     // 201 even though the mail failed — `created` tracks the row INSERT, not
@@ -189,12 +217,14 @@ describe('POST /api/admin/users/invite — happy path', () => {
     const id = r.json<{ id: string; invite_sent: boolean }>().id;
     expect(r.json<{ invite_sent: boolean }>().invite_sent).toBe(false);
     const { rows } = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_invited'`, [id],
+      `SELECT count(*)::int n FROM account_events WHERE user_id=$1 AND kind='user_invited'`,
+      [id],
     );
     expect(rows[0].n).toBe(1);
     // Row keeps invite_sent_at NULL; the user is already in the policy and CAN sign in.
     const u = await db.query<{ invite_sent_at: Date | null; cf_synced_at: Date | null }>(
-      `SELECT invite_sent_at, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT invite_sent_at, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(u.rows[0].invite_sent_at).toBeNull();
     expect(u.rows[0].cf_synced_at).not.toBeNull();
@@ -203,18 +233,26 @@ describe('POST /api/admin/users/invite — happy path', () => {
 
 describe('CF sync failure on a grant (Q7, Q8)', () => {
   it('leaves the row sync-pending, does NOT roll back, and sends NO email', async () => {
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     const email = freshEmail('syncfail');
     const r = await invite(email);
     expect(r.statusCode).toBe(201);
-    const body = r.json<{ id: string; cf_synced: boolean; invite_sent: boolean; sync_error: string }>();
+    const body = r.json<{
+      id: string;
+      cf_synced: boolean;
+      invite_sent: boolean;
+      sync_error: string;
+    }>();
     expect(body.cf_synced).toBe(false);
     expect(body.invite_sent).toBe(false);
     expect(body.sync_error).toBe('cf_http_error');
     expect(sentMail).toHaveLength(0);
 
     const { rows } = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [body.id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [body.id],
     );
     // Q17b — the row exists and is NOT activatable.
     expect(rows[0].status).toBe('invited');
@@ -222,7 +260,9 @@ describe('CF sync failure on a grant (Q7, Q8)', () => {
   });
 
   it('an app_count breach refuses the same way', async () => {
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('app_count_not_one', 'two apps'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('app_count_not_one', 'two apps');
+    };
     const r = await invite(freshEmail('appcount'));
     expect(r.json<{ sync_error: string }>().sync_error).toBe('app_count_not_one');
     expect(sentMail).toHaveLength(0);
@@ -243,7 +283,9 @@ describe('duplicate invite — all five cases (Q29)', () => {
   it('invited + unsynced + the retry ALSO fails -> no mail at all', async () => {
     const email = freshEmail('unsynced2');
     await seed(email, 'invited', null);
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_timeout', 'slow'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_timeout', 'slow');
+    };
     const r = await invite(email);
     expect(r.statusCode).toBe(200);
     expect(r.json<{ resynced: boolean }>().resynced).toBe(false);
@@ -276,7 +318,8 @@ describe('duplicate invite — all five cases (Q29)', () => {
     policyEmails.push(email);
 
     const { rows } = await db.query<{ invited_at: Date }>(
-      `SELECT invited_at FROM users WHERE id=$1`, [id],
+      `SELECT invited_at FROM users WHERE id=$1`,
+      [id],
     );
     const expected = initialIdempotencyKey(id, rows[0].invited_at);
 
@@ -314,9 +357,12 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // deleting Admin A below must not change the outcome.
     const id = await seed(email, 'invited', new Date(), null, aRows[0].id, adminA);
     policyEmails.push(email);
-    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
+    mailImpl = async () => {
+      throw new mailer.MailerError('mail_timeout', 'ack lost');
+    };
     const { rows } = await db.query<{ invited_at: Date }>(
-      `SELECT invited_at FROM users WHERE id=$1`, [id],
+      `SELECT invited_at FROM users WHERE id=$1`,
+      [id],
     );
 
     await invite(email); // performed by ADMIN — i.e. Admin B
@@ -355,11 +401,14 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // first attempt STAMPS invite_sent_at and the second becomes an
     // intentional resend on a fresh key — a different branch that proves
     // nothing about replay.
-    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
+    mailImpl = async () => {
+      throw new mailer.MailerError('mail_timeout', 'ack lost');
+    };
 
     await invite(email);
     const mid = await db.query<{ invite_sent_at: Date | null }>(
-      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+      `SELECT invite_sent_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(mid.rows[0].invite_sent_at).toBeNull();
 
@@ -379,11 +428,14 @@ describe('duplicate invite — all five cases (Q29)', () => {
     const email = freshEmail('replay');
     const id = await seed(email, 'invited', new Date(), null);
     policyEmails.push(email);
-    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
+    mailImpl = async () => {
+      throw new mailer.MailerError('mail_timeout', 'ack lost');
+    };
 
     await invite(email);
     const mid = await db.query<{ invite_sent_at: Date | null }>(
-      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+      `SELECT invite_sent_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(mid.rows[0].invite_sent_at).toBeNull();
 
@@ -402,7 +454,9 @@ describe('duplicate invite — all five cases (Q29)', () => {
     const email = freshEmail('redeploy');
     const id = await seed(email, 'invited', new Date(), null);
     policyEmails.push(email);
-    mailImpl = async () => { throw new mailer.MailerError('mail_timeout', 'ack lost'); };
+    mailImpl = async () => {
+      throw new mailer.MailerError('mail_timeout', 'ack lost');
+    };
 
     await invite(email);
 
@@ -420,13 +474,15 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // And the frozen copy is the one that was persisted, not the new config.
     expect(sentMail[1].request.from).not.toContain('rotated@');
     const { rows } = await db.query<{ invite_request: string }>(
-      `SELECT invite_request FROM users WHERE id=$1`, [id],
+      `SELECT invite_request FROM users WHERE id=$1`,
+      [id],
     );
     // Stored as TEXT so the bytes survive verbatim — jsonb would reorder keys.
     expect(JSON.parse(rows[0].invite_request)).toEqual(sentMail[0].request);
     // And the audit row is untouched: 060 declares account_events append-only.
     const ev = await db.query<{ meta: Record<string, unknown> }>(
-      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`, [id],
+      `SELECT meta FROM account_events WHERE user_id=$1 AND kind='user_invited'`,
+      [id],
     );
     expect(ev.rows[0].meta.invite_request).toBeUndefined();
   });
@@ -472,9 +528,11 @@ describe('duplicate invite — all five cases (Q29)', () => {
     expect(body.cf_synced).toBe(true);
     expect(policyEmails).toContain(email);
 
-    const { rows } = await db.query<{ status: string; invite_sent_at: Date | null; cf_synced_at: Date | null }>(
-      `SELECT status, invite_sent_at, cf_synced_at FROM users WHERE lower(email)=$1`, [email],
-    );
+    const { rows } = await db.query<{
+      status: string;
+      invite_sent_at: Date | null;
+      cf_synced_at: Date | null;
+    }>(`SELECT status, invite_sent_at, cf_synced_at FROM users WHERE lower(email)=$1`, [email]);
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe('invited');
     expect(rows[0].invite_sent_at).toBeNull();
@@ -502,10 +560,10 @@ describe('duplicate invite — all five cases (Q29)', () => {
     // support constant would send a body that never matches the original.
     const email = freshEmail('badshape');
     const id = await seed(email, 'invited', new Date(), null);
-    await db.query(
-      `UPDATE account_events SET meta=$2::jsonb WHERE user_id=$1`,
-      [id, JSON.stringify(systemActor('cf_reconciliation', 'cutover'))],
-    );
+    await db.query(`UPDATE account_events SET meta=$2::jsonb WHERE user_id=$1`, [
+      id,
+      JSON.stringify(systemActor('cf_reconciliation', 'cutover')),
+    ]);
     policyEmails.push(email);
 
     const r = await invite(email);
@@ -517,7 +575,8 @@ describe('duplicate invite — all five cases (Q29)', () => {
     const email = freshEmail('unsyncedkey');
     const id = await seed(email, 'invited', null, null);
     const { rows } = await db.query<{ invited_at: Date }>(
-      `SELECT invited_at FROM users WHERE id=$1`, [id],
+      `SELECT invited_at FROM users WHERE id=$1`,
+      [id],
     );
     await invite(email);
     expect(sentMail[0].idempotencyKey).toBe(initialIdempotencyKey(id, rows[0].invited_at));
@@ -561,7 +620,9 @@ describe('cohort cap (Q12, Q18)', () => {
       `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
     );
     for (let i = rows[0].c; i < n; i++) {
-      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [freshEmail(`fill${i}`)]);
+      await db.query(`INSERT INTO users (email, status) VALUES ($1,'active')`, [
+        freshEmail(`fill${i}`),
+      ]);
     }
   }
 
@@ -579,7 +640,9 @@ describe('cohort cap (Q12, Q18)', () => {
   it('a deleting row still occupies its slot', async () => {
     await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
     await fillTo(9);
-    await db.query(`INSERT INTO users (email, status) VALUES ($1,'deleting')`, [freshEmail('pending')]);
+    await db.query(`INSERT INTO users (email, status) VALUES ($1,'deleting')`, [
+      freshEmail('pending'),
+    ]);
     const r = await invite(freshEmail('blocked'));
     expect(r.statusCode).toBe(409);
   });
@@ -587,7 +650,9 @@ describe('cohort cap (Q12, Q18)', () => {
   it('a suspended row does NOT occupy a slot', async () => {
     await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
     await fillTo(9);
-    await db.query(`INSERT INTO users (email, status) VALUES ($1,'suspended')`, [freshEmail('susp')]);
+    await db.query(`INSERT INTO users (email, status) VALUES ($1,'suspended')`, [
+      freshEmail('susp'),
+    ]);
     const r = await invite(freshEmail('allowed'));
     expect(r.statusCode).toBe(201);
   });
@@ -611,13 +676,15 @@ describe('auth (Q20)', () => {
     process.env.ADMIN_API_KEY = 'k';
     try {
       const r = await app.inject({
-        method: 'POST', url: '/api/admin/users/invite',
+        method: 'POST',
+        url: '/api/admin/users/invite',
         headers: { 'x-admin-key': 'k', 'x-repos-csrf': '1' },
         payload: { email: freshEmail('key'), role: 'member' },
       });
       expect(r.statusCode).toBe(403);
     } finally {
-      if (saved === undefined) delete process.env.ADMIN_API_KEY; else process.env.ADMIN_API_KEY = saved;
+      if (saved === undefined) delete process.env.ADMIN_API_KEY;
+      else process.env.ADMIN_API_KEY = saved;
     }
   });
 
@@ -625,7 +692,8 @@ describe('auth (Q20)', () => {
     const member = freshEmail('member');
     await seed(member, 'active', new Date());
     const r = await app.inject({
-      method: 'POST', url: '/api/admin/users/invite',
+      method: 'POST',
+      url: '/api/admin/users/invite',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(member), 'x-repos-csrf': '1' },
       payload: { email: freshEmail('x'), role: 'member' },
     });
@@ -641,7 +709,8 @@ describe('auth (Q20)', () => {
 describe('POST /api/admin/users/:id/resend-invite (Q29)', () => {
   async function resend(id: string) {
     return app.inject({
-      method: 'POST', url: `/api/admin/users/${id}/resend-invite`,
+      method: 'POST',
+      url: `/api/admin/users/${id}/resend-invite`,
       headers: {
         'cf-access-jwt-assertion': await jwks.mintJwt(ADMIN),
         'x-repos-csrf': '1',
@@ -654,7 +723,8 @@ describe('POST /api/admin/users/:id/resend-invite (Q29)', () => {
     const id = await seed(email, 'invited', new Date(), null);
     policyEmails.push(email);
     const { rows } = await db.query<{ invited_at: Date }>(
-      `SELECT invited_at FROM users WHERE id=$1`, [id],
+      `SELECT invited_at FROM users WHERE id=$1`,
+      [id],
     );
 
     const r = await resend(id);
@@ -698,8 +768,12 @@ describe('POST /api/admin/users/:id/resend-invite (Q29)', () => {
     policyEmails.push(email);
 
     let release!: () => void;
-    const holding = new Promise<void>((r) => { release = r; });
-    const lockHeld = withMembershipLock(async () => { await holding; });
+    const holding = new Promise<void>((r) => {
+      release = r;
+    });
+    const lockHeld = withMembershipLock(async () => {
+      await holding;
+    });
     await new Promise((r) => setTimeout(r, 60));
 
     const pending = resend(id);
@@ -716,9 +790,9 @@ describe('POST /api/admin/users/:id/resend-invite (Q29)', () => {
     // policy itself, to model a row whose cf_synced_at is set, so
     // `not.toContain` would be false by construction and `toContain` true
     // regardless of the outcome. The row count is what actually discriminates.)
-    const { rows } = await db.query<{ id: string }>(
-      `SELECT id FROM users WHERE lower(email)=$1`, [email],
-    );
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM users WHERE lower(email)=$1`, [
+      email,
+    ]);
     expect(rows).toHaveLength(0);
   });
 });
@@ -751,7 +825,8 @@ describe('invite_at provenance (Q30)', () => {
     // behaviour this would be two sends carrying two different keys.
     expect(sentMail).toHaveLength(0);
     const { rows } = await db.query<{ invite_sent_at: Date | null }>(
-      `SELECT invite_sent_at FROM users WHERE id=$1`, [id],
+      `SELECT invite_sent_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(rows[0].invite_sent_at).toBeNull();
   });

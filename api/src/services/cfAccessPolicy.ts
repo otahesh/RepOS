@@ -135,7 +135,10 @@ async function cfRequest(
       });
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') {
-        throw new CfPolicyError('cf_timeout', `Cloudflare ${method} timed out after ${timeoutMs}ms`);
+        throw new CfPolicyError(
+          'cf_timeout',
+          `Cloudflare ${method} timed out after ${timeoutMs}ms`,
+        );
       }
       throw new CfPolicyError('cf_http_error', `Cloudflare ${method} failed`, String(err));
     }
@@ -150,14 +153,22 @@ async function cfRequest(
           `Cloudflare ${method} body stalled past ${timeoutMs}ms`,
         );
       }
-      throw new CfPolicyError('cf_http_error', `Cloudflare ${method} body read failed`, String(err));
+      throw new CfPolicyError(
+        'cf_http_error',
+        `Cloudflare ${method} body read failed`,
+        String(err),
+      );
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new CfPolicyError('cf_http_error', `Cloudflare ${method} returned non-JSON`, text.slice(0, 200));
+      throw new CfPolicyError(
+        'cf_http_error',
+        `Cloudflare ${method} returned non-JSON`,
+        text.slice(0, 200),
+      );
     }
     // Validate before ANY property access. A raw TypeError escaping this module
     // is not merely untidy: callers map CfPolicyError.code onto a sync_error and
@@ -275,7 +286,11 @@ function canonical(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(canonical);
   if (v !== null && typeof v === 'object') {
     const o = v as Record<string, unknown>;
-    return Object.fromEntries(Object.keys(o).sort().map((k) => [k, canonical(o[k])]));
+    return Object.fromEntries(
+      Object.keys(o)
+        .sort()
+        .map((k) => [k, canonical(o[k])]),
+    );
   }
   return v;
 }
@@ -294,9 +309,7 @@ function fingerprint(s: CfPolicySnapshot): string {
   return JSON.stringify(canonical(s.config));
 }
 
-export async function fetchPolicy(
-  opts: { timeoutMs?: number } = {},
-): Promise<CfPolicySnapshot> {
+export async function fetchPolicy(opts: { timeoutMs?: number } = {}): Promise<CfPolicySnapshot> {
   const result = await cfRequest('GET', undefined, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   return toSnapshot(result);
 }

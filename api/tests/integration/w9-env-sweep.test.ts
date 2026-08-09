@@ -28,9 +28,9 @@ const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
  * the tight form.
  */
 const JS_READS = [
-  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`),                       // process.env.X
-  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`),                // process.env['X']
-  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`),    // const { X } = process.env
+  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`), // process.env.X
+  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`), // process.env['X']
+  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`), // const { X } = process.env
 ];
 
 /**
@@ -44,14 +44,22 @@ const JS_READS = [
  * to prove it is IGNORED — a legitimate non-read that must keep passing.
  */
 const SHELL_READS = [
-  new RegExp(`\\$\\{?(${NAMES})\\b`),                                        // $X / ${X}
+  new RegExp(`\\$\\{?(${NAMES})\\b`), // $X / ${X}
   new RegExp(`^\\s*(?:export\\s+|ENV\\s+|ARG\\s+)?(${NAMES})\\s*[:=]`, 'm'), // X= / X: / ENV X=
 ];
 
 /** Build outputs, vendored code and VCS internals — never our source. */
 const EXCLUDED_DIRS = new Set([
-  'node_modules', 'dist', 'build', '.git', 'coverage',
-  'playwright-report', 'test-results', '.worktrees', '.vite', 'handoffs',
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  'coverage',
+  'playwright-report',
+  'test-results',
+  '.worktrees',
+  '.vite',
+  'handoffs',
 ]);
 
 const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -65,7 +73,7 @@ const SHELL_SHAPED_EXTENSIONS = new Set(['.sh', '.yml', '.yaml', '.json', '.conf
  * a developer's machine is not the deployment.
  */
 function classify(name: string): 'js' | 'shell' | null {
-  if (name.startsWith('.env')) return null;              // template has its own case
+  if (name.startsWith('.env')) return null; // template has its own case
   const ext = extname(name);
   if (ext === '.md') return null;
   if (JS_EXTENSIONS.has(ext)) return 'js';
@@ -79,7 +87,10 @@ function classify(name: string): 'js' | 'shell' | null {
 
 const repoRoot = join(process.cwd(), '..');
 
-interface Scan { files: string[]; offenders: string[] }
+interface Scan {
+  files: string[];
+  offenders: string[];
+}
 
 async function walk(dir: string, acc: Scan): Promise<void> {
   for (const entry of await readdir(dir)) {
@@ -118,17 +129,20 @@ describe('W9 env-var removal is complete', () => {
     const { files } = await scan;
     expect(files.length).toBeGreaterThan(400);
     for (const expected of [
-      'frontend/playwright.config.ts',                  // outside every original root
-      'api/vitest.integration.config.ts',               // ditto
-      '.github/workflows/test.yml',                     // ditto
-      'api/package.json',                               // ditto (npm scripts)
-      'docker/root/etc/s6-overlay/scripts/run-api',     // extensionless
-      'docker/Dockerfile',                              // extensionless
+      'frontend/playwright.config.ts', // outside every original root
+      'api/vitest.integration.config.ts', // ditto
+      '.github/workflows/test.yml', // ditto
+      'api/package.json', // ditto (npm scripts)
+      'docker/root/etc/s6-overlay/scripts/run-api', // extensionless
+      'docker/Dockerfile', // extensionless
       'api/src/middleware/cfAccess.ts',
       'frontend/src/lib/api/adminUsers.ts',
       'scripts/run-restore.sh',
     ]) {
-      expect(files.some((f) => f.endsWith(expected)), `never scanned ${expected}`).toBe(true);
+      expect(
+        files.some((f) => f.endsWith(expected)),
+        `never scanned ${expected}`,
+      ).toBe(true);
     }
   });
 
@@ -140,10 +154,10 @@ describe('W9 env-var removal is complete', () => {
       'api/src/db/migrations/080_users_roles_status.sql',
       'api/src/middleware/cfAccess.ts',
       'api/src/bootstrap-guards.ts',
-      'api/tests/unit/startup-guards.test.ts',   // passes the name as an IGNORED input
+      'api/tests/unit/startup-guards.test.ts', // passes the name as an IGNORED input
     ]) {
       const body = await readFile(join(repoRoot, historical), 'utf8');
-      expect(body).toMatch(new RegExp(NAMES));                 // still records it
+      expect(body).toMatch(new RegExp(NAMES)); // still records it
       expect(offenders.some((f) => f.endsWith(historical))).toBe(false);
     }
   });
@@ -157,8 +171,11 @@ describe('W9 env-var removal is complete', () => {
     expect(tpl).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
     expect(tpl).not.toMatch(/REPOS_ADMIN_EMAILS/);
     for (const v of [
-      'CF_API_TOKEN', 'CF_ACCOUNT_ID', 'CF_ACCESS_POLICY_ID',
-      'RESEND_API_KEY', 'INVITE_FROM_EMAIL',
+      'CF_API_TOKEN',
+      'CF_ACCOUNT_ID',
+      'CF_ACCESS_POLICY_ID',
+      'RESEND_API_KEY',
+      'INVITE_FROM_EMAIL',
     ]) {
       expect(tpl).toContain(v);
     }

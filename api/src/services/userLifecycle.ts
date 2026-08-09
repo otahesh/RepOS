@@ -132,10 +132,14 @@ async function originalSender(userId: string): Promise<string> {
   if (kind === 'user_invited') {
     // Q23 human shape. The address is the payload, so it must be present.
     if (
-      !meta || meta.actor_kind !== 'user' ||
-      typeof meta.actor_email !== 'string' || meta.actor_email === ''
+      !meta ||
+      meta.actor_kind !== 'user' ||
+      typeof meta.actor_email !== 'string' ||
+      meta.actor_email === ''
     ) {
-      throw new LifecycleError(500, 'invite_provenance_invalid', { reason: 'malformed_human_actor' });
+      throw new LifecycleError(500, 'invite_provenance_invalid', {
+        reason: 'malformed_human_actor',
+      });
     }
     return meta.actor_email;
   }
@@ -143,7 +147,9 @@ async function originalSender(userId: string): Promise<string> {
   // constant IS the durable answer here — but only for a correctly shaped
   // system event, never as a catch-all.
   if (!meta || meta.actor_kind !== 'system') {
-    throw new LifecycleError(500, 'invite_provenance_invalid', { reason: 'malformed_system_actor' });
+    throw new LifecycleError(500, 'invite_provenance_invalid', {
+      reason: 'malformed_system_actor',
+    });
   }
   return SUPPORT_CONTACT;
 }
@@ -187,10 +193,10 @@ async function frozenInviteRequest(userId: string, email: string): Promise<Invit
   });
   // Commit the freeze before any I/O, so a crash between here and the send
   // replays these exact bytes rather than re-rendering them.
-  await db.query(
-    `UPDATE users SET invite_request=$2 WHERE id=$1 AND invite_request IS NULL`,
-    [userId, serializeInviteRequest(request)],
-  );
+  await db.query(`UPDATE users SET invite_request=$2 WHERE id=$1 AND invite_request IS NULL`, [
+    userId,
+    serializeInviteRequest(request),
+  ]);
   // Re-read: if a concurrent attempt won the freeze, replay ITS bytes, not ours.
   const { rows: after } = await db.query<{ invite_request: string | null }>(
     `SELECT invite_request FROM users WHERE id=$1`,
@@ -224,11 +230,21 @@ async function provisionAndMail(
   email: string,
   makeRequest: () => Promise<InviteRequest>,
   idempotencyKey: string,
-): Promise<{ cf_synced: boolean; invite_sent: boolean; sync_error: string | null; mail_error: string | null }> {
+): Promise<{
+  cf_synced: boolean;
+  invite_sent: boolean;
+  sync_error: string | null;
+  mail_error: string | null;
+}> {
   try {
     await syncEmail(email, 'present');
   } catch (err) {
-    return { cf_synced: false, invite_sent: false, sync_error: syncErrorCode(err), mail_error: null };
+    return {
+      cf_synced: false,
+      invite_sent: false,
+      sync_error: syncErrorCode(err),
+      mail_error: null,
+    };
   }
   // Q7 — stamp only after a successful sync. The row becomes activatable here
   // and not one instruction earlier.
@@ -240,19 +256,29 @@ async function provisionAndMail(
   } catch (err) {
     if (err instanceof LifecycleError) throw err;
     // Provisioned, not mailed — the row is durable and the invitee can sign in.
-    return { cf_synced: true, invite_sent: false, sync_error: null, mail_error: mailErrorCode(err) };
+    return {
+      cf_synced: true,
+      invite_sent: false,
+      sync_error: null,
+      mail_error: mailErrorCode(err),
+    };
   }
 
   try {
     const { messageId } = await sendInviteRequest(request, idempotencyKey, email);
-    await db.query(
-      `UPDATE users SET invite_sent_at = now(), invite_message_id = $2 WHERE id=$1`,
-      [userId, messageId],
-    );
+    await db.query(`UPDATE users SET invite_sent_at = now(), invite_message_id = $2 WHERE id=$1`, [
+      userId,
+      messageId,
+    ]);
     return { cf_synced: true, invite_sent: true, sync_error: null, mail_error: null };
   } catch (err) {
     // The user is already in the CF policy and CAN sign in; the admin resends.
-    return { cf_synced: true, invite_sent: false, sync_error: null, mail_error: mailErrorCode(err) };
+    return {
+      cf_synced: true,
+      invite_sent: false,
+      sync_error: null,
+      mail_error: mailErrorCode(err),
+    };
   }
 }
 
@@ -290,112 +316,120 @@ async function resendExisting(row: InviteRow, actor: Actor): Promise<InviteOutco
   if (row.status === 'deleting') throw new LifecycleError(409, 'deletion_in_progress');
 
   {
-      // Q30 — the key is chosen by whether a delivery has ever SUCCEEDED, not
-      // by which retry branch we are in. `invite_sent_at` is the only durable
-      // record of that, and it is written only after sendInviteRequest resolves.
-      //
-      // The case that forces this: Resend ACCEPTS the initial send but the
-      // response times out. The row is left invited + CF-synced +
-      // invite_sent_at NULL, so a retry lands in the "already provisioned"
-      // branch below — which used to mint a FRESH key and deliver the same
-      // initial invite a second time. Resend only deduplicates retries that
-      // reuse the same key, so the deterministic initial key is the only thing
-      // that collapses them. A fresh key is correct exclusively when a prior
-      // delivery is known-successful, which is what Q30 means by "a deliberate
-      // second delivery".
-      // Reusing the deterministic key OBLIGES us to reproduce the original
-      // request body, because Resend deduplicates only IDENTICAL requests
-      // sharing a key and returns 409 invalid_idempotent_request otherwise.
-      // Rendering the retry with the CURRENT admin's address breaks that:
-      // Admin A's send is accepted, the response is lost, Admin B retries, and
-      // the body now names B against A's key.
-      //
-      // So the sender is resolved from durable state rather than from the
-      // caller — see originalSender(). Both the key and the body are then pure
-      // functions of the row, which is what makes the retry a true replay.
-      // There is deliberately NO fresh-key fallback on this branch: a fresh key
-      // per attempt would defeat Q30 outright, since a lost ack leaves the row
-      // untouched and the next attempt would deliver again.
-      const neverDelivered = row.invite_sent_at === null;
-      let idempotencyKey: string;
-      if (neverDelivered) {
-        // The initial key is derived from invited_at, so a NULL one cannot
-        // produce it. Defaulting to `new Date()` does not degrade gracefully:
-        // it mints a DIFFERENT key on every attempt, which is precisely the
-        // unbounded-resend failure Q30 forbids — a lost ack leaves the row
-        // untouched, so each retry looks like a new request to Resend and
-        // delivers again. `invited_at` is nullable in the schema, so this row
-        // is representable; refuse it as broken provenance rather than
-        // synthesizing mutable key material. (A CHECK constraint asserting
-        // status='invited' ⇒ invited_at IS NOT NULL would also close it, but
-        // that is a new migration and a schema decision, not this task's.)
-        if (row.invited_at === null) {
-          throw new LifecycleError(500, 'invite_provenance_invalid', {
-            reason: 'missing_invited_at',
-          });
-        }
-        idempotencyKey = initialIdempotencyKey(row.id, row.invited_at);
-      } else {
-        // A deliberate second delivery keys off the id alone, so it never reads
-        // invited_at — guarding it here would block a legitimate resend over a
-        // value the operation does not use.
-        idempotencyKey = resendIdempotencyKey(row.id);
+    // Q30 — the key is chosen by whether a delivery has ever SUCCEEDED, not
+    // by which retry branch we are in. `invite_sent_at` is the only durable
+    // record of that, and it is written only after sendInviteRequest resolves.
+    //
+    // The case that forces this: Resend ACCEPTS the initial send but the
+    // response times out. The row is left invited + CF-synced +
+    // invite_sent_at NULL, so a retry lands in the "already provisioned"
+    // branch below — which used to mint a FRESH key and deliver the same
+    // initial invite a second time. Resend only deduplicates retries that
+    // reuse the same key, so the deterministic initial key is the only thing
+    // that collapses them. A fresh key is correct exclusively when a prior
+    // delivery is known-successful, which is what Q30 means by "a deliberate
+    // second delivery".
+    // Reusing the deterministic key OBLIGES us to reproduce the original
+    // request body, because Resend deduplicates only IDENTICAL requests
+    // sharing a key and returns 409 invalid_idempotent_request otherwise.
+    // Rendering the retry with the CURRENT admin's address breaks that:
+    // Admin A's send is accepted, the response is lost, Admin B retries, and
+    // the body now names B against A's key.
+    //
+    // So the sender is resolved from durable state rather than from the
+    // caller — see originalSender(). Both the key and the body are then pure
+    // functions of the row, which is what makes the retry a true replay.
+    // There is deliberately NO fresh-key fallback on this branch: a fresh key
+    // per attempt would defeat Q30 outright, since a lost ack leaves the row
+    // untouched and the next attempt would deliver again.
+    const neverDelivered = row.invite_sent_at === null;
+    let idempotencyKey: string;
+    if (neverDelivered) {
+      // The initial key is derived from invited_at, so a NULL one cannot
+      // produce it. Defaulting to `new Date()` does not degrade gracefully:
+      // it mints a DIFFERENT key on every attempt, which is precisely the
+      // unbounded-resend failure Q30 forbids — a lost ack leaves the row
+      // untouched, so each retry looks like a new request to Resend and
+      // delivers again. `invited_at` is nullable in the schema, so this row
+      // is representable; refuse it as broken provenance rather than
+      // synthesizing mutable key material. (A CHECK constraint asserting
+      // status='invited' ⇒ invited_at IS NOT NULL would also close it, but
+      // that is a new migration and a schema decision, not this task's.)
+      if (row.invited_at === null) {
+        throw new LifecycleError(500, 'invite_provenance_invalid', {
+          reason: 'missing_invited_at',
+        });
       }
-      // A never-delivered invite REPLAYS its frozen request; a known-successful
-      // prior delivery is a deliberate new one, so it renders fresh under a
-      // fresh key and has no earlier request to match. Either can fail on a
-      // missing INVITE_FROM_EMAIL, which is a MAIL failure on a durable row —
-      // never a reason to unwind the invitation, and (on the unsynced branch
-      // below) never a reason to skip provisioning. Hence a thunk rather than a
-      // value: provisionAndMail evaluates it only after the CF add and the
-      // stamp, so a config gap cannot strand the row with cf_synced_at NULL.
-      const makeRequest = async (): Promise<InviteRequest> =>
-        neverDelivered
-          ? await frozenInviteRequest(row.id, target)
-          : buildInviteRequest({ toEmail: target, invitedByEmail: actor.email });
+      idempotencyKey = initialIdempotencyKey(row.id, row.invited_at);
+    } else {
+      // A deliberate second delivery keys off the id alone, so it never reads
+      // invited_at — guarding it here would block a legitimate resend over a
+      // value the operation does not use.
+      idempotencyKey = resendIdempotencyKey(row.id);
+    }
+    // A never-delivered invite REPLAYS its frozen request; a known-successful
+    // prior delivery is a deliberate new one, so it renders fresh under a
+    // fresh key and has no earlier request to match. Either can fail on a
+    // missing INVITE_FROM_EMAIL, which is a MAIL failure on a durable row —
+    // never a reason to unwind the invitation, and (on the unsynced branch
+    // below) never a reason to skip provisioning. Hence a thunk rather than a
+    // value: provisionAndMail evaluates it only after the CF add and the
+    // stamp, so a config gap cannot strand the row with cf_synced_at NULL.
+    const makeRequest = async (): Promise<InviteRequest> =>
+      neverDelivered
+        ? await frozenInviteRequest(row.id, target)
+        : buildInviteRequest({ toEmail: target, invitedByEmail: actor.email });
 
-      if (row.cf_synced_at === null) {
-        // Provisioning failed last time: retry the sync FIRST and send only if
-        // it succeeds. Mailing unconditionally would send a link the invitee
-        // cannot use, contradicting Q7 and Q17b.
-        const r = await provisionAndMail(row.id, target, makeRequest, idempotencyKey);
-        return {
-          id: row.id, email: target, status: 'invited', created: false,
-          ...r, resynced: r.cf_synced,
-        };
-      }
-      // Already provisioned, so there is no sync to order the freeze against —
-      // building the request here cannot strand the row. Whether this is a
-      // resend or the completion of an initial delivery is decided by
-      // `neverDelivered`, not by this branch.
-      let invite_sent = false;
-      let mail_error: string | null = null;
-      try {
-        // `target`, not `email`: the frozen request was rendered against the
-        // lower-cased address, and sendInviteRequest compares expectedTo to
-        // request.to[0] EXACTLY. Passing the raw input would reject every
-        // replay of an invite whose address was typed with capitals.
-        const { messageId } = await sendInviteRequest(
-          await makeRequest(), idempotencyKey, target,
-        );
-        await db.query(
-          `UPDATE users SET invite_sent_at = now(), invite_message_id=$2 WHERE id=$1`,
-          [row.id, messageId],
-        );
-        invite_sent = true;
-      } catch (err) {
-        if (err instanceof LifecycleError) throw err;
-        mail_error = mailErrorCode(err);
-      }
+    if (row.cf_synced_at === null) {
+      // Provisioning failed last time: retry the sync FIRST and send only if
+      // it succeeds. Mailing unconditionally would send a link the invitee
+      // cannot use, contradicting Q7 and Q17b.
+      const r = await provisionAndMail(row.id, target, makeRequest, idempotencyKey);
       return {
-        id: row.id, email: target, status: 'invited', created: false,
-        cf_synced: true, invite_sent, sync_error: null, mail_error,
-        // Only a genuine second delivery is a resend; finishing an initial
-        // send whose response was lost is not. This is exactly the branch that
-        // returns resent:false WITHOUT having created anything, which is why
-        // the route keys 201 off `created` and not off this field.
-        resent: !neverDelivered,
+        id: row.id,
+        email: target,
+        status: 'invited',
+        created: false,
+        ...r,
+        resynced: r.cf_synced,
       };
+    }
+    // Already provisioned, so there is no sync to order the freeze against —
+    // building the request here cannot strand the row. Whether this is a
+    // resend or the completion of an initial delivery is decided by
+    // `neverDelivered`, not by this branch.
+    let invite_sent = false;
+    let mail_error: string | null = null;
+    try {
+      // `target`, not `email`: the frozen request was rendered against the
+      // lower-cased address, and sendInviteRequest compares expectedTo to
+      // request.to[0] EXACTLY. Passing the raw input would reject every
+      // replay of an invite whose address was typed with capitals.
+      const { messageId } = await sendInviteRequest(await makeRequest(), idempotencyKey, target);
+      await db.query(`UPDATE users SET invite_sent_at = now(), invite_message_id=$2 WHERE id=$1`, [
+        row.id,
+        messageId,
+      ]);
+      invite_sent = true;
+    } catch (err) {
+      if (err instanceof LifecycleError) throw err;
+      mail_error = mailErrorCode(err);
+    }
+    return {
+      id: row.id,
+      email: target,
+      status: 'invited',
+      created: false,
+      cf_synced: true,
+      invite_sent,
+      sync_error: null,
+      mail_error,
+      // Only a genuine second delivery is a resend; finishing an initial
+      // send whose response was lost is not. This is exactly the branch that
+      // returns resent:false WITHOUT having created anything, which is why
+      // the route keys 201 off `created` and not off this field.
+      resent: !neverDelivered,
+    };
   }
 }
 
@@ -469,7 +503,8 @@ export async function inviteUser(
     // (Q7). Freezing between the two would satisfy the first and break the
     // second.
     const r = await provisionAndMail(
-      userId, target,
+      userId,
+      target,
       () => frozenInviteRequest(userId, target),
       initialIdempotencyKey(userId, invitedAt),
     );
@@ -614,8 +649,12 @@ export async function patchUser(
     // and settles at first sign-in (Q21). Without this guard a role-only PATCH
     // on an invited row falls straight through to the role branch below,
     // because the status check above is skipped when `patch.status` is absent.
-    if (patch.role !== undefined && patch.role !== cur.role &&
-        cur.status !== 'active' && cur.status !== 'suspended') {
+    if (
+      patch.role !== undefined &&
+      patch.role !== cur.role &&
+      cur.status !== 'active' &&
+      cur.status !== 'suspended'
+    ) {
       throw new LifecycleError(409, 'invalid_transition', {
         from: cur.status,
         role_change: true,
@@ -665,19 +704,28 @@ export async function patchUser(
         );
         await client.query(`UPDATE users SET cf_synced_at=now() WHERE id=$1`, [targetId]);
         await recordAccountEventTx(client, {
-          userId: targetId, userEmail: cur.email, kind: 'user_reinstated',
-          ip: actor.ip, meta: { ...humanActor(actor.userId, actor.email) },
+          userId: targetId,
+          userEmail: cur.email,
+          kind: 'user_reinstated',
+          ip: actor.ip,
+          meta: { ...humanActor(actor.userId, actor.email) },
         });
         if (roleChanged) {
           await recordAccountEventTx(client, {
-            userId: targetId, userEmail: cur.email, kind: 'role_changed',
+            userId: targetId,
+            userEmail: cur.email,
+            kind: 'role_changed',
             ip: actor.ip,
             meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
           });
         }
         return {
-          id: targetId, email: cur.email, role: nextRole, status: 'active' as UserStatus,
-          cf_synced: true, sync_error: null,
+          id: targetId,
+          email: cur.email,
+          role: nextRole,
+          status: 'active' as UserStatus,
+          cf_synced: true,
+          sync_error: null,
         };
       });
     }
@@ -693,12 +741,17 @@ export async function patchUser(
           [targetId, nextRole],
         );
         await recordAccountEventTx(client, {
-          userId: targetId, userEmail: cur.email, kind: 'user_suspended',
-          ip: actor.ip, meta: { ...humanActor(actor.userId, actor.email) },
+          userId: targetId,
+          userEmail: cur.email,
+          kind: 'user_suspended',
+          ip: actor.ip,
+          meta: { ...humanActor(actor.userId, actor.email) },
         });
         if (roleChanged) {
           await recordAccountEventTx(client, {
-            userId: targetId, userEmail: cur.email, kind: 'role_changed',
+            userId: targetId,
+            userEmail: cur.email,
+            kind: 'role_changed',
             ip: actor.ip,
             meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
           });
@@ -718,16 +771,24 @@ export async function patchUser(
         sync_error = syncErrorCode(err);
       }
       return {
-        id: targetId, email: cur.email, role: nextRole,
-        status: 'suspended' as UserStatus, cf_synced, sync_error,
+        id: targetId,
+        email: cur.email,
+        role: nextRole,
+        status: 'suspended' as UserStatus,
+        cf_synced,
+        sync_error,
       };
     }
 
     // ---- ROLE ONLY: no CF membership change, so cf_synced_at is untouched ----
     if (!roleChanged) {
       return {
-        id: targetId, email: cur.email, role: cur.role, status: cur.status,
-        cf_synced: cur.cf_synced_at !== null, sync_error: null,
+        id: targetId,
+        email: cur.email,
+        role: cur.role,
+        status: cur.status,
+        cf_synced: cur.cf_synced_at !== null,
+        sync_error: null,
       };
     }
 
@@ -735,13 +796,19 @@ export async function patchUser(
       await assertAdminRemains(client, targetId, { role: nextRole, status: cur.status });
       await client.query(`UPDATE users SET role=$2 WHERE id=$1`, [targetId, nextRole]);
       await recordAccountEventTx(client, {
-        userId: targetId, userEmail: cur.email, kind: 'role_changed',
+        userId: targetId,
+        userEmail: cur.email,
+        kind: 'role_changed',
         ip: actor.ip,
         meta: { ...humanActor(actor.userId, actor.email), from: cur.role, to: nextRole },
       });
       return {
-        id: targetId, email: cur.email, role: nextRole, status: cur.status,
-        cf_synced: cur.cf_synced_at !== null, sync_error: null,
+        id: targetId,
+        email: cur.email,
+        role: nextRole,
+        status: cur.status,
+        cf_synced: cur.cf_synced_at !== null,
+        sync_error: null,
       };
     });
   });
@@ -875,7 +942,12 @@ export async function listUsers(): Promise<UserListResponse> {
 export async function retrySync(
   targetId: string,
   actor: Actor,
-): Promise<{ id: string; cf_synced: boolean; sync_error: string | null; direction: 'present' | 'absent' }> {
+): Promise<{
+  id: string;
+  cf_synced: boolean;
+  sync_error: string | null;
+  direction: 'present' | 'absent';
+}> {
   void actor;
   return withMembershipLock(async () => {
     const cur = await readUser(targetId);

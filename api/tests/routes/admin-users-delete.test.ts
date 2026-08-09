@@ -46,7 +46,8 @@ beforeAll(async () => {
   jwks = await setupTestJwks();
   app = await buildApp();
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`, [ADMIN],
+    `INSERT INTO users (email, role, status) VALUES ($1,'admin','active') RETURNING id`,
+    [ADMIN],
   );
   adminId = rows[0].id;
   // The deterministic cascade blocker used by the Q27 rollback case. ON DELETE
@@ -76,8 +77,16 @@ beforeEach(async () => {
   await db.query(`UPDATE users SET role='admin', status='active' WHERE id=$1`, [adminId]);
   policyEmails = [ADMIN];
   fetchPolicyImpl = async () => ({
-    emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
-    config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    emails: [...policyEmails],
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: policyEmails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
   });
   vi.spyOn(policy, 'fetchPolicy').mockImplementation(() => fetchPolicyImpl() as never);
   vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
@@ -85,16 +94,24 @@ beforeEach(async () => {
   });
 });
 
-function freshEmail(tag: string) { return `dt-${tag}-${randomUUID().slice(0, 8)}@repos.test`; }
+function freshEmail(tag: string) {
+  return `dt-${tag}-${randomUUID().slice(0, 8)}@repos.test`;
+}
 
 async function del(id: string, asEmail = ADMIN) {
   return app.inject({
-    method: 'DELETE', url: `/api/admin/users/${id}`,
+    method: 'DELETE',
+    url: `/api/admin/users/${id}`,
     headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(asEmail), 'x-repos-csrf': '1' },
   });
 }
 
-async function seed(email: string, status: string, role = 'member', cfSynced: Date | null = new Date()) {
+async function seed(
+  email: string,
+  status: string,
+  role = 'member',
+  cfSynced: Date | null = new Date(),
+) {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO users (email, status, role, cf_synced_at) VALUES ($1,$2,$3,$4) RETURNING id`,
     [email, status, role, cfSynced],
@@ -118,9 +135,15 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
     const email = freshEmail('delev');
     const id = await seed(email, 'active');
     await del(id);
-    const { rows } = await db.query<{ kind: string; user_id: string | null; user_id_at_event: string; user_email_at_event: string }>(
+    const { rows } = await db.query<{
+      kind: string;
+      user_id: string | null;
+      user_id_at_event: string;
+      user_email_at_event: string;
+    }>(
       `SELECT kind, user_id, user_id_at_event, user_email_at_event
-         FROM account_events WHERE user_id_at_event=$1 ORDER BY occurred_at`, [id],
+         FROM account_events WHERE user_id_at_event=$1 ORDER BY occurred_at`,
+      [id],
     );
     const kinds = rows.map((r) => r.kind);
     expect(kinds).toContain('user_delete_requested');
@@ -135,25 +158,31 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
     const id = await seed(email, 'active');
     await db.query(
       `INSERT INTO health_weight_samples (user_id, sample_date, sample_time, weight_lbs, source)
-       VALUES ($1, '2026-07-01', '08:00', 180.0, 'Manual')`, [id],
+       VALUES ($1, '2026-07-01', '08:00', 180.0, 'Manual')`,
+      [id],
     );
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     const r = await del(id);
     expect(r.statusCode).toBe(502);
 
     const u = await db.query<{ status: string; cf_synced_at: Date | null }>(
-      `SELECT status, cf_synced_at FROM users WHERE id=$1`, [id],
+      `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+      [id],
     );
     expect(u.rows[0].status).toBe('deleting');
     expect(u.rows[0].cf_synced_at).toBeNull();
     // Asserted by ROW COUNTS, not just a status code.
     const child = await db.query<{ n: number }>(
-      `SELECT count(*)::int n FROM health_weight_samples WHERE user_id=$1`, [id],
+      `SELECT count(*)::int n FROM health_weight_samples WHERE user_id=$1`,
+      [id],
     );
     expect(child.rows[0].n).toBe(1);
     const ev = await db.query<{ n: number }>(
       `SELECT count(*)::int n FROM account_events
-        WHERE user_id_at_event=$1 AND kind='user_delete_requested'`, [id],
+        WHERE user_id_at_event=$1 AND kind='user_delete_requested'`,
+      [id],
     );
     expect(ev.rows[0].n).toBe(1);
   });
@@ -161,18 +190,29 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
   it('a second admin resumes an interrupted delete without a duplicate request event', async () => {
     const email = freshEmail('resume');
     const id = await seed(email, 'active');
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     await del(id);
     // CF recovers; a different admin finishes the job.
     fetchPolicyImpl = async () => ({
-      emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
-      config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+      emails: [...policyEmails],
+      name: 'Owner Only',
+      decision: 'allow',
+      config: {
+        name: 'Owner Only',
+        decision: 'allow',
+        include: policyEmails.map((e) => ({ email: { email: e } })),
+        exclude: [],
+        require: [],
+      },
     });
     const r = await del(id);
     expect(r.statusCode).toBe(204);
     const ev = await db.query<{ n: number }>(
       `SELECT count(*)::int n FROM account_events
-        WHERE user_id_at_event=$1 AND kind='user_delete_requested'`, [id],
+        WHERE user_id_at_event=$1 AND kind='user_delete_requested'`,
+      [id],
     );
     expect(ev.rows[0].n).toBe(1); // the original requester is preserved
   });
@@ -187,7 +227,8 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
     expect(r.statusCode).toBe(500);
     const ev = await db.query<{ n: number }>(
       `SELECT count(*)::int n FROM account_events
-        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`,
+      [id],
     );
     expect(ev.rows[0].n).toBe(0); // no event describing a mutation that did not happen
     await db.query(`DELETE FROM w9_block WHERE user_id=$1`, [id]);
@@ -202,7 +243,8 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
   it('rejects an Authorization: Bearer header (Q20)', async () => {
     const id = await seed(freshEmail('bearerdel'), 'active');
     const r = await app.inject({
-      method: 'DELETE', url: `/api/admin/users/${id}`,
+      method: 'DELETE',
+      url: `/api/admin/users/${id}`,
       headers: { authorization: 'Bearer whatever', 'x-repos-csrf': '1' },
     });
     expect(r.statusCode).toBe(403);
@@ -212,7 +254,9 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
   it('a deleting row occupies a cohort slot until the cascade completes (Q12)', async () => {
     await db.query(`DELETE FROM users WHERE email <> $1`, [ADMIN]);
     const id = await seed(freshEmail('slot'), 'active');
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     await del(id);
     const { rows } = await db.query<{ c: number }>(
       `SELECT count(*)::int c FROM users WHERE status IN ('active','invited','deleting')`,
@@ -224,7 +268,8 @@ describe('admin delete — the full state machine (Q17, Q17b, Q27, Q33)', () => 
 describe('DELETE /api/me shares the same service (Q33)', () => {
   async function selfDelete(email: string) {
     return app.inject({
-      method: 'DELETE', url: '/api/me',
+      method: 'DELETE',
+      url: '/api/me',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(email), 'x-repos-csrf': '1' },
       payload: { confirm: 'DELETE my account' },
     });
@@ -239,7 +284,8 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     expect(rows).toHaveLength(0);
     expect(policyEmails).not.toContain(email);
     const ev = await db.query<{ kind: string }>(
-      `SELECT kind FROM account_events WHERE user_id_at_event=$1`, [id],
+      `SELECT kind FROM account_events WHERE user_id_at_event=$1`,
+      [id],
     );
     expect(ev.rows.map((r) => r.kind)).toEqual(
       expect.arrayContaining(['user_delete_requested', 'user_deleted']),
@@ -258,9 +304,9 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     const r = await selfDelete(ADMIN);
     expect(r.statusCode).toBe(409);
     expect(r.json<{ error: string }>().error).toBe('last_admin');
-    const { rows } = await db.query<{ status: string }>(
-      `SELECT status FROM users WHERE email=$1`, [ADMIN],
-    );
+    const { rows } = await db.query<{ status: string }>(`SELECT status FROM users WHERE email=$1`, [
+      ADMIN,
+    ]);
     expect(rows[0].status).toBe('active'); // no mutation happened
   });
 
@@ -268,13 +314,15 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     const email = freshEmail('selfguard');
     await seed(email, 'active');
     const bearer = await app.inject({
-      method: 'DELETE', url: '/api/me',
+      method: 'DELETE',
+      url: '/api/me',
       headers: { authorization: 'Bearer x', 'x-repos-csrf': '1' },
       payload: { confirm: 'DELETE my account' },
     });
     expect(bearer.statusCode).toBe(403);
     const wrong = await app.inject({
-      method: 'DELETE', url: '/api/me',
+      method: 'DELETE',
+      url: '/api/me',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(email), 'x-repos-csrf': '1' },
       payload: { confirm: 'delete it' },
     });
@@ -285,12 +333,15 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     const email = freshEmail('interrupt');
     const id = await seed(email, 'active');
     const mint = await app.inject({
-      method: 'POST', url: '/api/tokens',
+      method: 'POST',
+      url: '/api/tokens',
       body: { user_id: id, label: 't', scopes: ['health:weight:write'] },
     });
     const token = mint.json<{ token: string }>().token;
 
-    fetchPolicyImpl = async () => { throw new policy.CfPolicyError('cf_http_error', 'down'); };
+    fetchPolicyImpl = async () => {
+      throw new policy.CfPolicyError('cf_http_error', 'down');
+    };
     const failed = await selfDelete(email);
     expect(failed.statusCode).toBe(502);
     // The Q37 contract, asserted rather than assumed: this is the response the
@@ -303,12 +354,14 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
 
     // Both auth paths now reject them.
     const cf = await app.inject({
-      method: 'GET', url: '/api/me',
+      method: 'GET',
+      url: '/api/me',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(email) },
     });
     expect(cf.statusCode).toBe(403);
     const bearer = await app.inject({
-      method: 'GET', url: '/api/account/sessions',
+      method: 'GET',
+      url: '/api/account/sessions',
       headers: { authorization: `Bearer ${token}` },
     });
     expect(bearer.statusCode).toBe(401);
@@ -317,8 +370,16 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
 
     // An admin completes it.
     fetchPolicyImpl = async () => ({
-      emails: [...policyEmails], name: 'Owner Only', decision: 'allow',
-      config: { name: 'Owner Only', decision: 'allow', include: policyEmails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+      emails: [...policyEmails],
+      name: 'Owner Only',
+      decision: 'allow',
+      config: {
+        name: 'Owner Only',
+        decision: 'allow',
+        include: policyEmails.map((e) => ({ email: { email: e } })),
+        exclude: [],
+        require: [],
+      },
     });
     expect((await del(id)).statusCode).toBe(204);
 
@@ -328,7 +389,8 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
     // that mints a token, so it is the only place the field is falsifiable.
     const ev = await db.query<{ meta: { previous_token_count?: number } }>(
       `SELECT meta FROM account_events
-        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`,
+      [id],
     );
     expect(ev.rows[0].meta.previous_token_count).toBe(1);
   });
@@ -345,20 +407,24 @@ describe('DELETE /api/me shares the same service (Q33)', () => {
 
     const r = await selfDelete(email);
     expect(r.statusCode).toBe(500);
-    const body = r.json<{ error: string; disabled?: boolean; resumable?: boolean; message?: string }>();
+    const body = r.json<{
+      error: string;
+      disabled?: boolean;
+      resumable?: boolean;
+      message?: string;
+    }>();
     expect(body.error).toBe('delete_finalize_failed');
     expect(body.disabled).toBe(true);
     expect(body.resumable).toBe(true);
     expect(body.message).toContain(SUPPORT_CONTACT);
 
     // Durably disabled, and no event describing a deletion that did not happen.
-    const u = await db.query<{ status: string }>(
-      `SELECT status FROM users WHERE id=$1`, [id],
-    );
+    const u = await db.query<{ status: string }>(`SELECT status FROM users WHERE id=$1`, [id]);
     expect(u.rows[0].status).toBe('deleting');
     const ev = await db.query<{ n: number }>(
       `SELECT count(*)::int n FROM account_events
-        WHERE user_id_at_event=$1 AND kind='user_deleted'`, [id],
+        WHERE user_id_at_event=$1 AND kind='user_deleted'`,
+      [id],
     );
     expect(ev.rows[0].n).toBe(0);
 

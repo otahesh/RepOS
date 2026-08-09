@@ -208,17 +208,20 @@ export function serializeInviteRequest(request: InviteRequest): string {
  * wrong is actively harmful: a corrupted or mismatched row must never mail a
  * third party. Exactly one recipient, and it must be the lifecycle target.
  */
-export function assertInviteRequest(
-  r: unknown,
-  expectedTo: string,
-): asserts r is InviteRequest {
+export function assertInviteRequest(r: unknown, expectedTo: string): asserts r is InviteRequest {
   const o = r as Record<string, unknown> | null;
   const shaped =
-    o !== null && typeof o === 'object' && !Array.isArray(o) &&
-    typeof o.from === 'string' && o.from !== '' &&
-    typeof o.subject === 'string' && o.subject !== '' &&
-    typeof o.html === 'string' && o.html !== '' &&
-    typeof o.text === 'string' && o.text !== '' &&
+    o !== null &&
+    typeof o === 'object' &&
+    !Array.isArray(o) &&
+    typeof o.from === 'string' &&
+    o.from !== '' &&
+    typeof o.subject === 'string' &&
+    o.subject !== '' &&
+    typeof o.html === 'string' &&
+    o.html !== '' &&
+    typeof o.text === 'string' &&
+    o.text !== '' &&
     Array.isArray(o.to);
   if (!shaped) {
     throw new MailerError(
@@ -269,10 +272,7 @@ export async function sendInviteRequest(
   if (!key) {
     // Missing credentials fail at USE time with a specific error, never at
     // boot — matching the Healthchecks and feedback-webhook precedent.
-    throw new MailerError(
-      'mail_not_configured',
-      'RESEND_API_KEY must be set to send invites',
-    );
+    throw new MailerError('mail_not_configured', 'RESEND_API_KEY must be set to send invites');
   }
   assertInviteRequest(request, expectedTo);
 

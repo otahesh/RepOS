@@ -31,8 +31,14 @@ describe('account-event wire schema accepts every canonical kind', () => {
 
   it('covers all eight W9 lifecycle kinds specifically', () => {
     for (const kind of [
-      'user_invited', 'user_activated', 'user_suspended', 'user_reinstated',
-      'role_changed', 'user_delete_requested', 'user_deleted', 'user_imported',
+      'user_invited',
+      'user_activated',
+      'user_suspended',
+      'user_reinstated',
+      'role_changed',
+      'user_delete_requested',
+      'user_deleted',
+      'user_imported',
     ]) {
       expect(ACCOUNT_EVENT_KINDS).toContain(kind);
     }

@@ -249,9 +249,8 @@ describe('restore of a pre-080 dump (Q35)', () => {
     vi.resetModules();
     process.env.DATABASE_URL = eph.url;
     const policy = await import('../../src/services/cfAccessPolicy.js');
-    const { reconcileCfBaseline, ReconcileAbort } = await import(
-      '../../src/services/cfReconcile.js'
-    );
+    const { reconcileCfBaseline, ReconcileAbort } =
+      await import('../../src/services/cfReconcile.js');
     const { db } = await import('../../src/db/client.js');
     cleanups.push(async () => {
       await db.end();

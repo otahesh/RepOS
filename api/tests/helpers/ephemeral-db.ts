@@ -30,7 +30,10 @@ export async function createEphemeralDb(tag: string): Promise<EphemeralDb> {
   const base = process.env.DATABASE_URL;
   if (!base) throw new Error('DATABASE_URL must be set to create an ephemeral database');
   const name = `repos_t_${tag.replace(/[^a-z0-9]/gi, '').toLowerCase()}_${randomUUID().slice(0, 8)}`;
-  const admin = new pg.Client({ connectionString: maintenanceUrl(base), connectionTimeoutMillis: 5_000 });
+  const admin = new pg.Client({
+    connectionString: maintenanceUrl(base),
+    connectionTimeoutMillis: 5_000,
+  });
   await admin.connect();
   try {
     await admin.query(`CREATE DATABASE ${name}`);
@@ -45,7 +48,10 @@ export async function createEphemeralDb(tag: string): Promise<EphemeralDb> {
   const drop = async (): Promise<void> => {
     if (dropped) return;
     dropped = true;
-    const a = new pg.Client({ connectionString: maintenanceUrl(base), connectionTimeoutMillis: 5_000 });
+    const a = new pg.Client({
+      connectionString: maintenanceUrl(base),
+      connectionTimeoutMillis: 5_000,
+    });
     await a.connect();
     try {
       await a.query(

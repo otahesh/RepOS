@@ -19,7 +19,11 @@ let memberEmail: string;
 async function buildProbe() {
   const a = Fastify({ logger: false });
   a.get('/probe', { preHandler: requireCfAccessAdmin() }, async () => ({ ok: true }));
-  a.delete('/probe-strict', { preHandler: requireCfAccessAdmin({ rejectBearer: true }) }, async () => ({ ok: true }));
+  a.delete(
+    '/probe-strict',
+    { preHandler: requireCfAccessAdmin({ rejectBearer: true }) },
+    async () => ({ ok: true }),
+  );
   await a.ready();
   return a;
 }
@@ -42,7 +46,8 @@ afterAll(async () => {
 describe('requireCfAccessAdmin (Q3, Q20)', () => {
   it('allows role=admin', async () => {
     const r = await app.inject({
-      method: 'GET', url: '/probe',
+      method: 'GET',
+      url: '/probe',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(adminEmail) },
     });
     expect(r.statusCode).toBe(200);
@@ -50,7 +55,8 @@ describe('requireCfAccessAdmin (Q3, Q20)', () => {
 
   it('403s role=member', async () => {
     const r = await app.inject({
-      method: 'GET', url: '/probe',
+      method: 'GET',
+      url: '/probe',
       headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(memberEmail) },
     });
     expect(r.statusCode).toBe(403);
@@ -62,7 +68,8 @@ describe('requireCfAccessAdmin (Q3, Q20)', () => {
     process.env.ADMIN_API_KEY = 'valid-key';
     try {
       const r = await app.inject({
-        method: 'GET', url: '/probe',
+        method: 'GET',
+        url: '/probe',
         headers: { 'x-admin-key': 'valid-key' },
       });
       expect(r.statusCode).toBe(403);
@@ -80,7 +87,8 @@ describe('requireCfAccessAdmin (Q3, Q20)', () => {
 
   it('rejectBearer:true 403s an Authorization: Bearer header before JWT validation', async () => {
     const r = await app.inject({
-      method: 'DELETE', url: '/probe-strict',
+      method: 'DELETE',
+      url: '/probe-strict',
       headers: { authorization: 'Bearer whatever' },
     });
     expect(r.statusCode).toBe(403);

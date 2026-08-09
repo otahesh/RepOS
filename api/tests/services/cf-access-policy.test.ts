@@ -19,10 +19,7 @@ function policyResult(over: Record<string, unknown> = {}) {
       name: 'Owner Only',
       decision: 'allow',
       app_count: 1,
-      include: [
-        { email: { email: 'a@repos.test' } },
-        { email: { email: 'b@repos.test' } },
-      ],
+      include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'b@repos.test' } }],
       exclude: [],
       require: [],
       ...over,
@@ -89,7 +86,9 @@ describe('fetchPolicy', () => {
     expect(calls[0].url).toBe(
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/access/policies/${POLICY}`,
     );
-    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer test-token');
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe(
+      'Bearer test-token',
+    );
   });
 
   it('Q10: refuses when app_count !== 1', async () => {
@@ -110,14 +109,20 @@ describe('fetchPolicy', () => {
   });
 
   it('Q22: refuses email_domain, group and service_token selectors', async () => {
-    for (const bad of [{ email_domain: { domain: 'repos.test' } }, { group: { id: 'g' } }, { service_token: { token_id: 't' } }]) {
+    for (const bad of [
+      { email_domain: { domain: 'repos.test' } },
+      { group: { id: 'g' } },
+      { service_token: { token_id: 't' } },
+    ]) {
       queue.push(async () => jsonResponse(policyResult({ include: [bad] })));
       await expect(fetchPolicy()).rejects.toMatchObject({ code: 'non_email_selector' });
     }
   });
 
   it('surfaces a non-2xx as cf_http_error', async () => {
-    queue.push(async () => jsonResponse({ success: false, errors: [{ message: 'bad token' }] }, 403));
+    queue.push(async () =>
+      jsonResponse({ success: false, errors: [{ message: 'bad token' }] }, 403),
+    );
     await expect(fetchPolicy()).rejects.toMatchObject({ code: 'cf_http_error' });
   });
 
@@ -127,7 +132,10 @@ describe('fetchPolicy', () => {
   });
 
   it('Q38: aborts on deadline and reports cf_timeout', async () => {
-    queue.push(async () => { await new Promise((r) => setTimeout(r, 200)); return jsonResponse(policyResult()); });
+    queue.push(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return jsonResponse(policyResult());
+    });
     await expect(fetchPolicy({ timeoutMs: 40 })).rejects.toMatchObject({ code: 'cf_timeout' });
   });
 
@@ -155,9 +163,9 @@ describe('fetchPolicy', () => {
 
 describe('putPolicyEmails', () => {
   it('re-fetches and compares immediately before PUT, then writes include[]', async () => {
-    queue.push(async () => jsonResponse(policyResult()));                       // fetchPolicy
-    queue.push(async () => jsonResponse(policyResult()));                       // pre-PUT re-fetch
-    queue.push(async () => jsonResponse(policyResult({ include: [] })));        // the PUT
+    queue.push(async () => jsonResponse(policyResult())); // fetchPolicy
+    queue.push(async () => jsonResponse(policyResult())); // pre-PUT re-fetch
+    queue.push(async () => jsonResponse(policyResult({ include: [] }))); // the PUT
     const snap = await fetchPolicy();
     await putPolicyEmails(['a@repos.test', 'b@repos.test', 'c@repos.test'], snap);
 
@@ -177,10 +185,18 @@ describe('putPolicyEmails', () => {
   });
 
   it('Q19: aborts when the dashboard changed the policy between GET and PUT', async () => {
-    queue.push(async () => jsonResponse(policyResult()));                                          // fetchPolicy
-    queue.push(async () => jsonResponse(policyResult({                                             // re-fetch: changed!
-      include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'intruder@repos.test' } }],
-    })));
+    queue.push(async () => jsonResponse(policyResult())); // fetchPolicy
+    queue.push(async () =>
+      jsonResponse(
+        policyResult({
+          // re-fetch: changed!
+          include: [
+            { email: { email: 'a@repos.test' } },
+            { email: { email: 'intruder@repos.test' } },
+          ],
+        }),
+      ),
+    );
     const snap = await fetchPolicy();
     await expect(
       putPolicyEmails(['a@repos.test', 'b@repos.test', 'c@repos.test'], snap),
@@ -211,7 +227,9 @@ describe('putPolicyEmails', () => {
 
   it('Q19: aborts on a new exclude[] rule', async () => {
     queue.push(async () => jsonResponse(policyResult()));
-    queue.push(async () => jsonResponse(policyResult({ exclude: [{ email: { email: 'banned@repos.test' } }] })));
+    queue.push(async () =>
+      jsonResponse(policyResult({ exclude: [{ email: { email: 'banned@repos.test' } }] })),
+    );
     const snap = await fetchPolicy();
     await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
       code: 'policy_changed',
@@ -220,7 +238,9 @@ describe('putPolicyEmails', () => {
 
   it('Q19: aborts on a new require[] rule', async () => {
     queue.push(async () => jsonResponse(policyResult()));
-    queue.push(async () => jsonResponse(policyResult({ require: [{ email_domain: { domain: 'repos.test' } }] })));
+    queue.push(async () =>
+      jsonResponse(policyResult({ require: [{ email_domain: { domain: 'repos.test' } }] })),
+    );
     const snap = await fetchPolicy();
     await expect(putPolicyEmails(['a@repos.test'], snap)).rejects.toMatchObject({
       code: 'policy_changed',
@@ -251,9 +271,13 @@ describe('CfPolicyError', () => {
 // values back — stripping exclude[]/require[] and rewriting name and decision.
 describe('malformed policy responses fail closed rather than defaulting', () => {
   it('refuses a result carrying only app_count and name', async () => {
-    queue.push(async () => jsonResponse({
-      success: true, errors: [], result: { app_count: 1, name: 'Owner Only' },
-    }));
+    queue.push(async () =>
+      jsonResponse({
+        success: true,
+        errors: [],
+        result: { app_count: 1, name: 'Owner Only' },
+      }),
+    );
     await expect(fetchPolicy()).rejects.toMatchObject({ code: 'malformed_policy' });
   });
 
@@ -390,7 +414,9 @@ describe('the whole writable policy is preserved and compared', () => {
     const body = JSON.parse(String(calls[2].init.body));
     expect(body.session_duration).toBe('24h');
     expect(body.approval_required).toBe(true);
-    expect(body.approval_groups).toEqual([{ approvals_needed: 1, email_addresses: ['boss@repos.test'] }]);
+    expect(body.approval_groups).toEqual([
+      { approvals_needed: 1, email_addresses: ['boss@repos.test'] },
+    ]);
     expect(body.isolation_required).toBe(false);
     expect(body.purpose_justification_required).toBe(true);
     expect(body.purpose_justification_prompt).toBe('Why do you need access?');
@@ -434,15 +460,21 @@ describe('the whole writable policy is preserved and compared', () => {
   it('key ORDER alone is not a change — the compare is canonical', async () => {
     queue.push(async () => jsonResponse(policyResult()));
     // Same content, different property order in the JSON body.
-    queue.push(async () => jsonResponse({
-      success: true,
-      errors: [],
-      result: {
-        require: [], exclude: [], app_count: 1,
-        include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'b@repos.test' } }],
-        decision: 'allow', name: 'Owner Only', id: POLICY,
-      },
-    }));
+    queue.push(async () =>
+      jsonResponse({
+        success: true,
+        errors: [],
+        result: {
+          require: [],
+          exclude: [],
+          app_count: 1,
+          include: [{ email: { email: 'a@repos.test' } }, { email: { email: 'b@repos.test' } }],
+          decision: 'allow',
+          name: 'Owner Only',
+          id: POLICY,
+        },
+      }),
+    );
     queue.push(async () => jsonResponse(policyResult()));
     const snap = await fetchPolicy();
     await expect(putPolicyEmails(['a@repos.test'], snap)).resolves.toBeUndefined();

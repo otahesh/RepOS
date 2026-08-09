@@ -55,7 +55,7 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   // W9 — admin-only settings sections (Users) are hidden from members. This is
   // presentation only; /api/admin/* enforces role='admin' server-side, so a
   // member who types the URL gets "Not authorized", not data.
-  const visibleSections = SETTINGS_SECTIONS.filter(s => !s.adminOnly || user?.is_admin)
+  const visibleSections = SETTINGS_SECTIONS.filter((s) => !s.adminOnly || user?.is_admin);
 
   // AuthGate blocks render until status === 'authenticated', so user is
   // non-null here.

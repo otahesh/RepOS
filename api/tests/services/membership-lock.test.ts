@@ -73,7 +73,9 @@ describe('withMembershipLock', () => {
 
   it('releases the lock when the body throws', async () => {
     await expect(
-      withMembershipLock(async () => { throw new Error('boom'); }),
+      withMembershipLock(async () => {
+        throw new Error('boom');
+      }),
     ).rejects.toThrow('boom');
     expect(await heldLockCount()).toBe(0);
   });
@@ -86,7 +88,9 @@ describe('withMembershipLock', () => {
   it('fails fast with LockTimeoutError rather than blocking the pool', async () => {
     let release!: () => void;
     const holder = withMembershipLock(async () => {
-      await new Promise<void>((r) => { release = r; });
+      await new Promise<void>((r) => {
+        release = r;
+      });
     });
     await new Promise((r) => setTimeout(r, 30));
     await expect(

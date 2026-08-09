@@ -21,9 +21,17 @@ import type { ToastSpec } from '../components/common/ToastHost';
 import { UsersTable, type RowAction } from '../components/settings/UsersTable';
 import { InviteUserModal, inviteErrorMessage } from '../components/settings/InviteUserModal';
 import {
-  listUsers, inviteUser, patchUser, resendInvite, retrySync, deleteUser,
-  type AdminUserList, type AdminUserRow, type UserRole,
-  type InviteOutcome, type PatchOutcome,
+  listUsers,
+  inviteUser,
+  patchUser,
+  resendInvite,
+  retrySync,
+  deleteUser,
+  type AdminUserList,
+  type AdminUserRow,
+  type UserRole,
+  type InviteOutcome,
+  type PatchOutcome,
 } from '../lib/api/adminUsers';
 
 function statusOf(err: unknown): number | undefined {
@@ -99,39 +107,61 @@ export default function SettingsUsersPage(): JSX.Element {
       if (status === 401 || status === 403) setDenied(true);
       // Anything else (5xx, network, parse) must surface an actionable,
       // retryable error — never a spinner that never resolves.
-      else setError(`Could not load users — GET /api/admin/users${status ? ` returned HTTP ${status}` : ' failed (network)'}.`);
+      else
+        setError(
+          `Could not load users — GET /api/admin/users${status ? ` returned HTTP ${status}` : ' failed (network)'}.`,
+        );
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function handleAction(action: RowAction, row: AdminUserRow): Promise<void> {
     setBusyId(row.id);
     try {
       switch (action) {
         case 'resend':
-          pushToast(inviteOutcomeToast(
-            await resendInvite(row.id), row.email, `Invite resent to ${row.email}.`,
-          ));
+          pushToast(
+            inviteOutcomeToast(
+              await resendInvite(row.id),
+              row.email,
+              `Invite resent to ${row.email}.`,
+            ),
+          );
           break;
         case 'retry-sync': {
           const out = await retrySync(row.id);
           // A 200 does not mean it worked — the service reports the failure in
           // the body rather than throwing.
-          pushToast(out.cf_synced
-            ? { severity: 'success', body: `${row.email} reconciled with Cloudflare.` }
-            : { severity: 'error', body: `Sync still failing for ${row.email} — ${out.sync_error ?? 'unknown error'}.` });
+          pushToast(
+            out.cf_synced
+              ? { severity: 'success', body: `${row.email} reconciled with Cloudflare.` }
+              : {
+                  severity: 'error',
+                  body: `Sync still failing for ${row.email} — ${out.sync_error ?? 'unknown error'}.`,
+                },
+          );
           break;
         }
         case 'suspend':
-          pushToast(patchOutcomeToast(
-            await patchUser(row.id, { status: 'suspended' }), row.email, `${row.email} suspended.`,
-          ));
+          pushToast(
+            patchOutcomeToast(
+              await patchUser(row.id, { status: 'suspended' }),
+              row.email,
+              `${row.email} suspended.`,
+            ),
+          );
           break;
         case 'reinstate':
-          pushToast(patchOutcomeToast(
-            await patchUser(row.id, { status: 'active' }), row.email, `${row.email} reinstated.`,
-          ));
+          pushToast(
+            patchOutcomeToast(
+              await patchUser(row.id, { status: 'active' }),
+              row.email,
+              `${row.email} reinstated.`,
+            ),
+          );
           break;
         case 'delete':
           await deleteUser(row.id);
@@ -172,50 +202,114 @@ export default function SettingsUsersPage(): JSX.Element {
   }
 
   if (denied) {
-    return <div style={{ padding: 32, color: TOKENS.danger, fontFamily: FONTS.mono }}>Not authorized.</div>;
+    return (
+      <div style={{ padding: 32, color: TOKENS.danger, fontFamily: FONTS.mono }}>
+        Not authorized.
+      </div>
+    );
   }
 
   const drift = data?.drift;
 
   return (
-    <div style={{ maxWidth: 1040, margin: '0 auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div
+      style={{
+        maxWidth: 1040,
+        margin: '0 auto',
+        padding: '24px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>Users</h1>
         {data && (
           <span
             title="Counted cohort: active + invited + deleting"
             style={{
-              fontFamily: FONTS.mono, fontSize: 12,
+              fontFamily: FONTS.mono,
+              fontSize: 12,
               color: data.cohort.count >= data.cohort.cap ? TOKENS.warn : TOKENS.textDim,
-              border: `1px solid ${TOKENS.line}`, borderRadius: 999, padding: '3px 10px',
+              border: `1px solid ${TOKENS.line}`,
+              borderRadius: 999,
+              padding: '3px 10px',
             }}
-          >{data.cohort.count} / {data.cohort.cap}</span>
+          >
+            {data.cohort.count} / {data.cohort.cap}
+          </span>
         )}
         <button
-          type="button" onClick={() => { setInviteError(null); setInviteOpen(true); }}
-          style={{
-            marginLeft: 'auto', padding: '7px 14px', borderRadius: 6,
-            border: `1px solid ${TOKENS.accent}`, background: TOKENS.accent, color: '#fff',
-            fontFamily: FONTS.ui, fontSize: 12, fontWeight: 600, letterSpacing: 0.5,
-            textTransform: 'uppercase', cursor: 'pointer',
+          type="button"
+          onClick={() => {
+            setInviteError(null);
+            setInviteOpen(true);
           }}
-        >Invite user</button>
+          style={{
+            marginLeft: 'auto',
+            padding: '7px 14px',
+            borderRadius: 6,
+            border: `1px solid ${TOKENS.accent}`,
+            background: TOKENS.accent,
+            color: '#fff',
+            fontFamily: FONTS.ui,
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: 0.5,
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}
+        >
+          Invite user
+        </button>
       </div>
 
       {error && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, color: TOKENS.danger, fontFamily: FONTS.mono, fontSize: 12 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 10,
+            color: TOKENS.danger,
+            fontFamily: FONTS.mono,
+            fontSize: 12,
+          }}
+        >
           <span>{error}</span>
-          <button type="button" onClick={() => void load()}
-            style={{ padding: '6px 12px', borderRadius: 6, border: `1px solid ${TOKENS.line}`, background: TOKENS.bg, color: TOKENS.text, fontFamily: FONTS.ui, fontSize: 12, cursor: 'pointer' }}>Retry</button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.bg,
+              color: TOKENS.text,
+              fontFamily: FONTS.ui,
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
       {/* CONFIRMED divergence only. */}
       {drift && drift.divergent.length > 0 && (
-        <div role="alert" style={{
-          background: TOKENS.surface, border: `1px solid ${TOKENS.danger}`, borderRadius: 10,
-          padding: 14, fontFamily: FONTS.ui, fontSize: 13, color: TOKENS.text,
-        }}>
+        <div
+          role="alert"
+          style={{
+            background: TOKENS.surface,
+            border: `1px solid ${TOKENS.danger}`,
+            borderRadius: 10,
+            padding: 14,
+            fontFamily: FONTS.ui,
+            fontSize: 13,
+            color: TOKENS.text,
+          }}
+        >
           <strong style={{ color: TOKENS.danger }}>
             The Cloudflare Access policy diverges from RepOS.
           </strong>
@@ -236,16 +330,26 @@ export default function SettingsUsersPage(): JSX.Element {
       {/* Separate branch, NOT nested under divergence: an unread policy means
           sync state is unknown for every row, which is not a claim of drift. */}
       {drift && !drift.checked && (
-        <div role="status" style={{
-          background: TOKENS.surface, border: `1px solid ${TOKENS.warn}`, borderRadius: 10,
-          padding: 14, fontFamily: FONTS.ui, fontSize: 13, color: TOKENS.text,
-        }}>
+        <div
+          role="status"
+          style={{
+            background: TOKENS.surface,
+            border: `1px solid ${TOKENS.warn}`,
+            borderRadius: 10,
+            padding: 14,
+            fontFamily: FONTS.ui,
+            fontSize: 13,
+            color: TOKENS.text,
+          }}
+        >
           <strong style={{ color: TOKENS.warn }}>Cloudflare policy could not be read</strong>
           <span style={{ fontFamily: FONTS.mono, fontSize: 12, color: TOKENS.textDim }}>
-            {' '}({drift.policy_error ?? 'unknown'})
+            {' '}
+            ({drift.policy_error ?? 'unknown'})
           </span>
           <p style={{ margin: '8px 0 0', fontSize: 12, color: TOKENS.textDim }}>
-            Sync state is unknown for every row below. This is not drift — the comparison did not run.
+            Sync state is unknown for every row below. This is not drift — the comparison did not
+            run.
           </p>
         </div>
       )}

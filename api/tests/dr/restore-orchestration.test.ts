@@ -58,7 +58,9 @@ interface Scenario {
  * AND exercises the stop/wait/boot branch, which the unstubbed version skipped
  * entirely.
  */
-async function sandbox(scn: Scenario): Promise<{ run: () => number; sentinel: () => Promise<Sentinel> }> {
+async function sandbox(
+  scn: Scenario,
+): Promise<{ run: () => number; sentinel: () => Promise<Sentinel> }> {
   const root = await mkdtemp(join(tmpdir(), 'repos-restore-orch-'));
   sandboxes.push(root);
 

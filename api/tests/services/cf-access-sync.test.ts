@@ -7,8 +7,16 @@ function snap(emails: string[]) {
   // `config` mirrors what fetchPolicy would have observed. Task 5's snapshot
   // carries the WHOLE writable policy; there are no top-level exclude/require.
   return {
-    emails, name: 'Owner Only', decision: 'allow',
-    config: { name: 'Owner Only', decision: 'allow', include: emails.map((e) => ({ email: { email: e } })), exclude: [], require: [] },
+    emails,
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: emails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
   };
 }
 

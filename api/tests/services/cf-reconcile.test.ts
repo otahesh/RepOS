@@ -24,9 +24,8 @@ process.env.DATABASE_URL = eph.url;
 const { db } = await import('../../src/db/client.js');
 const policy = await import('../../src/services/cfAccessPolicy.js');
 const { reconcileCfBaseline } = await import('../../src/services/cfReconcile.js');
-const { withMembershipLock, MEMBERSHIP_LOCK_KEY } = await import(
-  '../../src/services/membershipLock.js'
-);
+const { withMembershipLock, MEMBERSHIP_LOCK_KEY } =
+  await import('../../src/services/membershipLock.js');
 
 let policyEmails: string[];
 let fetchPolicyImpl: () => Promise<unknown>;

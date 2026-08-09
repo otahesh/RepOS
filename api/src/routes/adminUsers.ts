@@ -5,8 +5,13 @@ import { requireCfAccessAdmin } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
 import { InviteRequestSchema, UserPatchSchema } from '../schemas/adminUsers.js';
 import {
-  inviteUser, resendInvite, patchUser, listUsers, retrySync,
-  LifecycleError, type Actor,
+  inviteUser,
+  resendInvite,
+  patchUser,
+  listUsers,
+  retrySync,
+  LifecycleError,
+  type Actor,
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
 import { deleteUser } from '../services/deleteUser.js';
@@ -26,9 +31,7 @@ export function sendLifecycleError(reply: import('fastify').FastifyReply, err: u
   }
   if (err instanceof LockTimeoutError) {
     // A wedged holder fails fast rather than blocking the pool (Q16).
-    return reply
-      .code(503)
-      .send({ error: 'lock_timeout', retry_after_seconds: 2 });
+    return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
   }
   throw err;
 }

@@ -292,13 +292,10 @@ export async function accountRoutes(app: FastifyInstance) {
   // removal -> user_deleted + cascade in one txn) and this route only maps its
   // errors. The structured log still fires AFTER the cascade commits (per
   // I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
-  app.delete(
-    '/me',
-    { preHandler: [requireCfAccessOnly, csrfOrigin] },
-    async (req, reply) => {
-      const userId = req.userId;
-      const userEmail = req.userEmail;
-      if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
+  app.delete('/me', { preHandler: [requireCfAccessOnly, csrfOrigin] }, async (req, reply) => {
+    const userId = req.userId;
+    const userEmail = req.userEmail;
+    if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
 
     const parsed = DeleteMeRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -307,80 +304,81 @@ export async function accountRoutes(app: FastifyInstance) {
         .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
     }
 
-      // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
-      // deleteUser service so the self-service and admin paths produce
-      // identical end state — same events, same CF removal, same cascade — and
-      // so the "at least one active admin remains" invariant cannot be
-      // bypassed here.
-      //
-      // W6's own path recorded account_deleted only as a log line with no
-      // account_events row; the service does not inherit that gap.
-      //
-      // Q37: once status='deleting' commits, both auth paths reject this user,
-      // so they cannot call this route again. A failed self-delete tells them
-      // the account is already disabled and gives the contact path from the
-      // invite email. Letting a `deleting` user re-authenticate to finish
-      // deleting themselves would punch a hole through the gate for the one
-      // status that most needs it shut.
-      // No initializer: every catch path returns, so this is definitely
-      // assigned before it is read (origin's no-useless-assignment rule).
-      let previousTokenCount: number;
-      try {
-        const out = await deleteUser(userId, {
-          userId,
-          email: userEmail,
-          ip: clientIp(req) ?? null,
+    // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
+    // deleteUser service so the self-service and admin paths produce
+    // identical end state — same events, same CF removal, same cascade — and
+    // so the "at least one active admin remains" invariant cannot be
+    // bypassed here.
+    //
+    // W6's own path recorded account_deleted only as a log line with no
+    // account_events row; the service does not inherit that gap.
+    //
+    // Q37: once status='deleting' commits, both auth paths reject this user,
+    // so they cannot call this route again. A failed self-delete tells them
+    // the account is already disabled and gives the contact path from the
+    // invite email. Letting a `deleting` user re-authenticate to finish
+    // deleting themselves would punch a hole through the gate for the one
+    // status that most needs it shut.
+    // No initializer: every catch path returns, so this is definitely
+    // assigned before it is read (origin's no-useless-assignment rule).
+    let previousTokenCount: number;
+    try {
+      const out = await deleteUser(userId, {
+        userId,
+        email: userEmail,
+        ip: clientIp(req) ?? null,
+      });
+      previousTokenCount = out.previous_token_count;
+    } catch (err) {
+      if (err instanceof LifecycleError) {
+        // Q37 keys on the STATE, not on one error code. Any failure past the
+        // status='deleting' commit leaves this user denied on both auth
+        // paths with no way to retry, so every such failure — a CF removal
+        // that failed, a cascade that failed, an audit insert that failed —
+        // owes them the same "already disabled, here is who can finish it"
+        // response. Matching `cf_sync_failed` instead covered exactly the
+        // one failure the tests happened to inject; `last_admin` and the
+        // other pre-mutation refusals correctly carry no `disabled` flag
+        // because they roll back and the account still works.
+        const disabled = err.details.disabled === true;
+        if (disabled) {
+          // The client contract is now typed, but the operator still needs
+          // the underlying fault — LifecycleError carries it as `cause`.
+          req.log.error({ err, userId }, 'account_delete_finalize_failed');
+        }
+        return reply.code(err.statusCode).send({
+          error: err.code,
+          ...err.details,
+          ...(disabled
+            ? {
+                message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.`,
+              }
+            : {}),
         });
-        previousTokenCount = out.previous_token_count;
-      } catch (err) {
-        if (err instanceof LifecycleError) {
-          // Q37 keys on the STATE, not on one error code. Any failure past the
-          // status='deleting' commit leaves this user denied on both auth
-          // paths with no way to retry, so every such failure — a CF removal
-          // that failed, a cascade that failed, an audit insert that failed —
-          // owes them the same "already disabled, here is who can finish it"
-          // response. Matching `cf_sync_failed` instead covered exactly the
-          // one failure the tests happened to inject; `last_admin` and the
-          // other pre-mutation refusals correctly carry no `disabled` flag
-          // because they roll back and the account still works.
-          const disabled = err.details.disabled === true;
-          if (disabled) {
-            // The client contract is now typed, but the operator still needs
-            // the underlying fault — LifecycleError carries it as `cause`.
-            req.log.error({ err, userId }, 'account_delete_finalize_failed');
-          }
-          return reply.code(err.statusCode).send({
-            error: err.code,
-            ...err.details,
-            ...(disabled
-              ? { message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.` }
-              : {}),
-          });
-        }
-        if (err instanceof LockTimeoutError) {
-          return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
-        }
-        req.log.error({ err, userId }, 'account_delete_failed');
-        return reply.code(500).send({ error: 'delete_failed' });
       }
+      if (err instanceof LockTimeoutError) {
+        return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
+      }
+      req.log.error({ err, userId }, 'account_delete_failed');
+      return reply.code(500).send({ error: 'delete_failed' });
+    }
 
-      // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
-      // deleted on a half-committed state.
-      req.log.info(
-        {
-          event: 'account_deleted',
-          userId,
-          userEmail,
-          previous_token_count: previousTokenCount,
-          ip: clientIp(req),
-        },
-        'account_deleted',
-      );
+    // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
+    // deleted on a half-committed state.
+    req.log.info(
+      {
+        event: 'account_deleted',
+        userId,
+        userEmail,
+        previous_token_count: previousTokenCount,
+        ip: clientIp(req),
+      },
+      'account_deleted',
+    );
 
-      // Do NOT clear CF_Authorization here — the frontend's follow-up
-      // /cdn-cgi/access/logout navigation needs the cookie intact for CF to
-      // terminate the edge session (same contract as signout-everywhere).
-      return reply.code(204).send();
-    },
-  );
+    // Do NOT clear CF_Authorization here — the frontend's follow-up
+    // /cdn-cgi/access/logout navigation needs the cookie intact for CF to
+    // terminate the edge session (same contract as signout-everywhere).
+    return reply.code(204).send();
+  });
 }

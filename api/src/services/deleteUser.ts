@@ -63,10 +63,9 @@ export async function deleteUser(
           throw new LifecycleError(409, 'last_admin');
         }
         // Q24 — the stamp is cleared because CF membership is about to change.
-        await client.query(
-          `UPDATE users SET status='deleting', cf_synced_at=NULL WHERE id=$1`,
-          [targetId],
-        );
+        await client.query(`UPDATE users SET status='deleting', cf_synced_at=NULL WHERE id=$1`, [
+          targetId,
+        ]);
         await recordAccountEventTx(client, {
           userId: targetId,
           userEmail: cur.email,

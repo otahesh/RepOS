@@ -87,7 +87,16 @@ interface Pending {
   row: AdminUserRow;
 }
 
-const CONFIRM_COPY: Record<Pending['action'], { title: string; body: string; label: string; severity: 'warn' | 'accent' | 'danger'; tier: 'medium' | 'heavy' }> = {
+const CONFIRM_COPY: Record<
+  Pending['action'],
+  {
+    title: string;
+    body: string;
+    label: string;
+    severity: 'warn' | 'accent' | 'danger';
+    tier: 'medium' | 'heavy';
+  }
+> = {
   suspend: {
     title: 'Suspend this user?',
     // Q7/Q17 — revocations take effect first: the DB transition is the
@@ -164,24 +173,54 @@ export function UsersTable({ rows, currentUserId, busyId, onAction }: Props): JS
                   ) : (
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {row.status === 'invited' && (
-                        <button type="button" disabled={busy} onClick={fire('resend')}
-                          style={actionButton(TOKENS.text, busy)}>Resend</button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={fire('resend')}
+                          style={actionButton(TOKENS.text, busy)}
+                        >
+                          Resend
+                        </button>
                       )}
-                      <button type="button" disabled={busy} onClick={fire('retry-sync')}
-                        style={actionButton(TOKENS.text, busy)}>Retry sync</button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={fire('retry-sync')}
+                        style={actionButton(TOKENS.text, busy)}
+                      >
+                        Retry sync
+                      </button>
                       {(row.status === 'active' || row.status === 'invited') && (
-                        <button type="button" disabled={busy} onClick={ask('suspend')}
-                          style={actionButton(TOKENS.warn, busy)}>Suspend</button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={ask('suspend')}
+                          style={actionButton(TOKENS.warn, busy)}
+                        >
+                          Suspend
+                        </button>
                       )}
                       {row.status === 'suspended' && (
-                        <button type="button" disabled={busy} onClick={ask('reinstate')}
-                          style={actionButton(TOKENS.accent, busy)}>Reinstate</button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={ask('reinstate')}
+                          style={actionButton(TOKENS.accent, busy)}
+                        >
+                          Reinstate
+                        </button>
                       )}
                       {/* Also offered on a `deleting` row: Q37 — an interrupted
                           self-deletion can only be completed by an admin, and
                           deleteUser resumes rather than restarting. */}
-                      <button type="button" disabled={busy} onClick={ask('delete')}
-                        style={actionButton(TOKENS.danger, busy)}>Delete</button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={ask('delete')}
+                        style={actionButton(TOKENS.danger, busy)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   )}
                 </td>

@@ -24,8 +24,15 @@ export const W9_MIGRATIONS = [
 
 /** Every column W9 adds to `users` — eight from 080, one from 081. */
 export const W9_USER_COLUMNS = [
-  'role', 'status', 'invited_by', 'invited_at', 'activated_at',
-  'cf_synced_at', 'invite_sent_at', 'invite_message_id', 'invite_request',
+  'role',
+  'status',
+  'invited_by',
+  'invited_at',
+  'activated_at',
+  'cf_synced_at',
+  'invite_sent_at',
+  'invite_message_id',
+  'invite_request',
 ] as const;
 
 /**

@@ -10,12 +10,17 @@ import { runMigrations } from '../../src/db/runMigrations.js';
 import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 
 const cleanups: Array<() => Promise<void>> = [];
-afterAll(async () => { for (const c of cleanups) await c(); });
+afterAll(async () => {
+  for (const c of cleanups) await c();
+});
 
 async function freshPool(tag: string): Promise<pg.Pool> {
   const eph = await createEphemeralDb(tag);
   const pool = new pg.Pool({ connectionString: eph.url, max: 3 });
-  cleanups.push(async () => { await pool.end(); await eph.drop(); });
+  cleanups.push(async () => {
+    await pool.end();
+    await eph.drop();
+  });
   return pool;
 }
 
@@ -38,7 +43,11 @@ describe('migration 080 — schema', () => {
   it('adds every column with the documented defaults and CHECKs', async () => {
     const pool = await freshPool('m080cols');
     await runMigrations(pool);
-    const { rows } = await pool.query<{ column_name: string; column_default: string | null; is_nullable: string }>(
+    const { rows } = await pool.query<{
+      column_name: string;
+      column_default: string | null;
+      is_nullable: string;
+    }>(
       `SELECT column_name, column_default, is_nullable
          FROM information_schema.columns
         WHERE table_name='users'
@@ -80,7 +89,12 @@ describe('migration 080 — Q35 admin guarantee', () => {
   it('clause 3: INSERTs the founding admin into a genuinely empty database', async () => {
     const pool = await freshPool('m080empty');
     await runMigrations(pool);
-    const { rows } = await pool.query<{ email: string; role: string; status: string; cf_synced_at: Date | null }>(
+    const { rows } = await pool.query<{
+      email: string;
+      role: string;
+      status: string;
+      cf_synced_at: Date | null;
+    }>(
       `SELECT email, role, status, cf_synced_at FROM users WHERE role='admin' AND status='active'`,
     );
     expect(rows).toHaveLength(1);
@@ -94,7 +108,9 @@ describe('migration 080 — Q35 admin guarantee', () => {
     // Simulate a pre-080 dump: wipe what 080 just did, re-seed, re-apply.
     await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
-    await pool.query(`INSERT INTO users (email) VALUES ($1), ('someone.else@repos.test')`, [FOUNDING_ADMIN_EMAIL]);
+    await pool.query(`INSERT INTO users (email) VALUES ($1), ('someone.else@repos.test')`, [
+      FOUNDING_ADMIN_EMAIL,
+    ]);
 
     await runMigrations(pool);
 
@@ -111,7 +127,9 @@ describe('migration 080 — Q35 admin guarantee', () => {
     await migrateTo079(pool);
     await unwindToPreW9(pool);
     await pool.query(`DROP INDEX IF EXISTS users_status_idx`);
-    await pool.query(`INSERT INTO users (email) VALUES ('beta.one@repos.test'), ('beta.two@repos.test')`);
+    await pool.query(
+      `INSERT INTO users (email) VALUES ('beta.one@repos.test'), ('beta.two@repos.test')`,
+    );
 
     await runMigrations(pool);
 
@@ -144,7 +162,8 @@ describe('migration 080 — Q35 admin guarantee', () => {
     );
     expect(rows.map((r) => r.email)).toEqual(['someone.promoted@repos.test']);
     const founding = await pool.query<{ n: number }>(
-      `SELECT count(*)::int n FROM users WHERE lower(email)=$1`, [FOUNDING_ADMIN_EMAIL],
+      `SELECT count(*)::int n FROM users WHERE lower(email)=$1`,
+      [FOUNDING_ADMIN_EMAIL],
     );
     expect(founding.rows[0].n).toBe(0); // clause 3 must NOT have fired
   });

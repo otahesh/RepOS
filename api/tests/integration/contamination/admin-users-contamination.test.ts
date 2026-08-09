@@ -46,10 +46,12 @@ interface VictimState {
 async function readVictim(): Promise<VictimState> {
   const { rows } = await db.query(`SELECT * FROM users WHERE id=$1`, [victimId]);
   const { rows: ev } = await db.query<{ c: string }>(
-    `SELECT count(*)::int AS c FROM account_events WHERE user_id=$1`, [victimId],
+    `SELECT count(*)::int AS c FROM account_events WHERE user_id=$1`,
+    [victimId],
   );
   const { rows: tgt } = await db.query<{ c: string }>(
-    `SELECT count(*)::int AS c FROM users WHERE email=$1`, [INVITE_TARGET],
+    `SELECT count(*)::int AS c FROM users WHERE email=$1`,
+    [INVITE_TARGET],
   );
   return { row: rows[0], events: Number(ev[0].c), inviteTargetExists: Number(tgt[0].c) > 0 };
 }
@@ -64,7 +66,9 @@ beforeAll(async () => {
   // that write invisible to the state comparison below — "unchanged" and
   // "cleared" are the same value. Start from the other value.
   const victim = await mkUserWithEmail(`w9.contam-victim-${randomUUID().slice(0, 8)}@repos.test`, {
-    role: 'member', status: 'active', cfSyncedAt: new Date('2026-07-01T00:00:00Z'),
+    role: 'member',
+    status: 'active',
+    cfSyncedAt: new Date('2026-07-01T00:00:00Z'),
   });
   victimId = victim.id;
   created.push(victimId);
@@ -79,21 +83,48 @@ afterAll(async () => {
   await jwks.teardown();
 });
 
-const ROUTES: Array<{ name: string; method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: (id: string) => string; payload?: unknown }> = [
-  { name: 'GET /api/admin/users',                    method: 'GET',    url: () => '/api/admin/users' },
-  { name: 'POST /api/admin/users/invite',            method: 'POST',   url: () => '/api/admin/users/invite', payload: { email: 'x@repos.test', role: 'member' } },
-  { name: 'POST /api/admin/users/:id/resend-invite', method: 'POST',   url: (id) => `/api/admin/users/${id}/resend-invite` },
-  { name: 'PATCH /api/admin/users/:id',              method: 'PATCH',  url: (id) => `/api/admin/users/${id}`, payload: { status: 'suspended' } },
-  { name: 'DELETE /api/admin/users/:id',             method: 'DELETE', url: (id) => `/api/admin/users/${id}` },
-  { name: 'POST /api/admin/users/:id/retry-sync',    method: 'POST',   url: (id) => `/api/admin/users/${id}/retry-sync` },
+const ROUTES: Array<{
+  name: string;
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  url: (id: string) => string;
+  payload?: unknown;
+}> = [
+  { name: 'GET /api/admin/users', method: 'GET', url: () => '/api/admin/users' },
+  {
+    name: 'POST /api/admin/users/invite',
+    method: 'POST',
+    url: () => '/api/admin/users/invite',
+    payload: { email: 'x@repos.test', role: 'member' },
+  },
+  {
+    name: 'POST /api/admin/users/:id/resend-invite',
+    method: 'POST',
+    url: (id) => `/api/admin/users/${id}/resend-invite`,
+  },
+  {
+    name: 'PATCH /api/admin/users/:id',
+    method: 'PATCH',
+    url: (id) => `/api/admin/users/${id}`,
+    payload: { status: 'suspended' },
+  },
+  { name: 'DELETE /api/admin/users/:id', method: 'DELETE', url: (id) => `/api/admin/users/${id}` },
+  {
+    name: 'POST /api/admin/users/:id/retry-sync',
+    method: 'POST',
+    url: (id) => `/api/admin/users/${id}/retry-sync`,
+  },
 ];
 
 describe('W9 contamination matrix — six rows toward G2', () => {
   for (const r of ROUTES) {
     it(`${r.name}: a CF-Access member gets 403`, async () => {
       const res = await app.inject({
-        method: r.method, url: r.url(victimId),
-        headers: { 'cf-access-jwt-assertion': await jwks.mintJwt(memberEmail), 'x-repos-csrf': '1' },
+        method: r.method,
+        url: r.url(victimId),
+        headers: {
+          'cf-access-jwt-assertion': await jwks.mintJwt(memberEmail),
+          'x-repos-csrf': '1',
+        },
         ...(r.payload ? { payload: r.payload } : {}),
       });
       expect(res.statusCode).toBe(403);
@@ -107,7 +138,8 @@ describe('W9 contamination matrix — six rows toward G2', () => {
       process.env.ADMIN_API_KEY = 'contam-key';
       try {
         const res = await app.inject({
-          method: r.method, url: r.url(victimId),
+          method: r.method,
+          url: r.url(victimId),
           headers: { 'x-admin-key': 'contam-key', 'x-repos-csrf': '1' },
           ...(r.payload ? { payload: r.payload } : {}),
         });
@@ -137,9 +169,9 @@ describe('W9 contamination matrix — six rows toward G2', () => {
   // refused by this assertion.
   it('nothing the six routes could have touched moved', async () => {
     const after = await readVictim();
-    expect(after.row).toEqual(before.row);           // covers sync + delivery columns
-    expect(after.events).toBe(before.events);        // Q27 writes one per real change
-    expect(after.inviteTargetExists).toBe(false);    // POST /invite targets this, not the victim
+    expect(after.row).toEqual(before.row); // covers sync + delivery columns
+    expect(after.events).toBe(before.events); // Q27 writes one per real change
+    expect(after.inviteTargetExists).toBe(false); // POST /invite targets this, not the victim
   });
 
   // A Cloudflare write would also be a breach, and it is covered structurally
