@@ -10,7 +10,6 @@ function envBase(overrides: Record<string, string | undefined> = {}): NodeJS.Pro
     CF_ACCESS_ENABLED: 'true',
     CF_ACCESS_AUD: 'aud',
     CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
-    CF_ACCESS_ALLOWED_EMAILS: 'a@b.c',
     ...overrides,
   } as NodeJS.ProcessEnv;
 }
@@ -61,21 +60,6 @@ describe('validateStartupEnv', () => {
     expect(r.fatal.join(';')).not.toMatch(/POSTGRES_PASSWORD/);
   });
 
-  it('emits an info log entry for allow-list count', () => {
-    const r = validateStartupEnv(envBase({ CF_ACCESS_ALLOWED_EMAILS: 'a@b.c, b@b.c, c@b.c' }));
-    expect(r.info).toContainEqual({ allowListCount: 3 });
-  });
-
-  it('emits 0 allow-list count when CF_ACCESS_ALLOWED_EMAILS unset', () => {
-    const r = validateStartupEnv(envBase({ CF_ACCESS_ALLOWED_EMAILS: undefined }));
-    expect(r.info).toContainEqual({ allowListCount: 0 });
-  });
-
-  it('emits 0 allow-list count when CF_ACCESS_ALLOWED_EMAILS is whitespace-only', () => {
-    const r = validateStartupEnv(envBase({ CF_ACCESS_ALLOWED_EMAILS: '  , , ,' }));
-    expect(r.info).toContainEqual({ allowListCount: 0 });
-  });
-
   it('reports multiple fatals when several env conditions are violated', () => {
     const r = validateStartupEnv(
       envBase({
@@ -85,5 +69,37 @@ describe('validateStartupEnv', () => {
       }),
     );
     expect(r.fatal.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('W9 credential advisories', () => {
+  const base = { DATABASE_URL: 'postgres://x/y' } as NodeJS.ProcessEnv;
+
+  it('no longer reports allowListCount — CF_ACCESS_ALLOWED_EMAILS is gone', () => {
+    const r = validateStartupEnv({ ...base, CF_ACCESS_ALLOWED_EMAILS: 'a@b.c,d@e.f' });
+    expect(r.info.some((i) => 'allowListCount' in i)).toBe(false);
+  });
+
+  it('INFO (not fatal) when CF_API_TOKEN is unset', () => {
+    const r = validateStartupEnv({ ...base });
+    expect(r.fatal).toEqual([]);
+    expect(JSON.stringify(r.info)).toContain('CF_API_TOKEN unset');
+  });
+
+  it('INFO (not fatal) when RESEND_API_KEY is unset', () => {
+    const r = validateStartupEnv({ ...base });
+    expect(r.fatal).toEqual([]);
+    expect(JSON.stringify(r.info)).toContain('RESEND_API_KEY unset');
+  });
+
+  it('silent when both are configured', () => {
+    const r = validateStartupEnv({ ...base, CF_API_TOKEN: 't', RESEND_API_KEY: 'k' });
+    expect(JSON.stringify(r.info)).not.toContain('CF_API_TOKEN unset');
+    expect(JSON.stringify(r.info)).not.toContain('RESEND_API_KEY unset');
+  });
+
+  it('missing credentials never block boot — the API must start and serve reads', () => {
+    const r = validateStartupEnv({ ...base, NODE_ENV: 'production', ADMIN_API_KEY: 'k' });
+    expect(r.fatal).toEqual([]);
   });
 });

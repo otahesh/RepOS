@@ -44,6 +44,11 @@ export type SessionRow = {
   last_used_ip_24: string | null;
 };
 
+// Mirrors ACCOUNT_EVENT_KINDS in api/src/constants/accountEvents.ts. The two
+// packages build separately so the list cannot literally be shared, but adding
+// a kind here is compile-enforced downstream: KIND_LABELS in
+// AccountEventsTimeline is a Record<AccountEventKind, string>, so tsc fails
+// until the label exists.
 export type AccountEventKind =
   | 'profile_changed'
   | 'token_minted'
@@ -52,7 +57,18 @@ export type AccountEventKind =
   | 'delete_initiated'
   | 'par_q_acknowledged'
   | 'onboarding_completed'
-  | 'restore_replayed';
+  | 'restore_replayed'
+  // W9 lifecycle kinds. These land in the TARGET user's timeline (Q23 — the
+  // event's user_id is always the target), so the labels read from that
+  // person's point of view.
+  | 'user_invited'
+  | 'user_activated'
+  | 'user_suspended'
+  | 'user_reinstated'
+  | 'role_changed'
+  | 'user_delete_requested'
+  | 'user_deleted'
+  | 'user_imported';
 
 export type AccountEventRow = {
   id: string;

@@ -2,14 +2,16 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
-import { assertNotPlaceholderUserId } from '../bootstrap-runtime.js';
+import { recordAccountEventTx, humanActor } from '../services/accountEvents.js';
 import { constantTimeEqual } from '../utils/constantTimeEqual.js';
+import { clientIp } from '../utils/clientIp.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
 // `CF_Authorization` cookie (browser). Verifies signature against the team's
 // JWKS endpoint, validates `aud` and `iss`, then resolves the email claim
-// to a `users` row (auto-provisioning on first sight).
+// to a `users` row. Deny-by-default per W9 Q2: no row means 403, never an
+// INSERT.
 //
 // All gating is on `CF_ACCESS_ENABLED=true` — when off, requireCfAccess
 // returns 503 so callers can detect "feature not configured" cleanly. This
@@ -102,56 +104,125 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
   const rawEmail = typeof payload.email === 'string' ? payload.email.toLowerCase() : null;
   if (!rawEmail) return reply.code(401).send({ error: 'no_email_claim' });
 
-  const allowList = (process.env.CF_ACCESS_ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  if (allowList.length && !allowList.includes(rawEmail)) {
-    return reply.code(403).send({ error: 'email_not_allowed' });
-  }
-
   const displayNameClaim = typeof payload.name === 'string' ? payload.name : null;
 
-  const { rows } = await db.query(
-    `SELECT id, display_name, timezone, last_seen_at
+  // Deny-by-default (Q2). cfAccess.ts previously INSERTed a users row for any
+  // email that cleared CF Access; auto-provisioning is the opposite of a gate,
+  // and without this flip the DB cannot be authoritative.
+  const { rows } = await db.query<{
+    id: string;
+    display_name: string | null;
+    timezone: string;
+    last_seen_at: Date | null;
+    status: string;
+    role: string;
+    cf_synced_at: Date | null;
+  }>(
+    `SELECT id, display_name, timezone, last_seen_at, status, role, cf_synced_at
      FROM users WHERE lower(email) = $1`,
     [rawEmail],
   );
 
-  let userId: string;
-  let userDisplayName: string | null;
-  let userTz: string;
-
   if (rows.length === 0) {
-    const ins = await db.query(
-      `INSERT INTO users (email, timezone, display_name, last_seen_at)
-       VALUES ($1, 'UTC', $2, now())
-       RETURNING id, display_name, timezone`,
-      [rawEmail, displayNameClaim],
-    );
-    userId = ins.rows[0].id as string;
-    // Post-insert canary: gen_random_uuid() can never return the placeholder, so
-    // this never fires in normal flow. If it ever did, the row is already written
-    // — the throw surfaces a 500 and stops the sentinel id reaching a live session
-    // (defense-in-depth alongside the boot-time validatePlaceholderPurge).
-    assertNotPlaceholderUserId(userId, process.env);
-    userDisplayName = ins.rows[0].display_name as string | null;
-    userTz = ins.rows[0].timezone as string;
-  } else {
-    userId = rows[0].id as string;
-    userDisplayName = rows[0].display_name as string | null;
-    userTz = rows[0].timezone as string;
-    const last = rows[0].last_seen_at as Date | null;
-    if (!last || Date.now() - last.getTime() > 60_000) {
-      // Debounce last_seen_at writes to once per minute per user.
-      await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [userId]);
+    req.log.warn({ email: rawEmail }, 'cf_access_not_invited');
+    return reply.code(403).send({ error: 'not_invited' });
+  }
+
+  const user = rows[0];
+  let status = user.status;
+
+  if (status === 'invited') {
+    // Q17b — an invited row may not activate unless its CF provisioning
+    // actually landed. Without this precondition a row whose CF step failed
+    // would be activatable the moment anything put a session in front of it.
+    if (user.cf_synced_at === null) {
+      req.log.warn({ email: rawEmail }, 'cf_access_not_provisioned');
+      return reply.code(403).send({ error: 'not_provisioned' });
+    }
+
+    // Q21 — the conditional UPDATE picks exactly one winner among concurrent
+    // first requests, so user_activated is emitted at most once.
+    //
+    // Q27 — the UPDATE and its audit row commit TOGETHER. Doing the update on
+    // the pool and then recording the event separately would leave an
+    // activated account with no user_activated row if the process died or the
+    // insert failed in between: a mutation without its event, which is exactly
+    // the lost-intent case invariant I3 forbids. Only the transaction that
+    // actually won the race writes the event, so the race test's
+    // "exactly one event" assertion still holds.
+    const client = await db.connect();
+    // No initializer: every catch path returns, so `won` is definitely
+    // assigned before it is read (origin's no-useless-assignment rule).
+    let won: boolean;
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query<{ id: string }>(
+        `UPDATE users SET status='active', activated_at=now()
+          WHERE id=$1 AND status='invited' AND cf_synced_at IS NOT NULL
+          RETURNING id`,
+        [user.id],
+      );
+      won = upd.rowCount === 1;
+      if (won) {
+        await recordAccountEventTx(client, {
+          userId: user.id,
+          userEmail: rawEmail,
+          kind: 'user_activated',
+          // clientIp, not req.ip: the socket peer here is nginx on loopback,
+          // so every activation in the audit trail recorded 127.0.0.1 —
+          // and this is the one event that records where a member first
+          // signed in.
+          ip: clientIp(req),
+          meta: { ...humanActor(user.id, rawEmail) },
+        });
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      req.log.error({ err, userId: user.id }, 'activation_failed');
+      // Fail closed: an activation we could not commit must not admit anyone.
+      return reply.code(403).send({ error: 'not_provisioned' });
+    } finally {
+      client.release();
+    }
+
+    if (won) {
+      status = 'active';
+    } else {
+      // A zero-row result is NEVER treated as "someone else activated me"
+      // (round-4 review finding 3). The update may equally have lost because
+      // an admin concurrently suspended or deleted the row — assuming the
+      // benign case would let a suspended user straight through. Re-read and
+      // branch on the row's ACTUAL current status.
+      const re = await db.query<{ status: string; cf_synced_at: Date | null }>(
+        `SELECT status, cf_synced_at FROM users WHERE id=$1`,
+        [user.id],
+      );
+      status = re.rows[0]?.status ?? 'deleting';
+      if (status === 'invited') {
+        return reply.code(403).send({ error: 'not_provisioned' });
+      }
     }
   }
 
-  req.userId = userId;
+  if (status !== 'active') {
+    // 'suspended' and 'deleting' share one response: a deleting row must not
+    // reveal that a deletion is under way.
+    req.log.warn({ email: rawEmail, status }, 'cf_access_inactive');
+    return reply.code(403).send({ error: 'access_suspended' });
+  }
+
+  const last = user.last_seen_at;
+  if (!last || Date.now() - last.getTime() > 60_000) {
+    // Debounce last_seen_at writes to once per minute per user.
+    await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [user.id]);
+  }
+
+  req.userId = user.id;
   req.userEmail = rawEmail;
-  req.userDisplayName = userDisplayName;
-  req.userTimezone = userTz;
+  req.userDisplayName = user.display_name ?? displayNameClaim;
+  req.userTimezone = user.timezone;
+  req.userRole = user.role;
 }
 
 // Composer: tries Bearer first (the iOS Shortcut machine path), then CF
@@ -172,30 +243,20 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
   return requireCfAccess(req, reply);
 }
 
-// True iff `email` is in the comma-separated REPOS_ADMIN_EMAILS allow-list.
-// Fail-closed: unset env or empty email → false (never accidentally admin).
-export function isAdminEmail(email: string | undefined | null): boolean {
-  const adminEmails = process.env.REPOS_ADMIN_EMAILS;
-  if (!adminEmails || !email) return false;
-  return adminEmails
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(email.toLowerCase());
+// Q3 — users.role replaces REPOS_ADMIN_EMAILS. The comment that used to live
+// at line 265 claimed "Migration 063 reserves users.role"; that migration was
+// never written (060-062 then a jump to 070). Migration 080 actually builds it.
+//
+// Fail-closed: the role is only ever read from a row the gate already
+// resolved, so an unauthenticated request can never be admin.
+export function isAdminRequest(req: FastifyRequest): boolean {
+  return req.userRole === 'admin';
 }
 
-// Shared helper: enforce that the CF-Access-authenticated user's email is in
-// REPOS_ADMIN_EMAILS. Fail closed if env unset (per D10). Returns true if the
-// reply was already sent (caller must short-circuit).
-function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolean {
-  if (!process.env.REPOS_ADMIN_EMAILS) {
-    req.log.error('admin_check: REPOS_ADMIN_EMAILS not configured — failing closed');
-    reply.code(403).send({ error: 'admin_check_misconfigured' });
-    return true;
-  }
-  const userEmail = req.userEmail;
-  if (!isAdminEmail(userEmail)) {
-    req.log.warn({ userEmail }, 'admin_check_rejected');
+/** Returns true if the reply was already sent (caller must short-circuit). */
+function rejectIfNotAdminRole(req: FastifyRequest, reply: FastifyReply): boolean {
+  if (!isAdminRequest(req)) {
+    req.log.warn({ userEmail: req.userEmail }, 'admin_check_rejected');
     reply.code(403).send({ error: 'not_an_admin' });
     return true;
   }
@@ -207,10 +268,10 @@ function rejectIfNotAdminEmail(req: FastifyRequest, reply: FastifyReply): boolea
 // stashed on the request so handlers can pick the right user_id source.
 //
 // FACTORY (W5): call `requireAdminKeyOrCfAccess()` to get a preHandler.
-//   - default ({}): dual-auth (X-Admin-Key OR CF Access JWT + admin email).
+//   - default ({}): dual-auth (X-Admin-Key OR CF Access JWT + role='admin').
 //   - { requireFreshCfAccess: true } (per C-RESTORE-AUTH-CFACCESS): destructive
 //     admin ops (restore) — REJECT the X-Admin-Key path, require CF Access JWT
-//     + admin email. The opaque bearer escape hatch is not enough for a
+//     + role='admin'. The opaque bearer escape hatch is not enough for a
 //     restore that DROPs the database.
 export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean } = {}) {
   return async function adminGate(req: FastifyRequest, reply: FastifyReply) {
@@ -233,7 +294,7 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
       }
       await requireCfAccess(req, reply);
       if (reply.sent) return;
-      if (rejectIfNotAdminEmail(req, reply)) return;
+      if (rejectIfNotAdminRole(req, reply)) return;
       req.authMode = 'cf_access_fresh';
       return;
     }
@@ -260,11 +321,9 @@ export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean
       if (reply.sent) return;
       req.authMode = 'cf_access';
 
-      // Per D10: when authenticated via CF Access (not the admin key), enforce
-      // that the user's email is in REPOS_ADMIN_EMAILS. Fail closed if env unset.
-      // Migration 063 reserves users.role TEXT for post-Beta cohort scale-up;
-      // until then REPOS_ADMIN_EMAILS is the source of truth.
-      if (rejectIfNotAdminEmail(req, reply)) return;
+      // Per D10 as re-based by W9 Q3: authorization is users.role, resolved by
+      // requireCfAccess above. There is no env allow-list any more.
+      if (rejectIfNotAdminRole(req, reply)) return;
       return;
     }
 
@@ -291,4 +350,45 @@ export async function requireCfAccessOnly(req: FastifyRequest, reply: FastifyRep
   await requireCfAccess(req, reply);
   if (reply.sent) return;
   req.authMode = 'cf_access';
+}
+
+/**
+ * Q20 — the user-management gate. CF Access JWT + role='admin', with the
+ * X-Admin-Key path rejected outright.
+ *
+ * Why reject the admin key: requireAdminKeyOrCfAccess returns on its admin-key
+ * branch WITHOUT setting req.userId or req.userEmail, so there is no actor —
+ * the self-lockout guards (Q13) have no "self" to compare against and audit
+ * rows have no attribution. Precedent already exists at account.ts:298, which
+ * gates DELETE /api/me with requireCfAccessOnly on identical reasoning. No
+ * operator automation needs to manage users.
+ *
+ * Q32 — this is NOT `requireFreshCfAccess`. It performs no token-age check and
+ * makes no re-authentication guarantee; it requires a valid CF Access JWT and
+ * the admin role, nothing more. Renaming the existing misleading flag is a
+ * follow-up, out of scope for W9.
+ *
+ * `rejectBearer` is used by DELETE: a stolen bearer must never delete a user.
+ */
+export function requireCfAccessAdmin(opts: { rejectBearer?: boolean } = {}) {
+  return async function cfAccessAdminGate(req: FastifyRequest, reply: FastifyReply) {
+    if (opts.rejectBearer) {
+      const auth = req.headers.authorization;
+      if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        req.log.warn({ path: req.url }, 'bearer_rejected_on_admin_users_route');
+        return reply.code(403).send({ error: 'cf_access_required' });
+      }
+    }
+    const adminKeyHeader = req.headers['x-admin-key'];
+    if (typeof adminKeyHeader === 'string' && adminKeyHeader.length > 0) {
+      req.log.warn({ path: req.url }, 'admin_key_rejected_on_user_management_route');
+      return reply.code(403).send({ error: 'cf_access_required' });
+    }
+    await requireCfAccess(req, reply);
+    if (reply.sent) return;
+    if (rejectIfNotAdminRole(req, reply)) return;
+    // Stamp authMode so the chained csrfOrigin preHandler enforces the Origin
+    // guard — a stolen JWT replayed cross-origin must still be blocked.
+    req.authMode = 'cf_access';
+  };
 }

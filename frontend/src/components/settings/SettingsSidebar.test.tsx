@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SETTINGS_SECTIONS } from './SettingsSidebar';
 
 describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
-  it('ships the W6 lineup plus the W2 Health entry (slotted after Account)', () => {
+  it('ships the W6 lineup plus W2 Health and the W9 admin-only Users entry', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.label)).toEqual([
       'Account',
       'Health',
@@ -11,9 +11,17 @@ describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
       'Program prefs',
       'Backups',
       'Feedback',
+      'Users',
       'Storage',
       'Injuries',
     ]);
+  });
+
+  it('Users is admin-only and every other entry is not', () => {
+    const users = SETTINGS_SECTIONS.find((s) => s.label === 'Users');
+    expect(users?.adminOnly).toBe(true);
+    expect(users?.ownerWave).toBe('W9');
+    expect(SETTINGS_SECTIONS.filter((s) => s.adminOnly).map((s) => s.label)).toEqual(['Users']);
   });
 
   it('Health is a live W2 entry (navigable, not a disabled placeholder)', () => {
@@ -36,6 +44,17 @@ describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
     expect(byLabel.get('Injuries')?.disabled).toBe(false);
     // No remaining disabled slots once W7 lands.
     expect(SETTINGS_SECTIONS.every((s) => s.disabled === false)).toBe(true);
+  });
+
+  // G7 — every Beta surface is reachable from `/` in ≤3 clicks. /settings/users
+  // is 2: the top-level Settings nav item, then this entry. That budget only
+  // holds while Users is a live top-level section — a `disabled` placeholder is
+  // not navigable, and a nested tier would add a click.
+  it('G7: /settings/users is a live top-level entry, so it is 2 clicks from /', () => {
+    const users = SETTINGS_SECTIONS.find((s) => s.label === 'Users');
+    expect(users?.to).toBe('/settings/users');
+    expect(users?.disabled).toBe(false);
+    expect(users?.to.split('/').filter(Boolean)).toHaveLength(2); // settings + users, no deeper tier
   });
 
   it('every entry has a route under /settings/', () => {

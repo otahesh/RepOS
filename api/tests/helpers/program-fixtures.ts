@@ -172,3 +172,28 @@ export async function cleanupExercises(ids: Array<string | undefined>): Promise<
   if (filtered.length === 0) return;
   await db.query(`DELETE FROM exercises WHERE id = ANY($1::uuid[])`, [filtered]);
 }
+
+/**
+ * W9 — a users row at a caller-chosen email, role and status. Needed because
+ * the CF Access gate is deny-by-default (Q2): a test that mints a JWT for a
+ * fixed address must pre-create the row, since the middleware no longer
+ * auto-provisions one.
+ */
+export async function mkUserWithEmail(
+  email: string,
+  opts: {
+    role?: 'member' | 'admin';
+    status?: 'invited' | 'active' | 'suspended' | 'deleting';
+    cfSyncedAt?: Date | null;
+  } = {},
+): Promise<{ id: string; email: string }> {
+  const {
+    rows: [u],
+  } = await db.query<{ id: string; email: string }>(
+    `INSERT INTO users (email, role, status, cf_synced_at)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, email`,
+    [email, opts.role ?? 'member', opts.status ?? 'active', opts.cfSyncedAt ?? null],
+  );
+  return u;
+}

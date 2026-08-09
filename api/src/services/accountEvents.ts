@@ -1,15 +1,36 @@
 import { db } from '../db/client.js';
 import type { PoolClient } from 'pg';
 
-export type AccountEventKind =
-  | 'profile_changed'
-  | 'token_minted'
-  | 'token_revoked'
-  | 'signout_everywhere'
-  | 'delete_initiated'
-  | 'par_q_acknowledged'
-  | 'onboarding_completed'
-  | 'restore_replayed';
+// The kind list lives in constants/accountEvents.ts so that schemas/account.ts
+// can derive its zod enum from the SAME source. Importing this service there
+// instead would drag the db pool into the schema module. Re-exported here so
+// existing importers are unaffected.
+import type { AccountEventKind } from '../constants/accountEvents.js';
+export type { AccountEventKind };
+
+/**
+ * Q23 — the discriminated actor recorded in account_events.meta. Every W9
+ * lifecycle event carries exactly ONE of these shapes, never a partial or a
+ * mix. `meta` is intentionally permissive (see 060_account_events.sql) so this
+ * needs no migration.
+ */
+export type EventActor =
+  | { actor_kind: 'user'; actor_user_id: string; actor_email: string }
+  | { actor_kind: 'system'; actor_name: string; source: 'cutover' | 'restore' };
+
+/** A real admin (or the user themselves, for user_activated) took the action. */
+export function humanActor(userId: string, email: string): EventActor {
+  return { actor_kind: 'user', actor_user_id: userId, actor_email: email };
+}
+
+/**
+ * The reconciliation script took the action. `source` keeps the run's origin
+ * accurate: the same code path runs at cutover and inside run-restore.sh, and
+ * a hard-coded 'system:cutover' would simply lie in the restore case.
+ */
+export function systemActor(actor_name: string, source: 'cutover' | 'restore'): EventActor {
+  return { actor_kind: 'system', actor_name, source };
+}
 
 export interface RecordAccountEventArgs {
   userId: string;

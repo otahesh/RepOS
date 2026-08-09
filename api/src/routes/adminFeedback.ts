@@ -1,5 +1,5 @@
 // Beta W7 — admin triage surface. Admin-gated (X-Admin-Key OR CF Access +
-// REPOS_ADMIN_EMAILS). List is untriaged-first, newest-first.
+// users.role='admin', per W9 Q3). List is untriaged-first, newest-first.
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';

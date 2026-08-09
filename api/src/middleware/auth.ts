@@ -77,11 +77,17 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   // Look up by prefix — at most one row; no table scan. `scopes` is pulled
   // alongside id/user_id so requireScope (api/src/middleware/scope.ts) can
   // gate writes without a second DB round-trip.
+  //
+  // W9 Q25: JOIN users and pull status. Before this join, a suspended user's
+  // iOS Shortcut token kept working indefinitely — the DB gate existed on the
+  // CF Access path only. Suspension is only a real revocation if BOTH paths
+  // check it on every request.
   const { rows } = await db.query(
-    `SELECT id, user_id, token_hash, scopes
-     FROM device_tokens
-     WHERE token_hash LIKE $1 AND revoked_at IS NULL
-     ORDER BY id LIMIT 1`,
+    `SELECT dt.id, dt.user_id, dt.token_hash, dt.scopes, u.status
+       FROM device_tokens dt
+       JOIN users u ON u.id = dt.user_id
+      WHERE dt.token_hash LIKE $1 AND dt.revoked_at IS NULL
+      ORDER BY dt.id LIMIT 1`,
     [`${prefix}:%`],
   );
 
@@ -117,6 +123,20 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       expiresAt: Date.now() + VERIFIED_CACHE_TTL_MS,
       lastTouchedAt: 0,
     });
+  }
+
+  // Status is checked AFTER the secret verifies, so an attacker probing
+  // prefixes learns nothing about account state from the response code —
+  // every failure is an indistinguishable bare 401. It is checked BEFORE the
+  // last_used_at UPDATE so a rejected request does not make a suspended
+  // user's token look freshly used on the sessions surface.
+  //
+  // `status` comes from the per-request SELECT above, never from
+  // verifiedTokenCache — the cache short-circuits the argon2 verify only, so a
+  // suspension still takes effect on the very next request (W9 invariant I1).
+  if (row.status !== 'active') {
+    req.log.warn({ userId: row.user_id, status: row.status }, 'bearer_rejected_inactive_user');
+    return reply.code(401).send();
   }
 
   const entry = verifiedTokenCache.get(cacheKey);

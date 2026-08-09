@@ -31,12 +31,18 @@ import {
 import { mintBearer } from '../helpers/seed-fixtures.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 import { db } from '../../src/db/client.js';
+import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 
 const handles: SeedHandle[] = [];
 let jwks: TestJwksHandle | undefined;
 
 beforeAll(async () => {
   jwks = await setupTestJwks();
+  // W9 Q2: deny-by-default — the row must pre-exist, where this suite used to
+  // lean on the middleware auto-provisioning it. Delete first in case a
+  // crashed earlier run left one behind.
+  await db.query(`DELETE FROM users WHERE email = $1`, ['scope-enforcement-cf@repos.test']);
+  await mkUserWithEmail('scope-enforcement-cf@repos.test', { status: 'active' });
 });
 
 afterEach(async () => {
@@ -45,7 +51,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (jwks) await jwks.teardown();
-  // Wipe any user the CF Access path auto-provisioned by email claim.
+  // Wipe the row beforeAll created (no longer auto-provisioned — W9 Q2).
   await db.query(`DELETE FROM users WHERE email = $1`, ['scope-enforcement-cf@repos.test']);
   await db.end();
 });
@@ -136,7 +142,7 @@ describe('scope enforcement (W1.4.0 backport)', () => {
         payload: validWeightPayload('2025-02-03'),
       });
 
-      // CF Access auto-provisions the user on first sight, so the write
+      // The CF Access path resolves the pre-created user row, so the write
       // should succeed end-to-end (201) — no scope check fires because
       // requireScope pass-throughs when tokenScopes is undefined.
       expect(resp.statusCode).toBe(201);

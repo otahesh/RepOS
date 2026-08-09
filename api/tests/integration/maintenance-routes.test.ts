@@ -113,6 +113,75 @@ describe('maintenance routes', () => {
     const res = await app.inject({ method: 'POST', url: '/api/maintenance/clear' });
     expect(res.statusCode).toBe(204);
   });
+
+  // W9 Q35 — a non-fatal reconciliation failure rides along with a SUCCESSFUL
+  // restore. Reporting it only on status==='failed' is what hid it.
+  it('GET /api/maintenance/status surfaces warning_message even when the restore status is ok', async () => {
+    writeFileSync(flagPath, 'restore', 'utf8');
+    writeSentinel({
+      restore_id: 'r-warn',
+      status: 'ok',
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      source_filename: 'repos-x.dump.gz',
+      pre_snapshot_filename: 'pre-restore-x.sql.gz',
+      warning_message: 'CF reconciliation failed after restore. ... /settings/users',
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/maintenance/status' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      active: true,
+      restore: {
+        status: 'ok', // the restore really did succeed...
+        error_message: null, // ...so this stays empty...
+        warning_message: 'CF reconciliation failed after restore. ... /settings/users',
+      },
+    });
+  });
+
+  it('POST /api/maintenance/clear preserves a warning into backup_runs before deleting the sentinel', async () => {
+    // Clearing unlinks the sentinel, so a warning not copied here is lost the
+    // moment the operator dismisses the banner.
+    writeFileSync(flagPath, 'restore', 'utf8');
+    writeSentinel({
+      restore_id: 'r-warn-2',
+      status: 'ok',
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      source_filename: 'repos-x.dump.gz',
+      pre_snapshot_filename: 'pre-restore-x.sql.gz',
+      warning_message: 'CF reconciliation failed after restore.',
+    });
+    const res = await app.inject({ method: 'POST', url: '/api/maintenance/clear' });
+    expect(res.statusCode).toBe(204);
+    expect(existsSync(sentinelPath)).toBe(false);
+    const { rows } = await db.query<{ status: string; error_message: string | null }>(
+      `SELECT status, error_message FROM backup_runs WHERE event_kind='restore_complete'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('ok'); // the restore succeeded — do not relabel it
+    expect(rows[0].error_message).toBe('CF reconciliation failed after restore.');
+  });
+
+  it('a real error still wins the error_message column over a warning', async () => {
+    writeFileSync(flagPath, 'restore', 'utf8');
+    writeSentinel({
+      restore_id: 'r-warn-3',
+      status: 'failed',
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      source_filename: 'repos-x.dump.gz',
+      pre_snapshot_filename: 'pre-restore-x.sql.gz',
+      error_message: 'device_tokens wipe failed',
+      warning_message: 'CF reconciliation failed after restore.',
+    });
+    await app.inject({ method: 'POST', url: '/api/maintenance/clear' });
+    const { rows } = await db.query<{ status: string; error_message: string | null }>(
+      `SELECT status, error_message FROM backup_runs WHERE event_kind='restore_complete'`,
+    );
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].error_message).toBe('device_tokens wipe failed');
+  });
 });
 
 describe('POST /api/backups/:id/restore', () => {

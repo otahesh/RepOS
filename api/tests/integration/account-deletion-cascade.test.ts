@@ -32,9 +32,10 @@
 
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
+import * as policy from '../../src/services/cfAccessPolicy.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 
 const TEST_EMAIL = `vitest.w6-delete-${Math.random().toString(36).slice(2, 10)}@repos.test`;
@@ -46,6 +47,12 @@ let userJwt: string;
 let savedPublicOrigin: string | undefined;
 let templateId: string;
 let mesocycleRunId: string;
+// W9 Q33 — DELETE /api/me now runs through the deleteUser state machine, which
+// removes the address from the CF Access policy before cascading. The policy
+// client is fail-closed and api/.env sets none of CF_API_TOKEN / CF_ACCOUNT_ID
+// / CF_ACCESS_POLICY_ID, so without this stub every delete below would 502 on
+// cf_not_configured and never reach the cascade this suite exists to prove.
+let policyEmails: string[] = [];
 
 // The tables we expect to be fully wiped for the user after DELETE /api/me.
 // account_events is INTENTIONALLY excluded (D8 — survives with user_id=NULL).
@@ -227,6 +234,23 @@ beforeAll(async () => {
   jwks = await setupTestJwks();
   app = await buildApp();
 
+  policyEmails = [TEST_EMAIL];
+  vi.spyOn(policy, 'fetchPolicy').mockImplementation(async () => ({
+    emails: [...policyEmails],
+    name: 'Owner Only',
+    decision: 'allow',
+    config: {
+      name: 'Owner Only',
+      decision: 'allow',
+      include: policyEmails.map((e) => ({ email: { email: e } })),
+      exclude: [],
+      require: [],
+    },
+  }));
+  vi.spyOn(policy, 'putPolicyEmails').mockImplementation(async (emails: string[]) => {
+    policyEmails = [...emails];
+  });
+
   // Pre-create the user so admin-path /api/tokens mints work without going
   // through CF Access auto-provisioning. CF Access JWT path will then resolve
   // by email lookup to this same row.
@@ -346,6 +370,10 @@ describe('DELETE /api/me — full cascade', () => {
     const setCookie = r.headers['set-cookie'];
     const cookieStr = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
     expect(cookieStr).not.toMatch(/CF_Authorization/i);
+
+    // W9 Q33 — the address is removed from the CF Access policy rather than
+    // orphaned there. beforeAll seeded it into policyEmails, so this can fail.
+    expect(policyEmails).not.toContain(TEST_EMAIL);
 
     // users row is gone.
     const { rows: u } = await db.query<{ n: number }>(

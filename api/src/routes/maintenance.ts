@@ -31,6 +31,13 @@ interface RestoreSentinel {
   source_filename: string;
   pre_snapshot_filename: string;
   error_message?: string;
+  /**
+   * A NON-FATAL problem during an otherwise successful restore — today, a
+   * failed CF reconciliation (W9 Q35). Independent of `status`, which stays
+   * 'ok': the data restore succeeded, but something the operator must act on
+   * did not. Reported whenever present, never gated on status.
+   */
+  warning_message?: string;
   admin_user_id?: string | null;
 }
 
@@ -56,6 +63,8 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
             status: sentinel.status,
             file_path: sentinel.source_filename,
             error_message: sentinel.error_message ?? null,
+            // Surfaced even when status === 'ok' — that is the whole point.
+            warning_message: sentinel.warning_message ?? null,
             started_at: sentinel.started_at,
             finished_at: sentinel.finished_at ?? null,
           }
@@ -88,7 +97,11 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
           [
             sentinel.status === 'ok' ? 'ok' : 'failed',
             sentinel.source_filename,
-            sentinel.error_message ?? null,
+            // Clearing maintenance DELETES the sentinel, so a warning that is
+            // never copied here vanishes with it. Keep the row's status honest
+            // ('ok' — the restore did succeed) while preserving the note in the
+            // permanent audit trail. A real error always wins the column.
+            sentinel.error_message ?? sentinel.warning_message ?? null,
             req.userId ?? sentinel.admin_user_id ?? null,
             sentinel.started_at,
           ],

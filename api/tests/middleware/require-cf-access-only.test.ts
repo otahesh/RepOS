@@ -15,16 +15,25 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { requireCfAccessOnly } from '../../src/middleware/cfAccess.js';
 import { setupTestJwks, type TestJwksHandle } from '../helpers/cf-access-jwt.js';
 import { db } from '../../src/db/client.js';
+import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 
 let jwks: TestJwksHandle;
 
+const CF_ONLY_EMAIL = 'cfaccess.only@repos.test';
+
 beforeAll(async () => {
   jwks = await setupTestJwks();
+  // W9 Q2: the gate is deny-by-default, so the row has to exist before a JWT
+  // for it will authenticate — this suite used to rely on the middleware
+  // auto-provisioning it. Delete first so a crashed earlier run can't leave a
+  // row behind and trip the unique constraint.
+  await db.query(`DELETE FROM users WHERE email = $1`, [CF_ONLY_EMAIL]);
+  await mkUserWithEmail(CF_ONLY_EMAIL, { status: 'active' });
 });
 
 afterAll(async () => {
   await jwks.teardown();
-  await db.query(`DELETE FROM users WHERE email = $1`, ['cfaccess.only@repos.test']);
+  await db.query(`DELETE FROM users WHERE email = $1`, [CF_ONLY_EMAIL]);
   await db.end();
 });
 
@@ -68,7 +77,7 @@ describe('requireCfAccessOnly (C-SIGNOUT-CFACCESS-ONLY)', () => {
   });
 
   it('passes through to the handler with a valid CF Access JWT', async () => {
-    const jwt = await jwks.mintJwt('cfaccess.only@repos.test');
+    const jwt = await jwks.mintJwt(CF_ONLY_EMAIL);
     const app = await buildTestApp();
     try {
       const r = await app.inject({

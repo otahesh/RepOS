@@ -52,6 +52,11 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const isSettings = location.pathname.startsWith('/settings');
   const { user } = useCurrentUser();
 
+  // W9 — admin-only settings sections (Users) are hidden from members. This is
+  // presentation only; /api/admin/* enforces role='admin' server-side, so a
+  // member who types the URL gets "Not authorized", not data.
+  const visibleSections = SETTINGS_SECTIONS.filter((s) => !s.adminOnly || user?.is_admin);
+
   // AuthGate blocks render until status === 'authenticated', so user is
   // non-null here.
   const trimmedName = user?.display_name?.trim() ?? '';
@@ -208,7 +213,7 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
                     marginTop: 2,
                   }}
                 >
-                  {SETTINGS_SECTIONS.map((sub) => {
+                  {visibleSections.map((sub) => {
                     if (sub.disabled) {
                       // Non-navigable placeholder for W4/W5/W7 slots. Skips
                       // tab order via aria-disabled + tabIndex=-1.

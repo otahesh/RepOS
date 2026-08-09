@@ -5,3 +5,6 @@
 
 # style: apply Prettier formatting + fix ESLint errors (PR-C)
 beb0bc44a15fb121fa5ccfac8ab625d6aa7fe54c
+
+# style: bring W9 files under origin's Prettier gate (post-merge catch-up)
+c7d98106fb9612135187cc9a6397f86260c23573

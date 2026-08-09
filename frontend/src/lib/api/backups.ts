@@ -20,6 +20,12 @@ export interface MaintenanceStatus {
   restore: {
     status: 'running' | 'ok' | 'failed';
     error_message?: string | null;
+    /**
+     * A non-fatal problem during an otherwise successful restore (W9 Q35 — a
+     * failed CF reconciliation). Present independently of `status`, which stays
+     * 'ok'; the banner must render it rather than gating on status === 'failed'.
+     */
+    warning_message?: string | null;
     file_path?: string;
   } | null;
   recovery_available: boolean;

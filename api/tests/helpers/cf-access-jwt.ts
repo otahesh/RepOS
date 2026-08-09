@@ -31,15 +31,12 @@ interface SavedEnv {
   CF_ACCESS_ENABLED: string | undefined;
   CF_ACCESS_AUD: string | undefined;
   CF_ACCESS_TEAM_DOMAIN: string | undefined;
-  CF_ACCESS_ALLOWED_EMAILS: string | undefined;
 }
 
 export async function setupTestJwks(
   opts: {
     /** AUD value the issued JWTs claim; default unique per call to avoid bleed. */
     aud?: string;
-    /** Comma-separated allowed email list; default empty (= allow all). */
-    allowedEmails?: string;
   } = {},
 ): Promise<TestJwksHandle> {
   const aud = opts.aud ?? `test-aud-${Math.random().toString(36).slice(2, 10)}`;
@@ -73,16 +70,10 @@ export async function setupTestJwks(
     CF_ACCESS_ENABLED: process.env.CF_ACCESS_ENABLED,
     CF_ACCESS_AUD: process.env.CF_ACCESS_AUD,
     CF_ACCESS_TEAM_DOMAIN: process.env.CF_ACCESS_TEAM_DOMAIN,
-    CF_ACCESS_ALLOWED_EMAILS: process.env.CF_ACCESS_ALLOWED_EMAILS,
   };
   process.env.CF_ACCESS_ENABLED = 'true';
   process.env.CF_ACCESS_AUD = aud;
   process.env.CF_ACCESS_TEAM_DOMAIN = teamDomain;
-  if (opts.allowedEmails !== undefined) {
-    process.env.CF_ACCESS_ALLOWED_EMAILS = opts.allowedEmails;
-  } else {
-    delete process.env.CF_ACCESS_ALLOWED_EMAILS;
-  }
   // Reset the cached JWKS client so the new CF_ACCESS_TEAM_DOMAIN is picked up.
   resetJwksCacheForTesting();
 

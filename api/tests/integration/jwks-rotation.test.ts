@@ -18,6 +18,7 @@ import { createServer, type Server } from 'node:http';
 import { generateKeyPair, exportJWK, SignJWT, type KeyLike, type JWK } from 'jose';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { db } from '../../src/db/client.js';
+import { mkUserWithEmail } from '../helpers/program-fixtures.js';
 import { requireCfAccess, resetJwksCacheForTesting } from '../../src/middleware/cfAccess.js';
 
 const AUD = 'test-aud-beta-w0-6';
@@ -59,7 +60,11 @@ beforeAll(async () => {
   process.env.CF_ACCESS_ENABLED = 'true';
   process.env.CF_ACCESS_AUD = AUD;
   process.env.CF_ACCESS_TEAM_DOMAIN = `127.0.0.1:${mockJwksPort}`;
-  process.env.CF_ACCESS_ALLOWED_EMAILS = TEST_EMAIL;
+
+  // W9 Q4/Q2: CF_ACCESS_ALLOWED_EMAILS is gone — users.status replaces it — and
+  // the gate no longer auto-provisions, so TEST_EMAIL needs a real row.
+  await db.query(`DELETE FROM users WHERE lower(email) = lower($1)`, [TEST_EMAIL]);
+  await mkUserWithEmail(TEST_EMAIL, { status: 'active' });
 });
 
 afterAll(async () => {

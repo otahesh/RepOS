@@ -15,26 +15,36 @@
 //     restore_complete audit row.
 import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
 import { validateMaintenanceFlag } from '../../src/bootstrap-runtime.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
+// Hold the mkdtemp root itself, not just the paths inside it. Unlinking the
+// flag and the sentinel leaves the directory behind, and one empty
+// /tmp/repos-crash-* then accumulates per integration run — 54 of them had
+// piled up before anyone globbed the whole prefix.
+let tmpRoot: string;
 let flagPath: string;
 let sentinelPath: string;
 
 beforeAll(() => {
-  flagPath = join(mkdtempSync(join(tmpdir(), 'repos-crash-')), 'maintenance.flag');
-  sentinelPath = `${dirname(flagPath)}/restore-state.json`;
+  tmpRoot = mkdtempSync(join(tmpdir(), 'repos-crash-'));
+  flagPath = join(tmpRoot, 'maintenance.flag');
+  sentinelPath = join(tmpRoot, 'restore-state.json');
   process.env.MAINTENANCE_FLAG_PATH = flagPath;
   process.env.RESTORE_STATE_PATH = sentinelPath;
 });
 afterAll(async () => {
-  if (existsSync(flagPath)) unlinkSync(flagPath);
-  if (existsSync(sentinelPath)) unlinkSync(sentinelPath);
+  // Recursive + force: removes the directory AND whatever the cases left in
+  // it, so cleanup cannot be defeated by a test that writes an extra file.
+  // Removal comes FIRST and is guarded, so a beforeAll that died before the
+  // mkdtemp cannot turn teardown into a TypeError (the sibling
+  // restore-migration-failure suite leaked exactly that way).
+  if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
   delete process.env.MAINTENANCE_FLAG_PATH;
   delete process.env.RESTORE_STATE_PATH;
   await db.end();

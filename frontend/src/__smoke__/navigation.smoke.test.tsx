@@ -10,10 +10,16 @@
 // against the current pathname, so the rendered <a href="…"> looks fine
 // even when the link is broken. The static lint is what catches that.
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from '../components/layout/Sidebar';
+import { SETTINGS_SECTIONS } from '../components/settings/SettingsSidebar';
+
+// W9 — mutable so a single mocked module can serve both the member and the
+// admin case. `vi.mock` is hoisted above the imports, so the state it closes
+// over has to be hoisted too.
+const authState = vi.hoisted(() => ({ isAdmin: false }));
 
 vi.mock('../auth', () => {
   const passthrough = ({ children }: { children: React.ReactNode }) => <>{children}</>;
@@ -47,11 +53,23 @@ vi.mock('../auth', () => {
         email: 'test@example.com',
         display_name: 'Test User',
         timezone: 'UTC',
+        is_admin: authState.isAdmin,
       },
       error: null,
     }),
   };
 });
+
+beforeEach(() => {
+  authState.isAdmin = false;
+});
+
+/** Section labels currently rendered inside the sidebar's settings sub-nav. */
+function renderedSectionLabels(sidebar: HTMLElement): string[] {
+  return SETTINGS_SECTIONS.map((s) => s.label).filter(
+    (label) => within(sidebar).queryAllByText(label).length > 0,
+  );
+}
 
 vi.mock('../lib/api/equipment', () => ({
   getEquipmentProfile: vi.fn().mockResolvedValue({ _v: 1, equipment: ['barbell'] }),
@@ -101,5 +119,36 @@ describe('navigation smoke', () => {
         `sub-nav "${name}" missing from Sidebar`,
       ).toBeInTheDocument();
     }
+  });
+
+  // W9 — `adminOnly` sections are filtered client-side. This is presentation
+  // only; /api/admin/* enforces role='admin' server-side regardless.
+  it('hides the admin-only Users entry from a member', () => {
+    render(
+      <MemoryRouter initialEntries={['/settings/account']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    const sidebar = screen.getByRole('complementary');
+    expect(within(sidebar).queryByText('Users')).toBeNull();
+    expect(renderedSectionLabels(sidebar)).toHaveLength(9);
+  });
+
+  it('shows the Users entry to an admin', () => {
+    authState.isAdmin = true;
+    render(
+      <MemoryRouter initialEntries={['/settings/account']}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    const sidebar = screen.getByRole('complementary');
+    expect(within(sidebar).getByText('Users')).toBeInTheDocument();
+    expect(renderedSectionLabels(sidebar)).toHaveLength(10);
+    // G7 — reachable means clickable, not merely rendered. Asserting the href
+    // is what makes this a reachability test rather than a label test.
+    expect(within(sidebar).getByText('Users').closest('a')).toHaveAttribute(
+      'href',
+      '/settings/users',
+    );
   });
 });

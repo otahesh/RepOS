@@ -10,7 +10,9 @@ export interface SettingsSection {
   label: string;
   to: string;
   disabled: boolean;
-  ownerWave: 'W6' | 'W1' | 'W2' | 'W3' | 'W4' | 'W5' | 'W7';
+  ownerWave: 'W6' | 'W1' | 'W2' | 'W3' | 'W4' | 'W5' | 'W7' | 'W9';
+  /** W9 — rendered only when /api/me reports is_admin. The API enforces it server-side regardless. */
+  adminOnly?: boolean;
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
@@ -21,6 +23,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed
   { label: 'Backups', to: '/settings/backups', disabled: false, ownerWave: 'W5' }, // W5 landed
   { label: 'Feedback', to: '/settings/feedback', disabled: false, ownerWave: 'W7' }, // W7 landed
+  { label: 'Users', to: '/settings/users', disabled: false, ownerWave: 'W9', adminOnly: true },
   // D7: Storage + Injuries stay top-level.
   { label: 'Storage', to: '/settings/storage', disabled: false, ownerWave: 'W1' },
   { label: 'Injuries', to: '/settings/injuries', disabled: false, ownerWave: 'W3' },
