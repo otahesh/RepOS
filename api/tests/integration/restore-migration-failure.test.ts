@@ -18,17 +18,21 @@ import {
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
+// The mkdtemp root, held at module scope so afterAll can remove it. Cleaning
+// only `backups/` (its child) and unlinking the flag/sentinel left the root
+// behind — one empty /tmp/repos-mig-fail-* per integration run.
+let tmpRoot: string;
 let backupsDir: string;
 let flagPath: string;
 let sentinelPath: string;
 let preSnapshotPath: string;
 
 beforeAll(async () => {
-  const root = mkdtempSync(join(tmpdir(), 'repos-mig-fail-'));
-  backupsDir = join(root, 'backups');
+  tmpRoot = mkdtempSync(join(tmpdir(), 'repos-mig-fail-'));
+  backupsDir = join(tmpRoot, 'backups');
   mkdirSync(backupsDir, { recursive: true });
-  flagPath = join(root, 'maintenance.flag');
-  sentinelPath = join(root, 'restore-state.json');
+  flagPath = join(tmpRoot, 'maintenance.flag');
+  sentinelPath = join(tmpRoot, 'restore-state.json');
   process.env.BACKUPS_DIR = backupsDir;
   process.env.MAINTENANCE_FLAG_PATH = flagPath;
   process.env.RESTORE_STATE_PATH = sentinelPath;
@@ -43,9 +47,9 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await app.close();
-  rmSync(backupsDir, { recursive: true, force: true });
-  if (existsSync(flagPath)) unlinkSync(flagPath);
-  if (existsSync(sentinelPath)) unlinkSync(sentinelPath);
+  // The root subsumes backupsDir, the flag and the sentinel — one recursive
+  // removal instead of three partial ones that each missed the parent.
+  rmSync(tmpRoot, { recursive: true, force: true });
   delete process.env.BACKUPS_DIR;
   delete process.env.MAINTENANCE_FLAG_PATH;
   delete process.env.RESTORE_STATE_PATH;
