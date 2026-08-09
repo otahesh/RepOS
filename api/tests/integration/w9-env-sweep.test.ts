@@ -17,8 +17,9 @@
 // bootstrap-guards.ts all cite the removed variables on purpose, to record
 // what replaced them. A bare-name assertion would force deleting that history.
 import { describe, it, expect } from 'vitest';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, extname, basename } from 'node:path';
+import { readdir, readFile, stat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, extname } from 'node:path';
 
 const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
 
@@ -63,26 +64,63 @@ const EXCLUDED_DIRS = new Set([
 ]);
 
 const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SHELL_SHAPED_EXTENSIONS = new Set(['.sh', '.yml', '.yaml', '.json', '.conf', '.sql']);
 
 /**
- * Documentation is deliberately NOT scanned: it may name, quote and explain
- * both variables — the plan quotes the old `.env.example` verbatim. The single
- * tracked env TEMPLATE is covered by its own, stricter bare-name case below.
- * `.env` itself is untracked local config and is skipped for the same reason
- * a developer's machine is not the deployment.
+ * Prose. Deliberately NOT scanned: docs may name, quote and explain both
+ * variables — the plan quotes the old `.env.example` verbatim.
+ */
+const DOC_EXTENSIONS = new Set(['.md', '.mdx']);
+
+/** Binary assets. Reading these as text finds nothing and costs a lot. */
+const BINARY_EXTENSIONS = new Set([
+  '.webp',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.gz',
+  '.zip',
+  '.tar',
+  '.pdf',
+  '.dump',
+]);
+
+/**
+ * EXCLUSION, APPLIED TO EXTENSIONS TOO — the same lesson as the directory
+ * walk, learned twice. The previous version allow-listed the extensions it
+ * understood (`.sh|.yml|.json|.conf|.sql` + extensionless) and returned null
+ * for everything else, so the exclusion-based *directory* walk fed a
+ * enumeration-based *file* filter and the blind spot simply moved down a
+ * level. A root-level `.toml` holding a live `REPOS_ADMIN_EMAILS = "..."`
+ * declaration was scanned by the walk and then silently dropped here; all
+ * four cases stayed green. Dotfiles were invisible for a subtler reason:
+ * `extname('.nvmrc')` is `''`, but `basename('.nvmrc').includes('.')` is
+ * true, so they matched neither the extension sets nor the extensionless
+ * escape hatch.
+ *
+ * So the default is now SCANNED. Only prose and binaries are ruled out, and
+ * an unrecognised extension fails toward over-scanning — a false positive
+ * someone must look at — rather than toward a variable nobody can see.
  */
 function classify(name: string): 'js' | 'shell' | null {
   if (name.startsWith('.env')) return null; // template has its own case
-  const ext = extname(name);
-  if (ext === '.md') return null;
+  const ext = extname(name).toLowerCase();
+  if (DOC_EXTENSIONS.has(ext)) return null;
+  if (BINARY_EXTENSIONS.has(ext)) return null;
   if (JS_EXTENSIONS.has(ext)) return 'js';
-  if (SHELL_SHAPED_EXTENSIONS.has(ext)) return 'shell';
-  // Extensionless files are shell-shaped: docker/root/etc/s6-overlay/scripts/*
-  // (run-api, init-migrations, wait-for-postgres…) and docker/Dockerfile carry
-  // no extension, and those are exactly where a container env var is plumbed.
-  if (!basename(name).includes('.')) return 'shell';
-  return null;
+  // Everything else is treated as shell-shaped config and gets BOTH pattern
+  // families: .toml/.ini/.conf/.yml/.sql, dotfiles like .nvmrc and
+  // .dockerignore, and extensionless files — docker/Dockerfile and
+  // docker/root/etc/s6-overlay/scripts/* (run-api, init-migrations,
+  // wait-for-postgres…), which is exactly where a container env var is
+  // plumbed.
+  return 'shell';
 }
 
 const repoRoot = join(process.cwd(), '..');
@@ -143,6 +181,40 @@ describe('W9 env-var removal is complete', () => {
         files.some((f) => f.endsWith(expected)),
         `never scanned ${expected}`,
       ).toBe(true);
+    }
+  });
+
+  // Pins the classifier against the blind spot that actually shipped. A
+  // root-level `.toml` carrying a live declaration was walked and then
+  // dropped by the extension allow-list, and all four other cases stayed
+  // green. This runs the REAL walk over a fixture tree rather than asserting
+  // on classify() in isolation, so it pins corpus selection end-to-end.
+  //
+  // `innocent.toml` is the non-vacuity control: it must appear in `files`.
+  // Without it, a classifier that skipped every .toml would still satisfy the
+  // offender assertion for the wrong reason.
+  it('scans unfamiliar config extensions and dotfiles, skipping only docs and binaries', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'repos-sweep-fixture-'));
+    try {
+      await writeFile(
+        join(fixture, 'evil.toml'),
+        '[deploy]\nREPOS_ADMIN_EMAILS = "boss@repos.test"\n',
+      );
+      await writeFile(join(fixture, '.nvmrc'), 'export CF_ACCESS_ALLOWED_EMAILS=a@b.c\n');
+      await writeFile(join(fixture, 'innocent.toml'), '[deploy]\nOTHER = 1\n');
+      await writeFile(join(fixture, 'notes.md'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
+      await writeFile(join(fixture, 'logo.webp'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
+
+      const acc: Scan = { files: [], offenders: [] };
+      await walk(fixture, acc);
+      const rel = (xs: string[]) => xs.map((f) => f.slice(fixture.length + 1)).sort();
+
+      // Unfamiliar extension AND dotfile are both caught.
+      expect(rel(acc.offenders)).toEqual(['.nvmrc', 'evil.toml']);
+      // Prose and binaries stay out of the corpus; the clean .toml is in it.
+      expect(rel(acc.files)).toEqual(['.nvmrc', 'evil.toml', 'innocent.toml']);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
     }
   });
 

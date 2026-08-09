@@ -17,7 +17,12 @@ import {
 } from '../../src/services/restoreRunner.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
-let app: App;
+// Optional, because `beforeAll` can die before it is assigned. `pg_dump` and
+// `buildApp()` both run AFTER the mkdtemp, so either failing left `app`
+// undefined — and the old teardown's leading `await app.close()` then threw
+// a TypeError before reaching the removal, leaking the directory on exactly
+// the runs where something had already gone wrong.
+let app: App | undefined;
 // The mkdtemp root, held at module scope so afterAll can remove it. Cleaning
 // only `backups/` (its child) and unlinking the flag/sentinel left the root
 // behind — one empty /tmp/repos-mig-fail-* per integration run.
@@ -46,15 +51,23 @@ beforeAll(async () => {
   app = await buildApp();
 });
 afterAll(async () => {
-  await app.close();
-  // The root subsumes backupsDir, the flag and the sentinel — one recursive
-  // removal instead of three partial ones that each missed the parent.
-  rmSync(tmpRoot, { recursive: true, force: true });
-  delete process.env.BACKUPS_DIR;
-  delete process.env.MAINTENANCE_FLAG_PATH;
-  delete process.env.RESTORE_STATE_PATH;
-  await db.query(`DELETE FROM backup_runs`);
-  await db.end();
+  try {
+    await app?.close();
+  } finally {
+    // Everything below must run even when setup failed or close() threw.
+    // The root subsumes backupsDir, the flag and the sentinel — one recursive
+    // removal instead of three partial ones that each missed the parent.
+    if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
+    delete process.env.BACKUPS_DIR;
+    delete process.env.MAINTENANCE_FLAG_PATH;
+    delete process.env.RESTORE_STATE_PATH;
+    // Swallowed deliberately: after a failed setup the connection may already
+    // be unusable, and a throw here would skip db.end() and leak the pool.
+    // The suite has already failed by then — masking a teardown error is the
+    // lesser harm. On the normal path neither of these can fail.
+    await db.query(`DELETE FROM backup_runs`).catch(() => {});
+    await db.end().catch(() => {});
+  }
 });
 beforeEach(async () => {
   if (existsSync(flagPath)) unlinkSync(flagPath);

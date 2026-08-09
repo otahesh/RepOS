@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
 import { recordAccountEventTx, humanActor } from '../services/accountEvents.js';
 import { constantTimeEqual } from '../utils/constantTimeEqual.js';
+import { clientIp } from '../utils/clientIp.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
@@ -167,7 +168,11 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
           userId: user.id,
           userEmail: rawEmail,
           kind: 'user_activated',
-          ip: req.ip,
+          // clientIp, not req.ip: the socket peer here is nginx on loopback,
+          // so every activation in the audit trail recorded 127.0.0.1 —
+          // and this is the one event that records where a member first
+          // signed in.
+          ip: clientIp(req),
           meta: { ...humanActor(user.id, rawEmail) },
         });
       }

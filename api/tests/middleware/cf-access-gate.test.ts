@@ -128,6 +128,31 @@ describe('activation (Q21 + Q17b)', () => {
     expect(rows[0].meta.actor_email).toBe(email);
   });
 
+  // user_activated is the only record of where a member first signed in, and
+  // it was recording nginx's loopback address: in production the socket peer
+  // is the proxy (client → Cloudflare → cloudflared → nginx → Fastify).
+  // Asserting the exact address rather than "not null" is deliberate —
+  // 127.0.0.1 is also not null, so a looser assertion would survive the bug.
+  it('records the Cf-Connecting-Ip client address on user_activated, not the proxy', async () => {
+    const email = freshEmail('actorip');
+    const u = await mkUserWithEmail(email, { status: 'invited', cfSyncedAt: new Date() });
+    created.push(u.id);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        'cf-access-jwt-assertion': await jwks.mintJwt(email),
+        'cf-connecting-ip': '203.0.113.42',
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    const { rows } = await db.query<{ ip: string | null }>(
+      `SELECT ip FROM account_events WHERE user_id=$1 AND kind='user_activated'`,
+      [u.id],
+    );
+    expect(rows[0].ip).toBe('203.0.113.42');
+  });
+
   it('Q27: a failing event write rolls the activation back — no mutation without its event', async () => {
     const email = freshEmail('atomic');
     const u = await mkUserWithEmail(email, { status: 'invited', cfSyncedAt: new Date() });

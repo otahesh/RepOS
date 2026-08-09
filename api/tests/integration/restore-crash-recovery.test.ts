@@ -41,7 +41,10 @@ beforeAll(() => {
 afterAll(async () => {
   // Recursive + force: removes the directory AND whatever the cases left in
   // it, so cleanup cannot be defeated by a test that writes an extra file.
-  rmSync(tmpRoot, { recursive: true, force: true });
+  // Removal comes FIRST and is guarded, so a beforeAll that died before the
+  // mkdtemp cannot turn teardown into a TypeError (the sibling
+  // restore-migration-failure suite leaked exactly that way).
+  if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
   delete process.env.MAINTENANCE_FLAG_PATH;
   delete process.env.RESTORE_STATE_PATH;
   await db.end();

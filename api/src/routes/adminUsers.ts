@@ -15,12 +15,23 @@ import {
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
 import { deleteUser } from '../services/deleteUser.js';
+import { clientIp } from '../utils/clientIp.js';
+import { requireUserId, requireUserEmail } from '../utils/requestIdentity.js';
 
+// Every lifecycle event this file writes is attributed to this actor, so all
+// three fields are security-relevant audit provenance.
+//
+// `clientIp`, not `req.ip`: behind Cloudflare → cloudflared → nginx, the
+// socket peer is nginx on loopback, so every admin action in the audit trail
+// read as 127.0.0.1. The non-null assertions were worse than untidy — `!`
+// silences the one check that would notice a route wired without its auth
+// preHandler, turning a missing actor into an audit row attributed to
+// `undefined` rather than a surfaced error.
 function actorOf(req: FastifyRequest): Actor {
   return {
-    userId: (req as { userId?: string }).userId!,
-    email: (req as { userEmail?: string }).userEmail!,
-    ip: req.ip ?? null,
+    userId: requireUserId(req),
+    email: requireUserEmail(req),
+    ip: clientIp(req),
   };
 }
 

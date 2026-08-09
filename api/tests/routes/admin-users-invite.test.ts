@@ -204,6 +204,32 @@ describe('POST /api/admin/users/invite — happy path', () => {
     });
   });
 
+  // Audit provenance. In production the socket peer is nginx on loopback
+  // (client → Cloudflare → cloudflared → nginx → Fastify), so `req.ip`
+  // attributed every admin action to 127.0.0.1. actorOf now resolves the
+  // address through clientIp(). Asserting the exact value — rather than
+  // "not null" — is what makes this fail if the proxy address comes back:
+  // 127.0.0.1 is also non-null.
+  it('attributes the audit row to the Cf-Connecting-Ip client, not the proxy', async () => {
+    const email = freshEmail('ip');
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/admin/users/invite',
+      headers: {
+        'cf-access-jwt-assertion': await jwks.mintJwt(ADMIN),
+        'x-repos-csrf': '1',
+        'cf-connecting-ip': '203.0.113.77',
+      },
+      payload: { email, role: 'member' },
+    });
+    expect(r.statusCode).toBe(201);
+    const { rows } = await db.query<{ ip: string | null }>(
+      `SELECT ip FROM account_events WHERE user_id=$1 AND kind='user_invited'`,
+      [r.json<{ id: string }>().id],
+    );
+    expect(rows[0].ip).toBe('203.0.113.77');
+  });
+
   it('Q27: a Resend failure still leaves the user_invited event committed', async () => {
     mailImpl = async () => {
       throw new mailer.MailerError('mail_http_error', 'nope');

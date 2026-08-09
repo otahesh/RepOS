@@ -28,15 +28,39 @@
 
 ## Prerequisite: a reachable Postgres
 
-Verified 2026-07-26: **no Postgres is currently reachable** from this workstation. `127.0.0.1:5432` and the retired `192.168.88.2:5432` both refuse connections, and `psql` is not installed. `podman` is available. Before Task 1, bring one up and point `api/.env` at it:
+> **Status: SATISFIED since 2026-07-27.** This section originally read "no Postgres is currently reachable … and `psql` is not installed" (verified 2026-07-26). All of that was fixed the next day, and every task in this plan was verified against the environment described below. It is corrected **here, in place**, rather than only in the Known-gaps section ~9.7k lines down — a reader who hits a blocked-environment claim on page one does not keep reading to find out it was solved. The superseded text is recorded at the end of this section.
+
+The working environment, re-verified 2026-08-09:
 
 ```bash
+# 1. Postgres — podman container `repos-pg`, up since 2026-07-27.
+#    Already running; recreate only if it is gone.
 podman run -d --name repos-pg -p 5432:5432 \
   -e POSTGRES_USER=repos -e POSTGRES_PASSWORD=repos_dev_pw -e POSTGRES_DB=repos_test \
-  docker.io/library/postgres:16
+  docker.io/library/postgres:16-alpine        # server reports 16.13
+
+# 2. REQUIRED IN EVERY SHELL. postgresql@16 is keg-only, so its client
+#    binaries are not on the default PATH and nothing was added to
+#    .bash_profile. Without this, tests/integration/restore.test.ts fails on
+#    `transaction_timeout` — brew's default libpq is 18.x, and pg_dump 18
+#    emits a SET the 16 server rejects.
+export PATH="/home/linuxbrew/.linuxbrew/opt/postgresql@16/bin:$PATH"
+
+# 3. Dependencies, schema, seed.
+cd /var/home/jason/Projects/RepOS/api && npm ci && npm run migrate && npm run seed
 ```
 
-Then point `api/.env` at it: `DATABASE_URL=postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test`. It currently names the old `192.168.88.2` host — that is **known and deferred**, not a defect to re-litigate; `.env` is local untracked config and is not authoritative on topology. It just has to name a reachable database for the test suite to run. Run `cd /var/home/jason/Projects/RepOS/api && npm run migrate` once to confirm the baseline schema applies. **No task in this plan can be verified without this.**
+- **`psql`, `pg_dump` and `pg_restore` ARE installed** (`brew install postgresql@16`, 2026-07-27; re-verified 2026-08-02 and 2026-08-09). Do not re-cite their absence as a justification for anything — see the Task 17 note, which flags exactly that stale citation.
+- **`api/.env` was repointed on 2026-07-27** to `postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test`. It no longer names the retired `192.168.88.2` host. The tracked template `api/.env.example` was left carrying the old host and has since been fixed independently — verified 2026-08-09, line 1 now reads `127.0.0.1`. The follow-up this plan flagged is closed; do not re-open it.
+- **`npm run seed` is mandatory before `npm test`.** Without it ~48 unit files fail with `seedUserWithMesocycle: no exercises in DB`.
+- **`npm ci`, not a bare install** — `node_modules` in both `api/` and `frontend/` has been found present-but-incomplete more than once; the symptom is `ERR_MODULE_NOT_FOUND` for a package that *is* in `package.json`.
+- **Run vitest with an explicit `cd` into `api/` or `frontend/`.** From the repo root dotenv loads the wrong `.env`, and the symptom is a misleading `DATABASE_URL must be set` that is not a real defect.
+
+<details><summary>Superseded 2026-07-26 text (kept for provenance)</summary>
+
+> Verified 2026-07-26: **no Postgres is currently reachable** from this workstation. `127.0.0.1:5432` and the retired `192.168.88.2:5432` both refuse connections, and `psql` is not installed. `podman` is available. Before Task 1, bring one up and point `api/.env` at it … It currently names the old `192.168.88.2` host — that is known and deferred.
+
+</details>
 
 ## File Structure
 
@@ -9695,9 +9719,11 @@ Not a task — the operator runs this once, and it is the only redeploy this wav
 
 **Known gaps, stated rather than hidden.** The first three below were written on 2026-07-26 and were **all obsolete by 2026-07-27**; they are corrected in place rather than deleted, because a plan that still asserts a blocked environment after the environment was fixed is how a later reader re-derives a solved problem.
 
+> Correcting them **only here** was itself the bug — the Prerequisite section on page one still asserted the blocked environment, and this entry pointed back at it for a PATH export it did not contain. The Prerequisite now carries the current environment and the superseded text; these entries are the changelog, not the source.
+
 - **The DR test is structural, not binary** — but ~~`pg_dump`/`pg_restore`/`psql` are absent on this workstation~~ **is no longer true** (`postgresql@16` installed 2026-07-27; the keg-only PATH export is in the Prerequisite). T17 reconstructs a pre-080 database by unwinding the migrations, and that harness stays **on its own merits** — it exercises the migrate-on-restore path directly. Jason confirmed 2026-08-02 that a binary `pg_restore` variant is deliberately NOT added: the existing integration test already covers that mechanism and it would not close the wiring gap.
 - ~~**No Postgres is currently running.**~~ **Corrected:** a `podman` container (`repos-pg`, postgres:16-alpine) has been up since 2026-07-27; every task in this plan was verified against it.
-- ~~**`api/.env` names the old `192.168.88.2` host.**~~ **Corrected:** repointed to `postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test` on 2026-07-27. The tracked template `api/.env.example` still carries the old host on line 1 — out of scope for this wave, which owns only the user-management variables, but worth a follow-up.
+- ~~**`api/.env` names the old `192.168.88.2` host.**~~ **Corrected:** repointed to `postgres://repos:repos_dev_pw@127.0.0.1:5432/repos_test` on 2026-07-27. The tracked template `api/.env.example` carried the old host on line 1 and has since been fixed independently — verified 2026-08-09, it now reads `127.0.0.1`. That follow-up is closed.
 - Invite expiry, Resend delivery webhooks, auto-healing drift, Access Groups, self-service signup and per-user permissions are all explicitly out of scope per the spec and appear in no task.
 
 **Type consistency.** `Actor`, `LifecycleError`, `UserStatus`, `UserRole`, `EventActor`, `CfPolicySnapshot`, `DriftReport` and `UserListRow` are each defined once and referenced by the same name everywhere. `desiredPresence` is the single source of the status→membership mapping and is consumed by `syncEmailToStatus` (T6), `listUsers` (T14) and `reconcileCfBaseline` (T16), so the three cannot drift apart.
