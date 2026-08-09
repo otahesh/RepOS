@@ -9804,7 +9804,7 @@ Expected: the contamination suite passes if Tasks 9–14 are correct — run it 
 
 **Measured: 16 passed / 1 failed** at the time of writing (13 contamination + 4 sweep cases). All 13 contamination cases passed first time, and so did three of the four sweep cases — by Task 19 **no `process.env` reader of either variable is left anywhere**, so that assertion lands as a regression guard rather than red-to-green. The single genuine failure was `api/.env.example`, which is the one artifact no code sweep can reach.
 
-> **The sweep has since grown to 6 cases (19 in the file overall) across three review rounds.** The corpus was wrong three times in a row, each time one level below the last: hand-picked *roots* → an extension *allow-list* → an env-object *anchor*. See the corrected block above, which is byte-synced from the shipped file.
+> **The sweep has since grown to 6 cases across three review rounds; the targeted run of both suites now measures 20 (14 contamination + 6 sweep).** The corpus was wrong three times in a row, each time one level below the last: hand-picked *roots* → an extension *allow-list* → an env-object *anchor*. See the corrected block above, which is byte-synced from the shipped file.
 
 **Most of this task's assertions therefore pass before any change is made, which is exactly the condition under which a test proves nothing.** Two structural consequences, both of which the original plan text got wrong:
 
@@ -9854,8 +9854,9 @@ Run, in order:
 ```bash
 cd /var/home/jason/Projects/RepOS/api && npm run build && npm test && npm run test:integration
 cd /var/home/jason/Projects/RepOS/frontend && npx vitest run && npm run build
-# The grep is a convenience backstop only — it covers neither import.meta.env
-# nor non-.ts corpora. `w9-env-sweep.test.ts` is the real gate.
+# The grep is a convenience backstop only — it matches dot notation across a few
+# hand-picked roots, so it misses bracket and destructuring forms and every file
+# outside those roots. `w9-env-sweep.test.ts` is the real gate.
 cd /var/home/jason/Projects/RepOS && grep -rnE "(process\.env|import\.meta\.env)\.(REPOS_ADMIN_EMAILS|CF_ACCESS_ALLOWED_EMAILS)|isAdminEmail" api/src frontend/src docker scripts
 ```
 
@@ -9863,7 +9864,7 @@ Expected: all green; the final grep returns **nothing**.
 
 **Measured at the time of writing:** api unit 81 files / 733 (unchanged — this task adds integration tests only), api integration **74 / 287 / 7 skipped** (from 72 / 270: +2 files, +17 tests), frontend **69 / 421** (+1 G7 case), both builds clean, `check-pages` and `check-term-coverage` OK, final grep empty.
 
-> **SUPERSEDED — those counts describe the pre-merge W9-only tree.** `origin/main`'s 88 commits were merged in on 2026-08-09 (merge `b27ec19`), and two review rounds have landed since. **Current: api unit 98 files / 866, api integration 83 / 347 / 0 skipped, frontend 88 / 653**, both builds clean, both lint gates 0 errors, `format:check` clean, frontend `validate` green. Re-measure against those, not the numbers above. Note the integration suite lost its 7 skips in the merge, and that the merge also brought a lint/format gate (PR-C) that W9 predated.
+> **SUPERSEDED — those counts describe the pre-merge W9-only tree.** `origin/main`'s 88 commits were merged in on 2026-08-09 (merge `b27ec19`), and two review rounds have landed since. **Current: api unit 98 files / 866, api integration 83 / 348 / 0 skipped, frontend 88 / 653**, both builds clean, both lint gates 0 errors, `format:check` clean, frontend `validate` green. Re-measure against those, not the numbers above. Note the integration suite lost its 7 skips in the merge, and that the merge also brought a lint/format gate (PR-C) that W9 predated.
 
 Post-run hygiene clean: 0 advisory locks, 0 ephemeral DBs, 0 stray `/tmp/repos-*`, 0 leftover `w9.contam%` rows. **Glob the whole `/tmp/repos-*` prefix, not a list of known names** — a three-prefix check once read 0 while 108 directories sat there.
 
