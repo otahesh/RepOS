@@ -13,8 +13,14 @@ async function makePng(dir: string, name: string, pixels: Buffer): Promise<strin
   return p;
 }
 
-test('a compressible image fits at the first quality rung', async () => {
+// Cleanup is registered with `t.after` rather than called at the end of the
+// body: a trailing `fs.rmSync` is skipped the moment an assertion throws, so
+// the directory leaked on exactly the runs worth investigating. These land in
+// /tmp as `webp-*`, which the repo's `ls -d /tmp/repos-*` hygiene sweep does
+// not match, so nothing would have reported them.
+test('a compressible image fits at the first quality rung', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webp-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   // Structured pattern → compresses well → q82 fits on the first try.
   const pattern = Buffer.alloc(1600 * 1200 * 3);
   for (let i = 0; i < pattern.length; i++) pattern[i] = (i * 2654435761) % 255;
@@ -29,11 +35,11 @@ test('a compressible image fits at the first quality rung', async () => {
   const meta = await sharp(dest).metadata();
   assert.equal(meta.format, 'webp');
   assert.ok((meta.width ?? 0) <= 1280);
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('incompressible noise descends to the quality floor and commits with a warning', async () => {
+test('incompressible noise descends to the quality floor and commits with a warning', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webp-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   // True random noise never fits the budget even at q42 — exercises the
   // full ladder descent AND the give-up path.
   const src = await makePng(dir, 'noise.png', crypto.randomFillSync(Buffer.alloc(1600 * 1200 * 3)));
@@ -43,5 +49,4 @@ test('incompressible noise descends to the quality floor and commits with a warn
   assert.equal(quality, 42, 'should give up at the ladder floor');
   assert.ok(bytes > MAX_BYTES, 'noise cannot fit the budget — file written anyway');
   assert.ok(fs.existsSync(dest));
-  fs.rmSync(dir, { recursive: true, force: true });
 });
