@@ -51,22 +51,44 @@ beforeAll(async () => {
   app = await buildApp();
 });
 afterAll(async () => {
-  try {
-    await app?.close();
-  } finally {
-    // Everything below must run even when setup failed or close() threw.
-    // The root subsumes backupsDir, the flag and the sentinel — one recursive
-    // removal instead of three partial ones that each missed the parent.
+  // Two requirements that pull against each other: every step must run even
+  // if an earlier one throws (or the mkdtemp root leaks), AND a teardown
+  // failure must still be visible. `.catch(() => {})` bought the first by
+  // giving up the second — and the assumption behind it, that the suite has
+  // already failed by the time teardown throws, is simply false: after four
+  // green tests, a failing `DELETE FROM backup_runs` or `db.end()` would be
+  // the FIRST failure, and silencing it turns a broken teardown into a green
+  // run that quietly poisons whatever suite comes next.
+  //
+  // So: run every step, collect what failed, and rethrow afterwards.
+  const errors: Error[] = [];
+  const step = async (label: string, fn: () => unknown | Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (cause) {
+      errors.push(new Error(`teardown step "${label}" failed`, { cause }));
+    }
+  };
+
+  await step('app.close', () => app?.close());
+  // The root subsumes backupsDir, the flag and the sentinel — one recursive
+  // removal instead of three partial ones that each missed the parent. It runs
+  // regardless of what app.close() did.
+  await step('remove tmpRoot', () => {
     if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
-    delete process.env.BACKUPS_DIR;
-    delete process.env.MAINTENANCE_FLAG_PATH;
-    delete process.env.RESTORE_STATE_PATH;
-    // Swallowed deliberately: after a failed setup the connection may already
-    // be unusable, and a throw here would skip db.end() and leak the pool.
-    // The suite has already failed by then — masking a teardown error is the
-    // lesser harm. On the normal path neither of these can fail.
-    await db.query(`DELETE FROM backup_runs`).catch(() => {});
-    await db.end().catch(() => {});
+  });
+  delete process.env.BACKUPS_DIR;
+  delete process.env.MAINTENANCE_FLAG_PATH;
+  delete process.env.RESTORE_STATE_PATH;
+  await step('DELETE backup_runs', () => db.query(`DELETE FROM backup_runs`));
+  await step('db.end', () => db.end());
+
+  // On a run whose setup already failed these may be consequential rather than
+  // causal — reporting them anyway is the lesser harm, because the alternative
+  // is the silence that hid this class of bug in the first place.
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    throw new AggregateError(errors, `${errors.length} teardown steps failed`);
   }
 });
 beforeEach(async () => {

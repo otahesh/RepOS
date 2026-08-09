@@ -2657,6 +2657,8 @@ Add to the imports:
 
 ```ts
 import { recordAccountEventTx, humanActor } from '../services/accountEvents.js';
+// Audit provenance: req.ip is nginx on loopback behind the tunnel.
+import { clientIp } from '../utils/clientIp.js';
 ```
 
 Delete the `CF_ACCESS_ALLOWED_EMAILS` block (lines 108–114) entirely — `users.status` replaces it (Q4).
@@ -2726,7 +2728,11 @@ Replace the row-resolution block (lines 116–153) with:
           userId: user.id,
           userEmail: rawEmail,
           kind: 'user_activated',
-          ip: req.ip,
+          // clientIp, not req.ip: the socket peer here is nginx on loopback,
+          // so every activation in the audit trail recorded 127.0.0.1 —
+          // and this is the one event that records where a member first
+          // signed in.
+          ip: clientIp(req),
           meta: { ...humanActor(user.id, rawEmail) },
         });
       }
@@ -5262,12 +5268,23 @@ import {
   inviteUser, resendInvite, LifecycleError, type Actor,
 } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
+import { clientIp } from '../utils/clientIp.js';
+import { requireUserId, requireUserEmail } from '../utils/requestIdentity.js';
 
+// Every lifecycle event this file writes is attributed to this actor, so all
+// three fields are security-relevant audit provenance.
+//
+// `clientIp`, not `req.ip`: behind Cloudflare → cloudflared → nginx, the
+// socket peer is nginx on loopback, so every admin action in the audit trail
+// read as 127.0.0.1. The non-null assertions were worse than untidy — `!`
+// silences the one check that would notice a route wired without its auth
+// preHandler, turning a missing actor into an audit row attributed to
+// `undefined` rather than a surfaced error.
 function actorOf(req: FastifyRequest): Actor {
   return {
-    userId: (req as { userId?: string }).userId!,
-    email: (req as { userEmail?: string }).userEmail!,
-    ip: req.ip ?? null,
+    userId: requireUserId(req),
+    email: requireUserEmail(req),
+    ip: clientIp(req),
   };
 }
 
@@ -6587,92 +6604,95 @@ Replace the body of `DELETE /me` in `api/src/routes/account.ts` (lines 314–365
   // removal -> user_deleted + cascade in one txn) and this route only maps its
   // errors. The structured log still fires AFTER the cascade commits (per
   // I-DELETE-COMPLETED) — never claim deleted on a half-committed state.
-  app.delete(
-    '/me',
-    { preHandler: [requireCfAccessOnly, csrfOrigin] },
-    async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
-      const userEmail = (req as { userEmail?: string }).userEmail;
-      if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
+  app.delete('/me', { preHandler: [requireCfAccessOnly, csrfOrigin] }, async (req, reply) => {
+    const userId = req.userId;
+    const userEmail = req.userEmail;
+    if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
 
-      const parsed = DeleteMeRequestSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
-      }
+    const parsed = DeleteMeRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
+    }
 
-      // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
-      // deleteUser service so the self-service and admin paths produce
-      // identical end state — same events, same CF removal, same cascade — and
-      // so the "at least one active admin remains" invariant cannot be
-      // bypassed here.
-      //
-      // W6's own path recorded account_deleted only as a log line with no
-      // account_events row; the service does not inherit that gap.
-      //
-      // Q37: once status='deleting' commits, both auth paths reject this user,
-      // so they cannot call this route again. A failed self-delete tells them
-      // the account is already disabled and gives the contact path from the
-      // invite email. Letting a `deleting` user re-authenticate to finish
-      // deleting themselves would punch a hole through the gate for the one
-      // status that most needs it shut.
-      let previousTokenCount = 0;
-      try {
-        const out = await deleteUser(userId, { userId, email: userEmail, ip: req.ip ?? null });
-        previousTokenCount = out.previous_token_count;
-      } catch (err) {
-        if (err instanceof LifecycleError) {
-          // Q37 keys on the STATE, not on one error code. Any failure past the
-          // status='deleting' commit leaves this user denied on both auth
-          // paths with no way to retry, so every such failure — a CF removal
-          // that failed, a cascade that failed, an audit insert that failed —
-          // owes them the same "already disabled, here is who can finish it"
-          // response. Matching `cf_sync_failed` instead covered exactly the
-          // one failure the tests happened to inject; `last_admin` and the
-          // other pre-mutation refusals correctly carry no `disabled` flag
-          // because they roll back and the account still works.
-          const disabled = err.details.disabled === true;
-          if (disabled) {
-            // The client contract is now typed, but the operator still needs
-            // the underlying fault — LifecycleError carries it as `cause`.
-            req.log.error({ err, userId }, 'account_delete_finalize_failed');
-          }
-          return reply.code(err.statusCode).send({
-            error: err.code,
-            ...err.details,
-            ...(disabled
-              ? { message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.` }
-              : {}),
-          });
+    // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
+    // deleteUser service so the self-service and admin paths produce
+    // identical end state — same events, same CF removal, same cascade — and
+    // so the "at least one active admin remains" invariant cannot be
+    // bypassed here.
+    //
+    // W6's own path recorded account_deleted only as a log line with no
+    // account_events row; the service does not inherit that gap.
+    //
+    // Q37: once status='deleting' commits, both auth paths reject this user,
+    // so they cannot call this route again. A failed self-delete tells them
+    // the account is already disabled and gives the contact path from the
+    // invite email. Letting a `deleting` user re-authenticate to finish
+    // deleting themselves would punch a hole through the gate for the one
+    // status that most needs it shut.
+    // No initializer: every catch path returns, so this is definitely
+    // assigned before it is read (origin's no-useless-assignment rule).
+    let previousTokenCount: number;
+    try {
+      const out = await deleteUser(userId, {
+        userId,
+        email: userEmail,
+        ip: clientIp(req) ?? null,
+      });
+      previousTokenCount = out.previous_token_count;
+    } catch (err) {
+      if (err instanceof LifecycleError) {
+        // Q37 keys on the STATE, not on one error code. Any failure past the
+        // status='deleting' commit leaves this user denied on both auth
+        // paths with no way to retry, so every such failure — a CF removal
+        // that failed, a cascade that failed, an audit insert that failed —
+        // owes them the same "already disabled, here is who can finish it"
+        // response. Matching `cf_sync_failed` instead covered exactly the
+        // one failure the tests happened to inject; `last_admin` and the
+        // other pre-mutation refusals correctly carry no `disabled` flag
+        // because they roll back and the account still works.
+        const disabled = err.details.disabled === true;
+        if (disabled) {
+          // The client contract is now typed, but the operator still needs
+          // the underlying fault — LifecycleError carries it as `cause`.
+          req.log.error({ err, userId }, 'account_delete_finalize_failed');
         }
-        if (err instanceof LockTimeoutError) {
-          return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
-        }
-        req.log.error({ err, userId }, 'account_delete_failed');
-        return reply.code(500).send({ error: 'delete_failed' });
+        return reply.code(err.statusCode).send({
+          error: err.code,
+          ...err.details,
+          ...(disabled
+            ? {
+                message: `Your account is already disabled and cannot be used. Contact ${SUPPORT_CONTACT} to finish removing it.`,
+              }
+            : {}),
+        });
       }
+      if (err instanceof LockTimeoutError) {
+        return reply.code(503).send({ error: 'lock_timeout', retry_after_seconds: 2 });
+      }
+      req.log.error({ err, userId }, 'account_delete_failed');
+      return reply.code(500).send({ error: 'delete_failed' });
+    }
 
-      // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
-      // deleted on a half-committed state.
-      req.log.info(
-        {
-          event: 'account_deleted',
-          userId,
-          userEmail,
-          previous_token_count: previousTokenCount,
-          ip: req.ip,
-        },
-        'account_deleted',
-      );
+    // Fires AFTER the cascade commits (per I-DELETE-COMPLETED) — never claim
+    // deleted on a half-committed state.
+    req.log.info(
+      {
+        event: 'account_deleted',
+        userId,
+        userEmail,
+        previous_token_count: previousTokenCount,
+        ip: clientIp(req),
+      },
+      'account_deleted',
+    );
 
-      reply.header(
-        'Set-Cookie',
-        'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-      );
-      return reply.code(204).send();
-    },
-  );
+    // Do NOT clear CF_Authorization here — the frontend's follow-up
+    // /cdn-cgi/access/logout navigation needs the cookie intact for CF to
+    // terminate the edge session (same contract as signout-everywhere).
+    return reply.code(204).send();
+  });
 ```
 
 Add to the imports at the top of `account.ts`:
@@ -9459,21 +9479,32 @@ Create `api/tests/integration/w9-env-sweep.test.ts`:
 // bootstrap-guards.ts all cite the removed variables on purpose, to record
 // what replaced them. A bare-name assertion would force deleting that history.
 import { describe, it, expect } from 'vitest';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, extname, basename } from 'node:path';
 
 const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
 
 /**
- * JS/TS read forms. All three tolerate whitespace, because a formatter will
- * happily produce `process.env[ 'X' ]` and the original pattern matched only
- * the tight form.
+ * The env objects a read can come through. `process.env` is Node; Vite
+ * exposes `import.meta.env` and the frontend genuinely uses it
+ * (`tokens.ts`, `SettingsProgramPrefsPage.tsx`, …). Anchoring only on
+ * `process.env` meant a frontend read of a removed variable was invisible to
+ * a sweep whose entire job is to prove no read survives — and the frontend is
+ * exactly where a `VITE_`-adjacent env read would be written.
  */
-const JS_READS = [
-  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`),                       // process.env.X
-  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`),                // process.env['X']
-  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`),    // const { X } = process.env
-];
+const ENV_ROOTS = ['process\\s*\\.\\s*env', 'import\\s*\\.\\s*meta\\s*\\.\\s*env'];
+
+/**
+ * JS/TS read forms, per env root. All tolerate whitespace, because a
+ * formatter will happily produce `process.env[ 'X' ]` and the original
+ * pattern matched only the tight form.
+ */
+const JS_READS = ENV_ROOTS.flatMap((root) => [
+  new RegExp(`${root}\\s*\\.\\s*(${NAMES})\\b`), // <root>.X
+  new RegExp(`${root}\\s*\\[\\s*['"\`]\\s*(${NAMES})`), // <root>['X']
+  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*${root}`), // const { X } = <root>
+]);
 
 /**
  * Shell / CI / container read AND declaration forms. A workflow that declares
@@ -9486,42 +9517,105 @@ const JS_READS = [
  * to prove it is IGNORED — a legitimate non-read that must keep passing.
  */
 const SHELL_READS = [
-  new RegExp(`\\$\\{?(${NAMES})\\b`),                                        // $X / ${X}
+  new RegExp(`\\$\\{?(${NAMES})\\b`), // $X / ${X}
   new RegExp(`^\\s*(?:export\\s+|ENV\\s+|ARG\\s+)?(${NAMES})\\s*[:=]`, 'm'), // X= / X: / ENV X=
 ];
 
 /** Build outputs, vendored code and VCS internals — never our source. */
 const EXCLUDED_DIRS = new Set([
-  'node_modules', 'dist', 'build', '.git', 'coverage',
-  'playwright-report', 'test-results', '.worktrees', '.vite', 'handoffs',
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  'coverage',
+  'playwright-report',
+  'test-results',
+  '.worktrees',
+  '.vite',
+  'handoffs',
 ]);
 
 const JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SHELL_SHAPED_EXTENSIONS = new Set(['.sh', '.yml', '.yaml', '.json', '.conf', '.sql']);
 
 /**
- * Documentation is deliberately NOT scanned: it may name, quote and explain
- * both variables — the plan quotes the old `.env.example` verbatim. The single
- * tracked env TEMPLATE is covered by its own, stricter bare-name case below.
- * `.env` itself is untracked local config and is skipped for the same reason
- * a developer's machine is not the deployment.
+ * Prose. Deliberately NOT scanned: docs may name, quote and explain both
+ * variables — the plan quotes the old `.env.example` verbatim.
+ */
+const DOC_EXTENSIONS = new Set(['.md', '.mdx']);
+
+/** Binary assets. Reading these as text finds nothing and costs a lot. */
+const BINARY_EXTENSIONS = new Set([
+  '.webp',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.ico',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.gz',
+  '.zip',
+  '.tar',
+  '.pdf',
+  '.dump',
+]);
+
+/**
+ * `.env` files split two ways, and blanket-skipping them was wrong.
+ *
+ * Genuinely LOCAL variants — `.env` itself and anything `*.local` — are
+ * untracked developer machines and are skipped for the same reason a
+ * developer's shell history is not the deployment. But FOUR `.env*` files are
+ * TRACKED (`api/.env.example`, `frontend/.env.{example,development,production}`),
+ * they ship, and a declaration in any of them is as live as one in a
+ * Dockerfile. Those are scanned.
+ */
+function isLocalEnvFile(name: string): boolean {
+  return name === '.env' || name.endsWith('.local');
+}
+
+/**
+ * EXCLUSION, APPLIED TO EXTENSIONS TOO — the same lesson as the directory
+ * walk, learned twice. The previous version allow-listed the extensions it
+ * understood (`.sh|.yml|.json|.conf|.sql` + extensionless) and returned null
+ * for everything else, so the exclusion-based *directory* walk fed an
+ * enumeration-based *file* filter and the blind spot simply moved down a
+ * level. A root-level `.toml` holding a live `REPOS_ADMIN_EMAILS = "..."`
+ * declaration was scanned by the walk and then silently dropped here; all
+ * four cases stayed green. Dotfiles were invisible for a subtler reason:
+ * `extname('.nvmrc')` is `''`, but `basename('.nvmrc').includes('.')` is
+ * true, so they matched neither the extension sets nor the extensionless
+ * escape hatch.
+ *
+ * So the default is now SCANNED. Only prose and binaries are ruled out, and
+ * an unrecognised extension fails toward over-scanning — a false positive
+ * someone must look at — rather than toward a variable nobody can see.
  */
 function classify(name: string): 'js' | 'shell' | null {
-  if (name.startsWith('.env')) return null;              // template has its own case
-  const ext = extname(name);
-  if (ext === '.md') return null;
+  // Tracked templates are shell-shaped (KEY=value); only local ones are skipped.
+  if (name.startsWith('.env')) return isLocalEnvFile(name) ? null : 'shell';
+  const ext = extname(name).toLowerCase();
+  if (DOC_EXTENSIONS.has(ext)) return null;
+  if (BINARY_EXTENSIONS.has(ext)) return null;
   if (JS_EXTENSIONS.has(ext)) return 'js';
-  if (SHELL_SHAPED_EXTENSIONS.has(ext)) return 'shell';
-  // Extensionless files are shell-shaped: docker/root/etc/s6-overlay/scripts/*
-  // (run-api, init-migrations, wait-for-postgres…) and docker/Dockerfile carry
-  // no extension, and those are exactly where a container env var is plumbed.
-  if (!basename(name).includes('.')) return 'shell';
-  return null;
+  // Everything else is treated as shell-shaped config and gets BOTH pattern
+  // families: .toml/.ini/.conf/.yml/.sql, dotfiles like .nvmrc and
+  // .dockerignore, and extensionless files — docker/Dockerfile and
+  // docker/root/etc/s6-overlay/scripts/* (run-api, init-migrations,
+  // wait-for-postgres…), which is exactly where a container env var is
+  // plumbed.
+  return 'shell';
 }
 
 const repoRoot = join(process.cwd(), '..');
 
-interface Scan { files: string[]; offenders: string[] }
+interface Scan {
+  files: string[];
+  offenders: string[];
+}
 
 async function walk(dir: string, acc: Scan): Promise<void> {
   for (const entry of await readdir(dir)) {
@@ -9560,17 +9654,109 @@ describe('W9 env-var removal is complete', () => {
     const { files } = await scan;
     expect(files.length).toBeGreaterThan(400);
     for (const expected of [
-      'frontend/playwright.config.ts',                  // outside every original root
-      'api/vitest.integration.config.ts',               // ditto
-      '.github/workflows/test.yml',                     // ditto
-      'api/package.json',                               // ditto (npm scripts)
-      'docker/root/etc/s6-overlay/scripts/run-api',     // extensionless
-      'docker/Dockerfile',                              // extensionless
+      'frontend/playwright.config.ts', // outside every original root
+      'api/vitest.integration.config.ts', // ditto
+      '.github/workflows/test.yml', // ditto
+      'api/package.json', // ditto (npm scripts)
+      'docker/root/etc/s6-overlay/scripts/run-api', // extensionless
+      'docker/Dockerfile', // extensionless
       'api/src/middleware/cfAccess.ts',
       'frontend/src/lib/api/adminUsers.ts',
       'scripts/run-restore.sh',
+      'api/.env.example', // tracked env templates ship — only local .env is skipped
+      'frontend/.env.production',
+      'frontend/src/tokens.ts', // a real import.meta.env reader
     ]) {
-      expect(files.some((f) => f.endsWith(expected)), `never scanned ${expected}`).toBe(true);
+      expect(
+        files.some((f) => f.endsWith(expected)),
+        `never scanned ${expected}`,
+      ).toBe(true);
+    }
+  });
+
+  // Pins the classifier against the blind spot that actually shipped. A
+  // root-level `.toml` carrying a live declaration was walked and then
+  // dropped by the extension allow-list, and all four other cases stayed
+  // green. This runs the REAL walk over a fixture tree rather than asserting
+  // on classify() in isolation, so it pins corpus selection end-to-end.
+  //
+  // `innocent.toml` is the non-vacuity control: it must appear in `files`.
+  // Without it, a classifier that skipped every .toml would still satisfy the
+  // offender assertion for the wrong reason.
+  it('scans unfamiliar config extensions and dotfiles, skipping only docs and binaries', async () => {
+    // Assembled at runtime so this file never LITERALLY spells a read form.
+    // The sweep scans the whole repo including itself, and a fixture that
+    // wrote `import.meta.env.<NAME>` as a source literal would make this test
+    // an offender — the pattern working correctly, but on the wrong file.
+    const RAE = ['REPOS_ADMIN', 'EMAILS'].join('_');
+    const CAAE = ['CF_ACCESS_ALLOWED', 'EMAILS'].join('_');
+    const fixture = await mkdtemp(join(tmpdir(), 'repos-sweep-fixture-'));
+    try {
+      await writeFile(join(fixture, 'evil.toml'), `[deploy]\n${RAE} = "boss@repos.test"\n`);
+      await writeFile(join(fixture, '.nvmrc'), `export ${CAAE}=a@b.c\n`);
+      // All three Vite read forms — the frontend uses import.meta.env, and
+      // anchoring only on process.env made every one of these invisible.
+      await writeFile(join(fixture, 'vite-dot.ts'), `export const a = import.meta.env.${RAE};\n`);
+      await writeFile(
+        join(fixture, 'vite-bracket.ts'),
+        `export const b = import.meta.env['${CAAE}'];\n`,
+      );
+      await writeFile(
+        join(fixture, 'vite-destructure.ts'),
+        `const { ${RAE} } = import.meta.env;\n`,
+      );
+      // A tracked template ships; a local .env does not.
+      await writeFile(join(fixture, '.env.production'), `${CAAE}=a@b.c\n`);
+      await writeFile(join(fixture, '.env'), `${RAE}=local@dev.test\n`);
+      await writeFile(join(fixture, 'innocent.toml'), '[deploy]\nOTHER = 1\n');
+      await writeFile(join(fixture, 'notes.md'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
+      await writeFile(join(fixture, 'logo.webp'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
+
+      const acc: Scan = { files: [], offenders: [] };
+      await walk(fixture, acc);
+      const rel = (xs: string[]) => xs.map((f) => f.slice(fixture.length + 1)).sort();
+
+      // Unfamiliar extension, dotfile, all three import.meta.env forms, and a
+      // tracked env template are all caught.
+      expect(rel(acc.offenders)).toEqual([
+        '.env.production',
+        '.nvmrc',
+        'evil.toml',
+        'vite-bracket.ts',
+        'vite-destructure.ts',
+        'vite-dot.ts',
+      ]);
+      // Prose, binaries and the LOCAL .env stay out of the corpus; the clean
+      // .toml is in it (the non-vacuity control).
+      expect(rel(acc.files)).toEqual([
+        '.env.production',
+        '.nvmrc',
+        'evil.toml',
+        'innocent.toml',
+        'vite-bracket.ts',
+        'vite-destructure.ts',
+        'vite-dot.ts',
+      ]);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  // The stricter bare-name rule, applied to every tracked env template rather
+  // than the one path someone remembered. The set is DISCOVERED from the
+  // walk, so a future `.env.staging` is held to it automatically — an
+  // enumerated list here would be the same mistake this file has now made
+  // twice at other levels.
+  it('no tracked .env template so much as names either removed variable', async () => {
+    const { files } = await scan;
+    const templates = files.filter((f) => basename(f).startsWith('.env'));
+    // Reach: api/.env.example + frontend/.env.{example,development,production}.
+    expect(templates.length).toBeGreaterThanOrEqual(4);
+    for (const f of templates) {
+      const rel = f.slice(repoRoot.length + 1);
+      const body = await readFile(f, 'utf8');
+      expect(body, `${rel} names CF_ACCESS_ALLOWED_EMAILS`).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
+      expect(body, `${rel} names REPOS_ADMIN_EMAILS`).not.toMatch(/REPOS_ADMIN_EMAILS/);
     }
   });
 
@@ -9582,10 +9768,10 @@ describe('W9 env-var removal is complete', () => {
       'api/src/db/migrations/080_users_roles_status.sql',
       'api/src/middleware/cfAccess.ts',
       'api/src/bootstrap-guards.ts',
-      'api/tests/unit/startup-guards.test.ts',   // passes the name as an IGNORED input
+      'api/tests/unit/startup-guards.test.ts', // passes the name as an IGNORED input
     ]) {
       const body = await readFile(join(repoRoot, historical), 'utf8');
-      expect(body).toMatch(new RegExp(NAMES));                 // still records it
+      expect(body).toMatch(new RegExp(NAMES)); // still records it
       expect(offenders.some((f) => f.endsWith(historical))).toBe(false);
     }
   });
@@ -9599,8 +9785,11 @@ describe('W9 env-var removal is complete', () => {
     expect(tpl).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
     expect(tpl).not.toMatch(/REPOS_ADMIN_EMAILS/);
     for (const v of [
-      'CF_API_TOKEN', 'CF_ACCOUNT_ID', 'CF_ACCESS_POLICY_ID',
-      'RESEND_API_KEY', 'INVITE_FROM_EMAIL',
+      'CF_API_TOKEN',
+      'CF_ACCOUNT_ID',
+      'CF_ACCESS_POLICY_ID',
+      'RESEND_API_KEY',
+      'INVITE_FROM_EMAIL',
     ]) {
       expect(tpl).toContain(v);
     }
@@ -9613,7 +9802,9 @@ describe('W9 env-var removal is complete', () => {
 Run: `cd /var/home/jason/Projects/RepOS/api && npx vitest run tests/integration/contamination/admin-users-contamination.test.ts tests/integration/w9-env-sweep.test.ts --config vitest.integration.config.ts`
 Expected: the contamination suite passes if Tasks 9–14 are correct — run it and read the failures rather than assuming. The env sweep fails if any reader survives; delete the reader, never the assertion.
 
-**Measured: 16 passed / 1 failed.** All 13 contamination cases passed first time, and so did three of the four sweep cases — by Task 19 **no `process.env` reader of either variable is left anywhere**, so that assertion lands as a regression guard rather than red-to-green. The single genuine failure was `api/.env.example`, which is the one artifact no code sweep can reach.
+**Measured: 16 passed / 1 failed** at the time of writing (13 contamination + 4 sweep cases). All 13 contamination cases passed first time, and so did three of the four sweep cases — by Task 19 **no `process.env` reader of either variable is left anywhere**, so that assertion lands as a regression guard rather than red-to-green. The single genuine failure was `api/.env.example`, which is the one artifact no code sweep can reach.
+
+> **The sweep has since grown to 6 cases (19 in the file overall) across three review rounds.** The corpus was wrong three times in a row, each time one level below the last: hand-picked *roots* → an extension *allow-list* → an env-object *anchor*. See the corrected block above, which is byte-synced from the shipped file.
 
 **Most of this task's assertions therefore pass before any change is made, which is exactly the condition under which a test proves nothing.** Two structural consequences, both of which the original plan text got wrong:
 
@@ -9621,7 +9812,14 @@ Expected: the contamination suite passes if Tasks 9–14 are correct — run it 
 2. **The extension allowlist skipped the files most likely to plumb a container env var.** `docker/root/etc/s6-overlay/scripts/*` (`run-api`, `init-migrations`, `wait-for-postgres`…) and `docker/Dockerfile` carry **no extension**, so an allowlist of `.ts|.sql|.sh|.md|…` opens none of them. Scan extensionless files too, and add the shell read form (`$VAR` / `${VAR}`) alongside the JS one — a plumbed `$REPOS_ADMIN_EMAILS` in an s6 script is precisely the reintroduction this gate exists to stop. Also widen the JS pattern to bracket notation: `process.env['REPOS_ADMIN_EMAILS']` evades a `process\.env\.` anchor completely.
 3. **AND THE ROOT LIST WAS STILL INCOMPLETE — this is the one that matters.** Findings 1 and 2 fixed the *pattern* and added a reach assertion over five hand-picked subtrees, and Jason's review then planted a live read in `frontend/playwright.config.ts`, which **no root covered**, and all four cases stayed green. **A reach assertion over a hand-picked list proves the list was scanned, never that the list is complete.** The corpus must be selected by **exclusion** — walk the whole repo, skip `node_modules`/`dist`/`.git`/build output — so the failure mode is over-scanning rather than a silent blind spot. Config and CI files live *beside* the source, not under it: `frontend/playwright.config.ts`, `api/vitest.integration.config.ts`, `.github/workflows/*.yml` and `package.json` scripts were all outside every root. That also means covering the **declaration** forms those files use (`X: ${{ secrets.Y }}`, `ENV X=`, `export X=`), applied to shell-shaped files only — on `.ts` the declaration form would flag `startup-guards.test.ts`, which passes the name as an object key precisely to prove it is IGNORED.
 
-Each of those was mutation-verified. The final set is **eight** plants, all caught: dot-notation, whitespace-bracket, destructuring, `frontend/playwright.config.ts`, `api/vitest.integration.config.ts`, a `.github/workflows/test.yml` env declaration, an `npm` script shell expansion, and an `export` in an extensionless s6 script.
+Each of those was mutation-verified. That round ended at **eight** plants, all caught: dot-notation, whitespace-bracket, destructuring, `frontend/playwright.config.ts`, `api/vitest.integration.config.ts`, a `.github/workflows/test.yml` env declaration, an `npm` script shell expansion, and an `export` in an extensionless s6 script.
+
+4. **THE EXTENSION ALLOW-LIST WAS THE SAME BUG ONE LEVEL DOWN.** Finding 3 made the *directory walk* exclusion-based and then handed its output to an enumeration-based **file** filter, so an unfamiliar extension was walked and silently dropped. A root-level `.toml` holding a live declaration left all four cases green. Dotfiles were invisible for a subtler reason: **`extname('.nvmrc')` is `''` but `basename('.nvmrc').includes('.')` is `true`**, so they matched neither the extension sets nor the extensionless escape hatch. The default is now *scanned*; only prose (`.md`/`.mdx`) and binaries are excluded.
+5. **AND THE ENV OBJECT WAS ENUMERATED TOO.** The patterns anchored on `process.env` only. The frontend is a **Vite** app and genuinely uses `import.meta.env` (`tokens.ts`, `SettingsProgramPrefsPage.tsx`), so a frontend read of a removed variable was invisible to a sweep whose whole job is to prove no read survives. Both roots are now covered in all three forms. Separately, `.env*` files were skipped wholesale, but **four are tracked and ship** (`api/.env.example`, `frontend/.env.{example,development,production}`) — only genuinely local variants (`.env`, `*.local`) are skipped now, and every tracked template is additionally held to the stricter bare-name rule, discovered from the walk rather than enumerated.
+
+**The final set is fourteen plants**, adding: a root-level `.toml` declaration, a `.nvmrc` dotfile declaration, `import.meta.env` in dot / bracket / destructuring form, and a declaration in a tracked `frontend/.env.production`.
+
+**One trap the fixture itself hit:** writing `import.meta.env.<NAME>` as a literal in the test source made the sweep flag *its own file* — correctly, since it scans the whole repo including itself. The fixture now assembles the names at runtime (`['REPOS_ADMIN','EMAILS'].join('_')`) so the file never spells a read form.
 
 **A caveat worth carrying about mutation harnesses**, learned here: the npm-script plant first reported as SURVIVING. It had not — appending a line to `api/package.json` made the JSON invalid, so vitest never started, and a harness that counts failing test lines read "no failures" as "not detected". **A mutation that prevents the suite from running is not a surviving mutation.** Re-planted as a valid JSON edit, it was caught immediately.
 
@@ -9656,14 +9854,20 @@ Run, in order:
 ```bash
 cd /var/home/jason/Projects/RepOS/api && npm run build && npm test && npm run test:integration
 cd /var/home/jason/Projects/RepOS/frontend && npx vitest run && npm run build
-cd /var/home/jason/Projects/RepOS && grep -rnE "process\.env\.(REPOS_ADMIN_EMAILS|CF_ACCESS_ALLOWED_EMAILS)|isAdminEmail" api/src frontend/src docker scripts
+# The grep is a convenience backstop only — it covers neither import.meta.env
+# nor non-.ts corpora. `w9-env-sweep.test.ts` is the real gate.
+cd /var/home/jason/Projects/RepOS && grep -rnE "(process\.env|import\.meta\.env)\.(REPOS_ADMIN_EMAILS|CF_ACCESS_ALLOWED_EMAILS)|isAdminEmail" api/src frontend/src docker scripts
 ```
 
 Expected: all green; the final grep returns **nothing**.
 
-**Measured:** api unit 81 files / 733 (unchanged — this task adds integration tests only), api integration **74 / 287 / 7 skipped** (from 72 / 270: +2 files, +17 tests), frontend **69 / 421** (+1 G7 case), both builds clean, `check-pages` and `check-term-coverage` OK, final grep empty. Post-run hygiene clean: 0 advisory locks, 0 ephemeral DBs, 0 stray `/tmp/repos-*`, 0 leftover `w9.contam%` rows.
+**Measured at the time of writing:** api unit 81 files / 733 (unchanged — this task adds integration tests only), api integration **74 / 287 / 7 skipped** (from 72 / 270: +2 files, +17 tests), frontend **69 / 421** (+1 G7 case), both builds clean, `check-pages` and `check-term-coverage` OK, final grep empty.
 
-Six mutations, each killing only its intended cases: a dot-notation reader, a **bracket-notation** reader, a **shell** reader planted in an extensionless s6 script, a broken scan root (kills the reachability case while the reader case still passes), dropping the gate from `GET /admin/users`, and dropping it from `PATCH` — the last one also **suspends the victim**, which is what proves the "victim is untouched" case is not vacuous.
+> **SUPERSEDED — those counts describe the pre-merge W9-only tree.** `origin/main`'s 88 commits were merged in on 2026-08-09 (merge `b27ec19`), and two review rounds have landed since. **Current: api unit 98 files / 866, api integration 83 / 347 / 0 skipped, frontend 88 / 653**, both builds clean, both lint gates 0 errors, `format:check` clean, frontend `validate` green. Re-measure against those, not the numbers above. Note the integration suite lost its 7 skips in the merge, and that the merge also brought a lint/format gate (PR-C) that W9 predated.
+
+Post-run hygiene clean: 0 advisory locks, 0 ephemeral DBs, 0 stray `/tmp/repos-*`, 0 leftover `w9.contam%` rows. **Glob the whole `/tmp/repos-*` prefix, not a list of known names** — a three-prefix check once read 0 while 108 directories sat there.
+
+Six mutations at the time, each killing only its intended cases: a dot-notation reader, a **bracket-notation** reader, a **shell** reader planted in an extensionless s6 script, a broken scan root (kills the reachability case while the reader case still passes), dropping the gate from `GET /admin/users`, and dropping it from `PATCH` — the last one also **suspends the victim**, which is what proves the "victim is untouched" case is not vacuous. Later rounds added: a `.toml` and a `.nvmrc` declaration, three `import.meta.env` forms, and a tracked `.env.production` declaration.
 
 Same reasoning as Task 9's grep: this matches **reads**, not the names. Migration
 080's mapping header and the `cfAccess.ts` replacement comment both cite the

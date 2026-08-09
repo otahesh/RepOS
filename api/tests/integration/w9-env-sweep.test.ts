@@ -19,20 +19,30 @@
 import { describe, it, expect } from 'vitest';
 import { readdir, readFile, stat, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, extname } from 'node:path';
+import { join, extname, basename } from 'node:path';
 
 const NAMES = 'CF_ACCESS_ALLOWED_EMAILS|REPOS_ADMIN_EMAILS';
 
 /**
- * JS/TS read forms. All three tolerate whitespace, because a formatter will
- * happily produce `process.env[ 'X' ]` and the original pattern matched only
- * the tight form.
+ * The env objects a read can come through. `process.env` is Node; Vite
+ * exposes `import.meta.env` and the frontend genuinely uses it
+ * (`tokens.ts`, `SettingsProgramPrefsPage.tsx`, …). Anchoring only on
+ * `process.env` meant a frontend read of a removed variable was invisible to
+ * a sweep whose entire job is to prove no read survives — and the frontend is
+ * exactly where a `VITE_`-adjacent env read would be written.
  */
-const JS_READS = [
-  new RegExp(`process\\.env\\s*\\.\\s*(${NAMES})\\b`), // process.env.X
-  new RegExp(`process\\.env\\s*\\[\\s*['"\`]\\s*(${NAMES})`), // process.env['X']
-  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*process\\.env`), // const { X } = process.env
-];
+const ENV_ROOTS = ['process\\s*\\.\\s*env', 'import\\s*\\.\\s*meta\\s*\\.\\s*env'];
+
+/**
+ * JS/TS read forms, per env root. All tolerate whitespace, because a
+ * formatter will happily produce `process.env[ 'X' ]` and the original
+ * pattern matched only the tight form.
+ */
+const JS_READS = ENV_ROOTS.flatMap((root) => [
+  new RegExp(`${root}\\s*\\.\\s*(${NAMES})\\b`), // <root>.X
+  new RegExp(`${root}\\s*\\[\\s*['"\`]\\s*(${NAMES})`), // <root>['X']
+  new RegExp(`\\{[^{}]*\\b(${NAMES})\\b[^{}]*\\}\\s*=\\s*${root}`), // const { X } = <root>
+]);
 
 /**
  * Shell / CI / container read AND declaration forms. A workflow that declares
@@ -92,10 +102,24 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 /**
+ * `.env` files split two ways, and blanket-skipping them was wrong.
+ *
+ * Genuinely LOCAL variants — `.env` itself and anything `*.local` — are
+ * untracked developer machines and are skipped for the same reason a
+ * developer's shell history is not the deployment. But FOUR `.env*` files are
+ * TRACKED (`api/.env.example`, `frontend/.env.{example,development,production}`),
+ * they ship, and a declaration in any of them is as live as one in a
+ * Dockerfile. Those are scanned.
+ */
+function isLocalEnvFile(name: string): boolean {
+  return name === '.env' || name.endsWith('.local');
+}
+
+/**
  * EXCLUSION, APPLIED TO EXTENSIONS TOO — the same lesson as the directory
  * walk, learned twice. The previous version allow-listed the extensions it
  * understood (`.sh|.yml|.json|.conf|.sql` + extensionless) and returned null
- * for everything else, so the exclusion-based *directory* walk fed a
+ * for everything else, so the exclusion-based *directory* walk fed an
  * enumeration-based *file* filter and the blind spot simply moved down a
  * level. A root-level `.toml` holding a live `REPOS_ADMIN_EMAILS = "..."`
  * declaration was scanned by the walk and then silently dropped here; all
@@ -109,7 +133,8 @@ const BINARY_EXTENSIONS = new Set([
  * someone must look at — rather than toward a variable nobody can see.
  */
 function classify(name: string): 'js' | 'shell' | null {
-  if (name.startsWith('.env')) return null; // template has its own case
+  // Tracked templates are shell-shaped (KEY=value); only local ones are skipped.
+  if (name.startsWith('.env')) return isLocalEnvFile(name) ? null : 'shell';
   const ext = extname(name).toLowerCase();
   if (DOC_EXTENSIONS.has(ext)) return null;
   if (BINARY_EXTENSIONS.has(ext)) return null;
@@ -176,6 +201,9 @@ describe('W9 env-var removal is complete', () => {
       'api/src/middleware/cfAccess.ts',
       'frontend/src/lib/api/adminUsers.ts',
       'scripts/run-restore.sh',
+      'api/.env.example', // tracked env templates ship — only local .env is skipped
+      'frontend/.env.production',
+      'frontend/src/tokens.ts', // a real import.meta.env reader
     ]) {
       expect(
         files.some((f) => f.endsWith(expected)),
@@ -194,13 +222,30 @@ describe('W9 env-var removal is complete', () => {
   // Without it, a classifier that skipped every .toml would still satisfy the
   // offender assertion for the wrong reason.
   it('scans unfamiliar config extensions and dotfiles, skipping only docs and binaries', async () => {
+    // Assembled at runtime so this file never LITERALLY spells a read form.
+    // The sweep scans the whole repo including itself, and a fixture that
+    // wrote `import.meta.env.<NAME>` as a source literal would make this test
+    // an offender — the pattern working correctly, but on the wrong file.
+    const RAE = ['REPOS_ADMIN', 'EMAILS'].join('_');
+    const CAAE = ['CF_ACCESS_ALLOWED', 'EMAILS'].join('_');
     const fixture = await mkdtemp(join(tmpdir(), 'repos-sweep-fixture-'));
     try {
+      await writeFile(join(fixture, 'evil.toml'), `[deploy]\n${RAE} = "boss@repos.test"\n`);
+      await writeFile(join(fixture, '.nvmrc'), `export ${CAAE}=a@b.c\n`);
+      // All three Vite read forms — the frontend uses import.meta.env, and
+      // anchoring only on process.env made every one of these invisible.
+      await writeFile(join(fixture, 'vite-dot.ts'), `export const a = import.meta.env.${RAE};\n`);
       await writeFile(
-        join(fixture, 'evil.toml'),
-        '[deploy]\nREPOS_ADMIN_EMAILS = "boss@repos.test"\n',
+        join(fixture, 'vite-bracket.ts'),
+        `export const b = import.meta.env['${CAAE}'];\n`,
       );
-      await writeFile(join(fixture, '.nvmrc'), 'export CF_ACCESS_ALLOWED_EMAILS=a@b.c\n');
+      await writeFile(
+        join(fixture, 'vite-destructure.ts'),
+        `const { ${RAE} } = import.meta.env;\n`,
+      );
+      // A tracked template ships; a local .env does not.
+      await writeFile(join(fixture, '.env.production'), `${CAAE}=a@b.c\n`);
+      await writeFile(join(fixture, '.env'), `${RAE}=local@dev.test\n`);
       await writeFile(join(fixture, 'innocent.toml'), '[deploy]\nOTHER = 1\n');
       await writeFile(join(fixture, 'notes.md'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
       await writeFile(join(fixture, 'logo.webp'), 'REPOS_ADMIN_EMAILS=boss@repos.test\n');
@@ -209,12 +254,47 @@ describe('W9 env-var removal is complete', () => {
       await walk(fixture, acc);
       const rel = (xs: string[]) => xs.map((f) => f.slice(fixture.length + 1)).sort();
 
-      // Unfamiliar extension AND dotfile are both caught.
-      expect(rel(acc.offenders)).toEqual(['.nvmrc', 'evil.toml']);
-      // Prose and binaries stay out of the corpus; the clean .toml is in it.
-      expect(rel(acc.files)).toEqual(['.nvmrc', 'evil.toml', 'innocent.toml']);
+      // Unfamiliar extension, dotfile, all three import.meta.env forms, and a
+      // tracked env template are all caught.
+      expect(rel(acc.offenders)).toEqual([
+        '.env.production',
+        '.nvmrc',
+        'evil.toml',
+        'vite-bracket.ts',
+        'vite-destructure.ts',
+        'vite-dot.ts',
+      ]);
+      // Prose, binaries and the LOCAL .env stay out of the corpus; the clean
+      // .toml is in it (the non-vacuity control).
+      expect(rel(acc.files)).toEqual([
+        '.env.production',
+        '.nvmrc',
+        'evil.toml',
+        'innocent.toml',
+        'vite-bracket.ts',
+        'vite-destructure.ts',
+        'vite-dot.ts',
+      ]);
     } finally {
       await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  // The stricter bare-name rule, applied to every tracked env template rather
+  // than the one path someone remembered. The set is DISCOVERED from the
+  // walk, so a future `.env.staging` is held to it automatically — an
+  // enumerated list here would be the same mistake this file has now made
+  // twice at other levels.
+  it('no tracked .env template so much as names either removed variable', async () => {
+    const { files } = await scan;
+    const templates = files.filter((f) => basename(f).startsWith('.env'));
+    // Reach: api/.env.example + frontend/.env.{example,development,production}.
+    expect(templates.length).toBeGreaterThanOrEqual(4);
+    for (const f of templates) {
+      const rel = f.slice(repoRoot.length + 1);
+      const body = await readFile(f, 'utf8');
+      expect(body, `${rel} names CF_ACCESS_ALLOWED_EMAILS`).not.toMatch(/CF_ACCESS_ALLOWED_EMAILS/);
+      expect(body, `${rel} names REPOS_ADMIN_EMAILS`).not.toMatch(/REPOS_ADMIN_EMAILS/);
     }
   });
 
