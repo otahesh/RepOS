@@ -147,7 +147,9 @@ export function MaintenanceBanner({
       ) : warning ? (
         <span>Restore complete, with a warning: {warning}</span>
       ) : (
-        <span>RepOS is down for a database restore. ~60 seconds. Your last set is queued locally.</span>
+        <span>
+          RepOS is down for a database restore. ~60 seconds. Your last set is queued locally.
+        </span>
       )}
     </div>
   );

@@ -33,7 +33,7 @@ function timestampedFilename(): string {
 }
 
 export interface ManualBackupCaller {
-  adminUserId: string | null; // C-ADMIN-USER-ID — populated from (req as any).userId
+  adminUserId: string | null; // C-ADMIN-USER-ID — populated from req.userId
   sourceIp: string | null; // C-DOWNLOAD-AUDIT — req.ip / x-forwarded-for
 }
 

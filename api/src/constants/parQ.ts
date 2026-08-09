@@ -58,7 +58,7 @@ export const PAR_Q_Q5_JOINT_OPTIONS = [
   'wrist',
   'other',
 ] as const;
-export type ParQ5Joint = typeof PAR_Q_Q5_JOINT_OPTIONS[number];
+export type ParQ5Joint = (typeof PAR_Q_Q5_JOINT_OPTIONS)[number];
 
 // Joints actually written to user_injuries — the W3 CHECK-constrained set.
 // 'other' is excluded (see PAR_Q_Q5_JOINT_OPTIONS note).

@@ -23,10 +23,11 @@ let token: string;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.userprograms.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.userprograms.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -57,7 +58,9 @@ describe('GET /api/user-programs contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = UserProgramListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data.programs)).toBe(true);
     }
@@ -71,7 +74,9 @@ describe('GET /api/user-programs contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = UserProgramListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
   });
 });
 
@@ -97,14 +102,18 @@ describe('GET /api/user-programs/:id contract', () => {
 describe('GET /api/user-programs/:id/warnings contract', () => {
   it('warnings response parses through UserProgramWarningsResponseSchema when program exists', async () => {
     // Need a forked user_program with a linked template
-    const { rows: [tmpl] } = await db.query(
+    const {
+      rows: [tmpl],
+    } = await db.query(
       `SELECT id, version, name FROM program_templates WHERE archived_at IS NULL LIMIT 1`,
     );
     if (!tmpl) {
       console.warn('No templates in DB — skipping warnings contract test');
       return;
     }
-    const { rows: [up] } = await db.query(
+    const {
+      rows: [up],
+    } = await db.query(
       `INSERT INTO user_programs (user_id, template_id, template_version, name, customizations, status)
        VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')
        RETURNING id`,
@@ -118,7 +127,9 @@ describe('GET /api/user-programs/:id/warnings contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = UserProgramWarningsResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data.warnings)).toBe(true);
     }
@@ -142,11 +153,15 @@ describe('PATCH /api/user-programs/:id contract', () => {
 
   it('400 on invalid op body', async () => {
     // Need any real program to test validation path
-    const { rows: [tmpl] } = await db.query(
+    const {
+      rows: [tmpl],
+    } = await db.query(
       `SELECT id, version, name FROM program_templates WHERE archived_at IS NULL LIMIT 1`,
     );
     if (!tmpl) return;
-    const { rows: [up] } = await db.query(
+    const {
+      rows: [up],
+    } = await db.query(
       `INSERT INTO user_programs (user_id, template_id, template_version, name, customizations, status)
        VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')
        RETURNING id`,

@@ -10,6 +10,8 @@ import { exercises } from './exercises.js';
 import { makeExerciseSeedAdapter } from './adapters/exercises.js';
 import { programTemplates } from './programTemplates.js';
 import { makeProgramTemplateAdapter } from './adapters/programTemplates.js';
+import { exerciseGuides } from './exerciseGuides.js';
+import { makeExerciseGuideAdapter } from './adapters/exerciseGuides.js';
 
 async function main(): Promise<void> {
   const exResult = await runSeed({
@@ -33,6 +35,13 @@ async function main(): Promise<void> {
     adapter: makeProgramTemplateAdapter(knownSlugs, cardioSlugs),
   });
   console.log('program_templates:', JSON.stringify(tplResult));
+
+  const guideResult = await runSeed({
+    key: 'exercise_guides',
+    entries: exerciseGuides,
+    adapter: makeExerciseGuideAdapter(knownSlugs),
+  });
+  console.log('exercise_guides:', JSON.stringify(guideResult));
 }
 
 main()

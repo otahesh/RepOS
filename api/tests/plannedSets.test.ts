@@ -5,27 +5,35 @@ import { buildApp } from '../src/app.js';
 import { db } from '../src/db/client.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
-let app: App; let userId: string; let token: string; let runId: string;
+let app: App;
+let userId: string;
+let token: string;
+let runId: string;
 
 beforeAll(async () => {
   vi.setSystemTime(new Date('2026-05-04T15:00:00.000Z'));
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.ps.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.ps.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
-    method: 'POST', url: '/api/tokens', body: { user_id: userId, label: 'ps-test' }
+    method: 'POST',
+    url: '/api/tokens',
+    body: { user_id: userId, label: 'ps-test' },
   });
   token = mint.json<{ token: string }>().token;
   const f = await app.inject({
-    method: 'POST', url: '/api/program-templates/full-body-3-day/fork',
+    method: 'POST',
+    url: '/api/program-templates/full-body-3-day/fork',
     headers: { authorization: `Bearer ${token}` },
   });
   const upId = f.json<any>().id;
   const s = await app.inject({
-    method: 'POST', url: `/api/user-programs/${upId}/start`,
+    method: 'POST',
+    url: `/api/user-programs/${upId}/start`,
     headers: { authorization: `Bearer ${token}` },
     body: { start_date: '2026-05-04', start_tz: 'America/New_York' },
   });
@@ -34,7 +42,8 @@ beforeAll(async () => {
 afterAll(async () => {
   vi.useRealTimers();
   if (userId) await db.query(`DELETE FROM users WHERE id=$1`, [userId]);
-  await app.close(); await db.end();
+  await app.close();
+  await db.end();
 });
 const auth = () => ({ authorization: `Bearer ${token}` });
 
@@ -56,8 +65,15 @@ describe('PATCH /api/planned-sets/:id', () => {
     const setRow = await getSetOnDate('2026-05-04');
     expect(setRow).toBeDefined();
     const r = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
-      body: { target_reps_low: 5, target_reps_high: 8, target_rir: 2, override_reason: 'feeling beat-up' },
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
+      body: {
+        target_reps_low: 5,
+        target_reps_high: 8,
+        target_rir: 2,
+        override_reason: 'feeling beat-up',
+      },
     });
     expect(r.statusCode).toBe(200);
     const body = r.json<any>();
@@ -69,37 +85,75 @@ describe('PATCH /api/planned-sets/:id', () => {
   });
 
   it('future day succeeds', async () => {
-    const setRow = await getSetOnDate('2026-05-06');   // Wed of week 1
+    const setRow = await getSetOnDate('2026-05-06'); // Wed of week 1
     expect(setRow).toBeDefined();
     const r = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: { target_reps_high: 12, override_reason: 'pushing volume' },
     });
     expect(r.statusCode).toBe(200);
   });
 
-  it('past day → 409', async () => {
-    // Backdate one day_workout so a planned_set sits in the past relative to pinned today.
+  it('past completed day → 409', async () => {
+    // Backdate one day_workout AND mark it terminal: only terminal past days are history.
     await db.query(
-      `UPDATE day_workouts SET scheduled_date='2026-05-01'
+      `UPDATE day_workouts SET scheduled_date='2026-05-01', status='completed'
        WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
       [runId],
     );
     try {
-      const { rows: [past] } = await db.query(
+      const {
+        rows: [past],
+      } = await db.query(
         `SELECT ps.id FROM planned_sets ps JOIN day_workouts dw ON dw.id=ps.day_workout_id
          WHERE dw.mesocycle_run_id=$1 AND dw.scheduled_date='2026-05-01' LIMIT 1`,
         [runId],
       );
       expect(past).toBeDefined();
       const r = await app.inject({
-        method: 'PATCH', url: `/api/planned-sets/${past.id}`, headers: auth(),
+        method: 'PATCH',
+        url: `/api/planned-sets/${past.id}`,
+        headers: auth(),
         body: { target_reps_low: 6 },
       });
       expect(r.statusCode).toBe(409);
       expect(r.json<any>().error).toBe('past_day_readonly');
     } finally {
-      // Restore the date so subsequent tests can still find a set on 2026-05-04.
+      // Restore date + status so subsequent tests can still find a set on 2026-05-04.
+      await db.query(
+        `UPDATE day_workouts SET scheduled_date='2026-05-04', status='planned'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
+        [runId],
+      );
+    }
+  });
+
+  it('past planned day (user running late) → 200, still editable', async () => {
+    await db.query(
+      `UPDATE day_workouts SET scheduled_date='2026-05-01'
+       WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
+      [runId],
+    );
+    try {
+      const {
+        rows: [past],
+      } = await db.query(
+        `SELECT ps.id FROM planned_sets ps JOIN day_workouts dw ON dw.id=ps.day_workout_id
+         WHERE dw.mesocycle_run_id=$1 AND dw.scheduled_date='2026-05-01' LIMIT 1`,
+        [runId],
+      );
+      expect(past).toBeDefined();
+      const r = await app.inject({
+        method: 'PATCH',
+        url: `/api/planned-sets/${past.id}`,
+        headers: auth(),
+        body: { target_reps_low: 6, override_reason: 'ran a day late' },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json<any>().target_reps_low).toBe(6);
+    } finally {
       await db.query(
         `UPDATE day_workouts SET scheduled_date='2026-05-04'
          WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=0`,
@@ -109,7 +163,9 @@ describe('PATCH /api/planned-sets/:id', () => {
   });
 
   it('week+1 baseline unaffected by today override', async () => {
-    const { rows: [w2Before] } = await db.query(
+    const {
+      rows: [w2Before],
+    } = await db.query(
       `SELECT ps.target_reps_low FROM planned_sets ps
        JOIN day_workouts dw ON dw.id=ps.day_workout_id
        WHERE dw.mesocycle_run_id=$1 AND dw.week_idx=2 AND dw.day_idx=0
@@ -118,10 +174,14 @@ describe('PATCH /api/planned-sets/:id', () => {
     );
     const todaySet = await getSetOnDate('2026-05-04');
     await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${todaySet.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${todaySet.id}`,
+      headers: auth(),
       body: { target_reps_low: 3, override_reason: 'iso testing' },
     });
-    const { rows: [w2After] } = await db.query(
+    const {
+      rows: [w2After],
+    } = await db.query(
       `SELECT ps.target_reps_low FROM planned_sets ps
        JOIN day_workouts dw ON dw.id=ps.day_workout_id
        WHERE dw.mesocycle_run_id=$1 AND dw.week_idx=2 AND dw.day_idx=0
@@ -134,7 +194,9 @@ describe('PATCH /api/planned-sets/:id', () => {
   it('appends mesocycle_run_events row with event_type=set_overridden', async () => {
     const setRow = await getSetOnDate('2026-05-04');
     await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: { target_rir: 1, override_reason: 'pushing for PR' },
     });
     const { rows } = await db.query(
@@ -151,7 +213,9 @@ describe('PATCH /api/planned-sets/:id', () => {
   it('rejects empty PATCH body with 400', async () => {
     const setRow = await getSetOnDate('2026-05-06');
     const r = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: {},
     });
     expect(r.statusCode).toBe(400);
@@ -162,47 +226,101 @@ describe('PATCH /api/planned-sets/:id', () => {
     const setRow = await getSetOnDate('2026-05-06');
     // First set a reason
     await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: { override_reason: 'temp' },
     });
     // Then explicitly clear
     const r = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: { override_reason: null },
     });
     expect(r.statusCode).toBe(200);
-    const { rows } = await db.query(`SELECT override_reason FROM planned_sets WHERE id=$1`, [setRow.id]);
+    const { rows } = await db.query(`SELECT override_reason FROM planned_sets WHERE id=$1`, [
+      setRow.id,
+    ]);
     expect(rows[0].override_reason).toBeNull();
   });
 
   it('cross-row rep range: PATCH target_reps_low > current high → 400 (no CHECK violation)', async () => {
     const setRow = await getSetOnDate('2026-05-06');
-    const { rows: [orig] } = await db.query(
-      `SELECT target_reps_low, target_reps_high FROM planned_sets WHERE id=$1`, [setRow.id]
-    );
+    const {
+      rows: [orig],
+    } = await db.query(`SELECT target_reps_low, target_reps_high FROM planned_sets WHERE id=$1`, [
+      setRow.id,
+    ]);
     // Set new low above current high
     const r = await app.inject({
-      method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+      method: 'PATCH',
+      url: `/api/planned-sets/${setRow.id}`,
+      headers: auth(),
       body: { target_reps_low: orig.target_reps_high + 5 },
     });
     expect(r.statusCode).toBe(400);
     expect(r.json<any>().field).toBe('target_reps_low');
   });
 
+  it('PATCH reps targets onto a duration-targeted row → 422 measurement_mismatch, row unchanged', async () => {
+    const setRow = await getSetOnDate('2026-05-06');
+    // Convert the row to duration-targeted (post-092 shape: reps NULL + duration pair).
+    await db.query(
+      `UPDATE planned_sets
+       SET target_reps_low=NULL, target_reps_high=NULL,
+           target_duration_low_sec=30, target_duration_high_sec=45
+       WHERE id=$1`,
+      [setRow.id],
+    );
+    try {
+      const r = await app.inject({
+        method: 'PATCH',
+        url: `/api/planned-sets/${setRow.id}`,
+        headers: auth(),
+        body: { target_reps_low: 8, target_reps_high: 12 },
+      });
+      expect(r.statusCode).toBe(422);
+      expect(r.json<any>().error).toBe('measurement_mismatch');
+      const {
+        rows: [after],
+      } = await db.query(
+        `SELECT target_reps_low, target_duration_low_sec FROM planned_sets WHERE id=$1`,
+        [setRow.id],
+      );
+      expect(after.target_reps_low).toBeNull();
+      expect(after.target_duration_low_sec).toBe(30);
+    } finally {
+      await db.query(
+        `UPDATE planned_sets
+         SET target_reps_low=$2, target_reps_high=$3,
+             target_duration_low_sec=NULL, target_duration_high_sec=NULL
+         WHERE id=$1`,
+        [setRow.id, setRow.target_reps_low, setRow.target_reps_high],
+      );
+    }
+  });
+
   it('bearer revoked mid-mesocycle → 401, no partial write', async () => {
     const setRow = await getSetOnDate('2026-05-06');
-    const before = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [setRow.id]);
+    const before = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [
+      setRow.id,
+    ]);
     await db.query(
       `UPDATE device_tokens SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`,
       [userId],
     );
     try {
       const r = await app.inject({
-        method: 'PATCH', url: `/api/planned-sets/${setRow.id}`, headers: auth(),
+        method: 'PATCH',
+        url: `/api/planned-sets/${setRow.id}`,
+        headers: auth(),
         body: { target_reps_low: 1 },
       });
       expect(r.statusCode).toBe(401);
-      const after = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [setRow.id]);
+      const after = await db.query(`SELECT target_reps_low FROM planned_sets WHERE id=$1`, [
+        setRow.id,
+      ]);
       expect(after.rows[0].target_reps_low).toBe(before.rows[0].target_reps_low);
     } finally {
       await db.query(`UPDATE device_tokens SET revoked_at=NULL WHERE user_id=$1`, [userId]);
@@ -213,19 +331,25 @@ describe('PATCH /api/planned-sets/:id', () => {
 describe('POST /api/planned-sets/:id/substitute', () => {
   it('persists exercise_id change AND substituted_from_exercise_id', async () => {
     const setRow = await getSetOnDate('2026-05-06');
-    const { rows: [orig] } = await db.query(
-      `SELECT exercise_id FROM planned_sets WHERE id=$1`, [setRow.id],
-    );
-    const { rows: [target] } = await db.query(
+    const {
+      rows: [orig],
+    } = await db.query(`SELECT exercise_id FROM planned_sets WHERE id=$1`, [setRow.id]);
+    const {
+      rows: [target],
+    } = await db.query(
       `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
     );
     expect(target).toBeDefined();
     const r = await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: { to_exercise_id: target.id },
     });
     expect(r.statusCode).toBe(200);
-    const { rows: [after] } = await db.query(
+    const {
+      rows: [after],
+    } = await db.query(
       `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`,
       [setRow.id],
     );
@@ -235,11 +359,15 @@ describe('POST /api/planned-sets/:id/substitute', () => {
 
   it('appends a mesocycle_run_events row with substitute payload', async () => {
     const setRow = await getSetOnDate('2026-05-06');
-    const { rows: [target] } = await db.query(
+    const {
+      rows: [target],
+    } = await db.query(
       `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
     );
     await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: { to_exercise_id: target.id },
     });
     const { rows } = await db.query(
@@ -252,31 +380,75 @@ describe('POST /api/planned-sets/:id/substitute', () => {
     expect(rows[0].payload.to_exercise_id).toBe(target.id);
   });
 
-  it('past day → 409', async () => {
+  it('past skipped day → 409', async () => {
     await db.query(
-      `UPDATE day_workouts SET scheduled_date='2026-05-01'
-       WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`, [runId],
+      `UPDATE day_workouts SET scheduled_date='2026-05-01', status='skipped'
+       WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`,
+      [runId],
     );
     try {
-      const { rows: [past] } = await db.query(
+      const {
+        rows: [past],
+      } = await db.query(
         `SELECT ps.id FROM planned_sets ps JOIN day_workouts dw ON dw.id=ps.day_workout_id
          WHERE dw.mesocycle_run_id=$1 AND dw.scheduled_date='2026-05-01' LIMIT 1`,
         [runId],
       );
-      const { rows: [target] } = await db.query(
+      const {
+        rows: [target],
+      } = await db.query(
         `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
       );
       const r = await app.inject({
-        method: 'POST', url: `/api/planned-sets/${past.id}/substitute`, headers: auth(),
+        method: 'POST',
+        url: `/api/planned-sets/${past.id}/substitute`,
+        headers: auth(),
         body: { to_exercise_id: target.id },
       });
       expect(r.statusCode).toBe(409);
       expect(r.json<any>().error).toBe('past_day_readonly');
     } finally {
-      // Restore the date so other tests aren't affected
+      // Restore date + status so other tests aren't affected
       await db.query(
-        `UPDATE day_workouts SET scheduled_date='2026-05-08'
-         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`, [runId],
+        `UPDATE day_workouts SET scheduled_date='2026-05-08', status='planned'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`,
+        [runId],
+      );
+    }
+  });
+
+  it('past planned day (user running late) → 200, substitute allowed', async () => {
+    await db.query(
+      `UPDATE day_workouts SET scheduled_date='2026-05-01'
+       WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`,
+      [runId],
+    );
+    try {
+      const {
+        rows: [past],
+      } = await db.query(
+        `SELECT ps.id FROM planned_sets ps JOIN day_workouts dw ON dw.id=ps.day_workout_id
+         WHERE dw.mesocycle_run_id=$1 AND dw.scheduled_date='2026-05-01' LIMIT 1`,
+        [runId],
+      );
+      const {
+        rows: [target],
+      } = await db.query(
+        `SELECT id FROM exercises WHERE slug='dumbbell-goblet-squat' AND archived_at IS NULL`,
+      );
+      const r = await app.inject({
+        method: 'POST',
+        url: `/api/planned-sets/${past.id}/substitute`,
+        headers: auth(),
+        body: { to_exercise_id: target.id },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json<any>().exercise_id).toBe(target.id);
+    } finally {
+      await db.query(
+        `UPDATE day_workouts SET scheduled_date='2026-05-08', status='planned'
+         WHERE mesocycle_run_id=$1 AND week_idx=1 AND day_idx=2`,
+        [runId],
       );
     }
   });
@@ -284,12 +456,16 @@ describe('POST /api/planned-sets/:id/substitute', () => {
   it('400 when to_exercise_id is missing or unknown', async () => {
     const setRow = await getSetOnDate('2026-05-06');
     const r1 = await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: {},
     });
     expect(r1.statusCode).toBe(400);
     const r2 = await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: { to_exercise_id: '00000000-0000-0000-0000-000000000000' },
     });
     expect(r2.statusCode).toBe(400);
@@ -298,29 +474,38 @@ describe('POST /api/planned-sets/:id/substitute', () => {
   it('idempotent substituted_from_exercise_id — second substitute preserves the first from', async () => {
     const setRow = await getSetOnDate('2026-05-06');
     // Capture the true "original from" — may already be set from earlier tests in this suite
-    const { rows: [before] } = await db.query(
-      `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`, [setRow.id],
+    const {
+      rows: [before],
+    } = await db.query(
+      `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`,
+      [setRow.id],
     );
     // The first-ever original is substituted_from_exercise_id if already substituted, else current exercise_id
     const trueOrigId = before.substituted_from_exercise_id ?? before.exercise_id;
     const { rows: targets } = await db.query(
       `SELECT id, slug FROM exercises WHERE slug IN ('dumbbell-goblet-squat','barbell-back-squat') AND archived_at IS NULL`,
     );
-    const goblet = targets.find(e => e.slug === 'dumbbell-goblet-squat');
-    const barbell = targets.find(e => e.slug === 'barbell-back-squat');
+    const goblet = targets.find((e) => e.slug === 'dumbbell-goblet-squat');
+    const barbell = targets.find((e) => e.slug === 'barbell-back-squat');
     expect(goblet).toBeDefined();
     expect(barbell).toBeDefined();
     // First sub (may re-apply goblet — idempotency will keep trueOrigId)
     await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: { to_exercise_id: goblet.id },
     });
     // Second sub
     await app.inject({
-      method: 'POST', url: `/api/planned-sets/${setRow.id}/substitute`, headers: auth(),
+      method: 'POST',
+      url: `/api/planned-sets/${setRow.id}/substitute`,
+      headers: auth(),
       body: { to_exercise_id: barbell.id },
     });
-    const { rows: [after] } = await db.query(
+    const {
+      rows: [after],
+    } = await db.query(
       `SELECT exercise_id, substituted_from_exercise_id FROM planned_sets WHERE id=$1`,
       [setRow.id],
     );

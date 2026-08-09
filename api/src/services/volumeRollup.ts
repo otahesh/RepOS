@@ -13,7 +13,9 @@ export type MuscleVolume = {
    * Closes the W1 acceptance bullet "MyProgramPage shows volume rollup updated".
    */
   performed_sets: number;
-  mev: number; mav: number; mrv: number;
+  mev: number;
+  mav: number;
+  mrv: number;
 };
 
 export type WeekVolume = {
@@ -30,7 +32,9 @@ export type VolumeRollup = {
 export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> {
   // Strength (planned): contribution-weighted sets per muscle per week.
   const { rows: setRows } = await db.query<{
-    week_idx: number; muscle_slug: string; sets: number;
+    week_idx: number;
+    muscle_slug: string;
+    sets: number;
   }>(
     `SELECT dw.week_idx,
             m.slug AS muscle_slug,
@@ -51,7 +55,9 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
   // we credit — so logging a substitution into the same planned_set still
   // counts correctly against the substituted exercise's muscles.
   const { rows: performedRows } = await db.query<{
-    week_idx: number; muscle_slug: string; performed_sets: number;
+    week_idx: number;
+    muscle_slug: string;
+    performed_sets: number;
   }>(
     `SELECT dw.week_idx,
             m.slug AS muscle_slug,
@@ -73,7 +79,9 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
 
   // Cardio: minutes per modality per week.
   const { rows: cardioRows } = await db.query<{
-    week_idx: number; modality_slug: string; minutes: number;
+    week_idx: number;
+    modality_slug: string;
+    minutes: number;
   }>(
     `SELECT dw.week_idx,
             e.slug AS modality_slug,
@@ -95,9 +103,12 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
   // line stayed at the default — and a mid-run PATCH could silently shift the
   // threshold the user is training against. Legacy runs (snapshot NULL —
   // materialized before migration 042) fall back to MUSCLE_LANDMARKS.
-  const { rows: [runMeta] } = await db.query<{ weeks: number; landmarks_snapshot: Record<string, { mev: number; mav: number; mrv: number }> | null }>(
-    `SELECT weeks, landmarks_snapshot FROM mesocycle_runs WHERE id=$1`, [runId],
-  );
+  const {
+    rows: [runMeta],
+  } = await db.query<{
+    weeks: number;
+    landmarks_snapshot: Record<string, { mev: number; mav: number; mrv: number }> | null;
+  }>(`SELECT weeks, landmarks_snapshot FROM mesocycle_runs WHERE id=$1`, [runId]);
   const nWeeks = runMeta.weeks;
   const snapshot = runMeta.landmarks_snapshot;
 
@@ -119,7 +130,7 @@ export async function computeVolumeRollup(runId: string): Promise<VolumeRollup> 
 
     const muscles: MuscleVolume[] = Array.from(musclesInWeek)
       .sort()
-      .map(slug => {
+      .map((slug) => {
         // [C-LANDMARKS-ACTIVE-RUN] Prefer the run's snapshot; fall back to the
         // global default for legacy runs (snapshot NULL).
         let lm = snapshot?.[slug] ?? MUSCLE_LANDMARKS[slug];

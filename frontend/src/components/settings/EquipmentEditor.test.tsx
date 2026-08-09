@@ -4,7 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { EquipmentEditor } from './EquipmentEditor';
 import * as equipApi from '../../lib/api/equipment.ts';
 import * as upApi from '../../lib/api/userPrograms.ts';
+import { pushToast } from '../common/ToastHost';
 import type { UserProgramRecord } from '../../lib/api/programs';
+
+// Assert on toasts without mounting a ToastHost.
+vi.mock('../common/ToastHost', () => ({ pushToast: vi.fn() }));
 
 function makeProgram(status: UserProgramRecord['status']): UserProgramRecord {
   return {
@@ -62,5 +66,73 @@ describe('<EquipmentEditor>', () => {
     // No dialog — the action applies directly.
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(putSpy).toHaveBeenCalledWith({ _v: 1 }));
+  });
+
+  // ── Selection persistence (the Beta-critical "selections don't save" bug) ──
+  // recumbent_bike and outdoor_walking are object-kind equipment in the backend
+  // schema/registry (resistance_levels / loop_mi). They must NOT be sent as bare
+  // `true` — that fails server validation and 400s the whole PUT.
+  it('saves Recumbent Bike as an object payload, not boolean true', async () => {
+    vi.spyOn(equipApi, 'getEquipmentProfile').mockResolvedValue({ _v: 1 });
+    vi.spyOn(upApi, 'listMyPrograms').mockResolvedValue([]);
+    const putSpy = vi.spyOn(equipApi, 'putEquipmentProfile').mockImplementation(async (p) => p);
+    const user = userEvent.setup();
+    render(<EquipmentEditor />);
+
+    await user.click(await screen.findByRole('checkbox', { name: /recumbent bike/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    const sent = putSpy.mock.calls[putSpy.mock.calls.length - 1][0] as Record<string, unknown>;
+    expect(sent.recumbent_bike).toBeTypeOf('object');
+    expect(sent.recumbent_bike).not.toBe(true);
+  });
+
+  it('saves Outdoor Walking as an object payload, not boolean true', async () => {
+    vi.spyOn(equipApi, 'getEquipmentProfile').mockResolvedValue({ _v: 1 });
+    vi.spyOn(upApi, 'listMyPrograms').mockResolvedValue([]);
+    const putSpy = vi.spyOn(equipApi, 'putEquipmentProfile').mockImplementation(async (p) => p);
+    const user = userEvent.setup();
+    render(<EquipmentEditor />);
+
+    await user.click(await screen.findByRole('checkbox', { name: /outdoor walking/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    const sent = putSpy.mock.calls[putSpy.mock.calls.length - 1][0] as Record<string, unknown>;
+    expect(sent.outdoor_walking).toBeTypeOf('object');
+    expect(sent.outdoor_walking).not.toBe(true);
+  });
+
+  it('shows an actionable error toast when the save fails (no silent swallow)', async () => {
+    vi.spyOn(equipApi, 'getEquipmentProfile').mockResolvedValue({ _v: 1 });
+    vi.spyOn(upApi, 'listMyPrograms').mockResolvedValue([]);
+    vi.spyOn(equipApi, 'putEquipmentProfile').mockRejectedValue(new Error('HTTP 400'));
+    const user = userEvent.setup();
+    render(<EquipmentEditor />);
+
+    await user.click(await screen.findByRole('checkbox', { name: /olympic barbell/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({ severity: 'error', body: expect.stringMatching(/400/) }),
+      ),
+    );
+  });
+
+  it('confirms a successful save with a success toast', async () => {
+    vi.spyOn(equipApi, 'getEquipmentProfile').mockResolvedValue({ _v: 1 });
+    vi.spyOn(upApi, 'listMyPrograms').mockResolvedValue([]);
+    vi.spyOn(equipApi, 'putEquipmentProfile').mockImplementation(async (p) => p);
+    const user = userEvent.setup();
+    render(<EquipmentEditor />);
+
+    await user.click(await screen.findByRole('checkbox', { name: /olympic barbell/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' })),
+    );
   });
 });

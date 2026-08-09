@@ -13,11 +13,13 @@ export type RecoveryFlagKey = (typeof KNOWN_FLAGS)[number];
 
 // The flag shape is extensible: bodyweight_crash includes trend_7d_lbs;
 // future flags may include other payload fields. We accept passthrough.
-export const RecoveryFlagItemSchema = z.object({
-  flag: z.enum(KNOWN_FLAGS),
-  message: z.string(),
-  trend_7d_lbs: z.number().optional(),
-}).passthrough();
+export const RecoveryFlagItemSchema = z
+  .object({
+    flag: z.enum(KNOWN_FLAGS),
+    message: z.string(),
+    trend_7d_lbs: z.number().optional(),
+  })
+  .passthrough();
 
 export type RecoveryFlagItem = z.infer<typeof RecoveryFlagItemSchema>;
 

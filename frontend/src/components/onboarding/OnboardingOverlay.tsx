@@ -84,33 +84,73 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
       aria-labelledby="onboarding-title"
       ref={dialogRef}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(10,13,18,0.92)',
-        display: 'flex', alignItems: isMobile ? 'flex-start' : 'center',
-        justifyContent: 'center', zIndex: TOKENS.zModal.zOverlay,
-        padding: isMobile ? 0 : 24, overflowY: 'auto',
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(10,13,18,0.92)',
+        display: 'flex',
+        alignItems: isMobile ? 'flex-start' : 'center',
+        justifyContent: 'center',
+        zIndex: TOKENS.zModal.zOverlay,
+        padding: isMobile ? 0 : 24,
+        overflowY: 'auto',
       }}
     >
-      <div style={{
-        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`,
-        borderRadius: isMobile ? 0 : 16,
-        padding: isMobile ? '24px 16px 80px' : '32px 36px',
-        maxWidth: 720, width: '100%', minHeight: isMobile ? '100vh' : 'auto',
-        fontFamily: FONTS.ui,
-      }}>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 11, letterSpacing: 1.4, color: TOKENS.accent, marginBottom: 8 }}>
+      <div
+        style={{
+          background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`,
+          borderRadius: isMobile ? 0 : 16,
+          padding: isMobile ? '24px 16px 80px' : '32px 36px',
+          maxWidth: 720,
+          width: '100%',
+          minHeight: isMobile ? '100vh' : 'auto',
+          fontFamily: FONTS.ui,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            color: TOKENS.accent,
+            marginBottom: 8,
+          }}
+        >
           ONBOARDING · STEP {step} / 5
         </div>
-        <h2 id="onboarding-title" style={{ fontSize: 24, fontWeight: 700, color: TOKENS.text, margin: '0 0 14px', letterSpacing: -0.4 }}>
+        <h2
+          id="onboarding-title"
+          style={{
+            fontSize: 24,
+            fontWeight: 700,
+            color: TOKENS.text,
+            margin: '0 0 14px',
+            letterSpacing: -0.4,
+          }}
+        >
           {step === 1 && 'Welcome to RepOS'}
           {step === 2 && 'What equipment do you have?'}
           {step === 3 && "What's your goal?"}
           {step === 4 && 'Pick a program'}
-          {step === 5 && <>Ready to start your first <Term k="mesocycle" />?</>}
+          {step === 5 && (
+            <>
+              Ready to start your first <Term k="mesocycle" />?
+            </>
+          )}
         </h2>
         {step === 1 && <WelcomeStep onNext={() => setStep(2)} />}
         {step === 2 && <EquipmentStep onNext={() => setStep(3)} onSkip={() => setStep(3)} />}
-        {step === 3 && <GoalStep goal={goal} onChange={setGoal} onNext={() => setStep(4)} onSkip={() => setStep(4)} />}
-        {step === 4 && <ProgramStep goal={goal} onNext={() => setStep(5)} onSkip={() => setStep(5)} />}
+        {step === 3 && (
+          <GoalStep
+            goal={goal}
+            onChange={setGoal}
+            onNext={() => setStep(4)}
+            onSkip={() => setStep(4)}
+          />
+        )}
+        {step === 4 && (
+          <ProgramStep goal={goal} onNext={() => setStep(5)} onSkip={() => setStep(5)} />
+        )}
         {step === 5 && <ReadyStep onStart={finish} />}
       </div>
     </div>

@@ -66,9 +66,7 @@ describe('PATCH /api/me/profile', () => {
     // The prior PII value is NEVER persisted.
     expect(rows[0].meta.changed).toBe(true);
     expect(Array.isArray(rows[0].meta.fields)).toBe(true);
-    expect(rows[0].meta.fields).toEqual(
-      expect.arrayContaining(['display_name', 'timezone']),
-    );
+    expect(rows[0].meta.fields).toEqual(expect.arrayContaining(['display_name', 'timezone']));
   });
 
   it('rejects units in body — units is not a supported field (per D6)', async () => {
@@ -134,10 +132,9 @@ describe('PATCH /api/me/profile', () => {
   it('partial update only touches sent fields', async () => {
     // Send timezone only; display_name must be preserved.
     const before = (
-      await db.query<{ display_name: string }>(
-        'SELECT display_name FROM users WHERE id=$1',
-        [userId],
-      )
+      await db.query<{ display_name: string }>('SELECT display_name FROM users WHERE id=$1', [
+        userId,
+      ])
     ).rows[0].display_name;
     await app.inject({
       method: 'PATCH',

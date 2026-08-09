@@ -10,7 +10,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
 describe('recovery_flag_events schema (migration 033)', () => {
-  afterAll(async () => { await db.end(); });
+  afterAll(async () => {
+    await db.end();
+  });
 
   it('has id, user_id, flag, week_start, event_type, occurred_at columns', async () => {
     const { rows } = await db.query(
@@ -27,7 +29,10 @@ describe('recovery_flag_events schema (migration 033)', () => {
     // from migration 024 for join compatibility.
     expect(cols.week_start).toMatchObject({ data_type: 'date', is_nullable: 'NO' });
     expect(cols.event_type).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
-    expect(cols.occurred_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+    expect(cols.occurred_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
   });
 
   it('enforces CHECK event_type IN (shown, dismissed)', async () => {

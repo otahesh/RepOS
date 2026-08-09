@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
-import { logBuffer, computeBackoffMs } from './logBuffer';
+import { logBuffer, computeBackoffMs, MAX_ATTEMPTS } from './logBuffer';
 
 // Cross-file isolation: Vitest's restoreMocks only undoes vi.spyOn/vi.fn spies,
 // not direct binding replacements or Object.defineProperty mutations. Save the
@@ -81,9 +81,7 @@ describe('logBuffer', () => {
       },
       'user-1',
     );
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(spy).toHaveBeenCalledTimes(1);
     const enqueued = spy.mock.calls[0][0] as PendingSetLog;
     expect(enqueued.client_request_id).toBe(id);
@@ -134,8 +132,16 @@ describe('logBuffer', () => {
     const a = await seedRow({ client_request_id: 'a', planned_set_id: 'ps-a', created_at: 1 });
     const b = await seedRow({ client_request_id: 'b', planned_set_id: 'ps-b', created_at: 2 });
     (fetch as any)
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 'srv-a', deduped: false }) })
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 'srv-b', deduped: false }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'srv-a', deduped: false }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'srv-b', deduped: false }),
+      });
 
     await logBuffer.flush();
 
@@ -145,18 +151,115 @@ describe('logBuffer', () => {
     expect(firstUrl).toBe('/api/set-logs');
     expect(firstInit.method).toBe('POST');
     expect(JSON.parse(firstInit.body).client_request_id).toBe(a.client_request_id);
-    expect(JSON.parse((fetch as any).mock.calls[1][1].body).client_request_id).toBe(b.client_request_id);
+    expect(JSON.parse((fetch as any).mock.calls[1][1].body).client_request_id).toBe(
+      b.client_request_id,
+    );
 
     expect(await idbQueue.peekPending()).toHaveLength(0);
     // Synced rows are deleted by idbQueue.markSynced — see idbQueue.ts line 122.
     expect(await idbQueue.peekRejected()).toHaveLength(0);
-    void a; void b;
+    void a;
+    void b;
+  });
+
+  it('flush omits null rpe/notes from the POST body — API schema is optional-absent, not nullable', async () => {
+    // The logger UI never sets rpe, so rows carry rpe: null in IDB. The server
+    // rejects "rpe": null with 400 (z.number().optional() ≠ nullable) — nulls
+    // must be stripped at the wire, not sent.
+    await seedRow({ rpe: null, notes: null });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('rpe');
+    expect(body).not.toHaveProperty('notes');
+    expect(body.weight_lbs).toBe(100);
+    expect(body.reps).toBe(5);
+    expect(body.rir).toBe(2);
+  });
+
+  it('flush posts duration_sec when present and omits reps — hold rows (measurement model)', async () => {
+    await seedRow({ weight_lbs: null, reps: null, duration_sec: 40, rir: null });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-hold', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.duration_sec).toBe(40);
+    expect(body).not.toHaveProperty('reps');
+    expect(body).not.toHaveProperty('weight_lbs');
+    expect(body).not.toHaveProperty('rir');
+  });
+
+  it('flush strips null AND absent duration_sec — reps rows and legacy queued rows send none', async () => {
+    // duration_sec: null (new-code reps row)
+    await seedRow({ duration_sec: null });
+    // legacy row without the key at all (pre-upgrade IDB row)
+    const legacy = await seedRow({});
+    delete (legacy as unknown as Record<string, unknown>).duration_sec;
+    (fetch as any).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-x', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    for (const call of (fetch as any).mock.calls) {
+      expect(JSON.parse(call[1].body)).not.toHaveProperty('duration_sec');
+    }
+  });
+
+  it('flush omits every null optional — a reps-only bodyweight row sends no weight_lbs/rir', async () => {
+    await seedRow({ weight_lbs: null, rir: null, rpe: null, notes: null, reps: 12 });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('weight_lbs');
+    expect(body).not.toHaveProperty('rir');
+    expect(body).not.toHaveProperty('rpe');
+    expect(body).not.toHaveProperty('notes');
+    expect(body.reps).toBe(12);
+  });
+
+  it('flush keeps rpe/notes in the POST body when they are set', async () => {
+    await seedRow({ rpe: 8, notes: 'belt on' });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'srv-1', deduped: false }),
+    });
+
+    await logBuffer.flush();
+
+    const body = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(body.rpe).toBe(8);
+    expect(body.notes).toBe('belt on');
   });
 
   it('flush on 201 calls markSynced', async () => {
     await seedRow({ client_request_id: 'x' });
     const synced = vi.spyOn(idbQueue, 'markSynced');
-    (fetch as any).mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 's', deduped: false }) });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 's', deduped: false }),
+    });
     await logBuffer.flush();
     expect(synced).toHaveBeenCalledWith('x');
   });
@@ -164,7 +267,11 @@ describe('logBuffer', () => {
   it('flush on 200 (deduped) calls markSynced', async () => {
     await seedRow({ client_request_id: 'x' });
     const synced = vi.spyOn(idbQueue, 'markSynced');
-    (fetch as any).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 's', deduped: true }) });
+    (fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 's', deduped: true }),
+    });
     await logBuffer.flush();
     expect(synced).toHaveBeenCalledWith('x');
   });
@@ -184,6 +291,102 @@ describe('logBuffer', () => {
     });
     await logBuffer.flush();
     expect(rejected).toHaveBeenCalledWith('x', 'audit_window_expired');
+  });
+
+  it('flush on 400 calls markRejected with other — terminal, never retried', async () => {
+    // The W1 rpe:null regression: a schema-validation 400 burned all 5
+    // attempts and left the row permanently "queued". Identical payload can
+    // never succeed on retry, so 4xx (minus 401/408/429) is terminal.
+    await seedRow({ client_request_id: 'x' });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ error: 'validation_failed' }),
+    });
+    await logBuffer.flush();
+    expect(rejected).toHaveBeenCalledWith('x', 'other');
+    expect(await idbQueue.peekPending()).toHaveLength(0);
+  });
+
+  it('flush on 422 calls markRejected with other', async () => {
+    await seedRow({ client_request_id: 'x' });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).toHaveBeenCalledWith('x', 'other');
+  });
+
+  it('flush on 408 leaves row pending and bumps attempt_count (transient)', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 408,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on 429 leaves row pending and bumps attempt_count (transient)', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on plain 401 (non-CFAccess) leaves row pending and bumps attempt_count', async () => {
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers(),
+      text: async () => '',
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
+  });
+
+  it('flush on unknown 409 (not audit_window_expired) still retries as transient', async () => {
+    // Guards the 409 carve-out: the terminal-4xx branch must not swallow the
+    // defensive unknown-409 retry path.
+    await seedRow({ client_request_id: 'x', attempt_count: 0 });
+    const rejected = vi.spyOn(idbQueue, 'markRejected');
+    (fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ error: 'some_future_conflict' }),
+    });
+    await logBuffer.flush();
+    expect(rejected).not.toHaveBeenCalled();
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(1);
   });
 
   it('flush on 404 calls markRejected with planned_set_deleted', async () => {
@@ -247,7 +450,9 @@ describe('logBuffer', () => {
     (fetch as any).mockResolvedValueOnce({
       ok: false,
       status: 401,
-      headers: new Headers({ 'WWW-Authenticate': 'CFAccess url=https://example.cloudflareaccess.com/login' }),
+      headers: new Headers({
+        'WWW-Authenticate': 'CFAccess url=https://example.cloudflareaccess.com/login',
+      }),
       text: async () => '',
     });
 
@@ -301,7 +506,11 @@ describe('logBuffer', () => {
     // Defer the fetch response so the first flush() is still in-flight when the
     // second is invoked.
     let resolve!: (r: unknown) => void;
-    (fetch as any).mockReturnValueOnce(new Promise(r => { resolve = r as (r: unknown) => void; }));
+    (fetch as any).mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r as (r: unknown) => void;
+      }),
+    );
 
     const p1 = logBuffer.flush();
     const p2 = logBuffer.flush(); // should immediately return without queuing another fetch
@@ -309,6 +518,59 @@ describe('logBuffer', () => {
     await Promise.all([p1, p2]);
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // retryStalled — recovery path for attempt-capped rows
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('MAX_ATTEMPTS is exported for consumers (pill/settings stalled detection)', () => {
+    expect(MAX_ATTEMPTS).toBe(5);
+  });
+
+  it('retryStalled re-arms capped rows (attempt_count 0, next_attempt_at 0) and returns count', async () => {
+    setOnline(false); // isolate re-arm from the flush kick
+    await seedRow({
+      client_request_id: 'stuck',
+      attempt_count: MAX_ATTEMPTS,
+      next_attempt_at: Date.now() + 60_000,
+    });
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(1);
+    const rows = await idbQueue.peekPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].attempt_count).toBe(0);
+    expect(rows[0].next_attempt_at).toBe(0);
+  });
+
+  it('retryStalled leaves non-capped rows untouched', async () => {
+    setOnline(false);
+    await seedRow({
+      client_request_id: 'healthy',
+      attempt_count: 2,
+      next_attempt_at: 12345,
+    });
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(0);
+    const rows = await idbQueue.peekPending();
+    expect(rows[0].attempt_count).toBe(2);
+    expect(rows[0].next_attempt_at).toBe(12345);
+  });
+
+  it('retryStalled triggers a flush when online and rows were re-armed', async () => {
+    setOnline(true);
+    await seedRow({ client_request_id: 'stuck', attempt_count: MAX_ATTEMPTS });
+    const flushSpy = vi.spyOn(logBuffer, 'flush').mockResolvedValue(undefined);
+    await logBuffer.retryStalled();
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retryStalled with no stalled rows does not flush', async () => {
+    setOnline(true);
+    const flushSpy = vi.spyOn(logBuffer, 'flush').mockResolvedValue(undefined);
+    const count = await logBuffer.retryStalled();
+    expect(count).toBe(0);
+    expect(flushSpy).not.toHaveBeenCalled();
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -443,8 +705,16 @@ describe('logBuffer', () => {
     const synced = vi.spyOn(idbQueue, 'markSynced');
     const rejected = vi.spyOn(idbQueue, 'markRejected');
     (fetch as any)
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 's-a', deduped: false }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 's-a', deduped: true }) });
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 's-a', deduped: false }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 's-a', deduped: true }),
+      });
 
     await logBuffer.flush();
 

@@ -41,9 +41,7 @@ export function DeleteAccountSection({ email }: Props): JSX.Element {
       // Stay signed in so the user can read the error and retry.
       pushToast({
         severity: 'error',
-        body:
-          'Account deletion failed. ' +
-          (err instanceof Error ? err.message : 'Try again.'),
+        body: 'Account deletion failed. ' + (err instanceof Error ? err.message : 'Try again.'),
       });
       setBusy(false);
       setOpen(false);
@@ -77,8 +75,8 @@ export function DeleteAccountSection({ email }: Props): JSX.Element {
           color: TOKENS.textDim,
         }}
       >
-        Permanently deletes your account ({email}) and all associated data —
-        programs, logs, weight history, and tokens. This cannot be undone.
+        Permanently deletes your account ({email}) and all associated data — programs, logs, weight
+        history, and tokens. This cannot be undone.
       </p>
       <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
         <button

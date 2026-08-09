@@ -4,19 +4,19 @@ import { ExerciseSeedSchema, type ExerciseSeed } from '../../schemas/exerciseSee
 import { validateSeed } from '../validate.js';
 import type { SeedAdapter } from '../runSeed.js';
 
-const ExerciseSeedArraySchema = z.array(ExerciseSeedSchema)
-  .superRefine((arr, ctx) => {
-    const result = validateSeed(arr);
-    if (!result.ok) for (const msg of result.errors) {
+const ExerciseSeedArraySchema = z.array(ExerciseSeedSchema).superRefine((arr, ctx) => {
+  const result = validateSeed(arr);
+  if (!result.ok)
+    for (const msg of result.errors) {
       ctx.addIssue({ code: 'custom', message: msg, path: [] });
     }
-  });
+});
 
 let muscleIdsCache: Map<string, number> | null = null;
 async function loadMuscleIds(tx: PoolClient): Promise<Map<string, number>> {
   if (muscleIdsCache) return muscleIdsCache;
   const { rows } = await tx.query<{ slug: string; id: number }>(`SELECT slug, id FROM muscles`);
-  muscleIdsCache = new Map(rows.map(r => [r.slug, r.id]));
+  muscleIdsCache = new Map(rows.map((r) => [r.slug, r.id]));
   return muscleIdsCache;
 }
 
@@ -27,25 +27,32 @@ export function makeExerciseSeedAdapter(key: string): SeedAdapter<ExerciseSeed> 
       const muscles = await loadMuscleIds(tx);
       const primary_muscle_id = muscles.get(e.primary_muscle)!;
       const parent_id = e.parent_slug
-        ? (await tx.query<{ id: string }>(`SELECT id FROM exercises WHERE slug=$1`, [e.parent_slug])).rows[0]?.id ?? null
+        ? ((
+            await tx.query<{ id: string }>(`SELECT id FROM exercises WHERE slug=$1`, [
+              e.parent_slug,
+            ])
+          ).rows[0]?.id ?? null)
         : null;
 
-      const { rows: [row] } = await tx.query<{ id: string }>(
+      const {
+        rows: [row],
+      } = await tx.query<{ id: string }>(
         `INSERT INTO exercises (
            slug, name, parent_exercise_id, primary_muscle_id, movement_pattern,
-           peak_tension_length, required_equipment, skill_complexity, loading_demand,
+           peak_tension_length, measurement, required_equipment, skill_complexity, loading_demand,
            systemic_fatigue, joint_stress_profile, eccentric_overload_capable,
            contraindications, requires_shoulder_flexion_overhead,
            loads_spine_in_flexion, loads_spine_axially, requires_hip_internal_rotation,
            requires_ankle_dorsiflexion, requires_wrist_extension_loaded,
            created_by, seed_key, seed_generation, archived_at, updated_at
          ) VALUES (
-           $1,$2,$3,$4,$5::movement_pattern,$6::peak_tension_length,$7::jsonb,
-           $8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,
-           'system',$20,$21,NULL,now()
+           $1,$2,$3,$4,$5::movement_pattern,$6::peak_tension_length,$7,$8::jsonb,
+           $9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,$20,
+           'system',$21,$22,NULL,now()
          )
          ON CONFLICT (slug) DO UPDATE SET
            name=EXCLUDED.name,
+           measurement=EXCLUDED.measurement,
            parent_exercise_id=EXCLUDED.parent_exercise_id,
            primary_muscle_id=EXCLUDED.primary_muscle_id,
            movement_pattern=EXCLUDED.movement_pattern,
@@ -69,14 +76,28 @@ export function makeExerciseSeedAdapter(key: string): SeedAdapter<ExerciseSeed> 
            updated_at=now()
          RETURNING id`,
         [
-          e.slug, e.name, parent_id, primary_muscle_id, e.movement_pattern,
-          e.peak_tension_length, JSON.stringify(e.required_equipment),
-          e.skill_complexity, e.loading_demand, e.systemic_fatigue,
-          JSON.stringify(e.joint_stress_profile), e.eccentric_overload_capable,
-          e.contraindications, e.requires_shoulder_flexion_overhead,
-          e.loads_spine_in_flexion, e.loads_spine_axially,
-          e.requires_hip_internal_rotation, e.requires_ankle_dorsiflexion,
-          e.requires_wrist_extension_loaded, key, generation,
+          e.slug,
+          e.name,
+          parent_id,
+          primary_muscle_id,
+          e.movement_pattern,
+          e.peak_tension_length,
+          e.measurement ?? 'reps',
+          JSON.stringify(e.required_equipment),
+          e.skill_complexity,
+          e.loading_demand,
+          e.systemic_fatigue,
+          JSON.stringify(e.joint_stress_profile),
+          e.eccentric_overload_capable,
+          e.contraindications,
+          e.requires_shoulder_flexion_overhead,
+          e.loads_spine_in_flexion,
+          e.loads_spine_axially,
+          e.requires_hip_internal_rotation,
+          e.requires_ankle_dorsiflexion,
+          e.requires_wrist_extension_loaded,
+          key,
+          generation,
         ],
       );
       await tx.query(`DELETE FROM exercise_muscle_contributions WHERE exercise_id=$1`, [row.id]);

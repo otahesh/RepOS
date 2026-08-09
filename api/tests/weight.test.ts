@@ -20,22 +20,25 @@ let revokedToken: string;
 beforeAll(async () => {
   app = await buildApp();
 
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.weight.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.weight.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
 
   // Active token
   const mint = await app.inject({
-    method: 'POST', url: '/api/tokens',
+    method: 'POST',
+    url: '/api/tokens',
     body: { user_id: userId, label: 'vitest' },
   });
   token = mint.json<{ token: string }>().token;
 
   // Revoked token for test 9
   const r = await app.inject({
-    method: 'POST', url: '/api/tokens',
+    method: 'POST',
+    url: '/api/tokens',
     body: { user_id: userId, label: 'revoke-me' },
   });
   const { id: rid, token: plain } = r.json<{ id: string; token: string }>();
@@ -65,7 +68,9 @@ describe('POST /api/health/weight', () => {
   });
 
   it('2. same (user,date,source) same weight → 200, deduped:true, updated_at unchanged', async () => {
-    const { rows: [before] } = await db.query<{ updated_at: Date }>(
+    const {
+      rows: [before],
+    } = await db.query<{ updated_at: Date }>(
       `SELECT updated_at FROM health_weight_samples WHERE user_id=$1 AND sample_date=$2 AND source=$3`,
       [userId, D1, 'Apple Health'],
     );
@@ -74,7 +79,9 @@ describe('POST /api/health/weight', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().deduped).toBe(true);
 
-    const { rows: [after] } = await db.query<{ updated_at: Date }>(
+    const {
+      rows: [after],
+    } = await db.query<{ updated_at: Date }>(
       `SELECT updated_at FROM health_weight_samples WHERE user_id=$1 AND sample_date=$2 AND source=$3`,
       [userId, D1, 'Apple Health'],
     );
@@ -82,7 +89,9 @@ describe('POST /api/health/weight', () => {
   });
 
   it('3. same (user,date,source) different weight → 200, deduped:true, weight updated, updated_at bumped', async () => {
-    const { rows: [before] } = await db.query<{ updated_at: Date }>(
+    const {
+      rows: [before],
+    } = await db.query<{ updated_at: Date }>(
       `SELECT updated_at FROM health_weight_samples WHERE user_id=$1 AND sample_date=$2 AND source=$3`,
       [userId, D1, 'Apple Health'],
     );
@@ -93,7 +102,9 @@ describe('POST /api/health/weight', () => {
     expect(body.deduped).toBe(true);
     expect(body.weight_lbs).toBe(186.0);
 
-    const { rows: [row] } = await db.query<{ w: number; updated_at: Date }>(
+    const {
+      rows: [row],
+    } = await db.query<{ w: number; updated_at: Date }>(
       `SELECT weight_lbs::float AS w, updated_at FROM health_weight_samples WHERE user_id=$1 AND sample_date=$2 AND source=$3`,
       [userId, D1, 'Apple Health'],
     );
@@ -133,7 +144,9 @@ describe('POST /api/health/weight', () => {
 
   it('8. no bearer token → 401', async () => {
     const res = await app.inject({
-      method: 'POST', url: '/api/health/weight', body: base,
+      method: 'POST',
+      url: '/api/health/weight',
+      body: base,
     });
     expect(res.statusCode).toBe(401);
   });

@@ -173,19 +173,8 @@ describe('csrfOrigin guard — CF Access cookie path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The following full-stack integration cases are deferred to Tasks 7–9 — they
-// require the real `PATCH /api/me/profile`, `DELETE /api/me`, and
-// `POST /api/auth/signout-everywhere` routes plus an end-to-end bearer mint
-// flow. The spec text at docs/superpowers/plans/2026-05-25-w6-account-ops.md
-// lines 884–957 is the source. They're marked `.skip` so the suite stays
-// green here and the named cases are visible in the test output as a TODO.
+// Full-stack CSRF cases against the real account/signout routes are covered
+// in signout-everywhere.test.ts, account-deletion-cascade.test.ts and
+// feedback.test.ts. The original deferred-case list lives in the W6 spec,
+// docs/superpowers/plans/2026-05-25-w6-account-ops.md lines 884–957.
 // ---------------------------------------------------------------------------
-describe.skip('CSRF Origin guard — full-stack integration (deferred to Tasks 7–9)', () => {
-  it('PATCH /api/me/profile with no Origin and no X-RepOS-CSRF → 403', () => {});
-  it('PATCH /api/me/profile with wrong Origin → 403', () => {});
-  it('PATCH /api/me/profile with matching Origin → 200', () => {});
-  it('PATCH /api/me/profile with X-RepOS-CSRF: 1 (no Origin) → 200', () => {});
-  it('DELETE /api/me also gates on CSRF guard', () => {});
-  it('POST /api/auth/signout-everywhere also gates on CSRF guard', () => {});
-  it('does NOT block bearer-auth paths (Origin guard is cookie-path only)', () => {});
-});

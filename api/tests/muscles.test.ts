@@ -5,7 +5,9 @@ import { buildApp } from '../src/app.js';
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
 
-beforeAll(async () => { app = await buildApp(); });
+beforeAll(async () => {
+  app = await buildApp();
+});
 
 describe('muscles seed (migration 008 + W2.4 core)', () => {
   it('has exactly 13 rows (12 v1 + core via migration 038)', async () => {
@@ -14,24 +16,22 @@ describe('muscles seed (migration 008 + W2.4 core)', () => {
   });
 
   it('every group_name resolves to a known group (incl. core from W2.4)', async () => {
-    const { rows } = await db.query(
-      `SELECT DISTINCT group_name FROM muscles ORDER BY group_name`
-    );
-    const groups = rows.map(r => r.group_name);
-    expect(groups).toEqual(['arms','back','chest','core','legs','shoulders']);
+    const { rows } = await db.query(`SELECT DISTINCT group_name FROM muscles ORDER BY group_name`);
+    const groups = rows.map((r) => r.group_name);
+    expect(groups).toEqual(['arms', 'back', 'chest', 'core', 'legs', 'shoulders']);
   });
 
   it('rejects a duplicate slug', async () => {
     await expect(
       db.query(`INSERT INTO muscles (slug, name, group_name, display_order)
-                VALUES ('chest','dup','chest',999)`)
+                VALUES ('chest','dup','chest',999)`),
     ).rejects.toThrow();
   });
 
   it('rejects a malformed slug', async () => {
     await expect(
       db.query(`INSERT INTO muscles (slug, name, group_name, display_order)
-                VALUES ('Bad-Slug','x','arms',999)`)
+                VALUES ('Bad-Slug','x','arms',999)`),
     ).rejects.toThrow();
   });
 });
@@ -53,4 +53,7 @@ describe('GET /api/muscles', () => {
   });
 });
 
-afterAll(async () => { await app.close(); await db.end(); });
+afterAll(async () => {
+  await app.close();
+  await db.end();
+});

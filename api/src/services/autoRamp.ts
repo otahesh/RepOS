@@ -2,9 +2,9 @@
 
 export type RampInput = {
   mev: number;
-  mav: number;     // carried for caller convenience; formula only uses mev + mrv
+  mav: number; // carried for caller convenience; formula only uses mev + mrv
   mrv: number;
-  week: number;       // 1-indexed
+  week: number; // 1-indexed
   totalWeeks: number; // N (deload is week N)
 };
 
@@ -22,6 +22,32 @@ export function computeRamp(input: RampInput): number {
   const denom = Math.max(totalWeeks - 2, 1);
   const raw = mev + (mrvTarget - mev) * ((week - 1) / denom);
   return Math.round(raw);
+}
+
+export type BlockRampInput = {
+  mev: number;
+  mav: number;
+  week: number; // 1-indexed
+  totalWeeks: number; // N (deload is week N)
+};
+
+/**
+ * Per-block sets-per-session ramp, driven by the template author's mev/mav.
+ *
+ *   sets(w) = round( mev + (mav - mev) * (w - 1) / max(N - 2, 1) )  for w in 1..N-1
+ *   sets(N) = max(1, round( mev / 2 ))                              deload
+ *
+ * Week 1 lands exactly on the block's MEV, the last accumulation week (N-1)
+ * exactly on its MAV. This replaces the landmark-driven weekly-muscle
+ * distribution, which concentrated an entire intermediate week's volume into
+ * whatever few blocks a template gave a muscle (23-set sessions in 2-day
+ * templates). Landmarks retain their real job: MAV/MRV warning thresholds.
+ */
+export function computeBlockRamp(input: BlockRampInput): number {
+  const { mev, mav, week, totalWeeks } = input;
+  if (week === totalWeeks) return Math.max(1, Math.round(mev / 2)); // deload
+  const denom = Math.max(totalWeeks - 2, 1);
+  return Math.round(mev + (mav - mev) * ((week - 1) / denom));
 }
 
 export type BlockMev = { blockKey: string; mev: number };
@@ -42,22 +68,28 @@ export function distributeWeekTargetAcrossBlocks(
   weekTarget: number,
 ): BlockSets[] {
   if (blocks.length === 0) return [];
-  if (weekTarget <= 0) return blocks.map(b => ({ blockKey: b.blockKey, sets: 0 }));
+  if (weekTarget <= 0) return blocks.map((b) => ({ blockKey: b.blockKey, sets: 0 }));
 
   const totalMev = blocks.reduce((s, b) => s + b.mev, 0);
-  const raw = totalMev === 0
-    ? blocks.map(b => ({ blockKey: b.blockKey, share: weekTarget / blocks.length }))
-    : blocks.map(b => ({ blockKey: b.blockKey, share: weekTarget * (b.mev / totalMev) }));
+  const raw =
+    totalMev === 0
+      ? blocks.map((b) => ({ blockKey: b.blockKey, share: weekTarget / blocks.length }))
+      : blocks.map((b) => ({ blockKey: b.blockKey, share: weekTarget * (b.mev / totalMev) }));
 
-  const floored = raw.map(r => ({ blockKey: r.blockKey, sets: Math.floor(r.share), remainder: r.share - Math.floor(r.share) }));
+  const floored = raw.map((r) => ({
+    blockKey: r.blockKey,
+    sets: Math.floor(r.share),
+    remainder: r.share - Math.floor(r.share),
+  }));
   let remaining = weekTarget - floored.reduce((s, b) => s + b.sets, 0);
 
   // Largest-remainder reconciliation (stable: original order on tiebreak).
-  const order = [...floored].map((b, i) => ({ ...b, idx: i }))
-    .sort((a, b) => (b.remainder - a.remainder) || (a.idx - b.idx));
+  const order = [...floored]
+    .map((b, i) => ({ ...b, idx: i }))
+    .sort((a, b) => b.remainder - a.remainder || a.idx - b.idx);
   for (let i = 0; i < order.length && remaining > 0; i++) {
     floored[order[i].idx].sets += 1;
     remaining -= 1;
   }
-  return floored.map(b => ({ blockKey: b.blockKey, sets: b.sets }));
+  return floored.map((b) => ({ blockKey: b.blockKey, sets: b.sets }));
 }

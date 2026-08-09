@@ -22,20 +22,21 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../db/client.js';
 import { requireCfAccessOnly } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function authSignoutRoutes(app: FastifyInstance) {
   app.post(
     '/auth/signout-everywhere',
     { preHandler: [requireCfAccessOnly, csrfOrigin] },
     async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
-      const userEmail = (req as { userEmail?: string }).userEmail;
+      const userId = req.userId;
+      const userEmail = req.userEmail;
       if (!userId || !userEmail) {
         return reply.code(500).send({ error: 'auth_state_missing' });
       }
 
       const client = await db.connect();
-      let rowCount = 0;
+      let rowCount: number;
       try {
         await client.query('BEGIN');
         const res = await client.query(
@@ -48,7 +49,7 @@ export async function authSignoutRoutes(app: FastifyInstance) {
         await client.query(
           `INSERT INTO account_events (user_id, user_id_at_event, user_email_at_event, kind, ip, meta)
            VALUES ($1, $1, $2, 'signout_everywhere', $3, $4::jsonb)`,
-          [userId, userEmail, req.ip, JSON.stringify({ revoked_count: rowCount })],
+          [userId, userEmail, clientIp(req), JSON.stringify({ revoked_count: rowCount })],
         );
         await client.query('COMMIT');
       } catch (err) {
@@ -59,15 +60,14 @@ export async function authSignoutRoutes(app: FastifyInstance) {
         client.release();
       }
 
-      // Clear the CF Access cookie on the browser. The CF Access edge also
-      // owns its own session — this Set-Cookie is the local-RepOS half of the
-      // signout. Attributes mirror what CF Access sets on first login.
-      reply.header(
-        'Set-Cookie',
-        'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-      );
+      // Do NOT clear the CF_Authorization cookie here. The frontend navigates
+      // to /cdn-cgi/access/logout after this 204, and Cloudflare only
+      // terminates the Access session when that request still carries the
+      // cookie. Clearing it server-side made the logout arrive cookieless —
+      // CF errored, the edge session survived, and the team-domain SSO
+      // silently re-signed the browser in (found live 2026-07-11).
       req.log.info(
-        { event: 'signout_everywhere', userId, revoked_count: rowCount, ip: req.ip },
+        { event: 'signout_everywhere', userId, revoked_count: rowCount, ip: clientIp(req) },
         'signout_everywhere',
       );
       return reply.code(204).send();

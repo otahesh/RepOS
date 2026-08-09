@@ -20,9 +20,31 @@ export function DeloadThisWeekButton({
 }) {
   const [open, setOpen] = useState(false);
 
-  const baseStyle: React.CSSProperties = variant === 'menuitem'
-    ? { background: 'transparent', border: 'none', color: TOKENS.text, padding: '12px 16px', textAlign: 'left', width: '100%', cursor: 'pointer', fontFamily: FONTS.ui, fontSize: 14 }
-    : { background: 'transparent', border: `1px solid ${TOKENS.warn}`, color: TOKENS.warn, borderRadius: 10, padding: '10px 16px', cursor: 'pointer', fontFamily: FONTS.ui, fontSize: 13, fontWeight: 600, letterSpacing: 0.3 };
+  const baseStyle: React.CSSProperties =
+    variant === 'menuitem'
+      ? {
+          background: 'transparent',
+          border: 'none',
+          color: TOKENS.text,
+          padding: '12px 16px',
+          textAlign: 'left',
+          width: '100%',
+          cursor: 'pointer',
+          fontFamily: FONTS.ui,
+          fontSize: 14,
+        }
+      : {
+          background: 'transparent',
+          border: `1px solid ${TOKENS.warn}`,
+          color: TOKENS.warn,
+          borderRadius: 10,
+          padding: '10px 16px',
+          cursor: 'pointer',
+          fontFamily: FONTS.ui,
+          fontSize: 13,
+          fontWeight: 600,
+          letterSpacing: 0.3,
+        };
 
   return (
     <>
@@ -32,7 +54,10 @@ export function DeloadThisWeekButton({
         onClick={() => setOpen(true)}
         style={baseStyle}
       >
-        <Term k="manual_deload" variant="abbr">Deload</Term> this week
+        <Term k="manual_deload" variant="abbr">
+          Deload
+        </Term>{' '}
+        this week
       </button>
       {open && (
         <DeloadThisWeekSheet

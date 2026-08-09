@@ -48,9 +48,7 @@ describe('AccountEventsTimeline', () => {
 
     render(<AccountEventsTimeline />);
 
-    await waitFor(() =>
-      expect(screen.getByText('Profile changed')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Profile changed')).toBeInTheDocument());
     expect(screen.getByText('Signed out everywhere')).toBeInTheDocument();
     // Relative time rendered (newest row ~5m ago, older ~2h ago).
     expect(screen.getByText('5m ago')).toBeInTheDocument();
@@ -63,9 +61,7 @@ describe('AccountEventsTimeline', () => {
   it('shows an empty state when there are no events', async () => {
     vi.mocked(api.listEvents).mockResolvedValue({ events: [], next_cursor: null });
     render(<AccountEventsTimeline />);
-    await waitFor(() =>
-      expect(screen.getByText(/no account activity yet/i)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/no account activity yet/i)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /load older/i })).toBeNull();
   });
 
@@ -93,8 +89,6 @@ describe('AccountEventsTimeline', () => {
       ),
     );
     // After the second page reports next_cursor: null, the button is gone.
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: /load older/i })).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: /load older/i })).toBeNull());
   });
 });

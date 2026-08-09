@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './',
-  testMatch: ['playwright/**/*.spec.ts', 'src/components/programs/__offline__/*.spec.ts'],
+  testMatch: ['playwright/**/*.spec.ts', 'src/components/programs/__offline__/**/*.spec.ts'],
   timeout: 30_000,
   // Retry in CI only — e2e timing (IDB polls, backoff windows, the build+preview
   // boot) is variance-prone on shared runners; a real regression fails all

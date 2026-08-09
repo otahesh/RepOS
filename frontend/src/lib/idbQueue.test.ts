@@ -3,7 +3,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
 
 describe('idbQueue', () => {
-  beforeEach(async () => { await idbQueue.purgeAll(); });
+  beforeEach(async () => {
+    await idbQueue.purgeAll();
+  });
 
   it('enqueue + peek round-trips a single item', async () => {
     const item = mkItem({ client_request_id: 'aaa' });
@@ -34,25 +36,29 @@ describe('idbQueue', () => {
     await idbQueue.markSyncing('s-b');
     await idbQueue.markSyncing('s-a');
     const out = await idbQueue.peekSyncing();
-    expect(out.map(i => i.client_request_id)).toEqual(['s-a', 's-b']);
-    expect(out.every(r => r.status === 'syncing')).toBe(true);
+    expect(out.map((i) => i.client_request_id)).toEqual(['s-a', 's-b']);
+    expect(out.every((r) => r.status === 'syncing')).toBe(true);
   });
 
   it('peekPending returns FIFO order', async () => {
     await idbQueue.enqueue(mkItem({ client_request_id: 'b', created_at: 2 }));
     await idbQueue.enqueue(mkItem({ client_request_id: 'a', created_at: 1 }));
     const out = await idbQueue.peekPending();
-    expect(out.map(i => i.client_request_id)).toEqual(['a', 'b']);
+    expect(out.map((i) => i.client_request_id)).toEqual(['a', 'b']);
   });
 
   it('QuotaExceededError throws QueueFullError to caller', async () => {
     // Force Dexie's put() to throw a QuotaExceededError DOMException once.
     // idbQueue must catch it and rethrow QueueFullError so the O6 banner can surface it.
-    const db = (idbQueue as unknown as { db: { pendingSetLogs: { put: (x: unknown) => Promise<unknown> } } }).db;
-    const spy = vi.spyOn(db.pendingSetLogs, 'put').mockRejectedValueOnce(
-      new DOMException('quota', 'QuotaExceededError')
+    const db = (
+      idbQueue as unknown as { db: { pendingSetLogs: { put: (x: unknown) => Promise<unknown> } } }
+    ).db;
+    const spy = vi
+      .spyOn(db.pendingSetLogs, 'put')
+      .mockRejectedValueOnce(new DOMException('quota', 'QuotaExceededError'));
+    await expect(idbQueue.enqueue(mkItem({ client_request_id: 'quota' }))).rejects.toBeInstanceOf(
+      QueueFullError,
     );
-    await expect(idbQueue.enqueue(mkItem({ client_request_id: 'quota' }))).rejects.toBeInstanceOf(QueueFullError);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 

@@ -119,15 +119,15 @@ describe('POST /api/auth/signout-everywhere', () => {
     });
     expect(r.statusCode).toBe(204);
 
-    // Set-Cookie clears CF_Authorization with Max-Age=0 and the security
-    // attributes set by the production route.
+    // The route must NOT touch the CF_Authorization cookie. The frontend
+    // navigates to /cdn-cgi/access/logout next, and Cloudflare only
+    // terminates the edge session when that request still carries the
+    // cookie — an API-side Max-Age=0 clear made the logout arrive
+    // cookieless, CF errored, and the team-domain SSO silently
+    // re-authenticated the browser (found live 2026-07-11).
     const setCookie = r.headers['set-cookie'];
     const cookieStr = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
-    expect(cookieStr).toMatch(/CF_Authorization=;.*Max-Age=0/i);
-    expect(cookieStr).toMatch(/HttpOnly/i);
-    expect(cookieStr).toMatch(/Secure/i);
-    expect(cookieStr).toMatch(/SameSite=Lax/i);
-    expect(cookieStr).toMatch(/Path=\//i);
+    expect(cookieStr).not.toMatch(/CF_Authorization/i);
 
     // Every previously-valid bearer now 401s on its next API call.
     const postA = await app.inject({
@@ -148,10 +148,9 @@ describe('POST /api/auth/signout-everywhere', () => {
       id: string;
       revoke_reason: string | null;
       revoked_at: Date | null;
-    }>(
-      `SELECT id::text, revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`,
-      [userId],
-    );
+    }>(`SELECT id::text, revoke_reason, revoked_at FROM device_tokens WHERE user_id = $1`, [
+      userId,
+    ]);
     expect(tokRows.length).toBe(2);
     for (const row of tokRows) {
       expect(row.revoke_reason).toBe('signout_everywhere');
@@ -163,10 +162,9 @@ describe('POST /api/auth/signout-everywhere', () => {
     const { rows: evRows } = await db.query<{
       kind: string;
       meta: { revoked_count?: number };
-    }>(
-      `SELECT kind, meta FROM account_events WHERE user_id = $1 AND kind = 'signout_everywhere'`,
-      [userId],
-    );
+    }>(`SELECT kind, meta FROM account_events WHERE user_id = $1 AND kind = 'signout_everywhere'`, [
+      userId,
+    ]);
     expect(evRows.length).toBe(1);
     expect(evRows[0].meta.revoked_count).toBe(2);
   });

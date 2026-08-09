@@ -4,10 +4,14 @@
 import { apiFetch } from '../../auth';
 
 export type ParQ5Joint =
-  | 'shoulder_left' | 'shoulder_right'
+  | 'shoulder_left'
+  | 'shoulder_right'
   | 'low_back'
-  | 'knee_left' | 'knee_right'
-  | 'elbow' | 'wrist' | 'other';
+  | 'knee_left'
+  | 'knee_right'
+  | 'elbow'
+  | 'wrist'
+  | 'other';
 
 export interface ParQStatus {
   current_version: number;

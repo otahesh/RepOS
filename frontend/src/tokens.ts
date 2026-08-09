@@ -24,13 +24,18 @@ export const TOKENS = {
   heat4: '#4D8DFF',
   heat5: '#7FB0FF',
   // W2 (panel C-Z) — explicit modal z-index stack. Every overlay references
-  // a token here, NEVER an inline zIndex literal. Auth tier is highest because
-  // a session-expired prompt must obscure even onboarding.
+  // a token here, NEVER an inline zIndex literal. Auth tier is the highest
+  // *modal surface* because a session-expired prompt must obscure even
+  // onboarding. zPopover sits above all modal surfaces: contextual-help popovers
+  // (Term) portal to <body>, so they must out-rank whatever modal hosts their
+  // trigger or they paint behind the modal's opaque backdrop and vanish.
+  // (Transient toasts in ToastHost render higher still, by design.)
   zModal: {
-    zSheet: 100,    // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
-    zBanner: 1000,  // LogBufferRecovery
+    zPill: 90, // SyncStatusPill — BELOW zSheet so bottom sheets always cover it
+    zSheet: 100, // BlockOverflowMenu, MidSessionSwapSheet, DeloadThisWeekSheet
     zOverlay: 1500, // OnboardingOverlay, ParQGate
-    zAuth: 2000,    // SessionExpiredBanner
+    zAuth: 2000, // SessionExpiredBanner
+    zPopover: 2500, // Term help popover — above every modal surface, below toasts
   },
 } as const;
 
@@ -39,4 +44,5 @@ export const FONTS = {
   mono: '"JetBrains Mono", "SF Mono", ui-monospace, monospace',
 } as const;
 
-export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
+export const API_BASE: string =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';

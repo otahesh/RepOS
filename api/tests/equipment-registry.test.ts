@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  EQUIPMENT_KEYS, isLegalEquipmentKey, equipmentKeyShape,
+  EQUIPMENT_KEYS,
+  isLegalEquipmentKey,
+  equipmentKeyShape,
 } from '../src/services/equipmentRegistry.js';
 
 describe('equipmentRegistry', () => {
@@ -19,11 +21,13 @@ describe('equipmentRegistry', () => {
 
   it('exposes a shape descriptor per key', () => {
     expect(equipmentKeyShape('dumbbells')).toEqual({
-      kind: 'load_range', fields: ['min_lb','max_lb','increment_lb'],
+      kind: 'load_range',
+      fields: ['min_lb', 'max_lb', 'increment_lb'],
     });
     expect(equipmentKeyShape('barbell')).toEqual({ kind: 'boolean' });
     expect(equipmentKeyShape('adjustable_bench')).toEqual({
-      kind: 'object', fields: ['incline','decline'],
+      kind: 'object',
+      fields: ['incline', 'decline'],
     });
   });
 });

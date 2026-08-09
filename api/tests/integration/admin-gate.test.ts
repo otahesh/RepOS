@@ -16,7 +16,9 @@ describe('requireAdminKeyOrCfAccess factory', () => {
     const saved = process.env.ADMIN_API_KEY;
     process.env.ADMIN_API_KEY = 'test-key-admin-gate';
     const app = Fastify({ logger: false });
-    app.get('/api/_test/dual', { preHandler: requireAdminKeyOrCfAccess() }, async () => ({ ok: true }));
+    app.get('/api/_test/dual', { preHandler: requireAdminKeyOrCfAccess() }, async () => ({
+      ok: true,
+    }));
     try {
       const good = await app.inject({
         method: 'GET',

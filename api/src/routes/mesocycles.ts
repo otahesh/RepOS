@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { getTodayWorkout } from '../services/getTodayWorkout.js';
 import { computeVolumeRollup } from '../services/volumeRollup.js';
+import { UuidParamSchema } from '../schemas/idParams.js';
 import type {
   MesocycleDetailResponse,
   MesocycleAbandonResponse,
@@ -12,21 +14,23 @@ import type {
 
 export async function mesocycleRoutes(app: FastifyInstance) {
   // /today must be registered before /:id so the literal path wins over the param.
-  app.get(
-    '/mesocycles/today',
-    { preHandler: requireBearerOrCfAccess },
-    async (req, _reply) => {
-      const userId = (req as any).userId as string;
-      return getTodayWorkout(userId);
-    },
-  );
+  app.get('/mesocycles/today', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
+    const userId = requireUserId(req);
+    return getTodayWorkout(userId);
+  });
 
   app.get<{ Params: { id: string } }>(
     '/mesocycles/:id',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
-      const { rows: [run] } = await db.query(
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const {
+        rows: [run],
+      } = await db.query(
         `SELECT id, user_program_id, user_id,
                 to_char(start_date, 'YYYY-MM-DD') AS start_date,
                 start_tz, weeks, current_week, status, finished_at, created_at, updated_at
@@ -55,11 +59,15 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/volume-rollup',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
-      const { rows } = await db.query(
-        `SELECT id FROM mesocycle_runs WHERE id=$1 AND user_id=$2`,
-        [req.params.id, userId],
-      );
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
+      const { rows } = await db.query(`SELECT id FROM mesocycle_runs WHERE id=$1 AND user_id=$2`, [
+        req.params.id,
+        userId,
+      ]);
       if (rows.length === 0) {
         reply.code(404);
         return { error: 'mesocycle_run not found', field: 'id' };
@@ -73,10 +81,16 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/recap-stats',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
 
       // Ownership + existence check; grab weeks while we're at it.
-      const { rows: [run] } = await db.query<{ id: string; weeks: number; finished_at: string | null }>(
+      const {
+        rows: [run],
+      } = await db.query<{ id: string; weeks: number; finished_at: string | null }>(
         `SELECT id, weeks, finished_at FROM mesocycle_runs WHERE id=$1 AND user_id=$2`,
         [req.params.id, userId],
       );
@@ -89,7 +103,9 @@ export async function mesocycleRoutes(app: FastifyInstance) {
       // this run's day_workouts. We don't filter by day_workouts.status because
       // a skipped day may still have set_logs if the user logged anyway; count
       // whatever was actually logged.
-      const { rows: [setRow] } = await db.query<{ total_sets: string }>(
+      const {
+        rows: [setRow],
+      } = await db.query<{ total_sets: string }>(
         `SELECT COUNT(sl.id) AS total_sets
          FROM set_logs sl
          JOIN planned_sets ps ON ps.id = sl.planned_set_id
@@ -106,7 +122,9 @@ export async function mesocycleRoutes(app: FastifyInstance) {
       // against max per-exercise in all prior runs. An exercise counts as a
       // PR if this-run max > prior max (or if there is no prior log at all).
       const runCutoff = run.finished_at ?? 'now()';
-      const { rows: [prRow] } = await db.query<{ prs: string }>(
+      const {
+        rows: [prRow],
+      } = await db.query<{ prs: string }>(
         `WITH this_run_maxes AS (
            SELECT ps.exercise_id, MAX(sl.performed_load_lbs) AS max_lbs
            FROM set_logs sl
@@ -139,10 +157,56 @@ export async function mesocycleRoutes(app: FastifyInstance) {
       );
       const prs = parseInt(prRow?.prs ?? '0', 10);
 
+      // Duration PRs — mirrors the load-PR comparison: this run's longest
+      // hold per exercise vs the max across all earlier runs. load_lbs of the
+      // best-duration set rides along for the "@ 70 lb" recap label.
+      const { rows: durationPrRows } = await db.query<{
+        exercise_slug: string;
+        exercise_name: string;
+        best_duration_sec: number;
+        load_lbs: number | null;
+      }>(
+        `WITH this_run_best AS (
+           SELECT DISTINCT ON (ps.exercise_id)
+                  ps.exercise_id, sl.performed_duration_sec AS best_duration_sec,
+                  sl.performed_load_lbs::float AS load_lbs
+           FROM set_logs sl
+           JOIN planned_sets ps ON ps.id = sl.planned_set_id
+           JOIN day_workouts dw ON dw.id = ps.day_workout_id
+           WHERE dw.mesocycle_run_id = $1
+             AND sl.performed_duration_sec IS NOT NULL
+           ORDER BY ps.exercise_id, sl.performed_duration_sec DESC
+         ),
+         prior_best AS (
+           SELECT ps2.exercise_id, MAX(sl2.performed_duration_sec) AS best_duration_sec
+           FROM set_logs sl2
+           JOIN planned_sets ps2 ON ps2.id = sl2.planned_set_id
+           JOIN day_workouts dw2 ON dw2.id = ps2.day_workout_id
+           JOIN mesocycle_runs mr2 ON mr2.id = dw2.mesocycle_run_id
+           WHERE mr2.user_id = $2
+             AND mr2.id <> $1
+             AND sl2.performed_duration_sec IS NOT NULL
+             AND COALESCE(mr2.finished_at, now()) < $3
+           GROUP BY ps2.exercise_id
+         )
+         SELECT e.slug AS exercise_slug, e.name AS exercise_name,
+                trb.best_duration_sec, trb.load_lbs
+         FROM this_run_best trb
+         JOIN exercises e ON e.id = trb.exercise_id
+         WHERE NOT EXISTS (
+           SELECT 1 FROM prior_best pb
+           WHERE pb.exercise_id = trb.exercise_id
+             AND pb.best_duration_sec >= trb.best_duration_sec
+         )
+         ORDER BY trb.best_duration_sec DESC`,
+        [run.id, userId, runCutoff],
+      );
+
       const recap: MesocycleRecapStatsResponse = {
         weeks: run.weeks,
         total_sets,
         prs,
+        duration_prs: durationPrRows,
       };
       return recap;
     },
@@ -152,11 +216,17 @@ export async function mesocycleRoutes(app: FastifyInstance) {
     '/mesocycles/:id/abandon',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      if (!UuidParamSchema.safeParse(req.params).success) {
+        reply.code(404);
+        return { error: 'mesocycle_run not found', field: 'id' };
+      }
+      const userId = requireUserId(req);
       const client = await db.connect();
       try {
         await client.query('BEGIN');
-        const { rows: [run] } = await client.query<{ id: string; status: string }>(
+        const {
+          rows: [run],
+        } = await client.query<{ id: string; status: string }>(
           `SELECT id, status FROM mesocycle_runs
            WHERE id=$1 AND user_id=$2 FOR UPDATE`,
           [req.params.id, userId],
@@ -171,8 +241,13 @@ export async function mesocycleRoutes(app: FastifyInstance) {
           reply.code(409);
           return { error: 'not_active', current_status: run.status };
         }
-        const { rows: [updated] } = await client.query<{
-          id: string; status: string; finished_at: string; user_program_id: string;
+        const {
+          rows: [updated],
+        } = await client.query<{
+          id: string;
+          status: string;
+          finished_at: string;
+          user_program_id: string;
         }>(
           `UPDATE mesocycle_runs
               SET status='abandoned', finished_at=now(), updated_at=now()
@@ -201,7 +276,11 @@ export async function mesocycleRoutes(app: FastifyInstance) {
         };
         return abandonResp;
       } catch (e) {
-        try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* already rolled back */
+        }
         throw e;
       } finally {
         client.release();

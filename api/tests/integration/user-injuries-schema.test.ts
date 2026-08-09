@@ -10,7 +10,9 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
 describe('user_injuries schema (migration 032)', () => {
-  afterAll(async () => { await db.end(); });
+  afterAll(async () => {
+    await db.end();
+  });
 
   it('has user_id, joint, severity, notes, onset_at, created_at, updated_at columns', async () => {
     const { rows } = await db.query(
@@ -25,8 +27,14 @@ describe('user_injuries schema (migration 032)', () => {
     expect(cols.severity).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
     expect(cols.notes).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
     expect(cols.onset_at).toMatchObject({ data_type: 'date', is_nullable: 'YES' });
-    expect(cols.created_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
-    expect(cols.updated_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+    expect(cols.created_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
+    expect(cols.updated_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
   });
 
   it('enforces PRIMARY KEY (user_id, joint)', async () => {

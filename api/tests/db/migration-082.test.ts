@@ -166,8 +166,25 @@ describe('migration 082 — cf_synced_at must be cleared when CF membership chan
 
     // Independent source of truth: what the runner actually applies in the
     // 080–089 range on a fresh database.
+    //
+    // The 08x range is NOT W9's alone. W9 was built on a local branch while
+    // `main` independently shipped 080_exercise_guides.sql and
+    // 081_users_beta_disclaimer.sql, so both numbers exist twice. The range is
+    // therefore no longer a proxy for "W9's migrations" and has to be narrowed
+    // by an explicit exclusion list rather than by the number.
+    //
+    // Exclusion, not enumeration (the W9 sweep lesson): anything new in the
+    // range lands in `w9Range` by default and fails the equality below, which
+    // forces a deliberate choice — extend the unwind helper if it IS W9's, or
+    // list it here if it is not. The failure direction is a loud false alarm,
+    // never a silent blind spot.
+    const NON_W9_08X = ['080_exercise_guides.sql', '081_users_beta_disclaimer.sql'];
     const firstRun = await runMigrations(p2);
-    const discovered = firstRun.filter((f) => /^08\d_/.test(f)).sort();
+    const range08x = firstRun.filter((f) => /^08\d_/.test(f)).sort();
+    // The exclusion list must stay honest too: a name that no longer exists
+    // means someone renamed a migration and left this list describing nothing.
+    for (const f of NON_W9_08X) expect(range08x, `${f} missing from the 08x range`).toContain(f);
+    const discovered = range08x.filter((f) => !NON_W9_08X.includes(f));
     expect(discovered.length).toBeGreaterThan(0);
     // Pins the constant against reality. Add 083 without listing it here and
     // this fails, which is the whole point.

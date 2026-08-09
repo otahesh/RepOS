@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
+import { clientIp } from '../utils/clientIp.js';
 
 function flagPath(): string {
   return process.env.MAINTENANCE_FLAG_PATH ?? '/config/maintenance.flag';
@@ -81,32 +82,36 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.post('/maintenance/clear', { preHandler: requireAdminKeyOrCfAccess() }, async (req, reply) => {
-    // Append restore_complete row to backup_runs (C-AUDIT-SENTINEL —
-    // this is the post-clear historical audit; populated from the sentinel).
-    const sentinel = readSentinel();
-    if (sentinel) {
-      await db.query(
-        `INSERT INTO backup_runs (trigger, event_kind, status, file_path,
+  app.post(
+    '/maintenance/clear',
+    { preHandler: requireAdminKeyOrCfAccess() },
+    async (req, reply) => {
+      // Append restore_complete row to backup_runs (C-AUDIT-SENTINEL —
+      // this is the post-clear historical audit; populated from the sentinel).
+      const sentinel = readSentinel();
+      if (sentinel) {
+        await db.query(
+          `INSERT INTO backup_runs (trigger, event_kind, status, file_path,
                                   error_message, admin_user_id, started_at, finished_at)
          VALUES ('restore', 'restore_complete', $1, $2, $3, $4, $5, now())`,
-        [
-          sentinel.status === 'ok' ? 'ok' : 'failed',
-          sentinel.source_filename,
-          // Clearing maintenance DELETES the sentinel, so a warning that is
-          // never copied here vanishes with it. Keep the row's status honest
-          // ('ok' — the restore did succeed) while preserving the note in the
-          // permanent audit trail. A real error always wins the column.
-          sentinel.error_message ?? sentinel.warning_message ?? null,
-          (req as any).userId ?? sentinel.admin_user_id ?? null,
-          sentinel.started_at,
-        ],
-      );
-      if (existsSync(sentinelPath())) unlinkSync(sentinelPath());
-    }
-    if (existsSync(flagPath())) unlinkSync(flagPath());
-    return reply.code(204).send();
-  });
+          [
+            sentinel.status === 'ok' ? 'ok' : 'failed',
+            sentinel.source_filename,
+            // Clearing maintenance DELETES the sentinel, so a warning that is
+            // never copied here vanishes with it. Keep the row's status honest
+            // ('ok' — the restore did succeed) while preserving the note in the
+            // permanent audit trail. A real error always wins the column.
+            sentinel.error_message ?? sentinel.warning_message ?? null,
+            req.userId ?? sentinel.admin_user_id ?? null,
+            sentinel.started_at,
+          ],
+        );
+        if (existsSync(sentinelPath())) unlinkSync(sentinelPath());
+      }
+      if (existsSync(flagPath())) unlinkSync(flagPath());
+      return reply.code(204).send();
+    },
+  );
 
   app.post(
     '/maintenance/restore-pre-snapshot',
@@ -127,11 +132,8 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const { kickOffRestore } = await import('../services/restoreRunner.js');
       const filename = sourcePath.split('/').pop()!;
       const result = await kickOffRestore(filename, {
-        adminUserId: (req as any).userId ?? null,
-        sourceIp:
-          (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-          req.ip ??
-          null,
+        adminUserId: req.userId ?? null,
+        sourceIp: clientIp(req),
       });
       return reply.code(202).send({ restore_id: result.restore_id, source: filename });
     },

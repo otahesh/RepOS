@@ -21,7 +21,9 @@ export function validateSeed(seeds: ExerciseSeed[]): ValidateResult {
 
     const sum = Object.values(s.muscle_contributions).reduce((a, b) => a + b, 0);
     if (sum < MIN_SUM || sum > MAX_SUM) {
-      errors.push(`[${s.slug}] contribution sum ${sum.toFixed(2)} outside [${MIN_SUM}, ${MAX_SUM}]`);
+      errors.push(
+        `[${s.slug}] contribution sum ${sum.toFixed(2)} outside [${MIN_SUM}, ${MAX_SUM}]`,
+      );
     }
   }
 
@@ -36,12 +38,15 @@ export function validateSeed(seeds: ExerciseSeed[]): ValidateResult {
   }
 
   // 3. Cycle detection (DFS)
-  const parentOf = new Map(seeds.filter(s => s.parent_slug).map(s => [s.slug, s.parent_slug!]));
+  const parentOf = new Map(seeds.filter((s) => s.parent_slug).map((s) => [s.slug, s.parent_slug!]));
   for (const start of parentOf.keys()) {
     const seen = new Set<string>();
     let cur: string | undefined = start;
     while (cur) {
-      if (seen.has(cur)) { errors.push(`parent cycle detected involving "${start}"`); break; }
+      if (seen.has(cur)) {
+        errors.push(`parent cycle detected involving "${start}"`);
+        break;
+      }
       seen.add(cur);
       cur = parentOf.get(cur);
     }

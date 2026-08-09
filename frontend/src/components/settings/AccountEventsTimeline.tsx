@@ -182,8 +182,7 @@ export function AccountEventsTimeline(): JSX.Element {
             color: TOKENS.textDim,
           }}
         >
-          A record of changes to your account — each{' '}
-          <Term k="session">session</Term> and{' '}
+          A record of changes to your account — each <Term k="session">session</Term> and{' '}
           <Term k="bearer_token">bearer token</Term> event, newest first.
         </p>
       </div>
@@ -247,9 +246,7 @@ export function AccountEventsTimeline(): JSX.Element {
                     borderTop: i > 0 ? `1px solid ${TOKENS.line}` : 'none',
                   }}
                 >
-                  <div
-                    style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
-                  >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: TOKENS.text }}>
                       {humanizeKind(row.kind)}
                     </span>
@@ -265,9 +262,7 @@ export function AccountEventsTimeline(): JSX.Element {
                     >
                       {row.ip ? <span>{row.ip}</span> : null}
                       {detail ? <span>{detail}</span> : null}
-                      {row.user_email_at_event ? (
-                        <span>{row.user_email_at_event}</span>
-                      ) : null}
+                      {row.user_email_at_event ? <span>{row.user_email_at_event}</span> : null}
                     </span>
                   </div>
                   <time

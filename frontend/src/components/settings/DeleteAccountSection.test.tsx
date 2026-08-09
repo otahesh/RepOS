@@ -30,9 +30,7 @@ describe('DeleteAccountSection', () => {
 
   it('opens the heavy-tier dialog with a disabled Confirm until the phrase is typed', async () => {
     render(<DeleteAccountSection email="a@b.com" />);
-    await userEvent.click(
-      screen.getByRole('button', { name: /delete account/i }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /delete account/i }));
 
     const dialog = screen.getByRole('dialog', { name: /delete your account/i });
     expect(dialog).toBeInTheDocument();
@@ -59,26 +57,15 @@ describe('DeleteAccountSection', () => {
     vi.mocked(api.deleteAccount).mockResolvedValue();
 
     render(<DeleteAccountSection email="a@b.com" />);
-    await userEvent.click(
-      screen.getByRole('button', { name: /delete account/i }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /delete account/i }));
     const dialog = screen.getByRole('dialog', { name: /delete your account/i });
-    await userEvent.type(
-      screen.getByRole('textbox'),
-      CONFIRM_DELETE_ACCOUNT_PHRASE,
-    );
-    await userEvent.click(
-      within(dialog).getByRole('button', { name: /^delete account$/i }),
-    );
+    await userEvent.type(screen.getByRole('textbox'), CONFIRM_DELETE_ACCOUNT_PHRASE);
+    await userEvent.click(within(dialog).getByRole('button', { name: /^delete account$/i }));
 
     await waitFor(() =>
-      expect(api.deleteAccount).toHaveBeenCalledWith(
-        CONFIRM_DELETE_ACCOUNT_PHRASE,
-      ),
+      expect(api.deleteAccount).toHaveBeenCalledWith(CONFIRM_DELETE_ACCOUNT_PHRASE),
     );
-    await waitFor(() =>
-      expect(assign).toHaveBeenCalledWith('/cdn-cgi/access/logout'),
-    );
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/cdn-cgi/access/logout'));
   });
 
   it('on rejection shows an error toast and does NOT redirect', async () => {
@@ -91,22 +78,13 @@ describe('DeleteAccountSection', () => {
     vi.mocked(api.deleteAccount).mockRejectedValue(new Error('HTTP 500'));
 
     render(<DeleteAccountSection email="a@b.com" />);
-    await userEvent.click(
-      screen.getByRole('button', { name: /delete account/i }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /delete account/i }));
     const dialog = screen.getByRole('dialog', { name: /delete your account/i });
-    await userEvent.type(
-      screen.getByRole('textbox'),
-      CONFIRM_DELETE_ACCOUNT_PHRASE,
-    );
-    await userEvent.click(
-      within(dialog).getByRole('button', { name: /^delete account$/i }),
-    );
+    await userEvent.type(screen.getByRole('textbox'), CONFIRM_DELETE_ACCOUNT_PHRASE);
+    await userEvent.click(within(dialog).getByRole('button', { name: /^delete account$/i }));
 
     await waitFor(() =>
-      expect(pushToast).toHaveBeenCalledWith(
-        expect.objectContaining({ severity: 'error' }),
-      ),
+      expect(pushToast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' })),
     );
     expect(assign).not.toHaveBeenCalled();
   });

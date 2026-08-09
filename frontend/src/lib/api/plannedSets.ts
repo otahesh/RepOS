@@ -4,6 +4,7 @@
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 
 export { ApiError } from './_http';
@@ -23,8 +24,11 @@ export type PlannedSetPatchResponse = {
   block_idx: number;
   set_idx: number;
   exercise_id: string;
-  target_reps_low: number;
-  target_reps_high: number;
+  /** Exactly one measurement dimension is populated (reps pair XOR duration pair). */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   target_load_hint: string | null;
   rest_sec: number;
@@ -40,21 +44,26 @@ export type PlannedSetSubstituteResponse = {
   overridden_at: string;
 };
 
-export async function patchPlannedSet(id: string, patch: PlannedSetPatch): Promise<PlannedSetPatchResponse> {
-  const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify(patch),
+export async function patchPlannedSet(
+  id: string,
+  patch: PlannedSetPatch,
+): Promise<PlannedSetPatchResponse> {
+  const res = await apiFetch(`/api/planned-sets/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
   });
   return jsonOrThrow<PlannedSetPatchResponse>(res);
 }
 
 export async function substitutePlannedSet(
   id: string,
-  body: { to_exercise_id: string }
+  body: { to_exercise_id: string },
 ): Promise<PlannedSetSubstituteResponse> {
-  const res = await fetch(`/api/planned-sets/${encodeURIComponent(id)}/substitute`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin', body: JSON.stringify(body),
+  const res = await apiFetch(`/api/planned-sets/${encodeURIComponent(id)}/substitute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
   return jsonOrThrow<PlannedSetSubstituteResponse>(res);
 }

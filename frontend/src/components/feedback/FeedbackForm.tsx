@@ -47,9 +47,15 @@ export function FeedbackForm({
         rows={5}
         onChange={(e) => setBody(e.target.value)}
         style={{
-          padding: '10px 12px', background: TOKENS.bg, color: TOKENS.text,
-          border: `1px solid ${TOKENS.lineStrong}`, borderRadius: 8, fontSize: 14,
-          fontFamily: FONTS.ui, resize: 'vertical', minHeight: 96,
+          padding: '10px 12px',
+          background: TOKENS.bg,
+          color: TOKENS.text,
+          border: `1px solid ${TOKENS.lineStrong}`,
+          borderRadius: 8,
+          fontSize: 14,
+          fontFamily: FONTS.ui,
+          resize: 'vertical',
+          minHeight: 96,
         }}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -61,10 +67,15 @@ export function FeedbackForm({
           onClick={() => void handleSend()}
           disabled={!canSend}
           style={{
-            padding: '8px 18px', borderRadius: 6, border: 'none',
+            padding: '8px 18px',
+            borderRadius: 6,
+            border: 'none',
             background: canSend ? TOKENS.accent : TOKENS.surface,
             color: canSend ? '#fff' : TOKENS.textMute,
-            fontFamily: FONTS.ui, fontSize: 13, fontWeight: 600, letterSpacing: 0.6,
+            fontFamily: FONTS.ui,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: 0.6,
             cursor: canSend ? 'pointer' : 'not-allowed',
           }}
         >

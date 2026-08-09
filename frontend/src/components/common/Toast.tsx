@@ -1,25 +1,29 @@
-import { useEffect } from 'react'
-import { TOKENS, FONTS } from '../../tokens'
+import { useEffect } from 'react';
+import { TOKENS, FONTS } from '../../tokens';
 
-export type ToastSeverity = 'info' | 'success' | 'warn' | 'error'
+export type ToastSeverity = 'info' | 'success' | 'warn' | 'error';
 
 export interface ToastProps {
-  id: string
-  severity: ToastSeverity
-  body: string
-  durationMs?: number
-  actionLabel?: string
-  onAction?: () => void
-  onDismiss: (id: string) => void
+  id: string;
+  severity: ToastSeverity;
+  body: string;
+  durationMs?: number;
+  actionLabel?: string;
+  onAction?: () => void;
+  onDismiss: (id: string) => void;
 }
 
 function borderColorFor(sev: ToastSeverity): string {
   switch (sev) {
-    case 'success': return TOKENS.good
-    case 'warn':    return TOKENS.warn
-    case 'error':   return TOKENS.danger
+    case 'success':
+      return TOKENS.good;
+    case 'warn':
+      return TOKENS.warn;
+    case 'error':
+      return TOKENS.danger;
     case 'info':
-    default:        return TOKENS.textDim
+    default:
+      return TOKENS.textDim;
   }
 }
 
@@ -41,13 +45,13 @@ export function Toast({
   onDismiss,
 }: ToastProps): JSX.Element {
   useEffect(() => {
-    const handle = window.setTimeout(() => onDismiss(id), durationMs)
-    return () => window.clearTimeout(handle)
-  }, [id, durationMs, onDismiss])
+    const handle = window.setTimeout(() => onDismiss(id), durationMs);
+    return () => window.clearTimeout(handle);
+  }, [id, durationMs, onDismiss]);
 
-  const role = severity === 'error' ? 'alert' : 'status'
-  const ariaLive = severity === 'error' ? 'assertive' : 'polite'
-  const borderColor = borderColorFor(severity)
+  const role = severity === 'error' ? 'alert' : 'status';
+  const ariaLive = severity === 'error' ? 'assertive' : 'polite';
+  const borderColor = borderColorFor(severity);
 
   return (
     <div
@@ -74,7 +78,10 @@ export function Toast({
       {actionLabel && onAction ? (
         <button
           type="button"
-          onClick={() => { onAction(); onDismiss(id) }}
+          onClick={() => {
+            onAction();
+            onDismiss(id);
+          }}
           style={{
             background: 'transparent',
             border: `1px solid ${TOKENS.lineStrong}`,
@@ -108,5 +115,5 @@ export function Toast({
         ×
       </button>
     </div>
-  )
+  );
 }

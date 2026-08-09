@@ -9,18 +9,39 @@ import { FeedbackForm } from '../components/feedback/FeedbackForm';
 export default function SettingsFeedbackPage() {
   const { user } = useCurrentUser();
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div
+      style={{
+        maxWidth: 560,
+        margin: '0 auto',
+        padding: '24px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
       <header style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>Feedback</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>
+          Feedback
+        </h1>
         <p style={{ margin: 0, fontSize: 13, color: TOKENS.textDim }}>
           Found a bug or have an idea? Tell us — it goes straight to the team.
         </p>
       </header>
-      <section style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.line}`, borderRadius: 12, padding: 20 }}>
+      <section
+        style={{
+          background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`,
+          borderRadius: 12,
+          padding: 20,
+        }}
+      >
         <FeedbackForm />
       </section>
       {user?.is_admin && (
-        <Link to="/admin/feedback" style={{ color: TOKENS.accent, fontSize: 13, fontFamily: FONTS.mono, letterSpacing: 0.4 }}>
+        <Link
+          to="/admin/feedback"
+          style={{ color: TOKENS.accent, fontSize: 13, fontFamily: FONTS.mono, letterSpacing: 0.4 }}
+        >
           VIEW ALL FEEDBACK →
         </Link>
       )}

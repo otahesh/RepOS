@@ -13,12 +13,7 @@
 // destructive-confirm primitive. Delete uses W6's pushToast (light feedback).
 import { useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
-import {
-  listBackups,
-  deleteBackup,
-  restoreBackup,
-  type BackupItem,
-} from '../../lib/api/backups';
+import { listBackups, deleteBackup, restoreBackup, type BackupItem } from '../../lib/api/backups';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { pushToast } from '../common/ToastHost';
@@ -93,7 +88,14 @@ export function SnapshotTable(): JSX.Element {
 
   return (
     <>
-      <table style={{ width: '100%', fontFamily: FONTS.ui, color: TOKENS.text, borderCollapse: 'collapse' }}>
+      <table
+        style={{
+          width: '100%',
+          fontFamily: FONTS.ui,
+          color: TOKENS.text,
+          borderCollapse: 'collapse',
+        }}
+      >
         <thead>
           <tr style={{ textAlign: 'left', color: TOKENS.textDim, fontSize: 11 }}>
             <th style={{ textAlign: 'left', padding: '6px 8px' }}>FILE</th>
@@ -112,7 +114,9 @@ export function SnapshotTable(): JSX.Element {
               <td style={{ padding: '8px', fontFamily: FONTS.mono }}>
                 {Math.round(it.size_bytes / 1024)} KiB
               </td>
-              <td style={{ padding: '8px', fontFamily: FONTS.mono, fontSize: 11 }}>{it.created_at}</td>
+              <td style={{ padding: '8px', fontFamily: FONTS.mono, fontSize: 11 }}>
+                {it.created_at}
+              </td>
               <td style={{ padding: '8px' }}>
                 <Badge tier={it.verified_restorable} />
               </td>

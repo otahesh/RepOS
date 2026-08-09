@@ -10,10 +10,7 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import {
-  TokenMintResponseSchema,
-  TokenListResponseSchema,
-} from '../../src/schemas/tokens.js';
+import { TokenMintResponseSchema, TokenListResponseSchema } from '../../src/schemas/tokens.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 
@@ -23,10 +20,11 @@ let mintedTokenId: string;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.tokens.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.tokens.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
 }, 30_000);
 
@@ -49,7 +47,9 @@ describe('POST /api/tokens contract', () => {
     });
     expect(res.statusCode).toBe(201);
     const parsed = TokenMintResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(typeof parsed.data.token).toBe('string');
       // Token must be in "<prefix>.<secret>" format
@@ -79,12 +79,13 @@ describe('POST /api/tokens contract', () => {
     });
     expect(res.statusCode).toBe(201);
     const parsed = TokenMintResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
-      const { rows } = await db.query(
-        `SELECT scopes FROM device_tokens WHERE id = $1`,
-        [parsed.data.id],
-      );
+      const { rows } = await db.query(`SELECT scopes FROM device_tokens WHERE id = $1`, [
+        parsed.data.id,
+      ]);
       expect(rows[0].scopes).toEqual(['health:workouts:write']);
     }
   });
@@ -126,7 +127,9 @@ describe('GET /api/tokens contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = TokenListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data)).toBe(true);
     }

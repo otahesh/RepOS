@@ -37,20 +37,47 @@ export default function SettingsAccount(): JSX.Element {
   }
 
   return (
-    <div style={{ padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+    <div
+      style={{
+        padding: '24px 32px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        maxWidth: 720,
+      }}
+    >
       <div>
-        <div style={{ fontFamily: FONTS.mono, fontSize: 10, color: TOKENS.textMute, letterSpacing: 1.2, marginBottom: 4 }}>SETTINGS</div>
-        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, color: TOKENS.text }}>Account</h2>
+        <div
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 10,
+            color: TOKENS.textMute,
+            letterSpacing: 1.2,
+            marginBottom: 4,
+          }}
+        >
+          SETTINGS
+        </div>
+        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, color: TOKENS.text }}>
+          Account
+        </h2>
       </div>
 
       <AccountProfileEditor user={profile} />
 
       <ActiveSessionsTable />
 
-      <section style={{
-        background: TOKENS.surface, border: `1px solid ${TOKENS.line}`,
-        borderRadius: 12, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 10,
-      }}>
+      <section
+        style={{
+          background: TOKENS.surface,
+          border: `1px solid ${TOKENS.line}`,
+          borderRadius: 12,
+          padding: '20px 22px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
         <h3 style={{ fontSize: 14, fontWeight: 600, color: TOKENS.text, margin: 0 }}>Security</h3>
         <SignOutEverywhereButton />
       </section>

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import type {
@@ -8,13 +9,20 @@ import type {
 } from '../schemas/programs.js';
 
 export async function programRoutes(app: FastifyInstance) {
-  app.get('/program-templates', async (_req, reply) => {
-    const { rows } = await db.query(`
-      SELECT id, slug, name, description, weeks, days_per_week, version, created_at
-      FROM program_templates
-      WHERE archived_at IS NULL
-      ORDER BY slug ASC
-    `);
+  app.get<{ Querystring: { track?: string } }>('/program-templates', async (req, reply) => {
+    const track = req.query.track;
+    if (track !== undefined && !['beginner', 'intermediate', 'advanced'].includes(track)) {
+      reply.code(400);
+      return { error: 'track must be one of beginner|intermediate|advanced', field: 'track' };
+    }
+    const { rows } = await db.query(
+      `SELECT id, slug, name, description, weeks, days_per_week, track, version, created_at
+       FROM program_templates
+       WHERE archived_at IS NULL
+         AND ($1::text IS NULL OR track = $1)
+       ORDER BY slug ASC`,
+      [track ?? null],
+    );
     reply.header('cache-control', 'public, max-age=300');
     const listResp: ProgramTemplateListResponse = { templates: rows };
     return listResp;
@@ -22,7 +30,7 @@ export async function programRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { slug: string } }>('/program-templates/:slug', async (req, reply) => {
     const { rows } = await db.query(
-      `SELECT id, slug, name, description, weeks, days_per_week, structure, version,
+      `SELECT id, slug, name, description, weeks, days_per_week, track, structure, version,
               seed_key, seed_generation, created_at
        FROM program_templates
        WHERE slug=$1 AND archived_at IS NULL`,
@@ -33,7 +41,8 @@ export async function programRoutes(app: FastifyInstance) {
       return { error: 'template not found', field: 'slug' };
     }
     reply.header('cache-control', 'public, max-age=300');
-    const detail: ProgramTemplateDetailResponse = rows[0] as unknown as ProgramTemplateDetailResponse;
+    const detail: ProgramTemplateDetailResponse =
+      rows[0] as unknown as ProgramTemplateDetailResponse;
     return detail;
   });
 
@@ -41,8 +50,10 @@ export async function programRoutes(app: FastifyInstance) {
     '/program-templates/:slug/fork',
     { preHandler: requireBearerOrCfAccess },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
-      const { rows: [tmpl] } = await db.query(
+      const userId = requireUserId(req);
+      const {
+        rows: [tmpl],
+      } = await db.query(
         `SELECT id, version, name FROM program_templates
          WHERE slug=$1 AND archived_at IS NULL`,
         [req.params.slug],
@@ -51,7 +62,9 @@ export async function programRoutes(app: FastifyInstance) {
         reply.code(404);
         return { error: 'template not found', field: 'slug' };
       }
-      const { rows: [up] } = await db.query(
+      const {
+        rows: [up],
+      } = await db.query(
         `INSERT INTO user_programs
          (user_id, template_id, template_version, name, customizations, status)
          VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')

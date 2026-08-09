@@ -15,9 +15,9 @@ beforeEach(() => {
 
 describe('lib/api/account', () => {
   it('patchProfile PATCHes /api/me/profile with the field subset', async () => {
-    const spy = vi.spyOn(auth, 'apiFetch').mockResolvedValue(
-      new Response(JSON.stringify({ display_name: 'X' }), { status: 200 }),
-    );
+    const spy = vi
+      .spyOn(auth, 'apiFetch')
+      .mockResolvedValue(new Response(JSON.stringify({ display_name: 'X' }), { status: 200 }));
     const r = await patchProfile({ display_name: 'X' });
     expect(spy).toHaveBeenCalledWith(
       '/api/me/profile',
@@ -30,20 +30,13 @@ describe('lib/api/account', () => {
   });
 
   it('deleteAccount POSTs with the typed confirm', async () => {
-    const spy = vi
-      .spyOn(auth, 'apiFetch')
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const spy = vi.spyOn(auth, 'apiFetch').mockResolvedValue(new Response(null, { status: 204 }));
     await deleteAccount('DELETE my account');
-    expect(spy).toHaveBeenCalledWith(
-      '/api/me',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
+    expect(spy).toHaveBeenCalledWith('/api/me', expect.objectContaining({ method: 'DELETE' }));
   });
 
   it('signOutEverywhere returns void on 204', async () => {
-    vi.spyOn(auth, 'apiFetch').mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.spyOn(auth, 'apiFetch').mockResolvedValue(new Response(null, { status: 204 }));
     await expect(signOutEverywhere()).resolves.toBeUndefined();
   });
 
@@ -74,12 +67,11 @@ describe('lib/api/account', () => {
   });
 
   it('listEvents paginates with the keyset (before_ts, before_id) cursor', async () => {
-    const spy = vi.spyOn(auth, 'apiFetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({ events: [], next_cursor: null }),
-        { status: 200 },
-      ),
-    );
+    const spy = vi
+      .spyOn(auth, 'apiFetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ events: [], next_cursor: null }), { status: 200 }),
+      );
     await listEvents({
       before_ts: '2026-01-01T00:00:00Z',
       before_id: '42',
@@ -89,16 +81,11 @@ describe('lib/api/account', () => {
       expect.stringContaining('before_ts=2026-01-01'),
       expect.any(Object),
     );
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('before_id=42'),
-      expect.any(Object),
-    );
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('before_id=42'), expect.any(Object));
   });
 
   it('revokeSession DELETEs /api/account/sessions/:id with CSRF header', async () => {
-    const spy = vi
-      .spyOn(auth, 'apiFetch')
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const spy = vi.spyOn(auth, 'apiFetch').mockResolvedValue(new Response(null, { status: 204 }));
     await revokeSession('tok-123');
     expect(spy).toHaveBeenCalledWith(
       '/api/account/sessions/tok-123',
@@ -110,9 +97,7 @@ describe('lib/api/account', () => {
   });
 
   it('all state-changing requests send X-RepOS-CSRF: 1', async () => {
-    const spy = vi
-      .spyOn(auth, 'apiFetch')
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const spy = vi.spyOn(auth, 'apiFetch').mockResolvedValue(new Response(null, { status: 204 }));
     await deleteAccount('DELETE my account');
     expect(spy).toHaveBeenCalledWith(
       expect.any(String),

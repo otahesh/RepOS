@@ -5,7 +5,12 @@ import { z } from 'zod';
 // ---------------------------------------------------------------------------
 
 export const MESOCYCLE_STATUSES = [
-  'draft', 'active', 'paused', 'completed', 'archived', 'abandoned',
+  'draft',
+  'active',
+  'paused',
+  'completed',
+  'archived',
+  'abandoned',
 ] as const;
 export type MesocycleRunStatus = (typeof MESOCYCLE_STATUSES)[number];
 
@@ -17,10 +22,18 @@ const TodayNoActiveRunSchema = z.object({
   state: z.literal('no_active_run'),
 });
 
-const TodayRestSchema = z.object({
-  state: z.literal('rest'),
+// All day workouts finished (or the latest run itself is completed) — dates
+// are pacing hints under sequence semantics, so there is no 'rest' state.
+const TodayMesocycleCompleteSchema = z.object({
+  state: z.literal('mesocycle_complete'),
   run_id: z.string().uuid(),
-  scheduled_date: z.string(), // YYYY-MM-DD
+});
+
+const TodayPacingSchema = z.object({
+  status: z.enum(['ahead', 'on_pace', 'behind']),
+  // Whole days past the offered day's scheduled_date; present only when behind.
+  days_behind: z.number().int().min(1).optional(),
+  suggested_date: z.string(), // YYYY-MM-DD — the offered day's scheduled_date
 });
 
 const SuggestedSubstitutionSchema = z.object({
@@ -38,11 +51,28 @@ const TodaySetSchema = z.object({
     id: z.string().uuid(),
     slug: z.string(),
     name: z.string(),
+    // How the exercise is classified TODAY. Render mode must derive from the
+    // row's populated targets, not this field (rows materialized before a
+    // reclassification keep their original shape).
+    measurement: z.enum(['reps', 'duration']).optional(),
   }),
-  target_reps_low: z.number().int().min(1),
-  target_reps_high: z.number().int().min(1),
+  // Exactly one measurement dimension is populated (reps pair XOR duration pair).
+  target_reps_low: z.number().int().min(1).nullable(),
+  target_reps_high: z.number().int().min(1).nullable(),
+  target_duration_low_sec: z.number().int().min(1).nullable().optional(),
+  target_duration_high_sec: z.number().int().min(1).nullable().optional(),
   target_rir: z.number().int().min(0),
   rest_sec: z.number().int().min(0),
+  // Latest set_log for this planned set, or null if never logged. Fields pass
+  // through as-is (reps-only bodyweight logs have weight_lbs: null,
+  // duration-only holds have reps: null).
+  logged: z
+    .object({
+      weight_lbs: z.number().nullable(),
+      reps: z.number().int().nullable(),
+      duration_sec: z.number().int().nullable().optional(),
+    })
+    .nullable(),
   suggested_substitution: SuggestedSubstitutionSchema.optional(),
 });
 
@@ -57,6 +87,13 @@ const TodayCardioSchema = z.object({
   target_duration_sec: z.number().int().nullable(),
   target_distance_m: z.number().int().nullable(),
   target_zone: z.number().int().min(1).max(5).nullable(),
+  logged: z
+    .object({
+      duration_sec: z.number().int(),
+      distance_m: z.number().int().nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 
 const TodayDaySchema = z.object({
@@ -71,14 +108,21 @@ const TodayDaySchema = z.object({
 const TodayWorkoutSchema = z.object({
   state: z.literal('workout'),
   run_id: z.string().uuid(),
+  // Source template's experience track; the service always returns it (null for
+  // template-less runs). Optional here for backward-compat with mirror callers.
+  track: z.string().nullable().optional(),
+  // Run start_date (YYYY-MM-DD). Floors the backfill date picker client-side.
+  start_date: z.string(),
   day: TodayDaySchema,
+  pacing: TodayPacingSchema,
+  completed_today: z.boolean(),
   sets: z.array(TodaySetSchema),
   cardio: z.array(TodayCardioSchema),
 });
 
 export const TodayWorkoutResponseSchema = z.union([
   TodayNoActiveRunSchema,
-  TodayRestSchema,
+  TodayMesocycleCompleteSchema,
   TodayWorkoutSchema,
 ]);
 
@@ -171,6 +215,19 @@ export const MesocycleRecapStatsResponseSchema = z.object({
   // (or now() if the run is still active). Uses set_logs → planned_sets →
   // day_workouts chain; planned_cardio_blocks are excluded (no load).
   prs: z.number().int().min(0),
+  // Hold Best-Time PRs (measurement model): distinct duration exercises where
+  // this run's longest hold beats all prior runs'. Best Time is the ONLY PR
+  // for duration exercises (Hevy convention). Optional for rollout skew.
+  duration_prs: z
+    .array(
+      z.object({
+        exercise_slug: z.string(),
+        exercise_name: z.string(),
+        best_duration_sec: z.number().int().min(1),
+        load_lbs: z.number().nullable(), // null = bodyweight hold
+      }),
+    )
+    .optional(),
 });
 
 export type MesocycleRecapStatsResponse = z.infer<typeof MesocycleRecapStatsResponseSchema>;

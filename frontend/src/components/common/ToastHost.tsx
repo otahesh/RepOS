@@ -1,26 +1,26 @@
-import { useEffect, useState } from 'react'
-import { Toast, type ToastSeverity } from './Toast'
+import { useEffect, useState } from 'react';
+import { Toast, type ToastSeverity } from './Toast';
 
 export interface ToastSpec {
-  severity: ToastSeverity
-  body: string
-  durationMs?: number
-  actionLabel?: string
-  onAction?: () => void
+  severity: ToastSeverity;
+  body: string;
+  durationMs?: number;
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 interface ToastEntry extends ToastSpec {
-  id: string
+  id: string;
 }
 
 // Module-level listener set so pushToast() works from anywhere — non-React
 // callers (services, lib code) included. ToastHost subscribes on mount and
 // unsubscribes on unmount, so the set is the only piece that persists.
-type Listener = (entry: ToastEntry) => void
-const listeners = new Set<Listener>()
+type Listener = (entry: ToastEntry) => void;
+const listeners = new Set<Listener>();
 
 function nextId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
@@ -30,10 +30,10 @@ function nextId(): string {
  * that want to programmatically dismiss can do so (future use).
  */
 export function pushToast(spec: ToastSpec): string {
-  const id = nextId()
-  const entry: ToastEntry = { ...spec, id }
-  listeners.forEach((fn) => fn(entry))
-  return id
+  const id = nextId();
+  const entry: ToastEntry = { ...spec, id };
+  listeners.forEach((fn) => fn(entry));
+  return id;
 }
 
 /**
@@ -42,19 +42,19 @@ export function pushToast(spec: ToastSpec): string {
  * lose any in-flight toasts).
  */
 export function ToastHost(): JSX.Element {
-  const [toasts, setToasts] = useState<ToastEntry[]>([])
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
 
   useEffect(() => {
-    const onPush: Listener = (entry) => setToasts((prev) => [...prev, entry])
-    listeners.add(onPush)
+    const onPush: Listener = (entry) => setToasts((prev) => [...prev, entry]);
+    listeners.add(onPush);
     return () => {
-      listeners.delete(onPush)
-    }
-  }, [])
+      listeners.delete(onPush);
+    };
+  }, []);
 
   const handleDismiss = (id: string): void => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   return (
     <div
@@ -84,5 +84,5 @@ export function ToastHost(): JSX.Element {
         </div>
       ))}
     </div>
-  )
+  );
 }

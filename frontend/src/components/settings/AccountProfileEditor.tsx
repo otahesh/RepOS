@@ -75,28 +75,61 @@ export function AccountProfileEditor({ user }: Props): JSX.Element {
   };
 
   return (
-    <section aria-labelledby="profile-section-title" style={{
-      background: TOKENS.surface, border: `1px solid ${TOKENS.line}`,
-      borderRadius: 12, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14,
-    }}>
-      <h3 id="profile-section-title" style={{ fontSize: 14, fontWeight: 600, color: TOKENS.text, margin: 0 }}>Profile</h3>
+    <section
+      aria-labelledby="profile-section-title"
+      style={{
+        background: TOKENS.surface,
+        border: `1px solid ${TOKENS.line}`,
+        borderRadius: 12,
+        padding: '20px 22px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}
+    >
+      <h3
+        id="profile-section-title"
+        style={{ fontSize: 14, fontWeight: 600, color: TOKENS.text, margin: 0 }}
+      >
+        Profile
+      </h3>
 
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: TOKENS.textMute, letterSpacing: 1.2 }}>DISPLAY NAME</span>
+        <span
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 10,
+            color: TOKENS.textMute,
+            letterSpacing: 1.2,
+          }}
+        >
+          DISPLAY NAME
+        </span>
         <input
           aria-label="Display name"
           value={displayName}
           maxLength={80}
           onChange={(e) => setDisplayName(e.target.value)}
           style={{
-            padding: '8px 10px', background: TOKENS.bg, color: TOKENS.text,
-            border: `1px solid ${TOKENS.lineStrong}`, borderRadius: 6, fontSize: 13,
+            padding: '8px 10px',
+            background: TOKENS.bg,
+            color: TOKENS.text,
+            border: `1px solid ${TOKENS.lineStrong}`,
+            borderRadius: 6,
+            fontSize: 13,
           }}
         />
       </label>
 
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: TOKENS.textMute, letterSpacing: 1.2 }}>
+        <span
+          style={{
+            fontFamily: FONTS.mono,
+            fontSize: 10,
+            color: TOKENS.textMute,
+            letterSpacing: 1.2,
+          }}
+        >
           <Term k="IANA_timezone">TIME ZONE</Term>
         </span>
         <select
@@ -104,11 +137,19 @@ export function AccountProfileEditor({ user }: Props): JSX.Element {
           value={timezone}
           onChange={(e) => setTimezone(e.target.value)}
           style={{
-            padding: '8px 10px', background: TOKENS.bg, color: TOKENS.text,
-            border: `1px solid ${TOKENS.lineStrong}`, borderRadius: 6, fontSize: 13,
+            padding: '8px 10px',
+            background: TOKENS.bg,
+            color: TOKENS.text,
+            border: `1px solid ${TOKENS.lineStrong}`,
+            borderRadius: 6,
+            fontSize: 13,
           }}
         >
-          {IANA_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+          {IANA_TIMEZONES.map((tz) => (
+            <option key={tz} value={tz}>
+              {tz}
+            </option>
+          ))}
         </select>
       </label>
 
@@ -119,12 +160,19 @@ export function AccountProfileEditor({ user }: Props): JSX.Element {
           onClick={() => void handleSave()}
           disabled={saving}
           style={{
-            padding: '8px 16px', borderRadius: 6, border: 'none',
-            background: saving ? TOKENS.surface3 : TOKENS.accent, color: '#fff',
-            fontFamily: FONTS.ui, fontSize: 13, fontWeight: 600,
+            padding: '8px 16px',
+            borderRadius: 6,
+            border: 'none',
+            background: saving ? TOKENS.surface3 : TOKENS.accent,
+            color: '#fff',
+            fontFamily: FONTS.ui,
+            fontSize: 13,
+            fontWeight: 600,
             cursor: saving ? 'not-allowed' : 'pointer',
           }}
-        >{saving ? 'SAVING…' : 'SAVE'}</button>
+        >
+          {saving ? 'SAVING…' : 'SAVE'}
+        </button>
       </div>
     </section>
   );

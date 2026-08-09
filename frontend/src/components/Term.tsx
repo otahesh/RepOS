@@ -1,20 +1,35 @@
 import { type ReactNode, useState, useId, useCallback, useRef } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { TERMS, type TermKey } from '../lib/terms';
+import { TOKENS } from '../tokens';
 
 // Shared popover body — used by both variants so content stays consistent.
 // role is NOT a prop here — it's set on the outer Popover.Content wrapper.
-function PopoverBody({ term }: { term: NonNullable<typeof TERMS[TermKey]> }) {
+function PopoverBody({ term }: { term: NonNullable<(typeof TERMS)[TermKey]> }) {
   return (
     <>
-      <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12, letterSpacing: 0.5, color: '#4D8DFF', textTransform: 'uppercase' }}>
+      <div
+        style={{
+          fontWeight: 600,
+          marginBottom: 4,
+          fontSize: 12,
+          letterSpacing: 0.5,
+          color: '#4D8DFF',
+          textTransform: 'uppercase',
+        }}
+      >
         {term.full}
       </div>
       <div style={{ marginBottom: 8 }}>{term.plain}</div>
       <div style={{ color: 'rgba(255,255,255,0.7)', fontStyle: 'italic' }}>{term.whyMatters}</div>
       {term.citation ? (
         <div style={{ marginTop: 10, fontSize: 11 }}>
-          <a href={term.citation.url} target="_blank" rel="noopener noreferrer" style={{ color: '#4D8DFF' }}>
+          <a
+            href={term.citation.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#4D8DFF' }}
+          >
             {term.citation.label} ↗
           </a>
         </div>
@@ -35,7 +50,8 @@ const popoverContentStyle: React.CSSProperties = {
   fontSize: 13,
   lineHeight: 1.4,
   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-  zIndex: 100,
+  // Portals to <body>; must out-rank any modal hosting the trigger (see tokens).
+  zIndex: TOKENS.zModal.zPopover,
 };
 
 /**
@@ -47,7 +63,7 @@ function TermButton({
   label,
   compact,
 }: {
-  term: NonNullable<typeof TERMS[TermKey]>;
+  term: NonNullable<(typeof TERMS)[TermKey]>;
   label: ReactNode;
   compact: boolean;
 }) {
@@ -70,7 +86,11 @@ function TermButton({
           }}
         >
           {label}
-          {compact ? <span style={{ marginLeft: 4, color: 'rgba(255,255,255,0.5)', fontSize: '0.85em' }}>ⓘ</span> : null}
+          {compact ? (
+            <span style={{ marginLeft: 4, color: 'rgba(255,255,255,0.5)', fontSize: '0.85em' }}>
+              ⓘ
+            </span>
+          ) : null}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -104,7 +124,7 @@ function TermAbbr({
   label,
   tooltipId,
 }: {
-  term: NonNullable<typeof TERMS[TermKey]>;
+  term: NonNullable<(typeof TERMS)[TermKey]>;
   label: ReactNode;
   tooltipId: string;
 }) {
@@ -145,10 +165,16 @@ function TermAbbr({
             WebkitTextDecorationStyle: 'dotted',
           }}
           // Hover
-          onMouseEnter={() => { cancelClose(); setOpen(true); }}
+          onMouseEnter={() => {
+            cancelClose();
+            setOpen(true);
+          }}
           onMouseLeave={scheduleClose}
           // Keyboard focus / blur
-          onFocus={() => { cancelClose(); setOpen(true); }}
+          onFocus={() => {
+            cancelClose();
+            setOpen(true);
+          }}
           onBlur={scheduleClose}
           // Touch — pointerdown fires on first tap before any mouse events
           onPointerDown={(e) => {
@@ -173,8 +199,14 @@ function TermAbbr({
           sideOffset={8}
           style={popoverContentStyle}
           // Keep popover open while mouse is inside it
-          onMouseEnter={() => { overContent.current = true; cancelClose(); }}
-          onMouseLeave={() => { overContent.current = false; scheduleClose(); }}
+          onMouseEnter={() => {
+            overContent.current = true;
+            cancelClose();
+          }}
+          onMouseLeave={() => {
+            overContent.current = false;
+            scheduleClose();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false);
           }}

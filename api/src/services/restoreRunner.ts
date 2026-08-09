@@ -182,11 +182,10 @@ export async function kickOffRestore(
   // 7. Detach the actual work. Skipped in NODE_ENV=test (kickoff contract is
   //    tested via inject; the shell flow is exercised by tests/dr/).
   if (process.env.NODE_ENV !== 'test') {
-    spawn(
-      'bash',
-      [`${scriptsDir()}/run-restore.sh`, sourcePath, restoreId, preSnapshotFilename],
-      { detached: true, stdio: 'ignore' },
-    ).unref();
+    spawn('bash', [`${scriptsDir()}/run-restore.sh`, sourcePath, restoreId, preSnapshotFilename], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
   }
 
   return { restore_id: restoreId, source_file: sourceFilename };

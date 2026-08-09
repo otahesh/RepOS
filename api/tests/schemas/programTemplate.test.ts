@@ -2,13 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { ProgramTemplateSchema } from '../../src/schemas/programTemplate.js';
 
 const baseDay = (extra: Partial<any> = {}) => ({
-  idx: 0, day_offset: 0, kind: 'strength' as const, name: 'Mon',
-  blocks: [{
-    exercise_slug: 'barbell-back-squat',
-    mev: 8, mav: 14,
-    target_reps_low: 5, target_reps_high: 8,
-    target_rir: 2, rest_sec: 180,
-  }],
+  idx: 0,
+  day_offset: 0,
+  kind: 'strength' as const,
+  name: 'Mon',
+  blocks: [
+    {
+      exercise_slug: 'barbell-back-squat',
+      mev: 8,
+      mav: 14,
+      target_reps_low: 5,
+      target_reps_high: 8,
+      target_rir: 2,
+      rest_sec: 180,
+    },
+  ],
   ...extra,
 });
 
@@ -18,6 +26,7 @@ const validTemplate = {
   description: 'desc',
   weeks: 5,
   days_per_week: 3,
+  track: 'beginner' as const,
   structure: {
     _v: 1,
     days: [
@@ -32,6 +41,52 @@ describe('ProgramTemplateSchema', () => {
   it('accepts a valid 3-day template', () => {
     const r = ProgramTemplateSchema.safeParse(validTemplate);
     expect(r.success).toBe(true);
+  });
+
+  const durationBlock = {
+    exercise_slug: 'side-plank',
+    mev: 2,
+    mav: 3,
+    target_duration_low_sec: 30,
+    target_duration_high_sec: 45,
+    target_rir: 2,
+    rest_sec: 60,
+  };
+  const withBlock = (block: object) => ({
+    ...validTemplate,
+    days_per_week: 1,
+    structure: { _v: 1, days: [baseDay({ blocks: [block] })] },
+  });
+
+  it('accepts a duration-targeted block (holds)', () => {
+    const r = ProgramTemplateSchema.safeParse(withBlock(durationBlock));
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects a block with BOTH reps and duration targets', () => {
+    const r = ProgramTemplateSchema.safeParse(
+      withBlock({ ...durationBlock, target_reps_low: 8, target_reps_high: 15 }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a block with NEITHER reps nor duration targets', () => {
+    const { target_duration_low_sec, target_duration_high_sec, ...neither } = durationBlock;
+    const r = ProgramTemplateSchema.safeParse(withBlock(neither));
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a half-set duration pair', () => {
+    const { target_duration_high_sec, ...half } = durationBlock;
+    const r = ProgramTemplateSchema.safeParse(withBlock(half));
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects inverted duration range', () => {
+    const r = ProgramTemplateSchema.safeParse(
+      withBlock({ ...durationBlock, target_duration_low_sec: 50, target_duration_high_sec: 30 }),
+    );
+    expect(r.success).toBe(false);
   });
 
   it('rejects bad slug', () => {
@@ -99,12 +154,19 @@ describe('ProgramTemplateSchema', () => {
         _v: 1,
         days: [
           baseDay({
-            idx: 0, day_offset: 0,
-            blocks: [{
-              exercise_slug: 'x', mev: 14, mav: 8,
-              target_reps_low: 5, target_reps_high: 8,
-              target_rir: 2, rest_sec: 180,
-            }],
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 14,
+                mav: 8,
+                target_reps_low: 5,
+                target_reps_high: 8,
+                target_rir: 2,
+                rest_sec: 180,
+              },
+            ],
           }),
         ],
       },
@@ -122,14 +184,23 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [baseDay({
-          idx: 0, day_offset: 0,
-          blocks: [{
-            exercise_slug: 'x', mev: 8, mav: 14,
-            target_reps_low: 5, target_reps_high: 8,
-            target_rir: 0, rest_sec: 180,
-          }],
-        })],
+        days: [
+          baseDay({
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 8,
+                mav: 14,
+                target_reps_low: 5,
+                target_reps_high: 8,
+                target_rir: 0,
+                rest_sec: 180,
+              },
+            ],
+          }),
+        ],
       },
       days_per_week: 1,
     };
@@ -142,14 +213,23 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [baseDay({
-          idx: 0, day_offset: 0,
-          blocks: [{
-            exercise_slug: 'x', mev: 8, mav: 14,
-            target_reps_low: 12, target_reps_high: 5,
-            target_rir: 2, rest_sec: 180,
-          }],
-        })],
+        days: [
+          baseDay({
+            idx: 0,
+            day_offset: 0,
+            blocks: [
+              {
+                exercise_slug: 'x',
+                mev: 8,
+                mav: 14,
+                target_reps_low: 12,
+                target_reps_high: 5,
+                target_rir: 2,
+                rest_sec: 180,
+              },
+            ],
+          }),
+        ],
       },
       days_per_week: 1,
     };
@@ -162,13 +242,20 @@ describe('ProgramTemplateSchema', () => {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [{
-          idx: 0, day_offset: 0, kind: 'cardio', name: 'Z2',
-          blocks: [{
-            exercise_slug: 'treadmill',
-            cardio: { target_zone: 2 },
-          }],
-        }],
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'cardio',
+            name: 'Z2',
+            blocks: [
+              {
+                exercise_slug: 'treadmill',
+                cardio: { target_zone: 2 },
+              },
+            ],
+          },
+        ],
       },
       days_per_week: 1,
     };
@@ -179,18 +266,42 @@ describe('ProgramTemplateSchema', () => {
     }
   });
 
+  it('accepts each track value', () => {
+    for (const track of ['beginner', 'intermediate', 'advanced'] as const) {
+      expect(ProgramTemplateSchema.safeParse({ ...validTemplate, track }).success).toBe(true);
+    }
+  });
+
+  it('rejects an unknown track', () => {
+    const r = ProgramTemplateSchema.safeParse({ ...validTemplate, track: 'expert' });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(JSON.stringify(r.error.issues)).toMatch(/track/);
+  });
+
+  it('rejects a template with no track', () => {
+    const { track, ...noTrack } = validTemplate as typeof validTemplate & { track: string };
+    expect(ProgramTemplateSchema.safeParse(noTrack).success).toBe(false);
+  });
+
   it('cardio block accepts duration', () => {
     const t = {
       ...validTemplate,
       structure: {
         _v: 1,
-        days: [{
-          idx: 0, day_offset: 0, kind: 'cardio', name: 'Z2',
-          blocks: [{
-            exercise_slug: 'treadmill',
-            cardio: { target_duration_sec: 1800, target_zone: 2 },
-          }],
-        }],
+        days: [
+          {
+            idx: 0,
+            day_offset: 0,
+            kind: 'cardio',
+            name: 'Z2',
+            blocks: [
+              {
+                exercise_slug: 'treadmill',
+                cardio: { target_duration_sec: 1800, target_zone: 2 },
+              },
+            ],
+          },
+        ],
       },
       days_per_week: 1,
     };

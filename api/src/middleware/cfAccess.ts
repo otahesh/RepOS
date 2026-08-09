@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db/client.js';
 import { requireAuth } from './auth.js';
 import { recordAccountEventTx, humanActor } from '../services/accountEvents.js';
+import { constantTimeEqual } from '../utils/constantTimeEqual.js';
 
 // CF Access whole-host auth. Reads the JWT from either the
 // `Cf-Access-Jwt-Assertion` header (server-to-server / Shortcut-style) or the
@@ -32,16 +33,11 @@ function jwks() {
   // ephemeral-port form like "127.0.0.1:54321" AND NODE_ENV=test. Prod always
   // resolves to https:// because real team domains start with team names.
   const proto =
-    process.env.NODE_ENV === 'test' && teamDomain.startsWith('127.0.0.1')
-      ? 'http'
-      : 'https';
-  cachedJwks = createRemoteJWKSet(
-    new URL(`${proto}://${teamDomain}/cdn-cgi/access/certs`),
-    {
-      cacheMaxAge: 30_000, // 30s soft refresh
-      cooldownDuration: 0, // immediate refresh on a kid miss
-    },
-  );
+    process.env.NODE_ENV === 'test' && teamDomain.startsWith('127.0.0.1') ? 'http' : 'https';
+  cachedJwks = createRemoteJWKSet(new URL(`${proto}://${teamDomain}/cdn-cgi/access/certs`), {
+    cacheMaxAge: 30_000, // 30s soft refresh
+    cooldownDuration: 0, // immediate refresh on a kid miss
+  });
   return cachedJwks;
 }
 
@@ -154,7 +150,9 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
     // actually won the race writes the event, so the race test's
     // "exactly one event" assertion still holds.
     const client = await db.connect();
-    let won = false;
+    // No initializer: every catch path returns, so `won` is definitely
+    // assigned before it is read (origin's no-useless-assignment rule).
+    let won: boolean;
     try {
       await client.query('BEGIN');
       const upd = await client.query<{ id: string }>(
@@ -215,11 +213,11 @@ export async function requireCfAccess(req: FastifyRequest, reply: FastifyReply) 
     await db.query(`UPDATE users SET last_seen_at = now() WHERE id = $1`, [user.id]);
   }
 
-  (req as any).userId = user.id;
-  (req as any).userEmail = rawEmail;
-  (req as any).userDisplayName = user.display_name ?? displayNameClaim;
-  (req as any).userTimezone = user.timezone;
-  (req as any).userRole = user.role;
+  req.userId = user.id;
+  req.userEmail = rawEmail;
+  req.userDisplayName = user.display_name ?? displayNameClaim;
+  req.userTimezone = user.timezone;
+  req.userRole = user.role;
 }
 
 // Composer: tries Bearer first (the iOS Shortcut machine path), then CF
@@ -247,16 +245,13 @@ export async function requireBearerOrCfAccess(req: FastifyRequest, reply: Fastif
 // Fail-closed: the role is only ever read from a row the gate already
 // resolved, so an unauthenticated request can never be admin.
 export function isAdminRequest(req: FastifyRequest): boolean {
-  return (req as { userRole?: string }).userRole === 'admin';
+  return req.userRole === 'admin';
 }
 
 /** Returns true if the reply was already sent (caller must short-circuit). */
 function rejectIfNotAdminRole(req: FastifyRequest, reply: FastifyReply): boolean {
   if (!isAdminRequest(req)) {
-    req.log.warn(
-      { userEmail: (req as { userEmail?: string }).userEmail },
-      'admin_check_rejected',
-    );
+    req.log.warn({ userEmail: req.userEmail }, 'admin_check_rejected');
     reply.code(403).send({ error: 'not_an_admin' });
     return true;
   }
@@ -273,16 +268,14 @@ function rejectIfNotAdminRole(req: FastifyRequest, reply: FastifyReply): boolean
 //     admin ops (restore) — REJECT the X-Admin-Key path, require CF Access JWT
 //     + role='admin'. The opaque bearer escape hatch is not enough for a
 //     restore that DROPs the database.
-export function requireAdminKeyOrCfAccess(
-  opts: { requireFreshCfAccess?: boolean } = {},
-) {
+export function requireAdminKeyOrCfAccess(opts: { requireFreshCfAccess?: boolean } = {}) {
   return async function adminGate(req: FastifyRequest, reply: FastifyReply) {
     if (opts.requireFreshCfAccess) {
       // Dev / test: ADMIN_API_KEY unset means open admin path — same bypass
       // the dual-auth branch uses below. Production always sets ADMIN_API_KEY,
       // so the strict CF-Access-only path below is enforced in prod.
       if (!process.env.ADMIN_API_KEY) {
-        (req as any).authMode = 'cf_access_fresh';
+        req.authMode = 'cf_access_fresh';
         return;
       }
       // Restore endpoints — reject any X-Admin-Key presence, require CF Access.
@@ -297,7 +290,7 @@ export function requireAdminKeyOrCfAccess(
       await requireCfAccess(req, reply);
       if (reply.sent) return;
       if (rejectIfNotAdminRole(req, reply)) return;
-      (req as any).authMode = 'cf_access_fresh';
+      req.authMode = 'cf_access_fresh';
       return;
     }
 
@@ -305,23 +298,23 @@ export function requireAdminKeyOrCfAccess(
 
     // Dev / test: ADMIN_API_KEY unset means open admin path.
     if (!adminKey) {
-      (req as any).authMode = 'admin';
+      req.authMode = 'admin';
       return;
     }
 
     const provided = req.headers['x-admin-key'];
     if (typeof provided === 'string' && provided.length > 0) {
-      if (provided !== adminKey) {
+      if (!constantTimeEqual(provided, adminKey)) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
-      (req as any).authMode = 'admin';
+      req.authMode = 'admin';
       return;
     }
 
     if (isCfAccessEnabled()) {
       await requireCfAccess(req, reply);
       if (reply.sent) return;
-      (req as any).authMode = 'cf_access';
+      req.authMode = 'cf_access';
 
       // Per D10 as re-based by W9 Q3: authorization is users.role, resolved by
       // requireCfAccess above. There is no env allow-list any more.
@@ -343,10 +336,7 @@ export function requireAdminKeyOrCfAccess(
 // successful JWT validation we stamp `authMode='cf_access'` so the downstream
 // `csrfOrigin` preHandler enforces the Origin guard (per C-CSRF-ORIGIN) — a
 // stolen JWT replayed cross-origin must still be blocked.
-export async function requireCfAccessOnly(
-  req: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+export async function requireCfAccessOnly(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const auth = req.headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
     req.log.warn({ path: req.url }, 'bearer_rejected_on_cf_access_only_route');
@@ -354,7 +344,7 @@ export async function requireCfAccessOnly(
   }
   await requireCfAccess(req, reply);
   if (reply.sent) return;
-  (req as any).authMode = 'cf_access';
+  req.authMode = 'cf_access';
 }
 
 /**
@@ -394,6 +384,6 @@ export function requireCfAccessAdmin(opts: { rejectBearer?: boolean } = {}) {
     if (rejectIfNotAdminRole(req, reply)) return;
     // Stamp authMode so the chained csrfOrigin preHandler enforces the Origin
     // guard — a stolen JWT replayed cross-origin must still be blocked.
-    (req as any).authMode = 'cf_access';
+    req.authMode = 'cf_access';
   };
 }

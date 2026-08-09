@@ -49,7 +49,7 @@ const COMPOUND_PATTERNS = [
 export const overreachingEvaluator: RecoveryFlagEvaluator = {
   key: 'overreaching',
   version: 1,
-  async evaluate({ userId, runId }) {
+  async evaluate({ userId, runId, weekIdx }) {
     // No active run → no current-week volume to compare → fail-closed.
     if (!runId) return { triggered: false };
 
@@ -59,7 +59,9 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // means "deload context" — return no-fire. A deload is intentionally low
     // load; an overreaching advisory here is a false alarm. Mirrors the
     // stalledPrEvaluator deload-skip approach but adds the run-level guard.
-    const { rows: [ctx] } = await db.query<{ is_deload_run: boolean; is_deload_week: boolean }>(
+    const {
+      rows: [ctx],
+    } = await db.query<{ is_deload_run: boolean; is_deload_week: boolean }>(
       `SELECT bool_or(mr.is_deload) AS is_deload_run,
               COALESCE(bool_or(dw.is_deload), false) AS is_deload_week
        FROM mesocycle_runs mr
@@ -76,7 +78,16 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // we read the canonical movement_pattern from the planned exercise
     // (a future logged substitution would land in set_logs.exercise_id,
     // but the AND-gate semantically asks about programmed compound load).
-    const { rows: [{ ct }] } = await db.query<{ ct: number }>(
+    //
+    // KNOWN GAP (by design, measurement model 2026-07-12): duration sets log
+    // effort only when the user opts in (performed_rir omitted otherwise), so
+    // holds rarely contribute to this RIR-0 condition. Do NOT "fix" by feeding
+    // RPE through a separate unit — performed effort is stored as
+    // proximity-to-failure (rir) for ALL measurement classes; an opted-in
+    // hold at failure (RPE 10 → rir 0) already lands here correctly.
+    const {
+      rows: [{ ct }],
+    } = await db.query<{ ct: number }>(
       `SELECT COUNT(DISTINCT dw.id)::int AS ct
        FROM set_logs sl
        JOIN planned_sets ps ON ps.id = sl.planned_set_id
@@ -93,14 +104,10 @@ export const overreachingEvaluator: RecoveryFlagEvaluator = {
     // Condition 2: current-week performed_sets >= MAV for at least one
     // worked muscle. mesocycle_runs.current_week is 1-indexed and matches
     // WeekVolume.week_idx by construction (volumeRollup loops 1..nWeeks).
-    const { rows: [run] } = await db.query<{ current_week: number }>(
-      `SELECT current_week FROM mesocycle_runs WHERE id = $1`,
-      [runId],
-    );
-    if (!run) return { triggered: false };
-
+    // ctx.weekIdx is resolved by the route from the SAME active-run row as
+    // ctx.runId, so re-reading current_week here was a redundant round-trip.
     const rollup = await computeVolumeRollup(runId);
-    const week = rollup.weeks.find((w) => w.week_idx === run.current_week);
+    const week = rollup.weeks.find((w) => w.week_idx === weekIdx);
     if (!week) return { triggered: false };
 
     const overMav = week.muscles.some((m) => m.performed_sets >= m.mav);

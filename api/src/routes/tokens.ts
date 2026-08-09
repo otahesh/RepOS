@@ -4,10 +4,9 @@ import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { requireAdminKeyOrCfAccess } from '../middleware/cfAccess.js';
 import { isValidScope } from '../auth/scopes.js';
-import type {
-  TokenMintResponse,
-  TokenListResponse,
-} from '../schemas/tokens.js';
+import { isValidBigintId } from '../schemas/idParams.js';
+import { clientIp } from '../utils/clientIp.js';
+import type { TokenMintResponse, TokenListResponse } from '../schemas/tokens.js';
 
 // Token mint / list / revoke. Two auth modes:
 //   - admin   : body/query supplies user_id (CLI, tests, ops scripts).
@@ -53,17 +52,18 @@ export async function tokenRoutes(app: FastifyInstance) {
       const hash = await argon2.hash(secret);
       const storedHash = `${prefix}:${hash}`;
 
-      const { rows } = scopes === undefined
-        ? await db.query(
-            `INSERT INTO device_tokens (user_id, token_hash, label)
+      const { rows } =
+        scopes === undefined
+          ? await db.query(
+              `INSERT INTO device_tokens (user_id, token_hash, label)
              VALUES ($1, $2, $3) RETURNING id, created_at`,
-            [userId, storedHash, req.body.label ?? null],
-          )
-        : await db.query(
-            `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
+              [userId, storedHash, req.body.label ?? null],
+            )
+          : await db.query(
+              `INSERT INTO device_tokens (user_id, token_hash, label, scopes)
              VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-            [userId, storedHash, req.body.label ?? null, scopes],
-          );
+              [userId, storedHash, req.body.label ?? null, scopes],
+            );
 
       // Audit log for the mint event — there's no other persistent record of
       // "this caller minted a token for this user_id with these scopes from
@@ -78,12 +78,16 @@ export async function tokenRoutes(app: FastifyInstance) {
           targetUserId: userId,
           tokenId: String(rows[0].id),
           scopes: scopes ?? null,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'device_token minted',
       );
 
-      const mintResp: TokenMintResponse = { id: String(rows[0].id), token: plaintext, created_at: rows[0].created_at };
+      const mintResp: TokenMintResponse = {
+        id: String(rows[0].id),
+        token: plaintext,
+        created_at: rows[0].created_at,
+      };
       return reply.code(201).send(mintResp);
     },
   );
@@ -102,7 +106,7 @@ export async function tokenRoutes(app: FastifyInstance) {
          ORDER BY created_at DESC`,
         [userId],
       );
-      const listResp: TokenListResponse = rows.map(r => ({
+      const listResp: TokenListResponse = rows.map((r) => ({
         id: String(r.id),
         label: r.label,
         created_at: r.created_at,
@@ -118,6 +122,11 @@ export async function tokenRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = userIdFromReq(req, req.query.user_id);
       if (!userId) return reply.code(400).send({ error: 'user_id required' });
+      // device_tokens.id is bigint — a non-numeric or over-range :id would throw
+      // 22003 on the UPDATE → 500 leaking raw DB text. Treat as a clean 404 (G11).
+      if (!isValidBigintId(req.params.id)) {
+        return reply.code(404).send({ error: 'not found' });
+      }
       // The user_id+id pair guards against a leaked admin key revoking a
       // different user's tokens — the UPDATE only fires when both match.
       const { rowCount } = await db.query(
@@ -132,7 +141,7 @@ export async function tokenRoutes(app: FastifyInstance) {
           authMode: (req as { authMode?: string }).authMode ?? 'unknown',
           targetUserId: userId,
           tokenId: req.params.id,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'device_token revoked',
       );

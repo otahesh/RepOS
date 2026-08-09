@@ -5,12 +5,16 @@ import { db } from '../../src/db/client.js';
 import { seedUserProgram, cleanupSeeded, type SeedHandle } from '../helpers/seed-fixtures.js';
 
 const handles: SeedHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — is_deload populated by materializeMesocycle', () => {
   it('week N rows have is_deload=true, weeks 1..N-1 have is_deload=false', async () => {
-    const seed = await seedUserProgram();   // 5-week program template
+    const seed = await seedUserProgram(); // 5-week program template
     handles.push(seed);
     const { run_id } = await materializeMesocycle({
       userProgramId: seed.userProgramId,

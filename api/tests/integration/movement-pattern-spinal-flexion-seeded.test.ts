@@ -3,7 +3,9 @@ import 'dotenv/config';
 import { describe, it, expect, afterAll } from 'vitest';
 import { db } from '../../src/db/client.js';
 
-afterAll(async () => { await db.end(); });
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — movement_pattern enum extension applied to seeds', () => {
   it('cable-crunch is movement_pattern=spinal_flexion with lumbar=high', async () => {

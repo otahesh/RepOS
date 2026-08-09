@@ -10,7 +10,9 @@ const ok: ExerciseSeed = {
   movement_pattern: 'push_horizontal',
   peak_tension_length: 'mid',
   required_equipment: { _v: 1, requires: [{ type: 'barbell' }, { type: 'flat_bench' }] },
-  skill_complexity: 3, loading_demand: 4, systemic_fatigue: 3,
+  skill_complexity: 3,
+  loading_demand: 4,
+  systemic_fatigue: 3,
   joint_stress_profile: { _v: 1, shoulder: 'mod', elbow: 'mod', wrist: 'mod' },
   eccentric_overload_capable: false,
   contraindications: ['shoulder_impingement'],
@@ -60,7 +62,10 @@ describe('validateSeed', () => {
   });
 
   it('detects contribution sum outside 0.8–4.0', () => {
-    const bad = { ...ok, muscle_contributions: { chest: 1.0, triceps: 1.0, front_delt: 1.0, biceps: 1.0, lats: 0.5 } };
+    const bad = {
+      ...ok,
+      muscle_contributions: { chest: 1.0, triceps: 1.0, front_delt: 1.0, biceps: 1.0, lats: 0.5 },
+    };
     const r = validateSeed([bad]);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join(' ')).toMatch(/contribution sum/i);

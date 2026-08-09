@@ -42,19 +42,6 @@ export interface WeightSampleResponse {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/health/weight/backfill
-// ---------------------------------------------------------------------------
-
-export interface WeightBackfillInput {
-  samples: WeightSampleInput[]; // 1–500 items
-}
-
-export interface WeightBackfillResponse {
-  created: number;
-  deduped: number;
-}
-
-// ---------------------------------------------------------------------------
 // GET /api/health/weight
 // ---------------------------------------------------------------------------
 

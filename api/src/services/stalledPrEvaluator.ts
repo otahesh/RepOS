@@ -85,10 +85,17 @@ export const stalledPrEvaluator: RecoveryFlagEvaluator = {
            MAX(sl.performed_at)             AS session_at
          FROM set_logs sl
          JOIN planned_sets ps ON ps.id = sl.planned_set_id
+         JOIN exercises e     ON e.id  = ps.exercise_id
          JOIN day_workouts dw ON dw.id = ps.day_workout_id
          WHERE sl.user_id = $1
            AND dw.mesocycle_run_id = $2
            AND dw.is_deload = false           -- W2 swap: per-row deload guard
+           -- Measurement guard: duration sets (holds/carries) have no
+           -- load/rep progression to stall, and their NULL loads would
+           -- otherwise compare equal across sessions (null===null) once past
+           -- the reps gate, which today only skips them via accidental
+           -- "null < 5" JS coercion. Explicit is the contract.
+           AND e.measurement = 'reps'
          GROUP BY ps.exercise_id, dw.id
        ),
        ranked AS (
@@ -123,12 +130,18 @@ export const stalledPrEvaluator: RecoveryFlagEvaluator = {
       // different stimulus. Require a uniform-load uniform-rep session
       // (min_load === max_load, min_reps === max_reps) before treating the
       // session as comparable across the 3-session streak.
-      if (a.min_load !== a.max_load || b.min_load !== b.max_load || c.min_load !== c.max_load) continue;
-      if (a.min_reps !== a.max_reps || b.min_reps !== b.max_reps || c.min_reps !== c.max_reps) continue;
+      if (a.min_load !== a.max_load || b.min_load !== b.max_load || c.min_load !== c.max_load)
+        continue;
+      if (a.min_reps !== a.max_reps || b.min_reps !== b.max_reps || c.min_reps !== c.max_reps)
+        continue;
       if (
-        a.max_load === b.max_load && b.max_load === c.max_load &&
-        a.max_reps === b.max_reps && b.max_reps === c.max_reps &&
-        a.min_rir === 0 && b.min_rir === 0 && c.min_rir === 0
+        a.max_load === b.max_load &&
+        b.max_load === c.max_load &&
+        a.max_reps === b.max_reps &&
+        b.max_reps === c.max_reps &&
+        a.min_rir === 0 &&
+        b.min_rir === 0 &&
+        c.min_rir === 0
       ) {
         return {
           triggered: true,

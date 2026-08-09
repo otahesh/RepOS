@@ -29,10 +29,11 @@ let token: string;
 beforeAll(async () => {
   app = await buildApp();
 
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.weight.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.weight.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
 
   const mint = await app.inject({
@@ -72,7 +73,9 @@ describe('POST /api/health/weight contract', () => {
     });
     expect(res.statusCode).toBe(201);
     const parsed = WeightSampleResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.deduped).toBe(false);
       expect(parsed.data.weight_lbs).toBe(175.0);
@@ -90,7 +93,9 @@ describe('POST /api/health/weight contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = WeightSampleResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.deduped).toBe(true);
     }
@@ -118,7 +123,9 @@ describe('POST /api/health/weight/backfill contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = WeightBackfillResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.created + parsed.data.deduped).toBe(5);
     }
@@ -166,10 +173,11 @@ describe('GET /api/health/weight contract', () => {
     // We already have data from 2 days ago so 7d will have data. Use a past
     // range that has no data to exercise the null stats path.
     // The 2020/2019 data is outside 7d, so just use a fresh user.
-    const { rows: [u2] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.contract.weight.empty.${Date.now()}@repos.test`],
-    );
+    const {
+      rows: [u2],
+    } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.contract.weight.empty.${Date.now()}@repos.test`,
+    ]);
     const m = await app.inject({
       method: 'POST',
       url: '/api/tokens',
@@ -184,7 +192,9 @@ describe('GET /api/health/weight contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = WeightRangeResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.samples).toEqual([]);
       expect(parsed.data.current).toBeNull();
@@ -204,7 +214,9 @@ describe('GET /api/health/weight contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = WeightRangeResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
   });
 });
 
@@ -215,10 +227,11 @@ describe('GET /api/health/weight contract', () => {
 describe('GET /api/health/sync/status contract', () => {
   it('no-sync-record response parses through SyncStatusResponseSchema', async () => {
     // Create a fresh user with no sync record
-    const { rows: [u3] } = await db.query(
-      `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-      [`vitest.contract.sync.${Date.now()}@repos.test`],
-    );
+    const {
+      rows: [u3],
+    } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+      `vitest.contract.sync.${Date.now()}@repos.test`,
+    ]);
     const m = await app.inject({
       method: 'POST',
       url: '/api/tokens',
@@ -233,7 +246,9 @@ describe('GET /api/health/sync/status contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = SyncStatusResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       // No record → fallback shape from sync route
       expect(parsed.data.state).toBe('broken');
@@ -259,7 +274,9 @@ describe('GET /api/health/sync/status contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = SyncStatusResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.state).toBe('fresh');
       expect(typeof parsed.data.last_success_at).toBe('string');
@@ -284,7 +301,9 @@ describe('GET /api/health/sync/status contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = SyncStatusResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.state).toBe('stale');
     }
@@ -308,7 +327,9 @@ describe('GET /api/health/sync/status contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = SyncStatusResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.state).toBe('broken');
     }

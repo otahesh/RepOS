@@ -2,12 +2,20 @@
 import 'dotenv/config';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
-import { seedUserWithFullMesocycle, cleanupSeeded, type FullMesocycleHandle } from '../helpers/seed-fixtures.js';
+import {
+  seedUserWithFullMesocycle,
+  cleanupSeeded,
+  type FullMesocycleHandle,
+} from '../helpers/seed-fixtures.js';
 import { db } from '../../src/db/client.js';
 
 const handles: FullMesocycleHandle[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2.5 — manual deload', () => {
   it('POST /api/mesocycles/:id/deload-now reduces remaining-week planned sets to floor(MAV * 0.5) and pins RIR=4', async () => {
@@ -27,7 +35,7 @@ describe('W2.5 — manual deload', () => {
        GROUP BY ps.day_workout_id, ps.block_idx`,
       [seed.mesocycleRunId],
     );
-    const preByKey = new Map(preRows.map(r => [r.key, r.sets]));
+    const preByKey = new Map(preRows.map((r) => [r.key, r.sets]));
 
     const res = await app.inject({
       method: 'POST',
@@ -57,9 +65,10 @@ describe('W2.5 — manual deload', () => {
     expect(post.length).toBeGreaterThan(0);
 
     const { MUSCLE_LANDMARKS } = await import('../../src/services/_muscleLandmarks.js');
-    const { MANUAL_DELOAD_MAV_FACTOR, MANUAL_DELOAD_RIR } = await import('../../src/services/_deloadConstants.js');
+    const { MANUAL_DELOAD_MAV_FACTOR, MANUAL_DELOAD_RIR } =
+      await import('../../src/services/_deloadConstants.js');
     for (const r of post) {
-      const mav = (MUSCLE_LANDMARKS as any)[r.muscle_slug]?.mav ?? 10;  // fallback
+      const mav = (MUSCLE_LANDMARKS as any)[r.muscle_slug]?.mav ?? 10; // fallback
       const target = Math.max(1, Math.floor(mav * MANUAL_DELOAD_MAV_FACTOR));
       const preCount = preByKey.get(`${r.day_workout_id}|${r.block_idx}`) ?? target;
       // Deload only deletes excess — never pads up.
@@ -128,9 +137,17 @@ describe('W2.5 — manual deload', () => {
     const seed = await seedUserWithFullMesocycle({ weeks: 5, currentWeek: 2 });
     handles.push(seed);
     const auth = { authorization: `Bearer ${seed.bearer}` };
-    const r1 = await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`, headers: auth });
+    const r1 = await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`,
+      headers: auth,
+    });
     expect(r1.statusCode).toBe(200);
-    const r2 = await app.inject({ method: 'POST', url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`, headers: auth });
+    const r2 = await app.inject({
+      method: 'POST',
+      url: `/api/mesocycles/${seed.mesocycleRunId}/deload-now`,
+      headers: auth,
+    });
     expect(r2.statusCode).toBe(409);
     expect(r2.json().error).toBe('already_deloaded');
   });

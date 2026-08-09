@@ -2,17 +2,14 @@
 // bootstrap-guards.ts (pure env validation) so the latter stays trivially
 // unit-testable.
 
-import {
-  existsSync,
-  readFileSync,
-  openSync,
-  writeSync,
-  fsyncSync,
-  closeSync,
-} from 'node:fs';
+import { existsSync, readFileSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
 import { db } from './db/client.js';
 
 const PLACEHOLDER_UUID = '00000000-0000-0000-0000-000000000001';
+// Re-export under the spec name (08-qa.md §PLACEHOLDER) for the insert-time guard
+// and unit tests. Do NOT import this constant into production source — the grep
+// guard (scripts/check-no-placeholder.sh) only catches the literal UUID string.
+export const PLACEHOLDER_USER_ID = PLACEHOLDER_UUID;
 const DEFAULT_MAINTENANCE_FLAG_PATH = '/config/maintenance.flag';
 const DEFAULT_RESTORE_STATE_PATH = '/config/restore-state.json';
 
@@ -26,16 +23,34 @@ const DEFAULT_RESTORE_STATE_PATH = '/config/restore-state.json';
  */
 export async function validatePlaceholderPurge(env: NodeJS.ProcessEnv): Promise<void> {
   if (env.NODE_ENV !== 'production') return;
-  const { rows } = await db.query(
-    `SELECT 1 FROM users WHERE id = $1 LIMIT 1`,
-    [PLACEHOLDER_UUID],
-  );
+  const { rows } = await db.query(`SELECT 1 FROM users WHERE id = $1 LIMIT 1`, [PLACEHOLDER_UUID]);
   if (rows.length > 0) {
     console.error(
       `FATAL: placeholder user row (id=${PLACEHOLDER_UUID}) found in production DB. ` +
         `Run scripts/cutover/001-placeholder-to-jmeyer.sql before booting.`,
     );
     process.exit(1);
+  }
+}
+
+/**
+ * G8 insert-time guard. Refuse to attach the placeholder user UUID to any
+ * write outside the test environment. The boot-time validatePlaceholderPurge
+ * rejects the placeholder EXISTING in production; this is the complementary
+ * write-path guard that stops it being (re)created at runtime in dev or prod.
+ * No-op for null/undefined (no identity yet) and in NODE_ENV=test (fixtures
+ * legitimately seed the placeholder row).
+ */
+export function assertNotPlaceholderUserId(
+  userId: string | null | undefined,
+  env: NodeJS.ProcessEnv,
+): void {
+  if (env.NODE_ENV === 'test') return;
+  if (userId === PLACEHOLDER_UUID) {
+    throw new Error(
+      `refusing to write placeholder user (id=${PLACEHOLDER_UUID}) — ` +
+        `real identity must come from CF Access. This is a bug; see G8.`,
+    );
   }
 }
 

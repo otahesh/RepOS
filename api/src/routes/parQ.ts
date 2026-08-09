@@ -19,6 +19,7 @@
 // but CF Tunnel collapses all egress to one IP. parQRateLimit.ts checks
 // per-user write count over 24h; >5 → 429.
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
@@ -36,11 +37,14 @@ import {
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { checkParQWriteRateLimit, recordParQWrite } from '../services/parQRateLimit.js';
 import { recordAccountEventTx } from '../services/accountEvents.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function parQRoutes(app: FastifyInstance) {
   app.get('/me/par-q', { preHandler: requireBearerOrCfAccess }, async (req, _reply) => {
-    const userId = (req as any).userId as string;
-    const { rows: [u] } = await db.query<{ par_q_version: number; par_q_advisory_active: boolean }>(
+    const userId = requireUserId(req);
+    const {
+      rows: [u],
+    } = await db.query<{ par_q_version: number; par_q_advisory_active: boolean }>(
       'SELECT par_q_version, par_q_advisory_active FROM users WHERE id = $1',
       [userId],
     );
@@ -59,8 +63,8 @@ export async function parQRoutes(app: FastifyInstance) {
     '/me/par-q',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
-      const ip = (req.ip || '') as string;
+      const userId = requireUserId(req);
+      const ip = clientIp(req) ?? '';
 
       const parsed = ParQAcceptRequestSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -87,7 +91,7 @@ export async function parQRoutes(app: FastifyInstance) {
         return { error: 'par_q_write_rate_limited', limit_per_day: 5 };
       }
 
-      const anyYes = parsed.data.answers.some(a => a === true);
+      const anyYes = parsed.data.answers.some((a) => a === true);
       const responses = JSON.stringify({
         questions: PAR_Q_QUESTIONS,
         answers: parsed.data.answers,
@@ -100,7 +104,9 @@ export async function parQRoutes(app: FastifyInstance) {
         // Atomic upsert with is_new returning (panel I-UPSERT). DO UPDATE does
         // NOT touch accepted_at so re-accept keeps the original timestamp and
         // is_new is false.
-        const { rows: [ack] } = await client.query<{ is_new: boolean }>(
+        const {
+          rows: [ack],
+        } = await client.query<{ is_new: boolean }>(
           `INSERT INTO par_q_acknowledgments (user_id, version, responses, ip)
            VALUES ($1, $2, $3::jsonb, $4)
            ON CONFLICT (user_id, version) DO UPDATE
@@ -141,9 +147,8 @@ export async function parQRoutes(app: FastifyInstance) {
         // the injuryRanker JOINT_ROOT has no mapping for it. We still record
         // the full q5_joints (incl. 'other') in the account_events meta below.
         let injuriesCreated = 0;
-        const writableJoints = q5Joints.filter(
-          (j): j is (typeof PAR_Q_Q5_INJURY_JOINTS)[number] =>
-            (PAR_Q_Q5_INJURY_JOINTS as readonly string[]).includes(j),
+        const writableJoints = q5Joints.filter((j): j is (typeof PAR_Q_Q5_INJURY_JOINTS)[number] =>
+          (PAR_Q_Q5_INJURY_JOINTS as readonly string[]).includes(j),
         );
         if (writableJoints.length > 0) {
           // De-dup against existing rows. Per QA: do not stack identical
@@ -152,7 +157,7 @@ export async function parQRoutes(app: FastifyInstance) {
             `SELECT joint FROM user_injuries WHERE user_id = $1`,
             [userId],
           );
-          const have = new Set(existing.map(r => r.joint));
+          const have = new Set(existing.map((r) => r.joint));
           for (const joint of writableJoints) {
             if (have.has(joint)) continue;
             await client.query(
@@ -195,12 +200,16 @@ export async function parQRoutes(app: FastifyInstance) {
           version: parsed.data.version,
           accepted_at: new Date().toISOString(),
           any_yes: anyYes,
-          advisory_active: anyYes,  // mirrors the UPDATE above
+          advisory_active: anyYes, // mirrors the UPDATE above
           injuries_created: injuriesCreated,
         };
         return resp;
       } catch (e) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
         throw e;
       } finally {
         client.release();
@@ -214,7 +223,7 @@ export async function parQRoutes(app: FastifyInstance) {
     '/me/par-q/mark-cleared',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
+      const userId = requireUserId(req);
       const { rows } = await db.query(
         `UPDATE users SET par_q_advisory_active = false WHERE id = $1 RETURNING id`,
         [userId],

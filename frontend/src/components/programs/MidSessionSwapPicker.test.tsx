@@ -23,7 +23,11 @@ describe('<MidSessionSwapPicker>', () => {
       subs: [
         { id: 'a', slug: 'leg-press', name: 'Leg Press', score: 500, reason: '' },
         {
-          id: 'b', slug: 'bss', name: 'BSS', score: 250, reason: '',
+          id: 'b',
+          slug: 'bss',
+          name: 'BSS',
+          score: 250,
+          reason: '',
           injury_advisory: { joint: 'knee_left', level: 'mod' },
         },
       ],
@@ -40,7 +44,11 @@ describe('<MidSessionSwapPicker>', () => {
       from: { slug: 'back-squat', name: 'Back Squat' },
       subs: [
         {
-          id: 'b', slug: 'bss', name: 'BSS', score: 250, reason: '',
+          id: 'b',
+          slug: 'bss',
+          name: 'BSS',
+          score: 250,
+          reason: '',
           injury_advisory: { joint: 'knee_left', level: 'high' },
         },
       ],

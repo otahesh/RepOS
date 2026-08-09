@@ -11,6 +11,6 @@ export const OnboardingCompleteRequestSchema = z.object({
 export type OnboardingCompleteRequest = z.infer<typeof OnboardingCompleteRequestSchema>;
 
 export const OnboardingCompleteResponseSchema = z.object({
-  onboarding_completed_at: z.string(),  // ISO timestamp
+  onboarding_completed_at: z.string(), // ISO timestamp
 });
 export type OnboardingCompleteResponse = z.infer<typeof OnboardingCompleteResponseSchema>;

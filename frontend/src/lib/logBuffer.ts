@@ -5,13 +5,17 @@
  *   • POST /api/set-logs transport
  *   • Exponential backoff with ±25% jitter, cap 30s
  *   • Status mapping: 200/201 → markSynced, 409 audit_window_expired and 404
- *     planned_set_deleted → markRejected, 5xx + network errors → leave pending
- *     and bump attempt_count, 401 + CFAccess → leave pending without bumping
- *     and emit a window event so W1.3.7 can surface the re-auth banner.
+ *     planned_set_deleted → markRejected, other 4xx except 401/408/429 →
+ *     markRejected('other') — an identical payload can never pass a schema
+ *     rejection, so retrying only burns the attempt cap. 5xx + network errors
+ *     + plain 401/408/429 → leave pending and bump attempt_count, 401 +
+ *     CFAccess → leave pending without bumping and emit a window event so
+ *     W1.3.7 can surface the re-auth banner.
  *
- * Attempt cap discipline: rows with attempt_count >= 5 are SKIPPED (not
- * auto-rejected). User-entered training data is sacred; the W1.3.5
- * LogBufferRecovery banner will surface stalled rows so the user can decide.
+ * Attempt cap discipline: rows with attempt_count >= MAX_ATTEMPTS are SKIPPED
+ * (not auto-rejected). User-entered training data is sacred; the SyncStatusPill
+ * surfaces stalled rows so the user can decide, and retryStalled() re-arms
+ * them from /settings/storage.
  *
  * Reentrancy: flush() is guarded by a module-private isFlushing flag so the
  * online-event listener firing twice (or enqueue+online racing) collapses to a
@@ -28,6 +32,7 @@ import { idbQueue, QueueFullError, type PendingSetLog } from './idbQueue';
 export interface EnqueueFields {
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec?: number | null;
   rir: number | null;
   rpe?: number | null;
   performed_at: string; // ISO with offset
@@ -35,7 +40,9 @@ export interface EnqueueFields {
 }
 
 const ENDPOINT = '/api/set-logs';
-const MAX_ATTEMPTS = 5;
+// Exported so the sync pill and /settings/storage agree with the flusher on
+// what "stalled" means (pending && attempt_count >= MAX_ATTEMPTS).
+export const MAX_ATTEMPTS = 5;
 const BACKOFF_CAP_SECONDS = 30;
 
 function mintClientRequestId(): string {
@@ -55,20 +62,25 @@ export function computeBackoffMs(attemptCount: number): number {
 }
 
 async function postSetLog(row: PendingSetLog): Promise<Response> {
+  // IDB rows carry null for unset fields, but the API write schema is
+  // optional-absent (z.number().optional()) — "rpe": null is a 400, so nulls
+  // are stripped at the wire instead of serialized.
+  const payload: Record<string, unknown> = {
+    client_request_id: row.client_request_id,
+    planned_set_id: row.planned_set_id,
+    performed_at: row.performed_at,
+  };
+  if (row.weight_lbs != null) payload.weight_lbs = row.weight_lbs;
+  if (row.reps != null) payload.reps = row.reps;
+  if (row.duration_sec != null) payload.duration_sec = row.duration_sec;
+  if (row.rir != null) payload.rir = row.rir;
+  if (row.rpe != null) payload.rpe = row.rpe;
+  if (row.notes != null) payload.notes = row.notes;
   return fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({
-      client_request_id: row.client_request_id,
-      planned_set_id: row.planned_set_id,
-      weight_lbs: row.weight_lbs,
-      reps: row.reps,
-      rir: row.rir,
-      rpe: row.rpe,
-      performed_at: row.performed_at,
-      notes: row.notes,
-    }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -105,7 +117,7 @@ async function flushOnce(): Promise<void> {
   const now = Date.now();
   // FIFO, gated by next_attempt_at and the soft attempt cap.
   const eligible = pending.filter(
-    r => r.next_attempt_at <= now && r.attempt_count < MAX_ATTEMPTS,
+    (r) => r.next_attempt_at <= now && r.attempt_count < MAX_ATTEMPTS,
   );
 
   for (const row of eligible) {
@@ -135,7 +147,11 @@ async function flushOnce(): Promise<void> {
       // codes later — only treat audit_window_expired as a terminal rejection.
       const body = await res.text().catch(() => '');
       let parsed: { error?: string } = {};
-      try { parsed = body ? JSON.parse(body) : {}; } catch { /* keep empty */ }
+      try {
+        parsed = body ? JSON.parse(body) : {};
+      } catch {
+        /* keep empty */
+      }
       if (parsed.error === 'audit_window_expired') {
         await idbQueue.markRejected(row.client_request_id, 'audit_window_expired');
       } else {
@@ -153,7 +169,17 @@ async function flushOnce(): Promise<void> {
       break;
     }
 
-    // 5xx or anything else → transient, retry next tick.
+    if (res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status)) {
+      // Terminal client error (e.g. schema-validation 400): the identical
+      // payload can never succeed, so retrying only burns the attempt cap and
+      // strands the row as permanently "queued". Reject so /settings/storage
+      // surfaces it. 401 (session), 408 (timeout), 429 (rate limit) stay
+      // transient — those can succeed on retry.
+      await idbQueue.markRejected(row.client_request_id, 'other');
+      continue;
+    }
+
+    // 5xx, plain 401/408/429, or anything else → transient, retry next tick.
     await bumpAttempt(row);
   }
 }
@@ -173,6 +199,7 @@ export const logBuffer = {
       performed_at: fields.performed_at,
       weight_lbs: fields.weight_lbs,
       reps: fields.reps,
+      duration_sec: fields.duration_sec ?? null,
       rir: fields.rir,
       rpe: fields.rpe ?? null,
       notes: fields.notes ?? null,
@@ -223,10 +250,39 @@ export const logBuffer = {
     }
   },
 
+  /**
+   * Re-arm attempt-capped pending rows (attempt_count → 0, next_attempt_at →
+   * 0) so the next flush tick retries them, then kick a flush if online.
+   * Recovery affordance for rows that burned their cap on a since-fixed
+   * server error. Returns the number of rows re-armed.
+   */
+  async retryStalled(): Promise<number> {
+    const pending = await idbQueue.peekPending();
+    const stalled = pending.filter((r) => r.attempt_count >= MAX_ATTEMPTS);
+    const now = Date.now();
+    for (const row of stalled) {
+      await idbQueue.enqueue({
+        ...row,
+        attempt_count: 0,
+        next_attempt_at: 0,
+        updated_at: now,
+      });
+    }
+    if (stalled.length > 0 && navigator.onLine) {
+      // Fire-and-forget; the reentrancy guard collapses overlapping flushes.
+      void logBuffer.flush();
+    }
+    return stalled.length;
+  },
+
   onReconnect(): () => void {
-    const handler = (): void => { void logBuffer.flush(); };
+    const handler = (): void => {
+      void logBuffer.flush();
+    };
     window.addEventListener('online', handler);
-    return () => { window.removeEventListener('online', handler); };
+    return () => {
+      window.removeEventListener('online', handler);
+    };
   },
 };
 

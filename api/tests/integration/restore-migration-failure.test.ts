@@ -10,7 +10,11 @@ import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { buildApp } from '../../src/app.js';
 import { db } from '../../src/db/client.js';
-import { dumpSchemaRev, currentCodeRev, assertSchemaRevCompatible } from '../../src/services/restoreRunner.js';
+import {
+  dumpSchemaRev,
+  currentCodeRev,
+  assertSchemaRevCompatible,
+} from '../../src/services/restoreRunner.js';
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 let app: App;
@@ -88,7 +92,10 @@ describe('G5 case 4 — migration failure rollback to pre-snapshot', () => {
     });
 
     // 2. Recovery kickoff.
-    const recover = await app.inject({ method: 'POST', url: '/api/maintenance/restore-pre-snapshot' });
+    const recover = await app.inject({
+      method: 'POST',
+      url: '/api/maintenance/restore-pre-snapshot',
+    });
     expect(recover.statusCode).toBe(202);
     expect(recover.json().source).toBe('pre-restore-20260525T120000Z.sql.gz');
 
@@ -144,10 +151,10 @@ describe('G5 case 4 — migration failure rollback to pre-snapshot', () => {
   // resolves to the live code rev, so assertSchemaRevCompatible does NOT throw.
   it('dumpSchemaRev extracts the real max rev from a current dump', async () => {
     const okDump = join(backupsDir, 'repos-20260527T000000Z.dump.gz');
-    execSync(
-      `pg_dump --format=custom "${process.env.DATABASE_URL}" | gzip -6 > "${okDump}"`,
-      { stdio: 'pipe', shell: '/bin/bash' },
-    );
+    execSync(`pg_dump --format=custom "${process.env.DATABASE_URL}" | gzip -6 > "${okDump}"`, {
+      stdio: 'pipe',
+      shell: '/bin/bash',
+    });
     const rev = dumpSchemaRev(okDump);
     expect(rev).toBe(currentCodeRev());
     expect(rev).toBeGreaterThan(0);

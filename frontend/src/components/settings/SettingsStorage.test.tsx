@@ -8,11 +8,13 @@ const mockCounts: {
   pending: number;
   syncing: number;
   rejected: number;
+  stalled: number;
   oldestPendingCreatedAt: number | null;
 } = {
   pending: 0,
   syncing: 0,
   rejected: 0,
+  stalled: 0,
   oldestPendingCreatedAt: null,
 };
 
@@ -30,10 +32,18 @@ vi.mock('../../lib/idbQueue', () => ({
   },
 }));
 
+const retryStalledSpy = vi.fn<() => Promise<number>>().mockResolvedValue(1);
+vi.mock('../../lib/logBuffer', () => ({
+  logBuffer: {
+    retryStalled: (): Promise<number> => retryStalledSpy(),
+  },
+}));
+
 function setCounts(p: Partial<typeof mockCounts>) {
   mockCounts.pending = p.pending ?? 0;
   mockCounts.syncing = p.syncing ?? 0;
   mockCounts.rejected = p.rejected ?? 0;
+  mockCounts.stalled = p.stalled ?? 0;
   mockCounts.oldestPendingCreatedAt = p.oldestPendingCreatedAt ?? null;
 }
 
@@ -41,6 +51,8 @@ describe('<SettingsStorage>', () => {
   beforeEach(() => {
     setCounts({});
     clearRejectedSpy.mockClear();
+    retryStalledSpy.mockClear();
+    retryStalledSpy.mockResolvedValue(1);
   });
 
   it('renders the page heading and three count rows', () => {
@@ -109,6 +121,52 @@ describe('<SettingsStorage>', () => {
     await user.click(screen.getByRole('button', { name: /clear rejected/i }));
     await user.type(screen.getByLabelText(/type clear to confirm/i), 'clear');
     expect(screen.getByRole('button', { name: /confirm/i })).toBeDisabled();
+  });
+
+  it('hides the Retry-sync button when no pending rows are stalled', () => {
+    setCounts({ pending: 2, stalled: 0 });
+    render(<SettingsStorage />);
+    expect(screen.queryByRole('button', { name: /retry sync/i })).toBeNull();
+  });
+
+  it('shows Retry-sync on the pending row when stalled > 0, with stuck-count caption', () => {
+    setCounts({ pending: 3, stalled: 2 });
+    render(<SettingsStorage />);
+    expect(screen.getByRole('button', { name: /retry sync/i })).toBeInTheDocument();
+    expect(screen.getByTestId('row-pending')).toHaveTextContent(/2 sets stuck/i);
+  });
+
+  it('Retry-sync caption uses singular for one stuck set', () => {
+    setCounts({ pending: 1, stalled: 1 });
+    render(<SettingsStorage />);
+    expect(screen.getByTestId('row-pending')).toHaveTextContent(/1 set stuck/i);
+  });
+
+  it('Retry-sync click calls logBuffer.retryStalled (no confirm — it cannot lose data)', async () => {
+    const user = userEvent.setup();
+    setCounts({ pending: 1, stalled: 1 });
+    render(<SettingsStorage />);
+
+    await user.click(screen.getByRole('button', { name: /retry sync/i }));
+    expect(retryStalledSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('Retry-sync disables while the retry is in flight', async () => {
+    const user = userEvent.setup();
+    let resolve!: (n: number) => void;
+    retryStalledSpy.mockReturnValueOnce(
+      new Promise<number>((r) => {
+        resolve = r;
+      }),
+    );
+    setCounts({ pending: 1, stalled: 1 });
+    render(<SettingsStorage />);
+
+    const btn = screen.getByRole('button', { name: /retry sync/i });
+    await user.click(btn);
+    expect(btn).toBeDisabled();
+    resolve(1);
+    await vi.waitFor(() => expect(btn).not.toBeDisabled());
   });
 
   it('shows oldest-pending age when a stale pending row is present', () => {

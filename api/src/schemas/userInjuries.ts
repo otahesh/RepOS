@@ -31,10 +31,14 @@ export type InjurySeverity = (typeof INJURY_SEVERITIES)[number];
 // ---------------------------------------------------------------------------
 
 export const UserInjuryUpsertRequestSchema = z.object({
-  joint:    z.enum(INJURY_JOINTS),
+  joint: z.enum(INJURY_JOINTS),
   severity: z.enum(INJURY_SEVERITIES).default('mod'),
-  notes:    z.string().max(500).default(''),
-  onset_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  notes: z.string().max(500).default(''),
+  onset_at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .nullable(),
 });
 export type UserInjuryUpsertRequest = z.infer<typeof UserInjuryUpsertRequestSchema>;
 
@@ -42,9 +46,9 @@ export type UserInjuryUpsertRequest = z.infer<typeof UserInjuryUpsertRequestSche
 // PATCH /api/user/injuries/:joint — partial update; joint comes from path
 // ---------------------------------------------------------------------------
 
-export const UserInjuryPatchRequestSchema = UserInjuryUpsertRequestSchema
-  .omit({ joint: true })
-  .partial();
+export const UserInjuryPatchRequestSchema = UserInjuryUpsertRequestSchema.omit({
+  joint: true,
+}).partial();
 export type UserInjuryPatchRequest = z.infer<typeof UserInjuryPatchRequestSchema>;
 
 // ---------------------------------------------------------------------------
@@ -52,10 +56,10 @@ export type UserInjuryPatchRequest = z.infer<typeof UserInjuryPatchRequestSchema
 // ---------------------------------------------------------------------------
 
 export const UserInjuryItemSchema = z.object({
-  joint:      z.enum(INJURY_JOINTS),
-  severity:   z.enum(INJURY_SEVERITIES),
-  notes:      z.string(),
-  onset_at:   z.string().nullable(),
+  joint: z.enum(INJURY_JOINTS),
+  severity: z.enum(INJURY_SEVERITIES),
+  notes: z.string(),
+  onset_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });

@@ -25,10 +25,11 @@ let templateSlug: string | undefined;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.programs.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.programs.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -38,9 +39,9 @@ beforeAll(async () => {
   token = mint.json<{ token: string }>().token;
 
   // Find any non-archived template to use for detail + fork tests
-  const { rows: [tmpl] } = await db.query(
-    `SELECT slug FROM program_templates WHERE archived_at IS NULL LIMIT 1`,
-  );
+  const {
+    rows: [tmpl],
+  } = await db.query(`SELECT slug FROM program_templates WHERE archived_at IS NULL LIMIT 1`);
   templateSlug = tmpl?.slug;
 }, 30_000);
 
@@ -64,7 +65,9 @@ describe('GET /api/program-templates contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = ProgramTemplateListResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(Array.isArray(parsed.data.templates)).toBe(true);
     }
@@ -87,7 +90,9 @@ describe('GET /api/program-templates/:slug contract', () => {
     });
     expect(res.statusCode).toBe(200);
     const parsed = ProgramTemplateDetailResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.slug).toBe(templateSlug);
       expect(parsed.data.structure._v).toBe(1);
@@ -121,7 +126,9 @@ describe('POST /api/program-templates/:slug/fork contract', () => {
     });
     expect(res.statusCode).toBe(201);
     const parsed = ProgramForkResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.status).toBe('draft');
     }

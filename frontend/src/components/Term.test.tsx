@@ -2,6 +2,33 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Term } from './Term';
+import { TOKENS } from '../tokens';
+
+// ---------------------------------------------------------------------------
+// Stacking regression guard
+// ---------------------------------------------------------------------------
+// The help popover portals to <body>, escaping the DOM of any modal that hosts
+// the trigger (ParQGate/Onboarding at zOverlay=1500, SessionExpiredBanner at
+// zAuth=2000). If its z-index sits below those tiers it paints BEHIND the
+// modal's near-opaque backdrop and is invisible — the exact "PAR-Q tooltip
+// does nothing" bug. jsdom has no paint/stacking, so this asserts the invariant
+// on the inline z-index directly. Applies to both variants (shared style).
+describe('<Term> popover stacking (z-index guard)', () => {
+  it('button variant: popover out-ranks the highest modal tier', async () => {
+    const user = userEvent.setup();
+    render(<Term k="MEV" />);
+    await user.click(screen.getByRole('button'));
+    const panel = await screen.findByRole('tooltip');
+    expect(Number(panel.style.zIndex)).toBeGreaterThan(TOKENS.zModal.zAuth);
+  });
+
+  it('abbr variant: popover out-ranks the highest modal tier', async () => {
+    const { container } = render(<Term k="MEV" variant="abbr" />);
+    fireEvent.mouseEnter(container.querySelector('abbr')!);
+    const panel = await screen.findByRole('tooltip');
+    expect(Number(panel.style.zIndex)).toBeGreaterThan(TOKENS.zModal.zAuth);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Existing button variant — must pass without modification
@@ -61,7 +88,11 @@ describe('<Term variant="abbr">', () => {
   });
 
   it('renders children when provided (override label)', () => {
-    render(<Term k="RPE" variant="abbr">rate of perceived exertion</Term>);
+    render(
+      <Term k="RPE" variant="abbr">
+        rate of perceived exertion
+      </Term>,
+    );
     expect(screen.getByText('rate of perceived exertion')).toBeInTheDocument();
   });
 
@@ -153,12 +184,16 @@ describe('<Term variant="abbr">', () => {
     const abbr = container.querySelector('abbr')!;
     // First tap — opens
     await act(async () => {
-      abbr.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+      abbr.dispatchEvent(
+        new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }),
+      );
     });
     expect(await screen.findByText(/Minimum Effective Volume/)).toBeInTheDocument();
     // Second tap — closes
     await act(async () => {
-      abbr.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+      abbr.dispatchEvent(
+        new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }),
+      );
     });
     expect(screen.queryByText(/Minimum Effective Volume/)).toBeNull();
   });

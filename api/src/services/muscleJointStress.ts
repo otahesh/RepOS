@@ -25,7 +25,7 @@ export async function computeMuscleJointRoots(): Promise<Record<string, string[]
   );
   const out: Record<string, Set<string>> = {};
   for (const r of rows) {
-    const set = out[r.slug] ??= new Set();
+    const set = (out[r.slug] ??= new Set());
     for (const [joint, level] of Object.entries(r.profile ?? {})) {
       if (joint === '_v') continue;
       if (level === 'mod' || level === 'high') {
@@ -37,11 +37,4 @@ export async function computeMuscleJointRoots(): Promise<Record<string, string[]
   const final: Record<string, string[]> = {};
   for (const slug of Object.keys(out)) final[slug] = [...out[slug]].sort();
   return final;
-}
-
-export async function getMuscleJointStressCatalog() {
-  return {
-    JOINT_ROOT,
-    MUSCLE_JOINT_ROOTS: await computeMuscleJointRoots(),
-  };
 }

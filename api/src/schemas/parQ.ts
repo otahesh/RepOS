@@ -7,7 +7,7 @@ export const ParQStatusResponseSchema = z.object({
   acknowledged_version: z.number().int().min(0),
   needs_prompt: z.boolean(),
   questions: z.array(z.string()),
-  advisory_active: z.boolean(),  // mirrors users.par_q_advisory_active
+  advisory_active: z.boolean(), // mirrors users.par_q_advisory_active
 });
 export type ParQStatusResponse = z.infer<typeof ParQStatusResponseSchema>;
 
@@ -24,10 +24,10 @@ export type ParQAcceptRequest = z.infer<typeof ParQAcceptRequestSchema>;
 
 export const ParQAcceptResponseSchema = z.object({
   version: z.number().int().min(1),
-  accepted_at: z.string(),  // ISO timestamp
-  any_yes: z.boolean(),     // true → frontend shows soft-gate copy
-  advisory_active: z.boolean(),  // server's resulting users.par_q_advisory_active
-  injuries_created: z.number().int().min(0),  // count of user_injuries rows added from Q5 follow-up
+  accepted_at: z.string(), // ISO timestamp
+  any_yes: z.boolean(), // true → frontend shows soft-gate copy
+  advisory_active: z.boolean(), // server's resulting users.par_q_advisory_active
+  injuries_created: z.number().int().min(0), // count of user_injuries rows added from Q5 follow-up
 });
 export type ParQAcceptResponse = z.infer<typeof ParQAcceptResponseSchema>;
 

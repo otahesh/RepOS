@@ -13,9 +13,7 @@ import type { PendingSetLog } from '../lib/idbQueue';
  *   • 'rejected' — terminal failure; user must review.
  *   • 'unknown' — no client_request_id yet (initial state before enqueue).
  */
-export type QueueRowStatus =
-  | PendingSetLog['status']
-  | 'unknown';
+export type QueueRowStatus = PendingSetLog['status'] | 'unknown';
 
 const POLL_MS = 500;
 
@@ -35,7 +33,12 @@ const POLL_MS = 500;
  * is dropped by the `cancelled` flag so we don't setState on an unmounted
  * component.
  */
-export function useIdbQueueStatus(clientRequestId: string | null): QueueRowStatus {
+export function useIdbQueueStatus(
+  clientRequestId: string | null,
+  // Injectable for tests only (fast cadence beats fake timers — the tick's
+  // IndexedDB work is genuinely async); production callers pass nothing.
+  pollMs: number = POLL_MS,
+): QueueRowStatus {
   const [status, setStatus] = useState<QueueRowStatus>('unknown');
 
   useEffect(() => {
@@ -59,13 +62,15 @@ export function useIdbQueueStatus(clientRequestId: string | null): QueueRowStatu
     };
 
     void tick(); // immediate read so the UI doesn't wait 500ms for first sample
-    const id = setInterval(() => { void tick(); }, POLL_MS);
+    const id = setInterval(() => {
+      void tick();
+    }, pollMs);
 
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [clientRequestId]);
+  }, [clientRequestId, pollMs]);
 
   return status;
 }

@@ -18,12 +18,43 @@ export interface SeedSet {
   id: string;
   block_idx: number;
   set_idx: number;
-  exercise: { id: string; slug: string; name: string };
-  target_reps_low: number;
-  target_reps_high: number;
+  exercise: {
+    id: string;
+    slug: string;
+    name: string;
+    bodyweight?: boolean;
+    measurement?: 'reps' | 'duration';
+  };
+  /** Exactly one measurement dimension per row (reps pair XOR duration pair);
+   *  the logger derives its input mode from which pair is populated. */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   rest_sec: number;
+  logged?: { weight_lbs: number | null; reps: number | null; duration_sec?: number | null } | null;
 }
+
+/** Duration-set fixture (side plank) for O10 + any hold-mode spec. */
+export const HOLD_SEED_SET: SeedSet = {
+  id: 'ps-hold-1',
+  block_idx: 0,
+  set_idx: 0,
+  exercise: {
+    id: 'ex-plank',
+    slug: 'side-plank',
+    name: 'Side Plank',
+    bodyweight: true,
+    measurement: 'duration',
+  },
+  target_reps_low: null,
+  target_reps_high: null,
+  target_duration_low_sec: 30,
+  target_duration_high_sec: 45,
+  target_rir: 2,
+  rest_sec: 60,
+};
 
 export interface SeedDay {
   id: string;
@@ -41,7 +72,14 @@ export interface SeedOptions {
   /** Logical day metadata. Default Week 1 / Day 1 "Push". */
   day?: SeedDay;
   /** User shape returned by /api/me. */
-  user?: { id: string; email: string; display_name: string | null; timezone: string; onboarding_completed_at?: string | null };
+  user?: {
+    id: string;
+    email: string;
+    display_name: string | null;
+    timezone: string;
+    onboarding_completed_at?: string | null;
+    beta_disclaimer_ack_at?: string | null;
+  };
 }
 
 export interface CapturedPost {
@@ -50,6 +88,7 @@ export interface CapturedPost {
   planned_set_id: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec: number | null;
   rir: number | null;
   rpe: number | null;
   performed_at: string;
@@ -66,7 +105,10 @@ export type SetLogResponse =
   | { kind: 'orphan' }
   | { kind: 'transient'; status?: number };
 
-export type SetLogResponder = (body: CapturedPost, context: { posted: CapturedPost[] }) => SetLogResponse;
+export type SetLogResponder = (
+  body: CapturedPost,
+  context: { posted: CapturedPost[] },
+) => SetLogResponse;
 
 export interface MockServer {
   /** All POSTs to /api/set-logs captured (including ones aborted by `offlinePost`). */
@@ -87,6 +129,7 @@ const DEFAULT_USER = {
   // Past timestamp so AppShell.useOnboardingGate does NOT mount the full-viewport
   // OnboardingOverlay (z-1500) over the logger — added when the W2 gate landed.
   onboarding_completed_at: '2026-01-01T00:00:00Z',
+  beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
 };
 
 const DEFAULT_DAY: SeedDay = {
@@ -230,6 +273,34 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
     });
   });
 
+  // GET /api/exercises — fetched unconditionally on mount by TodayLoggerMobile
+  // to populate hub-chip/focus-header muscle metadata. Fire-and-forget +
+  // swallowed on failure, so this mock isn't strictly required for correctness,
+  // but an unmocked call would otherwise hit the `vite preview` static server
+  // (no backend) and log noise. Empty list is fine — metadata is decorative.
+  await page.route('**/api/exercises', async (route: Route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fulfill({ status: 405, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ exercises: [] }),
+    });
+  });
+
+  // GET /api/exercises/:slug/history — fetched lazily when a block is
+  // focused, to power the focus screen's last-time prefill line. Also
+  // fire-and-forget + swallowed on failure; empty sessions is fine.
+  await page.route('**/api/exercises/*/history*', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [] }),
+    });
+  });
+
   // GET /api/mesocycles/today
   await page.route('**/api/mesocycles/today', async (route: Route) => {
     await route.fulfill({
@@ -239,6 +310,8 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
         state: 'workout',
         run_id: runId,
         day,
+        pacing: { status: 'on_pace', suggested_date: '2026-01-01' },
+        completed_today: false,
         sets,
         cardio: [],
       }),
@@ -267,9 +340,10 @@ export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise
       receivedAt: Date.now(),
       client_request_id: parsed.client_request_id,
       planned_set_id: parsed.planned_set_id,
-      weight_lbs: parsed.weight_lbs,
-      reps: parsed.reps,
-      rir: parsed.rir,
+      weight_lbs: parsed.weight_lbs ?? null,
+      reps: parsed.reps ?? null,
+      duration_sec: parsed.duration_sec ?? null,
+      rir: parsed.rir ?? null,
       rpe: parsed.rpe ?? null,
       performed_at: parsed.performed_at,
       notes: parsed.notes ?? null,
@@ -368,6 +442,7 @@ export interface PendingSetLogRow {
   performed_at: string;
   weight_lbs: number | null;
   reps: number | null;
+  duration_sec?: number | null;
   rir: number | null;
   rpe: number | null;
   notes: string | null;
@@ -388,7 +463,7 @@ export async function inspectQueue(page: Page): Promise<PendingSetLogRow[]> {
   return page.evaluate(async () => {
     // Wait briefly for any in-flight Dexie open. If the DB doesn't exist yet,
     // resolve to [] so callers can assert "queue empty" cleanly.
-    const dbs = await indexedDB.databases?.().catch(() => []) ?? [];
+    const dbs = (await indexedDB.databases?.().catch(() => [])) ?? [];
     if (!dbs.some((d) => d.name === 'RepOSLogQueue')) return [] as unknown[];
 
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -428,7 +503,7 @@ export async function inspectQueue(page: Page): Promise<PendingSetLogRow[]> {
  * WAITS for the app's Dexie instance to create `RepOSLogQueue` (v2, with the
  * `pendingSetLogs` store) before opening it with no explicit version — so we
  * inherit the app's schema rather than creating a divergent v1. The caller must
- * therefore navigate to a banner-bearing route (e.g. `/`) first so
+ * therefore navigate to a pill-bearing route (e.g. `/`) first so
  * useIdbQueueCounts opens the DB.
  */
 export async function seedQueueRow(page: Page, row: PendingSetLogRow): Promise<void> {
@@ -478,8 +553,26 @@ export async function clearQueueDb(page: Page): Promise<void> {
 // -----------------------------------------------------------------------------
 
 /**
+ * Helper: tap the first exercise block on the hub (day checklist) screen to
+ * navigate into its focus screen, where set rows (`set-row-{idx}`) render.
+ *
+ * The W1 logger shell split the single-scroll logger into a hub
+ * (`/today/:runId/log`, one row per exercise block via `hub-row-{blockIdx}`)
+ * and a per-exercise focus screen (`/today/:runId/log/:blockIdx`, where
+ * `set-row-{idx}` + the `Log` button live). Every O# spec's fixtures put all
+ * sets on block 0, so opening block 0 is always sufficient here.
+ *
+ * Must be called after `page.goto('/today/<runId>/log')` (or any reload that
+ * lands back on the hub route) and before any `set-row-*` selector.
+ */
+export async function openFirstBlock(page: Page): Promise<void> {
+  await page.getByTestId('hub-row-0').click();
+}
+
+/**
  * Helper: log a single set via the mobile logger UI.
- * Assumes the page is on /today/<runId>/log with at least one set rendered.
+ * Assumes the page is on the exercise focus screen with at least one set
+ * rendered (see `openFirstBlock`).
  */
 export async function logSet(
   page: Page,
@@ -492,6 +585,19 @@ export async function logSet(
   // The button label is "Log" online and "Log (offline)" when navigator.onLine
   // is false (TodayLoggerMobile SetRow) — match both, but NOT the "Logged"
   // locked state. O2 logs while offline, so an exact /^Log$/ would miss it.
+  await row.getByRole('button', { name: /^Log( \(offline\))?$/ }).click();
+}
+
+/** Duration-mode sibling of logSet: fills the hold-seconds field and logs. */
+export async function logHoldSet(
+  page: Page,
+  setIdx: number,
+  values: { durationSec: number },
+): Promise<void> {
+  const row = page.getByTestId(`set-row-${setIdx}`);
+  await row
+    .getByLabel(new RegExp(`Set ${setIdx + 1} hold seconds`, 'i'))
+    .fill(String(values.durationSec));
   await row.getByRole('button', { name: /^Log( \(offline\))?$/ }).click();
 }
 
@@ -530,7 +636,9 @@ export async function waitForPosts(
   const start = Date.now();
   while (server.posted.length < n) {
     if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitForPosts: expected ${n} POSTs, got ${server.posted.length} after ${timeoutMs}ms`);
+      throw new Error(
+        `waitForPosts: expected ${n} POSTs, got ${server.posted.length} after ${timeoutMs}ms`,
+      );
     }
     await page.waitForTimeout(50);
   }

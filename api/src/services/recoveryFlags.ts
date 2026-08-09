@@ -35,23 +35,30 @@ export type EvaluatedFlag =
   | { key: string; triggered: true; message: string; payload?: Record<string, unknown> };
 
 export async function evaluateAll(ctx: RecoveryFlagContext): Promise<EvaluatedFlag[]> {
-  const out: EvaluatedFlag[] = [];
-  for (const ev of REGISTRY.values()) {
-    try {
-      const r = await ev.evaluate(ctx);
-      if (r.triggered) out.push({ key: ev.key, triggered: true, message: r.message, payload: r.payload });
-      else             out.push({ key: ev.key, triggered: false });
-    } catch (err) {
-      // Fail-closed so one evaluator failure doesn't drop the others.
-      console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
-      out.push({ key: ev.key, triggered: false });
-    }
-  }
-  return out;
+  // Evaluators are mutually independent — run them concurrently (each takes
+  // its own pooled connection). Promise.all over the mapped array preserves
+  // registry-insertion order in the output, so the response `flags` order is
+  // unchanged from the previous sequential loop.
+  return Promise.all(
+    Array.from(REGISTRY.values()).map(async (ev): Promise<EvaluatedFlag> => {
+      try {
+        const r = await ev.evaluate(ctx);
+        return r.triggered
+          ? { key: ev.key, triggered: true, message: r.message, payload: r.payload }
+          : { key: ev.key, triggered: false };
+      } catch (err) {
+        // Fail-closed so one evaluator failure doesn't drop the others.
+        console.error(`[recoveryFlags] evaluator '${ev.key}' threw`, err);
+        return { key: ev.key, triggered: false };
+      }
+    }),
+  );
 }
 
 // For tests: clear registry between scenarios.
-export function _resetRegistryForTest(): void { REGISTRY.clear(); }
+export function _resetRegistryForTest(): void {
+  REGISTRY.clear();
+}
 
 /**
  * Trigger when the 7-day weight trend is ≤ -2.0 lb AND the active program's
@@ -93,7 +100,9 @@ export const bodyweightCrashEvaluator: RecoveryFlagEvaluator = {
     if (trend === null || trend === undefined) return { triggered: false };
     if (trend > -2.0) return { triggered: false };
 
-    const { rows: [up] } = await db.query<{ goal: string | null }>(
+    const {
+      rows: [up],
+    } = await db.query<{ goal: string | null }>(
       `SELECT (up.customizations->>'goal')::text AS goal
        FROM mesocycle_runs mr
        JOIN user_programs up ON up.id=mr.user_program_id

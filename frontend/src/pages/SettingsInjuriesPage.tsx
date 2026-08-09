@@ -13,7 +13,8 @@ export default function SettingsInjuriesPage(): JSX.Element {
     <main style={{ padding: 16, color: '#fff', fontFamily: FONTS.ui }}>
       <h1 style={{ fontSize: 22, marginBottom: 12 }}>Injuries</h1>
       <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 16 }}>
-        Tap a chip to mark a joint. Active chips demote (but never block) load-bearing exercises during workouts.
+        Tap a chip to mark a joint. Active chips demote (but never block) load-bearing exercises
+        during workouts.
       </p>
       <InjuryChipsEditor />
     </main>

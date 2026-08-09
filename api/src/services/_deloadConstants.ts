@@ -11,7 +11,7 @@
 // available, the manual-deload service falls back to the seeded
 // _muscleLandmarks.MUSCLE_LANDMARKS[muscle].mav (see manualDeload.ts).
 
-export const MANUAL_DELOAD_MAV_FACTOR = 0.5;  // floor(MAV * 0.5)
-export const MANUAL_DELOAD_RIR        = 4;    // RIR floor (was RIR=3 in v1 draft)
+export const MANUAL_DELOAD_MAV_FACTOR = 0.5; // floor(MAV * 0.5)
+export const MANUAL_DELOAD_RIR = 4; // RIR floor (was RIR=3 in v1 draft)
 
 // (W4 may add FULL_DELOAD_* constants here when it lands.)

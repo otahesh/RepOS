@@ -4,11 +4,17 @@
  * See api/src/schemas/README.md for the cross-package type mirror strategy.
  */
 
+import { apiFetch } from '../../auth';
 import { jsonOrThrow } from './_http';
 export { ApiError } from './_http';
 
 export type MesocycleRunStatus =
-  | 'draft' | 'active' | 'paused' | 'completed' | 'archived' | 'abandoned';
+  | 'draft'
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'archived'
+  | 'abandoned';
 
 export type TodaySet = {
   id: string;
@@ -18,13 +24,29 @@ export type TodaySet = {
     id: string;
     slug: string;
     name: string;
+    /** requires: [] on the exercise — the logger captures reps-only. Optional
+     *  so older fixtures/mocks without it still compile (treated as false). */
+    bodyweight?: boolean;
+    /** Library-level classification; drives materialization + substitution
+     *  filtering. Render mode keys on populated targets instead. */
+    measurement?: 'reps' | 'duration';
   };
-  target_reps_low: number;
-  target_reps_high: number;
+  /** Exactly one measurement dimension is populated per row (reps pair XOR
+   *  duration pair). Nullable + optional while PR1..PR2 are in flight; the
+   *  logger derives its input mode from WHICH pair is populated — never from
+   *  exercise.measurement — so pre-reclassification rows render unchanged. */
+  target_reps_low: number | null;
+  target_reps_high: number | null;
+  target_duration_low_sec?: number | null;
+  target_duration_high_sec?: number | null;
   target_rir: number;
   rest_sec: number;
   target_load_hint?: string;
   suggested_substitution?: { id: string; slug: string; name: string; reason: string } | null;
+  /** Latest log for this planned set, or null if never logged. Fields are
+   *  individually nullable — a reps-only bodyweight log has weight_lbs: null,
+   *  a duration-only hold has reps: null. */
+  logged: { weight_lbs: number | null; reps: number | null; duration_sec?: number | null } | null;
 };
 
 export type TodayCardio = {
@@ -38,6 +60,8 @@ export type TodayCardio = {
   target_duration_sec?: number | null;
   target_distance_m?: number | null;
   target_zone?: number | null;
+  /** Latest cardio_log for this block, or null/absent if never completed. */
+  logged?: { duration_sec: number; distance_m: number | null } | null;
 };
 
 export type TodayDay = {
@@ -48,13 +72,33 @@ export type TodayDay = {
   day_idx: number;
 };
 
+export type TodayPacing = {
+  status: 'ahead' | 'on_pace' | 'behind';
+  /** Whole days past the offered day's scheduled_date. Present only when behind. */
+  days_behind?: number;
+  /** The offered day's scheduled_date — a pacing hint, not a gate. */
+  suggested_date: string;
+};
+
 export type TodayWorkoutResponse =
   | { state: 'no_active_run' }
-  | { state: 'rest'; run_id: string; scheduled_date: string }
+  // All day workouts finished (or the latest run itself is completed) — dates
+  // are pacing hints under sequence semantics, so there is no 'rest' state.
+  | { state: 'mesocycle_complete'; run_id: string }
   | {
       state: 'workout';
       run_id: string;
+      /** Source template's experience track — beginner runs render
+       *  plain-language effort cues instead of RIR. Null for template-less runs. */
+      track?: string | null;
+      /** The run's start_date (YYYY-MM-DD). Floors the backfill date picker so a
+       *  user can't stamp set-logs before the program started. */
+      start_date: string;
       day: TodayDay;
+      pacing: TodayPacing;
+      /** True when the run already has a day workout completed on the user's
+       *  current local day — lets the UI frame the next workout as optional. */
+      completed_today: boolean;
       sets: TodaySet[];
       cardio: TodayCardio[];
     };
@@ -122,35 +166,38 @@ export type MesocycleRecapStats = {
   weeks: number;
   total_sets: number;
   prs: number;
+  duration_prs?: Array<{
+    exercise_slug: string;
+    exercise_name: string;
+    best_duration_sec: number;
+    load_lbs: number | null;
+  }>;
 };
 
 export async function getTodayWorkout(): Promise<TodayWorkoutResponse> {
-  const res = await fetch('/api/mesocycles/today', { credentials: 'same-origin' });
+  const res = await apiFetch('/api/mesocycles/today', {});
   return jsonOrThrow(res);
 }
 
 export async function getMesocycle(id: string): Promise<MesocycleRunDetail> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}`, { credentials: 'same-origin' });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}`, {});
   return jsonOrThrow(res);
 }
 
 export async function getVolumeRollup(id: string): Promise<VolumeRollup> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, { credentials: 'same-origin' });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/volume-rollup`, {});
   return jsonOrThrow(res);
 }
 
 export async function abandonMesocycle(id: string): Promise<AbandonMesocycleResponse> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/abandon`, {
     method: 'POST',
-    credentials: 'same-origin',
   });
   return jsonOrThrow(res);
 }
 
 export async function getMesocycleRecapStats(id: string): Promise<MesocycleRecapStats> {
-  const res = await fetch(`/api/mesocycles/${encodeURIComponent(id)}/recap-stats`, {
-    credentials: 'same-origin',
-  });
+  const res = await apiFetch(`/api/mesocycles/${encodeURIComponent(id)}/recap-stats`, {});
   return jsonOrThrow(res);
 }
 
@@ -180,11 +227,10 @@ export async function startMesocycle(input: StartMesocycleInput): Promise<StartM
     start_tz: input.start_tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
   const intent = input.intent ?? 'normal';
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/user-programs/${encodeURIComponent(input.user_program_id)}/start?intent=${intent}`,
     {
       method: 'POST',
-      credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     },

@@ -38,11 +38,22 @@ export function buildSingleLandmarkSchema(slug: string) {
   const mevFloor = Math.max(2, Math.floor(seed.mev * 0.5));
   const mrvCeiling = Math.min(50, Math.ceil(seed.mrv * 1.5));
   return SingleLandmarkBaseSchema.superRefine((l, ctx) => {
-    if (l.mv !== undefined && l.mv > l.mev) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MV must be <= MEV' });
-    if (l.mev < mevFloor) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `MEV below clinical floor ${mevFloor}` });
-    if (l.mrv > mrvCeiling) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `MRV above clinical ceiling ${mrvCeiling}` });
-    if (l.mav - l.mev < 2) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MAV - MEV must be >= 2' });
-    if (l.mrv - l.mav < 2) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MRV - MAV must be >= 2' });
+    if (l.mv !== undefined && l.mv > l.mev)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MV must be <= MEV' });
+    if (l.mev < mevFloor)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `MEV below clinical floor ${mevFloor}`,
+      });
+    if (l.mrv > mrvCeiling)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `MRV above clinical ceiling ${mrvCeiling}`,
+      });
+    if (l.mav - l.mev < 2)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MAV - MEV must be >= 2' });
+    if (l.mrv - l.mav < 2)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'MRV - MAV must be >= 2' });
   });
 }
 
@@ -57,10 +68,14 @@ export function buildSingleLandmarkSchema(slug: string) {
 // therefore key the outer record on `z.string()` (partial-friendly) and reject
 // unknown slugs as a per-row fieldError below — preserving the same
 // per-row-error contract the plan specifies.
-export function parseLandmarksPatch(body: unknown):
+export function parseLandmarksPatch(
+  body: unknown,
+):
   | { ok: true; overrides: Record<string, { mev: number; mav: number; mrv: number; mv?: number }> }
   | { ok: false; fieldErrors: Record<string, string> } {
-  const shape = z.object({ overrides: z.record(z.string(), SingleLandmarkBaseSchema) }).safeParse(body);
+  const shape = z
+    .object({ overrides: z.record(z.string(), SingleLandmarkBaseSchema) })
+    .safeParse(body);
   if (!shape.success) return { ok: false, fieldErrors: { _root: 'malformed body' } };
   const out: Record<string, { mev: number; mav: number; mrv: number; mv?: number }> = {};
   const fieldErrors: Record<string, string> = {};
@@ -80,4 +95,7 @@ export function parseLandmarksPatch(body: unknown):
   return { ok: true, overrides: out };
 }
 
-export type ResolvedLandmarks = Record<string, { mev: number; mav: number; mrv: number; mv?: number }>;
+export type ResolvedLandmarks = Record<
+  string,
+  { mev: number; mav: number; mrv: number; mv?: number }
+>;

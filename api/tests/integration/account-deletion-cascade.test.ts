@@ -108,22 +108,28 @@ async function seedUserContents(): Promise<void> {
 
   // 4. user_programs → mesocycle_runs → day_workouts → planned_sets → set_logs.
   const tplSlug = `delete-cascade-tpl-${randomUUID()}`;
-  const { rows: [tpl] } = await db.query<{ id: string }>(
+  const {
+    rows: [tpl],
+  } = await db.query<{ id: string }>(
     `INSERT INTO program_templates
-       (slug, name, weeks, days_per_week, structure, version, created_by)
-     VALUES ($1, 'Delete Cascade Tpl', 1, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system')
+       (slug, name, weeks, days_per_week, structure, version, created_by, track)
+     VALUES ($1, 'Delete Cascade Tpl', 1, 1, '{"_v":1,"days":[]}'::jsonb, 1, 'system', 'beginner')
      RETURNING id`,
     [tplSlug],
   );
   templateId = tpl.id;
 
-  const { rows: [up] } = await db.query<{ id: string }>(
+  const {
+    rows: [up],
+  } = await db.query<{ id: string }>(
     `INSERT INTO user_programs (user_id, template_id, template_version, name, status)
      VALUES ($1, $2, 1, 'Cascade Program', 'active') RETURNING id`,
     [userId, templateId],
   );
 
-  const { rows: [mr] } = await db.query<{ id: string }>(
+  const {
+    rows: [mr],
+  } = await db.query<{ id: string }>(
     `INSERT INTO mesocycle_runs
        (user_program_id, user_id, start_date, start_tz, weeks, current_week, status)
      VALUES ($1, $2, CURRENT_DATE, 'UTC', 1, 1, 'active')
@@ -132,7 +138,9 @@ async function seedUserContents(): Promise<void> {
   );
   mesocycleRunId = mr.id;
 
-  const { rows: [dw] } = await db.query<{ id: string }>(
+  const {
+    rows: [dw],
+  } = await db.query<{ id: string }>(
     `INSERT INTO day_workouts
        (mesocycle_run_id, week_idx, day_idx, scheduled_date, kind, name)
      VALUES ($1, 1, 0, CURRENT_DATE, 'strength', 'Cascade Day')
@@ -141,15 +149,15 @@ async function seedUserContents(): Promise<void> {
   );
 
   // Pick any seeded exercise (matches seed-fixtures helper pattern).
-  const { rows: ex } = await db.query<{ id: string }>(
-    `SELECT id FROM exercises LIMIT 1`,
-  );
+  const { rows: ex } = await db.query<{ id: string }>(`SELECT id FROM exercises LIMIT 1`);
   if (ex.length === 0) {
     throw new Error('seed: no exercises in DB. Run `npm run seed` in api/.');
   }
   const exerciseId = ex[0].id;
 
-  const { rows: [ps] } = await db.query<{ id: string }>(
+  const {
+    rows: [ps],
+  } = await db.query<{ id: string }>(
     `INSERT INTO planned_sets
        (day_workout_id, block_idx, set_idx, exercise_id,
         target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -356,14 +364,12 @@ describe('DELETE /api/me — full cascade', () => {
     });
     expect(r.statusCode).toBe(204);
 
-    // Set-Cookie clears CF_Authorization — same shape as signout-everywhere.
+    // Must NOT touch the CF_Authorization cookie — same contract as
+    // signout-everywhere: the follow-up /cdn-cgi/access/logout navigation
+    // needs the cookie intact for CF to terminate the edge session.
     const setCookie = r.headers['set-cookie'];
     const cookieStr = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
-    expect(cookieStr).toMatch(/CF_Authorization=;.*Max-Age=0/i);
-    expect(cookieStr).toMatch(/HttpOnly/i);
-    expect(cookieStr).toMatch(/Secure/i);
-    expect(cookieStr).toMatch(/SameSite=Lax/i);
-    expect(cookieStr).toMatch(/Path=\//i);
+    expect(cookieStr).not.toMatch(/CF_Authorization/i);
 
     // W9 Q33 — the address is removed from the CF Access policy rather than
     // orphaned there. beforeAll seeded it into policyEmails, so this can fail.

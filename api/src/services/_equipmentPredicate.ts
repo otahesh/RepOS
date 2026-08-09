@@ -3,7 +3,10 @@
 // structured-constraint logic (e.g. dumbbells min_pair_lb vs profile max_lb).
 import type { PredicateT } from '../schemas/predicate.js';
 
-export function allPredicatesSatisfied(predicates: PredicateT[], profile: Record<string, unknown>): boolean {
+export function allPredicatesSatisfied(
+  predicates: PredicateT[],
+  profile: Record<string, unknown>,
+): boolean {
   for (const p of predicates) {
     if (!satisfies(p, profile)) return false;
   }
@@ -16,8 +19,12 @@ function satisfies(p: PredicateT, prof: Record<string, unknown>): boolean {
       const dp = prof['dumbbells'];
       if (!dp || dp === false || typeof dp !== 'object') return false;
       const o = dp as { min_lb?: number; max_lb?: number };
-      return typeof o.min_lb === 'number' && typeof o.max_lb === 'number'
-        && o.min_lb <= p.min_pair_lb && o.max_lb >= p.min_pair_lb;
+      return (
+        typeof o.min_lb === 'number' &&
+        typeof o.max_lb === 'number' &&
+        o.min_lb <= p.min_pair_lb &&
+        o.max_lb >= p.min_pair_lb
+      );
     }
     case 'adjustable_bench': {
       const ab = prof['adjustable_bench'];

@@ -18,3 +18,4 @@ screenshot.png
 **/.eslintcache
 **/*.log
 .DS_Store
+scripts/exercise-media/

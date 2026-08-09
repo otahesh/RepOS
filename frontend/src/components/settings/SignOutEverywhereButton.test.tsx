@@ -24,12 +24,18 @@ describe('SignOutEverywhereButton', () => {
   it('opens medium-tier confirm on click', async () => {
     render(<SignOutEverywhereButton />);
     await userEvent.click(screen.getByRole('button', { name: /sign out everywhere/i }));
-    expect(screen.getByRole('dialog', { name: /end this session on every device/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: /end this session on every device/i }),
+    ).toBeInTheDocument();
   });
 
   it('Confirm calls signOutEverywhere + posts BroadcastChannel signal + redirects', async () => {
     const assign = vi.fn();
-    Object.defineProperty(window, 'location', { value: { assign }, configurable: true, writable: true });
+    Object.defineProperty(window, 'location', {
+      value: { assign },
+      configurable: true,
+      writable: true,
+    });
     vi.mocked(api.signOutEverywhere).mockResolvedValue();
 
     const messages: unknown[] = [];

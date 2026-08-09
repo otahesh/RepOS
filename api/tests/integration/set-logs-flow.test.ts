@@ -25,7 +25,7 @@
  */
 
 import 'dotenv/config';
-import { describe, it, expect, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { build } from '../helpers/build-test-app.js';
 import {
   seedUserWithMesocycle,
@@ -79,6 +79,194 @@ describe('POST /api/set-logs — happy path', () => {
         rir: 2,
       });
     } finally {
+      await app.close();
+    }
+  });
+
+  it('round-trips a hold log: duration_sec stored, reps null (measurement model)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '22222222-2222-4222-8222-222222222222',
+          planned_set_id: seed.plannedSetId,
+          duration_sec: 40,
+          rir: 2, // proximity-to-failure — an RPE-8 hold
+          performed_at: new Date().toISOString(),
+        },
+      });
+
+      expect(resp.statusCode).toBe(201);
+      const body = resp.json();
+      expect(body.set_log).toMatchObject({
+        planned_set_id: seed.plannedSetId,
+        duration_sec: 40,
+        reps: null,
+        weight_lbs: null,
+        rir: 2,
+      });
+
+      const list = await app.inject({
+        method: 'GET',
+        url: `/api/set-logs?planned_set_id=${seed.plannedSetId}`,
+        headers: { authorization: `Bearer ${seed.bearer}` },
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().set_logs[0].duration_sec).toBe(40);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('400s a log with neither reps nor duration_sec (must measure something)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '33333333-3333-4333-8333-333333333333',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 100,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/set-logs — day-workout status flip (sequence-workouts)', () => {
+  it('flips the owning day_workout planned → in_progress on the first set log', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const { rows: before } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(before[0].status).toBe('planned');
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: '99999999-9999-4999-8999-999999999999',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 135,
+          reps: 5,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+
+      const { rows: after } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(after[0].status).toBe('in_progress');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('leaves a completed day_workout untouched (backfill scenario)', async () => {
+    const app = await build();
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+      await db.query(`UPDATE day_workouts SET status = 'completed' WHERE id = $1`, [
+        seed.dayWorkoutId,
+      ]);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 135,
+          reps: 5,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+
+      const { rows: after } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(after[0].status).toBe('completed');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still returns 201 when the status-flip UPDATE fails (best-effort hint)', async () => {
+    // The set_log INSERT commits before the flip runs; a flip failure
+    // (timeout, connection blip) must not 500 a request whose write
+    // persisted. The route swallows + warn-logs; the next log's flip
+    // self-heals via WHERE status='planned'.
+    const app = await build();
+    const originalQuery = db.query.bind(db);
+    const spy = vi.spyOn(db, 'query').mockImplementation(((...args: unknown[]) => {
+      const text = args[0];
+      if (typeof text === 'string' && text.includes(`SET status = 'in_progress'`)) {
+        return Promise.reject(new Error('injected flip failure'));
+      }
+      return (originalQuery as (...a: unknown[]) => unknown)(...args);
+    }) as never);
+    try {
+      const seed = await seedUserWithMesocycle();
+      handles.push(seed);
+
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/set-logs',
+        headers: { authorization: `Bearer ${seed.bearer}` },
+        payload: {
+          client_request_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          planned_set_id: seed.plannedSetId,
+          weight_lbs: 135,
+          reps: 5,
+          performed_at: new Date().toISOString(),
+        },
+      });
+      expect(resp.statusCode).toBe(201);
+      expect(resp.json().deduped).toBe(false);
+
+      spy.mockRestore();
+
+      // The set_log persisted despite the flip failure...
+      const { rows: logs } = await db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM set_logs WHERE planned_set_id = $1`,
+        [seed.plannedSetId],
+      );
+      expect(logs[0].n).toBe(1);
+      // ...and the day_workout is still 'planned' (flip never landed).
+      const { rows: after } = await db.query<{ status: string }>(
+        `SELECT status FROM day_workouts WHERE id = $1`,
+        [seed.dayWorkoutId],
+      );
+      expect(after[0].status).toBe('planned');
+    } finally {
+      spy.mockRestore();
       await app.close();
     }
   });

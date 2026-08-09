@@ -31,14 +31,26 @@ describe('health_workouts schema (migration 030)', () => {
     const cols = Object.fromEntries(rows.map((r) => [r.column_name, r]));
     expect(cols.id).toMatchObject({ data_type: 'bigint', is_nullable: 'NO' });
     expect(cols.user_id).toMatchObject({ data_type: 'uuid', is_nullable: 'NO' });
-    expect(cols.started_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
-    expect(cols.ended_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+    expect(cols.started_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
+    expect(cols.ended_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
     expect(cols.modality).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
     expect(cols.distance_m).toMatchObject({ data_type: 'integer', is_nullable: 'YES' });
     expect(cols.duration_sec).toMatchObject({ data_type: 'integer', is_nullable: 'NO' });
     expect(cols.source).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
-    expect(cols.created_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
-    expect(cols.updated_at).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+    expect(cols.created_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
+    expect(cols.updated_at).toMatchObject({
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+    });
   });
 
   it('enforces UNIQUE (user_id, started_at, source)', async () => {

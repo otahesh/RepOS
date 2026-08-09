@@ -20,7 +20,9 @@ function fmtFor(tz: string): Intl.DateTimeFormat {
     // Will throw RangeError on invalid IANA tz — that's the contract.
     f = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
     });
     FMT_CACHE.set(tz, f);
   }
@@ -34,7 +36,9 @@ function fmtFor(tz: string): Intl.DateTimeFormat {
  */
 export function computeUserLocalDate(tz: string, now: Date = new Date()): string {
   const parts = fmtFor(tz).formatToParts(now);
-  let y = '', m = '', d = '';
+  let y = '',
+    m = '',
+    d = '';
   for (const p of parts) {
     if (p.type === 'year') y = p.value;
     else if (p.type === 'month') m = p.value;

@@ -13,8 +13,12 @@ import {
 } from '../helpers/seed-fixtures.js';
 
 const handles: (StalledPrFixtureHandle | StalledPrMultiWeekFixtureHandle)[] = [];
-afterEach(async () => { if (handles.length) await cleanupSeeded(handles.splice(0)); });
-afterAll(async () => { await db.end(); });
+afterEach(async () => {
+  if (handles.length) await cleanupSeeded(handles.splice(0));
+});
+afterAll(async () => {
+  await db.end();
+});
 
 describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
   it('post-swap evaluator produces output identical to the pre-swap golden fixture (multi-week)', async () => {
@@ -26,7 +30,7 @@ describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
       triggered: boolean;
       exercise_slug: string | null;
     }>;
-    expect(golden.length).toBe(5);  // 5-week mesocycle
+    expect(golden.length).toBe(5); // 5-week mesocycle
 
     // Recreate the same seeded run. Weeks 3-4 carry the stalled RIR-0 bench
     // sessions (is_deload=false); week 5 has none. Both pre- and post-swap
@@ -36,7 +40,9 @@ describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
 
     for (const g of golden) {
       const res = await stalledPrEvaluator.evaluate({
-        userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: g.week,
+        userId: seed.userId,
+        runId: seed.mesocycleRunId,
+        weekIdx: g.week,
       });
       expect(res.triggered, `week ${g.week} triggered parity`).toBe(g.triggered);
       let postSlug: string | null = null;
@@ -55,7 +61,9 @@ describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
     const seed = await seedUserWithStalledPrFixture({ markLastSessionDeload: false });
     handles.push(seed);
     const res = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: seed.currentWeek,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: seed.currentWeek,
     });
     expect(res.triggered).toBe(true);
   });
@@ -64,21 +72,39 @@ describe('W2 — stalledPrEvaluator deload-signal handoff parity', () => {
     const seed = await seedUserWithStalledPrFixture({ markLastSessionDeload: true });
     handles.push(seed);
     const res = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: seed.currentWeek,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: seed.currentWeek,
     });
     expect(res.triggered).toBe(false);
   });
 
   it('parity: mid-run RIR-0 fires; deload-week sessions stay silent', async () => {
     // Two seeds with identical set_log shape — only the deload position changes.
-    const seedMidRun = await seedUserWithStalledPrFixture({ sessionsInWeek: 3, weeks: 5, markLastSessionDeload: false });
-    const seedDeloadWeek = await seedUserWithStalledPrFixture({ sessionsInWeek: 5, weeks: 5, markLastSessionDeload: true });
+    const seedMidRun = await seedUserWithStalledPrFixture({
+      sessionsInWeek: 3,
+      weeks: 5,
+      markLastSessionDeload: false,
+    });
+    const seedDeloadWeek = await seedUserWithStalledPrFixture({
+      sessionsInWeek: 5,
+      weeks: 5,
+      markLastSessionDeload: true,
+    });
     handles.push(seedMidRun, seedDeloadWeek);
 
-    const mid = await stalledPrEvaluator.evaluate({ userId: seedMidRun.userId, runId: seedMidRun.mesocycleRunId, weekIdx: 3 });
-    const dl  = await stalledPrEvaluator.evaluate({ userId: seedDeloadWeek.userId, runId: seedDeloadWeek.mesocycleRunId, weekIdx: 5 });
+    const mid = await stalledPrEvaluator.evaluate({
+      userId: seedMidRun.userId,
+      runId: seedMidRun.mesocycleRunId,
+      weekIdx: 3,
+    });
+    const dl = await stalledPrEvaluator.evaluate({
+      userId: seedDeloadWeek.userId,
+      runId: seedDeloadWeek.mesocycleRunId,
+      weekIdx: 5,
+    });
 
-    expect(mid.triggered).toBe(true);   // mid-run RIR-0 fire
-    expect(dl.triggered).toBe(false);   // deload-week silence
+    expect(mid.triggered).toBe(true); // mid-run RIR-0 fire
+    expect(dl.triggered).toBe(false); // deload-week silence
   });
 });

@@ -1,0 +1,17 @@
+{
+  "name": "exercise-media-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Manual Gemini photo pipeline for exercise setup cards (spec 2026-07-06 §5). Never runs in CI.",
+  "scripts": {
+    "generate": "tsx src/generate.ts",
+    "promote": "tsx src/promote.ts",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.34.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}

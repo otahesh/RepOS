@@ -53,9 +53,7 @@ describe('ActiveSessionsTable', () => {
     render(<ActiveSessionsTable />);
 
     // Wait for the first row to land.
-    await waitFor(() =>
-      expect(screen.getByTestId('session-row')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('session-row')).toBeInTheDocument());
     expect(screen.getByText('iOS Shortcut')).toBeInTheDocument();
     expect(screen.getByText('192.168.1.0/24')).toBeInTheDocument();
     // last_used_at rendered (we don't assert exact format, just that the date
@@ -66,9 +64,7 @@ describe('ActiveSessionsTable', () => {
   it('renders empty state "No active sessions" when the list is empty', async () => {
     vi.mocked(api.listSessions).mockResolvedValue([]);
     render(<ActiveSessionsTable />);
-    await waitFor(() =>
-      expect(screen.getByText(/no active sessions/i)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/no active sessions/i)).toBeInTheDocument());
     expect(screen.queryByTestId('session-row')).toBeNull();
     expect(screen.queryByTestId('session-card')).toBeNull();
   });
@@ -86,9 +82,7 @@ describe('ActiveSessionsTable', () => {
     ]);
     render(<ActiveSessionsTable />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('session-card')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('session-card')).toBeInTheDocument());
     // Mobile = cards only; no table rows.
     expect(screen.queryByTestId('session-row')).toBeNull();
     expect(screen.getByText('iOS Shortcut')).toBeInTheDocument();

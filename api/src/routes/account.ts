@@ -21,10 +21,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess, requireCfAccessOnly } from '../middleware/cfAccess.js';
 import { csrfOrigin } from '../middleware/csrfOrigin.js';
-import {
-  recordAccountEvent,
-  listAccountEvents,
-} from '../services/accountEvents.js';
+import { recordAccountEvent, listAccountEvents } from '../services/accountEvents.js';
 import {
   ProfilePatchRequestSchema,
   SessionListResponseSchema,
@@ -37,6 +34,8 @@ import { deleteUser } from '../services/deleteUser.js';
 import { LifecycleError } from '../services/userLifecycle.js';
 import { LockTimeoutError } from '../services/membershipLock.js';
 import { SUPPORT_CONTACT } from '../services/inviteMailer.js';
+import { isValidBigintId } from '../schemas/idParams.js';
+import { clientIp } from '../utils/clientIp.js';
 
 const VALID_TZ = new Set(IANA_TIMEZONES);
 
@@ -54,7 +53,7 @@ export function truncateIpTo24(ip: string | null): string | null {
 // non-typed cast; bearer path doesn't set it at all). Centralize the cast so
 // callers don't pepper `as { userEmail?: string }` through the file.
 function getUserEmail(req: FastifyRequest): string | undefined {
-  return (req as { userEmail?: string }).userEmail;
+  return req.userEmail;
 }
 
 export async function accountRoutes(app: FastifyInstance) {
@@ -73,15 +72,11 @@ export async function accountRoutes(app: FastifyInstance) {
 
       const parsed = ProfilePatchRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_body', issues: parsed.error.issues });
+        return reply.code(400).send({ error: 'invalid_body', issues: parsed.error.issues });
       }
 
       if (parsed.data.timezone && !VALID_TZ.has(parsed.data.timezone)) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_timezone', timezone: parsed.data.timezone });
+        return reply.code(400).send({ error: 'invalid_timezone', timezone: parsed.data.timezone });
       }
 
       // Read before-state for idempotency check + redacted audit meta. We
@@ -91,10 +86,7 @@ export async function accountRoutes(app: FastifyInstance) {
         email: string;
         display_name: string | null;
         timezone: string;
-      }>(
-        `SELECT email, display_name, timezone FROM users WHERE id=$1`,
-        [userId],
-      );
+      }>(`SELECT email, display_name, timezone FROM users WHERE id=$1`, [userId]);
       if (before.rows.length === 0) {
         return reply.code(500).send({ error: 'auth_state_missing' });
       }
@@ -113,10 +105,7 @@ export async function accountRoutes(app: FastifyInstance) {
         vals.push(parsed.data.display_name);
         changedFields.push('display_name');
       }
-      if (
-        parsed.data.timezone !== undefined &&
-        parsed.data.timezone !== before.rows[0].timezone
-      ) {
+      if (parsed.data.timezone !== undefined && parsed.data.timezone !== before.rows[0].timezone) {
         sets.push(`timezone=$${sets.length + 2}`);
         vals.push(parsed.data.timezone);
         changedFields.push('timezone');
@@ -129,10 +118,7 @@ export async function accountRoutes(app: FastifyInstance) {
           email: string;
           display_name: string | null;
           timezone: string;
-        }>(
-          `SELECT id::text, email, display_name, timezone FROM users WHERE id=$1`,
-          [userId],
-        );
+        }>(`SELECT id::text, email, display_name, timezone FROM users WHERE id=$1`, [userId]);
         return reply.code(200).send(rows[0]);
       }
 
@@ -153,7 +139,7 @@ export async function accountRoutes(app: FastifyInstance) {
         userId,
         userEmail,
         kind: 'profile_changed',
-        ip: req.ip,
+        ip: clientIp(req),
         meta: { fields: changedFields, changed: true },
       });
       return reply.code(200).send(rows[0]);
@@ -162,84 +148,68 @@ export async function accountRoutes(app: FastifyInstance) {
 
   // GET /api/account/sessions — list of the user's non-revoked device_tokens.
   // IP truncated to /24 per I-LAST-IP-TRUNCATE.
-  app.get(
-    '/account/sessions',
-    { preHandler: requireBearerOrCfAccess },
-    async (req, reply) => {
-      const userId = req.userId;
-      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
-      const { rows } = await db.query<{
-        id: string;
-        label: string | null;
-        created_at: Date;
-        last_used_at: Date | null;
-        last_used_ip: string | null;
-      }>(
-        `SELECT id::text, label, created_at, last_used_at, last_used_ip
+  app.get('/account/sessions', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = req.userId;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+    const { rows } = await db.query<{
+      id: string;
+      label: string | null;
+      created_at: Date;
+      last_used_at: Date | null;
+      last_used_ip: string | null;
+    }>(
+      `SELECT id::text, label, created_at, last_used_at, last_used_ip
            FROM device_tokens
           WHERE user_id=$1 AND revoked_at IS NULL
           ORDER BY created_at DESC`,
-        [userId],
-      );
-      const resp = SessionListResponseSchema.parse({
-        sessions: rows.map((r) => ({
-          id: r.id,
-          label: r.label,
-          created_at:
-            r.created_at instanceof Date
-              ? r.created_at.toISOString()
-              : String(r.created_at),
-          last_used_at:
-            r.last_used_at instanceof Date
-              ? r.last_used_at.toISOString()
-              : (r.last_used_at ?? null),
-          last_used_ip_24: truncateIpTo24(r.last_used_ip),
-        })),
-      });
-      return reply.send(resp);
-    },
-  );
+      [userId],
+    );
+    const resp = SessionListResponseSchema.parse({
+      sessions: rows.map((r) => ({
+        id: r.id,
+        label: r.label,
+        created_at:
+          r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+        last_used_at:
+          r.last_used_at instanceof Date ? r.last_used_at.toISOString() : (r.last_used_at ?? null),
+        last_used_ip_24: truncateIpTo24(r.last_used_ip),
+      })),
+    });
+    return reply.send(resp);
+  });
 
   // GET /api/account/events — keyset-paginated audit feed (per I-PAGINATION-KEYSET).
   app.get<{
     Querystring: { before_ts?: string; before_id?: string; limit?: string };
-  }>(
-    '/account/events',
-    { preHandler: requireBearerOrCfAccess },
-    async (req, reply) => {
-      const userId = req.userId;
-      if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
-      const beforeTs = req.query.before_ts
-        ? new Date(req.query.before_ts)
-        : undefined;
-      const beforeId = req.query.before_id;
-      const limit = req.query.limit
-        ? Math.min(parseInt(req.query.limit, 10), 200)
-        : 50;
-      const rows = await listAccountEvents(userId, {
-        beforeTs,
-        beforeId,
-        limit,
-      });
-      const last = rows[rows.length - 1];
-      const nextCursor =
-        rows.length === limit && last
-          ? { before_ts: last.occurred_at.toISOString(), before_id: last.id }
-          : null;
-      const resp = AccountEventListResponseSchema.parse({
-        events: rows.map((r) => ({
-          id: r.id,
-          kind: r.kind,
-          ip: r.ip,
-          user_email_at_event: r.user_email_at_event,
-          meta: r.meta,
-          occurred_at: r.occurred_at.toISOString(),
-        })),
-        next_cursor: nextCursor,
-      });
-      return reply.send(resp);
-    },
-  );
+  }>('/account/events', { preHandler: requireBearerOrCfAccess }, async (req, reply) => {
+    const userId = req.userId;
+    if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+    const beforeTs = req.query.before_ts ? new Date(req.query.before_ts) : undefined;
+    const beforeId = req.query.before_id;
+    const limit = req.query.limit ? Math.min(parseInt(req.query.limit, 10), 200) : 50;
+    const rows = await listAccountEvents(userId, {
+      beforeTs,
+      beforeId,
+      limit,
+    });
+    const last = rows[rows.length - 1];
+    const nextCursor =
+      rows.length === limit && last
+        ? { before_ts: last.occurred_at.toISOString(), before_id: last.id }
+        : null;
+    const resp = AccountEventListResponseSchema.parse({
+      events: rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        ip: r.ip,
+        user_email_at_event: r.user_email_at_event,
+        meta: r.meta,
+        occurred_at: r.occurred_at.toISOString(),
+      })),
+      next_cursor: nextCursor,
+    });
+    return reply.send(resp);
+  });
 
   // DELETE /api/account/sessions/:id — revoke a single bearer token (Task 14).
   //
@@ -263,6 +233,11 @@ export async function accountRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const userId = req.userId;
       if (!userId) return reply.code(500).send({ error: 'auth_state_missing' });
+      // device_tokens.id is bigint — a non-numeric or over-range :id would throw
+      // 22003 on the UPDATE → 500 leaking raw DB text. Treat as a clean 404 (G11).
+      if (!isValidBigintId(req.params.id)) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
 
       const { rowCount } = await db.query(
         `UPDATE device_tokens
@@ -275,10 +250,9 @@ export async function accountRoutes(app: FastifyInstance) {
       // Re-read email if the bearer path didn't plumb it through.
       let userEmail = getUserEmail(req);
       if (!userEmail) {
-        const { rows } = await db.query<{ email: string }>(
-          `SELECT email FROM users WHERE id=$1`,
-          [userId],
-        );
+        const { rows } = await db.query<{ email: string }>(`SELECT email FROM users WHERE id=$1`, [
+          userId,
+        ]);
         if (rows.length === 0) {
           return reply.code(500).send({ error: 'auth_state_missing' });
         }
@@ -289,7 +263,7 @@ export async function accountRoutes(app: FastifyInstance) {
         userId,
         userEmail,
         kind: 'token_revoked',
-        ip: req.ip,
+        ip: clientIp(req),
         meta: { token_id: req.params.id },
       });
       return reply.code(204).send();
@@ -322,16 +296,16 @@ export async function accountRoutes(app: FastifyInstance) {
     '/me',
     { preHandler: [requireCfAccessOnly, csrfOrigin] },
     async (req, reply) => {
-      const userId = (req as { userId?: string }).userId;
-      const userEmail = (req as { userEmail?: string }).userEmail;
+      const userId = req.userId;
+      const userEmail = req.userEmail;
       if (!userId || !userEmail) return reply.code(500).send({ error: 'auth_state_missing' });
 
-      const parsed = DeleteMeRequestSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
-      }
+    const parsed = DeleteMeRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_confirm', expected: CONFIRM_DELETE_ACCOUNT_PHRASE });
+    }
 
       // W9 Q33: this no longer deletes the row itself. It delegates to the ONE
       // deleteUser service so the self-service and admin paths produce
@@ -348,9 +322,15 @@ export async function accountRoutes(app: FastifyInstance) {
       // invite email. Letting a `deleting` user re-authenticate to finish
       // deleting themselves would punch a hole through the gate for the one
       // status that most needs it shut.
-      let previousTokenCount = 0;
+      // No initializer: every catch path returns, so this is definitely
+      // assigned before it is read (origin's no-useless-assignment rule).
+      let previousTokenCount: number;
       try {
-        const out = await deleteUser(userId, { userId, email: userEmail, ip: req.ip ?? null });
+        const out = await deleteUser(userId, {
+          userId,
+          email: userEmail,
+          ip: clientIp(req) ?? null,
+        });
         previousTokenCount = out.previous_token_count;
       } catch (err) {
         if (err instanceof LifecycleError) {
@@ -392,15 +372,14 @@ export async function accountRoutes(app: FastifyInstance) {
           userId,
           userEmail,
           previous_token_count: previousTokenCount,
-          ip: req.ip,
+          ip: clientIp(req),
         },
         'account_deleted',
       );
 
-      reply.header(
-        'Set-Cookie',
-        'CF_Authorization=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
-      );
+      // Do NOT clear CF_Authorization here — the frontend's follow-up
+      // /cdn-cgi/access/logout navigation needs the cookie intact for CF to
+      // terminate the edge session (same contract as signout-everywhere).
       return reply.code(204).send();
     },
   );

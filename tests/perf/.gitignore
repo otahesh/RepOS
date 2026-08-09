@@ -1,0 +1,6 @@
+# Per-endpoint scratch summaries from `k6 run` without an explicit BASELINE_OUT.
+beta-baseline-GET_*.json
+beta-baseline-POST_*.json
+beta-baseline-PATCH_*.json
+# The canonical committed artifact is beta-baseline-<YYYY-MM-DD>.json — add it
+# explicitly with `git add -f` after the cutover run (README documents this).

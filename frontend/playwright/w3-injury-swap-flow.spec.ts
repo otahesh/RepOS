@@ -35,7 +35,7 @@ const USER = {
   display_name: 'Tester',
   timezone: 'America/New_York',
   // Past timestamp so the W2 OnboardingOverlay (z-1500) does not cover the page.
-  onboarding_completed_at: '2026-01-01T00:00:00Z',
+  onboarding_completed_at: '2026-01-01T00:00:00Z', beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
 };
 
 const PLANNED_SET_ID = 'ps-bs-0';
@@ -134,6 +134,8 @@ test('inj-swap: chip → today → swap → demoted candidate click-through', as
           week_idx: 1,
           day_idx: 0,
         },
+        pacing: { status: 'on_pace', suggested_date: '2026-01-01' },
+        completed_today: false,
         sets: [
           {
             id: PLANNED_SET_ID,

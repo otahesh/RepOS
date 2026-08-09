@@ -1,5 +1,7 @@
 // frontend/src/components/programs/DayCard.tsx
 import { Term } from '../Term';
+import { rpeFromRir, rowMode } from '../../lib/effort';
+import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
 
 type Day = {
   idx: number;
@@ -10,8 +12,10 @@ type Day = {
     exercise_slug: string;
     mev: number;
     mav: number;
-    target_reps_low: number;
-    target_reps_high: number;
+    target_reps_low?: number | null;
+    target_reps_high?: number | null;
+    target_duration_low_sec?: number | null;
+    target_duration_high_sec?: number | null;
     target_rir: number;
     rest_sec: number;
   }>;
@@ -21,38 +25,97 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function DayCard({
   day,
+  track,
   onAddSet,
   onRemoveSet,
   onSwap,
 }: {
   day: Day;
+  /** Program's experience track — beginner renders plain-language effort cues
+   *  and definitive set copy instead of RIR + a bare range. */
+  track?: string | null;
   onAddSet: (dayIdx: number, blockIdx: number) => void;
   onRemoveSet: (dayIdx: number, blockIdx: number, currentSets: number) => void;
   onSwap: (dayIdx: number, blockIdx: number) => void;
 }) {
+  const beginner = isBeginnerTrack(track);
   return (
-    <div style={{ background: '#10141C', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: 12 }}>
+    <div
+      style={{
+        background: '#10141C',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
       <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
         {WEEKDAYS[day.day_offset] ?? `+${day.day_offset}d`} · {day.kind}
       </div>
       <div style={{ fontWeight: 600, marginTop: 4 }}>{day.name}</div>
-      <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ul
+        style={{
+          listStyle: 'none',
+          padding: 0,
+          margin: '8px 0 0',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
         {day.blocks.map((b, i) => (
-          <li key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+          <li
+            key={i}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: 12,
+            }}
+          >
             <div>
               <button
                 onClick={() => onSwap(day.idx, i)}
-                style={{ background: 'transparent', border: 'none', color: '#4D8DFF', cursor: 'pointer', padding: 0, font: 'inherit' }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#4D8DFF',
+                  cursor: 'pointer',
+                  padding: 0,
+                  font: 'inherit',
+                }}
               >
                 {b.exercise_slug.replace(/-/g, ' ')}
               </button>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>
-                {b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir}
+              <div
+                style={{
+                  fontFamily: 'JetBrains Mono',
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.5)',
+                }}
+              >
+                {beginner ? (
+                  <>
+                    {b.mev} sets, building to {b.mav} · {effortCue(b.target_rir, rowMode(b))}
+                  </>
+                ) : b.target_duration_low_sec != null ? (
+                  <>
+                    {b.mev}–{b.mav} sets · {b.target_duration_low_sec}–{b.target_duration_high_sec}s{' '}
+                    <Term k="hold" /> · <Term k="RPE" /> {rpeFromRir(b.target_rir)}
+                  </>
+                ) : (
+                  <>
+                    {b.mev}–{b.mav} sets · <Term k="RIR" /> {b.target_rir}
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
-              <button onClick={() => onRemoveSet(day.idx, i, b.mav - 1)} style={btn}>{'− set'}</button>
-              <button onClick={() => onAddSet(day.idx, i)} style={btn}>{'+ set'}</button>
+              <button onClick={() => onRemoveSet(day.idx, i, b.mav - 1)} style={btn}>
+                {'− set'}
+              </button>
+              <button onClick={() => onAddSet(day.idx, i)} style={btn}>
+                {'+ set'}
+              </button>
             </div>
           </li>
         ))}

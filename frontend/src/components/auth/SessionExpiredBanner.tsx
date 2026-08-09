@@ -125,10 +125,7 @@ export function SessionExpiredBanner(): JSX.Element | null {
           textAlign: 'center',
         }}
       >
-        <div
-          id="session-expired-title"
-          style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}
-        >
+        <div id="session-expired-title" style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
           Your <Term k="session">session</Term> expired
         </div>
         <div

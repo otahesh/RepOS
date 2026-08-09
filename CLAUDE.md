@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RepOS is a fitness tracking app — Apple Health weight-sync is v1. **Status: alpha, deployed.** The full backend (Fastify + Postgres) and frontend (Vite + React) ship from this repo, run as a single Docker container on Unraid, and are publicly reachable as `https://repos.jpmtech.com` via Cloudflare Tunnel.
+RepOS is a fitness tracking app — Apple Health weight-sync is v1. **Status: Beta (cutover executed 2026-07-11; Milestone 2 validation in flight).** The full backend (Fastify + Postgres) and frontend (Vite + React) ship from this repo, run as a single Docker container on Unraid, and are publicly reachable as `https://repos.jpmtech.com` via Cloudflare Tunnel.
 
 For current operational state see:
 - `docs/superpowers/plans/2026-05-11-repos-beta.md` — the master Beta plan (9 waves, 15 acceptance gates); W0 is operationally complete
@@ -14,7 +14,7 @@ For current operational state see:
 ## Repo Layout
 
 - `api/` — Fastify 5 + TypeScript backend (production source)
-- `frontend/` — Vite 5 + React 18 + TypeScript frontend (production source)
+- `frontend/` — Vite 8 + React 18 + TypeScript frontend (production source)
 - `docker/` — Dockerfile, nginx config, s6-overlay v3 service tree
 - `RepOS.html` + `*.jsx` files at root — original hi-fi design prototype (React via CDN). **Visual reference only — do not modify.** The live UI is in `frontend/`.
 

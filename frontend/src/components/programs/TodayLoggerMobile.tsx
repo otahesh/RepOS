@@ -1,31 +1,46 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
-import { Term } from '../Term';
-import { useNetworkState } from '../../hooks/useNetworkState';
+import { completeDayWorkout } from '../../lib/api/dayWorkouts';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { pushToast } from '../common/ToastHost';
 import {
   getTodayWorkout,
   type TodayDay,
   type TodaySet,
+  type TodayCardio,
   type TodayWorkoutResponse,
 } from '../../lib/api/mesocycles';
+import { listExercises } from '../../lib/api/exercises';
+import { getExerciseHistoryFull, type HistorySession } from '../../lib/api/exerciseHistory';
+import { getExerciseGuide, type ExerciseGuide } from '../../lib/api/exerciseGuide';
+import type { PredicateT } from '../../lib/api/predicates';
 import { logBuffer, QueueFullError } from '../../lib/logBuffer';
-import { useIdbQueueStatus, type QueueRowStatus } from '../../hooks/useIdbQueueStatus';
-import { useRestTimer } from '../../hooks/useRestTimer';
+import { rowMode, rirFromRpe } from '../../lib/effort';
+import { formatBackfillDate } from '../../lib/formatDate';
+import { useRestTimer } from './logger/useRestTimer';
+import { WorkoutHub, type HubBlock } from './logger/WorkoutHub';
+import { CardioBlockRow } from './logger/CardioBlockRow';
+import { ExerciseFocus } from './logger/ExerciseFocus';
+import { HistorySheet } from './logger/HistorySheet';
+import { SetupCardSheet } from './logger/SetupCardSheet';
+import type { RowState, RowInputs } from './logger/SetRow';
 
 // =============================================================================
-// TodayLoggerMobile — mobile-first live workout logger.
-// Mounted at /today/:mesocycleRunId/log; entered from TodayWorkoutMobile.
-// Persists set logs through logBuffer → idbQueue (offline-tolerant).
+// TodayLoggerMobile — container for the hub+focus mobile logger.
+// Mounted at /today/:mesocycleRunId/log and /today/:mesocycleRunId/log/:blockIdx;
+// entered from TodayWorkoutMobile. No :blockIdx → WorkoutHub (day checklist);
+// with :blockIdx → ExerciseFocus for that block. The container owns data
+// loading, the per-row state machine, history prefill, and the rest timer.
+// Persists set logs through logBuffer → idbQueue (offline-tolerant) — that
+// machinery is unchanged from the single-scroll logger.
 // =============================================================================
 
 // W1.3.4 code-review follow-ups deferred to W1.3.x cleanup:
 //   - weight upper/lower bound validation (currently server-side only)
 //   - Skip button currently no-op; awaits W1.3.5 design
 //   - quota-error banner needs dismiss/recover affordance (awaits W1.3.8 Settings storage UI)
-//   - inline styles could hoist to module-scope const for GC
-//   - extract RirSlider + NumInput into their own files when reused (W2.x desktop logger)
 
 export interface TodayLoggerMobileProps {
   /**
@@ -33,55 +48,25 @@ export interface TodayLoggerMobileProps {
    * the network. In production this is always undefined and the component
    * fetches its own data on mount.
    */
-  preloaded?: { run_id: string; day: TodayDay; sets: TodaySet[] };
-}
-
-type RowState =
-  | { phase: 'input' }
-  | { phase: 'logging'; clientRequestId: string | null }
-  | { phase: 'logged'; clientRequestId: string; loggedAt: number }
-  | { phase: 'rejected'; clientRequestId: string };
-
-interface RowInputs {
-  weight: string; // user-entered text; converted to number on Log
-  reps: string;
-  rir: number; // 0..5
-}
-
-const DEBOUNCE_MS = 500;
-
-// Map idb status → user-facing affordance text.
-// 'synced' surfaces "locked — Settings to edit" so users understand a typo can't
-// be fixed inline; the PATCH/DELETE routes exist (24h audit window) but the
-// inline edit/undo UI ships in a later wave per scope. Until then the message
-// explicitly points users at the right surface.
-function affordanceText(status: QueueRowStatus): string {
-  switch (status) {
-    case 'pending': return 'Queued offline';
-    case 'syncing': return 'Syncing…';
-    case 'synced':  return 'Logged · locked (24h). Edit via Settings.';
-    case 'rejected': return 'Rejected — review';
-    case 'unknown':
-    default: return '';
-  }
-}
-
-function affordanceColor(status: QueueRowStatus): string {
-  switch (status) {
-    case 'synced':   return TOKENS.good;
-    case 'rejected': return TOKENS.danger;
-    case 'pending':
-    case 'syncing':  return TOKENS.warn;
-    default:         return TOKENS.textDim;
-  }
+  preloaded?: {
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    cardio?: TodayCardio[];
+    track?: string | null;
+  };
 }
 
 export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps) {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
-  const [data, setData] = useState<{ run_id: string; day: TodayDay; sets: TodaySet[] } | null>(
-    preloaded ?? null,
-  );
+  const [data, setData] = useState<{
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    cardio?: TodayCardio[];
+    track?: string | null;
+  } | null>(preloaded ?? null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [quotaError, setQuotaError] = useState<string | null>(null);
 
@@ -92,16 +77,29 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
       .then((res: TodayWorkoutResponse) => {
         if (cancelled) return;
         if (res.state === 'workout') {
-          setData({ run_id: res.run_id, day: res.day, sets: res.sets });
+          setData({
+            run_id: res.run_id,
+            day: res.day,
+            sets: res.sets,
+            cardio: res.cardio,
+            track: res.track,
+          });
         } else {
-          setLoadError(res.state === 'no_active_run' ? 'No active mesocycle.' : 'Rest day.');
+          // Sequence-workouts: `today` is workout | mesocycle_complete |
+          // no_active_run — there is NO rest state. The else-branch is
+          // mesocycle_complete (rest is gone); it must never say "Rest day."
+          setLoadError(
+            res.state === 'no_active_run' ? 'No active mesocycle.' : 'Program complete.',
+          );
         }
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : 'Failed to load workout');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [preloaded]);
 
   if (loadError) {
@@ -110,7 +108,14 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
         {loadError}{' '}
         <button
           onClick={() => navigate('/')}
-          style={{ background: 'none', border: 'none', color: TOKENS.accent, textDecoration: 'underline', cursor: 'pointer', fontFamily: FONTS.ui }}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: TOKENS.accent,
+            textDecoration: 'underline',
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
+          }}
         >
           Back to Today
         </button>
@@ -125,10 +130,44 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
     <LoggerInner
       data={data}
       currentUserId={user?.id ?? null}
+      currentUserTz={user?.timezone ?? null}
       quotaError={quotaError}
       setQuotaError={setQuotaError}
     />
   );
+}
+
+// -----------------------------------------------------------------------------
+// Exercise metadata — the today-workout payload only carries {id, slug, name}
+// per exercise, but the hub chip + focus header need the primary muscle and an
+// equipment label. Source both from the existing /api/exercises list, keyed by
+// slug. Missing metadata degrades to empty labels rather than blocking logging.
+// -----------------------------------------------------------------------------
+
+type ExerciseMeta = { muscle: string; equipmentLabel: string };
+
+const EQUIPMENT_LABELS: Record<string, string> = {
+  barbell: 'Barbell',
+  flat_bench: 'Flat bench',
+  squat_rack: 'Squat rack',
+  pullup_bar: 'Pull-up bar',
+  dip_station: 'Dip station',
+  cable_stack: 'Cable stack',
+  rowing_erg: 'Rowing erg',
+  treadmill: 'Treadmill',
+  dumbbells: 'Dumbbells',
+  adjustable_bench: 'Adjustable bench',
+  recumbent_bike: 'Recumbent bike',
+  outdoor_walking: 'Outdoors',
+};
+
+function equipmentLabelOf(required: { requires?: unknown[] } | null | undefined): string {
+  const reqs = (required?.requires ?? []) as PredicateT[];
+  if (reqs.length === 0) return 'Bodyweight';
+  const parts = reqs.map((p) =>
+    p.type === 'machine' ? `${p.name} machine` : (EQUIPMENT_LABELS[p.type] ?? p.type),
+  );
+  return [...new Set(parts)].join(' · ');
 }
 
 // -----------------------------------------------------------------------------
@@ -139,15 +178,40 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
 function LoggerInner({
   data,
   currentUserId,
+  currentUserTz,
   quotaError,
   setQuotaError,
 }: {
-  data: { run_id: string; day: TodayDay; sets: TodaySet[] };
+  data: {
+    run_id: string;
+    day: TodayDay;
+    sets: TodaySet[];
+    cardio?: TodayCardio[];
+    track?: string | null;
+  };
   currentUserId: string | null;
+  currentUserTz: string | null;
   quotaError: string | null;
   setQuotaError: (msg: string | null) => void;
 }) {
   const navigate = useNavigate();
+  const { blockIdx: blockIdxParam } = useParams<{ blockIdx?: string }>();
+  const [searchParams] = useSearchParams();
+
+  // Backfill mode: /today/:run/log?for=YYYY-MM-DD stamps every set log AND the
+  // day-workout completion at the chosen past date rather than "now". Guard the
+  // shape so a garbage `?for=` can't slip a malformed date into a POST body.
+  const forParam = searchParams.get('for');
+  const forDate = forParam && /^\d{4}-\d{2}-\d{2}$/.test(forParam) ? forParam : null;
+  // Backfill is a MODE, so `?for=` must survive every hub↔focus hop inside the
+  // logger — otherwise tapping an exercise would silently drop back to "now".
+  const logSearch = forDate ? `?for=${forDate}` : '';
+
+  // Workout-level completion (FINISH WORKOUT in the hub). Not per-exercise —
+  // completing terminally closes the whole day workout (spec §2/§3).
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
   // Group sets by block_idx so the UI shows "exercise → its sets" together.
   const blocks = useMemo(() => {
@@ -162,521 +226,651 @@ function LoggerInner({
   }, [data.sets]);
 
   // Flat ordering used for "next set focus" jumps.
-  const flatOrder = useMemo(
-    () => blocks.flatMap(([, arr]) => arr.map(s => s.id)),
-    [blocks],
-  );
+  const flatOrder = useMemo(() => blocks.flatMap(([, arr]) => arr.map((s) => s.id)), [blocks]);
 
-  // Per-row state machine + inputs, keyed by planned_set_id.
+  // Per-row state machine + inputs, keyed by planned_set_id. Every set in
+  // data.sets gets an entry up-front — ExerciseFocus/SetRow assume non-null
+  // lookups. Server-logged sets initialize in the 'logged' phase (inputs show
+  // the logged weight × reps, disabled) so completion survives reload; their
+  // sentinel clientRequestId is never in the IDB queue, and idbQueue.getStatus
+  // collapses "absent" to 'synced' — the row correctly reads "Logged · locked".
   const [rowStates, setRowStates] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(data.sets.map(s => [s.id, { phase: 'input' as const }])),
+    Object.fromEntries(
+      data.sets.map((s) => [
+        s.id,
+        s.logged
+          ? { phase: 'logged' as const, clientRequestId: `server:${s.id}`, loggedAt: 0 }
+          : { phase: 'input' as const },
+      ]),
+    ),
   );
   const [rowInputs, setRowInputs] = useState<Record<string, RowInputs>>(() =>
-    Object.fromEntries(data.sets.map(s => [s.id, { weight: '', reps: '', rir: s.target_rir }])),
+    Object.fromEntries(
+      data.sets.map((s) => [
+        s.id,
+        {
+          // `logged` fields are individually nullable (reps-only bodyweight
+          // logs, duration-only holds) — seed only non-null values, never
+          // render "null".
+          weight: s.logged?.weight_lbs != null ? String(s.logged.weight_lbs) : '',
+          reps: s.logged?.reps != null ? String(s.logged.reps) : '',
+          durationSec: s.logged?.duration_sec != null ? String(s.logged.duration_sec) : '',
+          rir: s.target_rir,
+          holdRpe: null,
+        },
+      ]),
+    ),
   );
 
-  // Most-recently-logged-at drives a single rest-timer instance at the bottom.
-  const [lastLoggedAt, setLastLoggedAt] = useState<number | null>(null);
-  // Rest target = the just-logged set's rest_sec. Falls back to 90s on first mount.
-  const [activeRestSec, setActiveRestSec] = useState<number>(90);
+  // Slug → {muscle, equipmentLabel} for the hub chips + focus header.
+  const [exMeta, setExMeta] = useState<Record<string, ExerciseMeta>>({});
+  useEffect(() => {
+    let cancelled = false;
+    listExercises()
+      .then((list) => {
+        if (cancelled) return;
+        setExMeta(
+          Object.fromEntries(
+            list.map((e) => [
+              e.slug,
+              { muscle: e.primary_muscle, equipmentLabel: equipmentLabelOf(e.required_equipment) },
+            ]),
+          ),
+        );
+      })
+      .catch(() => {
+        // Metadata is decorative — logging works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Focused block (focus screen) — invalid/absent param renders the hub.
+  const focusedEntry = useMemo(() => {
+    if (blockIdxParam == null) return null;
+    const idx = Number(blockIdxParam);
+    if (!Number.isInteger(idx)) return null;
+    return blocks.find(([b]) => b === idx) ?? null;
+  }, [blockIdxParam, blocks]);
+
+  // Last-session history per exercise slug: powers prefill + the last-time
+  // line. Fetched lazily when a block is first focused; the ref dedupes
+  // in-flight/completed fetches so each slug is requested at most once.
+  const [histBySlug, setHistBySlug] = useState<Record<string, HistorySession | null>>({});
+  const histRequested = useRef<Set<string>>(new Set());
+  // All-time longest hold per slug (from the history fetch) — powers the
+  // "new best hold" toast. Ref, not state: read/compare at log time only.
+  const bestHoldBySlug = useRef<Record<string, number | null>>({});
+
+  const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
+    setRowInputs((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }, []);
+
+  useEffect(() => {
+    if (!focusedEntry) return;
+    const sets = focusedEntry[1];
+    const slug = sets[0]?.exercise.slug;
+    if (!slug || histRequested.current.has(slug)) return;
+    histRequested.current.add(slug);
+    // No cancellation on cleanup: histRequested dedupes forever, so a result
+    // dropped mid-flight (StrictMode re-fire, or any focusedEntry identity
+    // change) would never be refetched. The caches are slug-keyed and the
+    // prefill only touches untouched, unlogged rows, so a late write is safe.
+    getExerciseHistoryFull(slug, 1)
+      .then(({ sessions, best_duration_sec }) => {
+        bestHoldBySlug.current[slug] = best_duration_sec;
+        const last = sessions[0] ?? null;
+        setHistBySlug((prev) => ({ ...prev, [slug]: last }));
+        if (!last || last.sets.length === 0) return;
+        // Prefill: seed weight/reps for this block's unlogged, untouched rows
+        // from the same set_idx last session (first set as fallback). Rows the
+        // user already typed in (or logged — logging requires non-empty
+        // inputs) are left alone via the empty-inputs guard. History fields
+        // are individually nullable — seed only non-null values.
+        setRowInputs((prev) => {
+          const next = { ...prev };
+          for (const set of sets) {
+            if (set.logged) continue;
+            const cur = prev[set.id];
+            if (!cur || cur.weight !== '' || cur.reps !== '' || cur.durationSec !== '') continue;
+            const hs = last.sets[set.set_idx] ?? last.sets[0];
+            if (!hs) continue;
+            if (rowMode(set) === 'duration') {
+              // Quarantine rule: pre-reclassification history logged holds as
+              // "reps" (units ambiguous — some were seconds). Only genuine
+              // duration_sec values prefill a duration row; old reps never do.
+              next[set.id] = {
+                ...cur,
+                weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
+                durationSec: hs.duration_sec != null ? String(hs.duration_sec) : cur.durationSec,
+              };
+            } else {
+              next[set.id] = {
+                ...cur,
+                weight: hs.weight_lbs != null ? String(hs.weight_lbs) : cur.weight,
+                reps: hs.reps != null ? String(hs.reps) : cur.reps,
+              };
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // History is a nicety — logging must not depend on it.
+        setHistBySlug((prev) => ({ ...prev, [slug]: null }));
+      });
+  }, [focusedEntry]);
+
+  // Setup-card guide per exercise slug: powers the ⓘ button + SetupCardSheet.
+  // Fetched lazily when a block is first focused; the ref dedupes
+  // in-flight/completed fetches so each slug is requested at most once.
+  // null (no guide on the server, or fetch failed) hides ⓘ — guides are a
+  // nicety and logging must not depend on them.
+  const [guideBySlug, setGuideBySlug] = useState<Record<string, ExerciseGuide | null>>({});
+  const guideRequested = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!focusedEntry) return;
+    const slug = focusedEntry[1][0]?.exercise.slug;
+    if (!slug || guideRequested.current.has(slug)) return;
+    guideRequested.current.add(slug);
+    // No cancellation on cleanup — same reasoning as the history effect above:
+    // the ref dedupes forever, so a mid-flight drop would hide ⓘ for the
+    // whole session. Slug-keyed cache writes are safe whenever they land.
+    getExerciseGuide(slug)
+      .then((guide) => {
+        setGuideBySlug((prev) => ({ ...prev, [slug]: guide }));
+      })
+      .catch(() => {
+        setGuideBySlug((prev) => ({ ...prev, [slug]: null }));
+      });
+  }, [focusedEntry]);
+
+  // Bottom sheets — a single state slot so "both sheets open" is
+  // unrepresentable (each sheet installs a document-level Escape listener at
+  // the same z-index; two independent booleans could close both with one
+  // keypress). State owns whether a sheet is mounted; HistorySheet fetches
+  // its own data on mount (see logger/HistorySheet.tsx) while SetupCardSheet
+  // receives the already-fetched guide. Reset whenever the focused block
+  // changes (including back-to-hub, where focusedEntry is null) so a sheet
+  // left open in one block doesn't pop back open when a different block is
+  // later focused.
+  const [openSheet, setOpenSheet] = useState<'history' | 'guide' | null>(null);
+  useEffect(() => {
+    setOpenSheet(null);
+  }, [focusedEntry]);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
   // we focus the next set's weight input.
   const weightRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const getWeightInputRef = useCallback(
+    (id: string) => (el: HTMLInputElement | null) => {
+      weightRefs.current[id] = el;
+    },
+    [],
+  );
 
   const setRow = useCallback((id: string, next: RowState) => {
-    setRowStates(prev => ({ ...prev, [id]: next }));
+    setRowStates((prev) => ({ ...prev, [id]: next }));
   }, []);
 
-  const setInput = useCallback((id: string, patch: Partial<RowInputs>) => {
-    setRowInputs(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
-  }, []);
+  const focusNext = useCallback(
+    (currentId: string) => {
+      const i = flatOrder.indexOf(currentId);
+      if (i < 0) return;
+      const nextId = flatOrder[i + 1];
+      // Next set's input only exists while its block is on screen; end of the
+      // focused block (or of the workout) is a no-op.
+      if (nextId) weightRefs.current[nextId]?.focus();
+    },
+    [flatOrder],
+  );
 
-  const focusNext = useCallback((currentId: string) => {
-    const i = flatOrder.indexOf(currentId);
-    if (i < 0) return;
-    const nextId = flatOrder[i + 1];
-    if (!nextId) {
-      // End of workout — focus the complete CTA via id (rendered below).
-      const cta = document.getElementById('logger-complete-cta');
-      cta?.focus();
-      return;
-    }
-    weightRefs.current[nextId]?.focus();
-  }, [flatOrder]);
-
-  const handleLog = useCallback(async (set: TodaySet) => {
-    if (!currentUserId) return; // shouldn't happen — AuthGate blocks render
-    const inputs = rowInputs[set.id];
-    const weight = parseFloat(inputs.weight);
-    const reps = parseInt(inputs.reps, 10);
-    if (!Number.isFinite(weight) || !Number.isFinite(reps) || reps <= 0) {
-      // Validation gate — UI surfaces via the disabled CTA; nothing to do.
-      return;
-    }
-
-    setRow(set.id, { phase: 'logging', clientRequestId: null });
-    const performedAt = new Date().toISOString();
-    try {
-      const clientRequestId = await logBuffer.enqueue(
-        set.id,
-        { weight_lbs: weight, reps, rir: inputs.rir, performed_at: performedAt },
-        currentUserId,
-      );
-      const loggedAt = Date.now();
-      setRow(set.id, { phase: 'logged', clientRequestId, loggedAt });
-      setLastLoggedAt(loggedAt);
-      setActiveRestSec(set.rest_sec || 90);
-      // Defer focus shift so React commits the new affordance first; if the
-      // next input doesn't exist yet (rare), the document.getElementById
-      // path catches it.
-      setTimeout(() => focusNext(set.id), 0);
-    } catch (err: unknown) {
-      if (err instanceof QueueFullError) {
-        setQuotaError('Offline queue is full — logs cannot be saved until storage is freed.');
-        setRow(set.id, { phase: 'input' });
-        return;
+  const handleLog = useCallback(
+    async (set: TodaySet): Promise<boolean> => {
+      if (!currentUserId) return false; // shouldn't happen — AuthGate blocks render
+      const inputs = rowInputs[set.id];
+      // Bodyweight movements log without load: weight_lbs stays null and
+      // logBuffer omits it from the POST (the API field is optional).
+      const isBodyweight = set.exercise.bodyweight === true;
+      const mode = rowMode(set);
+      const weight = isBodyweight ? null : parseFloat(inputs.weight);
+      let reps: number | null = null;
+      let durationSec: number | null = null;
+      if (mode === 'duration') {
+        durationSec = parseInt(inputs.durationSec, 10);
+        if (!Number.isFinite(durationSec) || durationSec <= 0) return false;
+      } else {
+        reps = parseInt(inputs.reps, 10);
+        if (!Number.isFinite(reps) || reps <= 0) return false;
       }
-      // Unknown error — surface but leave the user the ability to retry.
-      setRow(set.id, { phase: 'input' });
-      throw err;
+      if (weight !== null && !Number.isFinite(weight)) {
+        // Validation gate — UI surfaces via the disabled CTA; nothing to do.
+        return false;
+      }
+      // Effort: reps mode keeps existing behavior (rir always sent; beginner
+      // hideRir silently keeps the target). Duration mode NEVER fabricates
+      // effort — rir is sent only when the user tapped the optional RPE
+      // control, converted to proximity-to-failure via the effort seam.
+      const rir =
+        mode === 'duration'
+          ? inputs.holdRpe != null
+            ? rirFromRpe(inputs.holdRpe)
+            : null
+          : inputs.rir;
+
+      setRow(set.id, { phase: 'logging', clientRequestId: null });
+      // Backfill mode stamps the chosen date at 12:00 user-local (noon keeps the
+      // sample well clear of a midnight DST/tz date-flip); live logging stamps
+      // now. `performed_at` is what the server buckets the set into a day by.
+      //
+      // Clamp to min(noon, now): the set-log POST schema bounds performed_at at
+      // now + 5min (api/src/schemas/setLogs.ts) — a TIMESTAMP-granularity check.
+      // Picking TODAY before ~noon local makes noon-local a few hours in the
+      // FUTURE → the POST 400s and logBuffer terminally rejects the row, yet the
+      // completion route validates completed_on at DATE granularity and still
+      // marks the day complete → silent training-data loss. Collapsing a
+      // today-pick to `now` clears the bound while staying today-local (same
+      // day bucket); past days are unaffected (their noon is always < now).
+      let performedAt = new Date().toISOString();
+      if (forDate) {
+        const noonMs = Date.parse(
+          zonedNoonISO(forDate, currentUserTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
+        );
+        performedAt = new Date(Math.min(noonMs, Date.now())).toISOString();
+      }
+      try {
+        const clientRequestId = await logBuffer.enqueue(
+          set.id,
+          { weight_lbs: weight, reps, duration_sec: durationSec, rir, performed_at: performedAt },
+          currentUserId,
+        );
+        setRow(set.id, { phase: 'logged', clientRequestId, loggedAt: Date.now() });
+        // Hold Best-Time PR toast (the one delight moment duration sets get —
+        // Hevy convention: Best Time is the ONLY duration PR). Compared
+        // against the all-time best from the history fetch; a missed fetch
+        // (null) still toasts on the exercise's first-ever hold.
+        if (mode === 'duration' && durationSec != null) {
+          const slug = set.exercise.slug;
+          const prev = bestHoldBySlug.current[slug];
+          if (prev == null || durationSec > prev) {
+            bestHoldBySlug.current[slug] = durationSec;
+            pushToast({
+              severity: 'success',
+              body:
+                prev == null
+                  ? `First hold logged — ${durationSec}s ${set.exercise.name}`
+                  : `New best hold — ${durationSec}s ${set.exercise.name} (was ${prev}s)`,
+            });
+          }
+        }
+        // Defer focus shift so React commits the new affordance first.
+        setTimeout(() => focusNext(set.id), 0);
+        return true;
+      } catch (err: unknown) {
+        if (err instanceof QueueFullError) {
+          setQuotaError('Offline queue is full — logs cannot be saved until storage is freed.');
+          setRow(set.id, { phase: 'input' });
+          return false;
+        }
+        // Unknown error — surface but leave the user the ability to retry.
+        setRow(set.id, { phase: 'input' });
+        throw err;
+      }
+    },
+    [currentUserId, currentUserTz, forDate, rowInputs, setRow, focusNext, setQuotaError],
+  );
+
+  // Rest-timer isolation (2026-07-13 quality pass): the 1 Hz countdown state
+  // lives inside RestTimerPill, not here — a per-second setState in this
+  // container re-rendered the whole hub/focus subtree (SetRow sliders and all)
+  // on every tick for the length of every rest. The container keeps only:
+  //   - restStartRef: imperative handle the pill exposes to arm the countdown
+  //   - restActive:   coarse boolean (flips on start/expire — 2 renders per
+  //                   rest, not ~90) that drives the 72px bottom padding
+  //                   reserving space so the fixed pill never overlaps content
+  const restStartRef = useRef<((sec: number) => void) | null>(null);
+  const [restActive, setRestActive] = useState(false);
+  const handleLogWithRest = useCallback(
+    async (set: TodaySet) => {
+      const ok = await handleLog(set);
+      if (ok) restStartRef.current?.(set.rest_sec || 90);
+    },
+    [handleLog],
+  );
+
+  // Hub rows: setsDone counts server-logged sets plus this session's local
+  // (queue-backed) logs.
+  const hubBlocks: HubBlock[] = useMemo(
+    () =>
+      blocks.map(([blockIdx, sets]) => ({
+        blockIdx,
+        exerciseName: sets[0].exercise.name,
+        muscle: exMeta[sets[0].exercise.slug]?.muscle ?? '',
+        setsTotal: sets.length,
+        setsDone: sets.filter((s) => s.logged != null || rowStates[s.id]?.phase === 'logged')
+          .length,
+      })),
+    [blocks, exMeta, rowStates],
+  );
+
+  // Sets neither server-logged nor logged this session — drives the
+  // "N sets unlogged. Finish anyway?" confirm before a partial completion.
+  const unloggedCount = useMemo(
+    () => hubBlocks.reduce((n, b) => n + (b.setsTotal - b.setsDone), 0),
+    [hubBlocks],
+  );
+
+  // Terminal, workout-level completion. `completed_on` backfills the chosen
+  // date in backfill mode; omitted otherwise (server stamps now()). On success
+  // we return to the today screen; a run-closing completion celebrates. On
+  // failure we surface the server's own message and stay put — never silent,
+  // never generic, never a navigation that loses the error.
+  const doFinish = useCallback(async () => {
+    setFinishing(true);
+    setCompleteError(null);
+    try {
+      const res = await completeDayWorkout(data.day.id, { completed_on: forDate ?? undefined });
+      if (res.run_completed) {
+        pushToast({
+          severity: 'success',
+          body: 'MESOCYCLE COMPLETE. You finished the program — review it in history.',
+        });
+      }
+      navigate('/');
+    } catch (err: unknown) {
+      setCompleteError(err instanceof Error ? err.message : String(err));
+      setFinishing(false);
     }
-  }, [currentUserId, rowInputs, setRow, focusNext, setQuotaError]);
+  }, [data.day.id, forDate, navigate]);
 
-  const restTimer = useRestTimer({ lastLoggedAt, targetRestSec: activeRestSec });
+  const requestFinish = useCallback(() => {
+    if (unloggedCount > 0) setConfirmFinish(true);
+    else void doFinish();
+  }, [unloggedCount, doFinish]);
 
-  return (
+  const quotaBanner = quotaError ? (
     <div
+      role="alert"
       style={{
-        padding: 16,
-        fontFamily: FONTS.ui,
-        color: TOKENS.text,
         maxWidth: 480,
         margin: '0 auto',
-        paddingBottom: 96, // reserve space for the sticky rest-timer footer
+        padding: '16px 16px 0',
+        boxSizing: 'border-box',
       }}
     >
-      <header style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            letterSpacing: 1,
-            color: TOKENS.accent,
-            textTransform: 'uppercase',
-          }}
-        >
-          Week {data.day.week_idx} · Day {data.day.day_idx + 1}
-        </div>
-        <h2 style={{ margin: '4px 0 0', fontSize: 22 }}>{data.day.name}</h2>
-      </header>
-
-      {quotaError ? (
-        <div
-          role="alert"
-          style={{
-            background: 'rgba(255,106,106,0.08)',
-            border: `1px solid ${TOKENS.danger}`,
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 12,
-            color: TOKENS.danger,
-            fontSize: 13,
-          }}
-        >
-          {quotaError}
-        </div>
-      ) : null}
-
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {blocks.map(([blockIdx, sets]) => (
-          <li
-            key={blockIdx}
-            style={{
-              background: TOKENS.surface,
-              border: `1px solid ${TOKENS.line}`,
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{sets[0].exercise.name}</div>
-            <div
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 11,
-                color: TOKENS.textDim,
-                marginTop: 4,
-              }}
-            >
-              {sets[0].target_reps_low}–{sets[0].target_reps_high} reps · <Term k="RIR" compact /> {sets[0].target_rir} · {sets[0].rest_sec}s rest
-            </div>
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sets.map(set => (
-                <SetRow
-                  key={set.id}
-                  set={set}
-                  state={rowStates[set.id]}
-                  inputs={rowInputs[set.id]}
-                  onInputChange={(patch) => setInput(set.id, patch)}
-                  onLog={() => handleLog(set)}
-                  onSkip={() => setRow(set.id, { phase: 'input' })}
-                  weightInputRef={(el) => { weightRefs.current[set.id] = el; }}
-                />
-              ))}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <button
-        id="logger-complete-cta"
-        onClick={() => navigate('/')}
+      <div
         style={{
-          marginTop: 24,
-          padding: 14,
-          width: '100%',
-          background: TOKENS.accent,
-          border: 'none',
+          background: 'rgba(255,106,106,0.08)',
+          border: `1px solid ${TOKENS.danger}`,
           borderRadius: 8,
-          color: TOKENS.text,
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          fontSize: 14,
-          cursor: 'pointer',
+          padding: 12,
+          color: TOKENS.danger,
+          fontSize: 13,
           fontFamily: FONTS.ui,
         }}
       >
-        Workout complete
-      </button>
+        {quotaError}
+      </div>
+    </div>
+  ) : null;
 
-      {lastLoggedAt !== null ? (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed',
-            bottom: 12,
-            left: 0,
-            right: 0,
-            margin: '0 auto',
-            maxWidth: 480,
-            padding: '10px 16px',
-            background: restTimer.isOvertime ? TOKENS.surface2 : TOKENS.surface,
-            border: `1px solid ${restTimer.isOvertime ? TOKENS.warn : TOKENS.line}`,
-            borderRadius: 10,
-            color: restTimer.isOvertime ? TOKENS.warn : TOKENS.text,
-            fontFamily: FONTS.mono,
-            fontSize: 12,
-            textAlign: 'center',
+  // Backfill banner — a persistent mode indicator shown on BOTH the hub and the
+  // focus screen (it's a mode for the whole logger session, not one screen).
+  const backfillBanner = forDate ? (
+    <div
+      role="status"
+      style={{ maxWidth: 480, margin: '0 auto', padding: '16px 16px 0', boxSizing: 'border-box' }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          background: 'rgba(245,181,68,0.1)',
+          border: `1px solid ${TOKENS.warn}`,
+          borderRadius: 8,
+          padding: '10px 12px',
+          color: TOKENS.warn,
+          fontFamily: FONTS.ui,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>Logging for </span>
+        <span style={{ fontFamily: FONTS.mono, fontWeight: 700, letterSpacing: 0.3 }}>
+          {formatBackfillDate(forDate)}
+        </span>
+      </div>
+    </div>
+  ) : null;
+
+  // Completion-failure banner — server message verbatim, mirrors the quota
+  // banner's danger treatment. Completion only fires from the hub.
+  const completeErrorBanner = completeError ? (
+    <div
+      role="alert"
+      style={{ maxWidth: 480, margin: '0 auto', padding: '16px 16px 0', boxSizing: 'border-box' }}
+    >
+      <div
+        style={{
+          background: 'rgba(255,106,106,0.08)',
+          border: `1px solid ${TOKENS.danger}`,
+          borderRadius: 8,
+          padding: 12,
+          color: TOKENS.danger,
+          fontSize: 13,
+          fontFamily: FONTS.ui,
+        }}
+      >
+        {`Couldn't finish workout — ${completeError}`}
+      </div>
+    </div>
+  ) : null;
+
+  // Hub/focus content renders into `body`; the shared wrapper below keeps
+  // RestTimerPill in ONE stable child slot so the pill (which owns the
+  // countdown state) is never remounted by hub↔focus navigation — a set is
+  // usually logged right before backing out to the hub, and the countdown
+  // must survive that transition.
+  let body: React.ReactNode;
+  if (!focusedEntry) {
+    body = (
+      <>
+        {backfillBanner}
+        {quotaBanner}
+        {completeErrorBanner}
+        <WorkoutHub
+          dayName={data.day.name}
+          blocks={hubBlocks}
+          onOpenBlock={(blockIdx) => navigate(`/today/${data.run_id}/log/${blockIdx}${logSearch}`)}
+          onFinish={requestFinish}
+          finishing={finishing}
+        />
+        {data.cardio && data.cardio.length > 0 ? (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {data.cardio.map((c) => (
+              <CardioBlockRow key={c.id} block={c} />
+            ))}
+          </div>
+        ) : null}
+        <ConfirmDialog
+          open={confirmFinish}
+          tier="medium"
+          title={`${unloggedCount} set${unloggedCount === 1 ? '' : 's'} unlogged.`}
+          body="This day will be marked complete with only the sets you've logged. Finish anyway?"
+          confirmLabel="Finish Anyway"
+          onConfirm={() => {
+            setConfirmFinish(false);
+            void doFinish();
           }}
-        >
-          {restTimer.isOvertime
-            ? `Rest +${Math.abs(restTimer.remainingSec)}s over`
-            : `Rest ${Math.max(0, restTimer.remainingSec)}s`}
-        </div>
-      ) : null}
+          onCancel={() => setConfirmFinish(false)}
+        />
+      </>
+    );
+  } else {
+    const [focusedIdx, focusedSets] = focusedEntry;
+    const slug = focusedSets[0].exercise.slug;
+    const meta = exMeta[slug];
+    const guide = guideBySlug[slug] ?? null;
+    const backToHub = () => navigate(`/today/${data.run_id}/log${logSearch}`);
+
+    body = (
+      <>
+        {backfillBanner}
+        {quotaBanner}
+        <ExerciseFocus
+          position={{
+            current: blocks.findIndex(([b]) => b === focusedIdx) + 1,
+            total: blocks.length,
+          }}
+          exercise={{
+            name: focusedSets[0].exercise.name,
+            muscle: meta?.muscle ?? '',
+            equipmentLabel: meta?.equipmentLabel ?? '',
+            slug,
+          }}
+          sets={focusedSets}
+          track={data.track}
+          rowStates={rowStates}
+          rowInputs={rowInputs}
+          onInputChange={setInput}
+          onLog={handleLogWithRest}
+          onSkip={(setId) => setRow(setId, { phase: 'input' })}
+          lastSession={histBySlug[slug] ?? null}
+          onOpenHistory={() => setOpenSheet('history')}
+          onOpenGuide={guide ? () => setOpenSheet('guide') : null}
+          onBack={backToHub}
+          onDone={backToHub}
+          getWeightInputRef={getWeightInputRef}
+        />
+        {openSheet === 'history' ? (
+          <HistorySheet slug={slug} track={data.track} onClose={() => setOpenSheet(null)} />
+        ) : null}
+        {openSheet === 'guide' && guide ? (
+          <SetupCardSheet
+            exerciseName={focusedSets[0].exercise.name}
+            guide={guide}
+            onClose={() => setOpenSheet(null)}
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <div style={{ paddingBottom: restActive ? 72 : 0 }}>
+      {body}
+      <RestTimerPill startRef={restStartRef} onActiveChange={setRestActive} />
     </div>
   );
 }
 
 // -----------------------------------------------------------------------------
-// SetRow — one planned set with weight/reps/RIR inputs + Log/Skip controls.
+// RestTimerPill — the REST m:ss pill. Owns useRestTimer so its 1 Hz tick
+// re-renders only this leaf (mirrors HoldStopwatch owning useHoldTimer). It
+// exposes start() to the container through `startRef` and reports coarse
+// active/idle transitions through `onActiveChange` (which drives the
+// container's 72px bottom-padding reservation). Rendered at the same tree
+// position on both the hub and focus branches so it stays mounted — and the
+// countdown survives — across hub↔focus navigation.
 // -----------------------------------------------------------------------------
 
-function SetRow({
-  set,
-  state,
-  inputs,
-  onInputChange,
-  onLog,
-  onSkip,
-  weightInputRef,
+function RestTimerPill({
+  startRef,
+  onActiveChange,
 }: {
-  set: TodaySet;
-  state: RowState;
-  inputs: RowInputs;
-  onInputChange: (patch: Partial<RowInputs>) => void;
-  onLog: () => void;
-  onSkip: () => void;
-  weightInputRef: (el: HTMLInputElement | null) => void;
+  startRef: React.MutableRefObject<((sec: number) => void) | null>;
+  onActiveChange: (active: boolean) => void;
 }) {
-  // 500ms client-side debounce on the Log button (separate from row state so
-  // a transient network error doesn't bypass it).
-  const [debounced, setDebounced] = useState(false);
+  const { remaining, start } = useRestTimer();
   useEffect(() => {
-    if (!debounced) return;
-    const t = setTimeout(() => setDebounced(false), DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [debounced]);
-
-  const clientRequestId =
-    state.phase === 'logged' || state.phase === 'rejected' ? state.clientRequestId : null;
-  const status = useIdbQueueStatus(clientRequestId);
-  // Show "Log (offline)" on the button label when the network is down so the
-  // user sees the queue behavior BEFORE pressing, not only after — covers the
-  // mid-workout-on-an-elevator "did this even register?" UX miss.
-  const { online } = useNetworkState();
-
-  const isLogged = state.phase === 'logged';
-  const isLogging = state.phase === 'logging';
-
-  const handleLogClick = (): void => {
-    if (debounced || isLogged || isLogging) return;
-    setDebounced(true);
-    onLog();
-  };
-
-  const canLog = !debounced && !isLogged && !isLogging
-    && inputs.weight.trim() !== ''
-    && inputs.reps.trim() !== '';
-
-  const logLabel = (() => {
-    if (isLogged) return 'Logged';
-    if (debounced) return 'Set queued';
-    return online ? 'Log' : 'Log (offline)';
-  })();
-
+    startRef.current = start;
+    return () => {
+      startRef.current = null;
+    };
+  }, [start, startRef]);
+  const active = remaining != null;
+  useEffect(() => {
+    onActiveChange(active);
+  }, [active, onActiveChange]);
+  if (remaining == null) return null;
   return (
     <div
-      data-testid={`set-row-${set.set_idx}`}
+      role="status"
+      aria-live="polite"
+      data-testid="rest-timer"
       style={{
-        background: TOKENS.bg,
-        border: `1px solid ${TOKENS.line}`,
-        borderRadius: 8,
-        padding: 10,
+        position: 'fixed',
+        bottom: 12,
+        left: 0,
+        right: 0,
+        margin: '0 auto',
+        maxWidth: 480,
+        padding: '10px 16px',
+        boxSizing: 'border-box',
+        background: TOKENS.surface,
+        border: `1px solid ${TOKENS.accent}`,
+        borderRadius: 10,
+        color: TOKENS.text,
+        fontFamily: FONTS.mono,
+        fontSize: 12,
+        letterSpacing: 1,
+        textAlign: 'center',
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
-          Set {set.set_idx + 1}
-        </span>
-        {set.target_load_hint ? (
-          <span style={{ fontFamily: FONTS.mono, fontSize: 11, color: TOKENS.textDim }}>
-            target {set.target_load_hint}
-          </span>
-        ) : null}
-      </div>
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <NumInput
-          label="Weight"
-          unit="lb"
-          value={inputs.weight}
-          onChange={(v) => onInputChange({ weight: v })}
-          inputRef={weightInputRef}
-          ariaLabel={`Set ${set.set_idx + 1} weight in pounds`}
-          disabled={isLogged}
-        />
-        <NumInput
-          label="Reps"
-          unit=""
-          value={inputs.reps}
-          onChange={(v) => onInputChange({ reps: v })}
-          ariaLabel={`Set ${set.set_idx + 1} reps`}
-          disabled={isLogged}
-        />
-      </div>
-
-      <RirSlider
-        value={inputs.rir}
-        onChange={(rir) => onInputChange({ rir })}
-        disabled={isLogged}
-      />
-
-      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-        <button
-          onClick={handleLogClick}
-          disabled={!canLog}
-          style={{
-            flex: 2,
-            padding: 10,
-            background: canLog ? TOKENS.accent : TOKENS.surface3,
-            color: TOKENS.text,
-            border: 'none',
-            borderRadius: 6,
-            fontFamily: FONTS.ui,
-            fontWeight: 600,
-            letterSpacing: 1,
-            textTransform: 'uppercase',
-            fontSize: 12,
-            cursor: canLog ? 'pointer' : 'not-allowed',
-          }}
-        >
-          {logLabel}
-        </button>
-        <button
-          onClick={onSkip}
-          disabled={isLogged}
-          style={{
-            flex: 1,
-            padding: 10,
-            background: 'transparent',
-            color: TOKENS.textDim,
-            border: `1px solid ${TOKENS.line}`,
-            borderRadius: 6,
-            fontFamily: FONTS.ui,
-            fontSize: 12,
-            cursor: isLogged ? 'not-allowed' : 'pointer',
-          }}
-        >
-          Skip
-        </button>
-      </div>
-
-      <div
-        role="status"
-        aria-live="polite"
-        data-testid={`set-row-${set.set_idx}-status`}
-        style={{
-          marginTop: 8,
-          minHeight: 16,
-          fontFamily: FONTS.mono,
-          fontSize: 11,
-          color: affordanceColor(status),
-        }}
-      >
-        {isLogged ? affordanceText(status) : ''}
-      </div>
+      REST {formatRest(remaining)}
     </div>
   );
 }
 
-// -----------------------------------------------------------------------------
-// NumInput — numeric text input styled with mono font for data values.
-// -----------------------------------------------------------------------------
-
-function NumInput({
-  label,
-  unit,
-  value,
-  onChange,
-  inputRef,
-  ariaLabel,
-  disabled,
-}: {
-  label: string;
-  unit: string;
-  value: string;
-  onChange: (v: string) => void;
-  inputRef?: (el: HTMLInputElement | null) => void;
-  ariaLabel: string;
-  disabled?: boolean;
-}) {
-  return (
-    <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-        {label}{unit ? ` (${unit})` : ''}
-      </span>
-      <input
-        ref={inputRef}
-        type="number"
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={ariaLabel}
-        disabled={disabled}
-        style={{
-          background: TOKENS.surface,
-          border: `1px solid ${TOKENS.line}`,
-          borderRadius: 6,
-          padding: '10px 10px',
-          color: TOKENS.text,
-          fontFamily: FONTS.mono,
-          fontSize: 16,
-          width: '100%',
-          boxSizing: 'border-box',
-        }}
-      />
-    </label>
-  );
+// m:ss with zero-padded seconds — 180 → "3:00".
+function formatRest(sec: number): string {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
 // -----------------------------------------------------------------------------
-// RirSlider — accessible 0..5 slider with arrow-key + Home/End support.
-// Implemented as role="slider" div so we control keyboard semantics + styling.
+// Backfill date helpers.
+//
+// small-icu discipline (project_alpine_smallicu): build every date string from
+// numeric `formatToParts` fields — never `.format()`'s locale-sensitive layout,
+// which Alpine small-icu silently reshapes. These read the same regardless of
+// the runtime ICU build.
 // -----------------------------------------------------------------------------
 
-function RirSlider({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  disabled?: boolean;
-}) {
-  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (disabled) return;
-    let next = value;
-    switch (e.key) {
-      case 'ArrowRight':
-      case 'ArrowUp':
-        next = Math.min(5, value + 1); break;
-      case 'ArrowLeft':
-      case 'ArrowDown':
-        next = Math.max(0, value - 1); break;
-      case 'Home':
-        next = 0; break;
-      case 'End':
-        next = 5; break;
-      default:
-        return;
-    }
-    e.preventDefault();
-    if (next !== value) onChange(next);
-  };
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontSize: 11, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-          <Term k="RIR" compact />
-        </span>
-        <span style={{ fontFamily: FONTS.mono, fontSize: 14, color: TOKENS.text }}>
-          {value}
-        </span>
-      </div>
-      <div
-        role="slider"
-        tabIndex={disabled ? -1 : 0}
-        aria-valuemin={0}
-        aria-valuemax={5}
-        aria-valuenow={value}
-        aria-label="RIR — reps in reserve"
-        aria-disabled={disabled ? 'true' : 'false'}
-        onKeyDown={handleKey}
-        style={{
-          marginTop: 6,
-          display: 'flex',
-          gap: 4,
-          outline: 'none',
-        }}
-      >
-        {[0, 1, 2, 3, 4, 5].map(n => (
-          <button
-            key={n}
-            type="button"
-            tabIndex={-1}
-            disabled={disabled}
-            onClick={() => onChange(n)}
-            aria-hidden="true"
-            style={{
-              flex: 1,
-              height: 36,
-              borderRadius: 4,
-              border: 'none',
-              background: n === value ? TOKENS.accent : TOKENS.surface2,
-              color: n === value ? TOKENS.text : TOKENS.textDim,
-              fontFamily: FONTS.mono,
-              fontSize: 13,
-              cursor: disabled ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
-    </div>
+// Offset (ms, +east) of `tz` at instant `at` — the wall-clock-minus-UTC diff.
+function tzOffsetMs(tz: string, at: Date): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const p = Object.fromEntries(dtf.formatToParts(at).map((x) => [x.type, x.value]));
+  const asUTC = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour) % 24, // small-icu can render midnight as "24"
+    Number(p.minute),
+    Number(p.second),
   );
+  return asUTC - at.getTime();
 }
+
+// ISO instant for `dateStr` (YYYY-MM-DD) at 12:00 in `tz`. Noon keeps the sample
+// far from any midnight tz/DST date-flip, so the server buckets it on the day
+// the user chose. DST never transitions at noon, so a single offset correction
+// is exact.
+function zonedNoonISO(dateStr: string, tz: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const noonAsUTC = Date.UTC(y, m - 1, d, 12, 0, 0);
+  const offset = tzOffsetMs(tz, new Date(noonAsUTC));
+  return new Date(noonAsUTC - offset).toISOString();
+}
+
+// formatBackfillDate moved to lib/formatDate.ts (2026-07-13 quality pass).

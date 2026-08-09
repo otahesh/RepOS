@@ -11,20 +11,25 @@
 // Auth-missing handling: empty UPDATE...RETURNING → 500 auth_state_missing
 // (panel I-AUTH-MISSING).
 import type { FastifyInstance } from 'fastify';
+import { requireUserId } from '../utils/requestIdentity.js';
 import { db } from '../db/client.js';
 import { requireBearerOrCfAccess } from '../middleware/cfAccess.js';
 import { requireScope } from '../middleware/scope.js';
-import { OnboardingCompleteRequestSchema, type OnboardingCompleteResponse } from '../schemas/onboarding.js';
+import {
+  OnboardingCompleteRequestSchema,
+  type OnboardingCompleteResponse,
+} from '../schemas/onboarding.js';
 import { zodToFieldError } from '../utils/zodToFieldError.js';
 import { recordAccountEventTx } from '../services/accountEvents.js';
+import { clientIp } from '../utils/clientIp.js';
 
 export async function onboardingRoutes(app: FastifyInstance) {
   app.post(
     '/me/onboarding/complete',
     { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
     async (req, reply) => {
-      const userId = (req as any).userId as string;
-      const ip = (req.ip || '') as string;
+      const userId = requireUserId(req);
+      const ip = clientIp(req) ?? '';
       const parsed = OnboardingCompleteRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400);
@@ -67,11 +72,36 @@ export async function onboardingRoutes(app: FastifyInstance) {
         };
         return resp;
       } catch (e) {
-        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
         throw e;
       } finally {
         client.release();
       }
+    },
+  );
+
+  // G14 — first-run Beta disclaimer ack. Idempotent (COALESCE keeps the
+  // first timestamp); same auth as onboarding-complete.
+  app.post(
+    '/me/beta-disclaimer-ack',
+    { preHandler: [requireBearerOrCfAccess, requireScope('account:write')] },
+    async (req) => {
+      const userId = requireUserId(req);
+      const {
+        rows: [u],
+      } = await db.query<{ beta_disclaimer_ack_at: string }>(
+        `UPDATE users
+            SET beta_disclaimer_ack_at = COALESCE(beta_disclaimer_ack_at, now())
+          WHERE id = $1
+          RETURNING
+            to_char(beta_disclaimer_ack_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS beta_disclaimer_ack_at`,
+        [userId],
+      );
+      return { beta_disclaimer_ack_at: u.beta_disclaimer_ack_at };
     },
   );
 }

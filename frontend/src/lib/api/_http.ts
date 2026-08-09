@@ -18,7 +18,11 @@ export async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const raw = await res.text();
     let parsed: unknown = undefined;
-    try { parsed = raw ? JSON.parse(raw) : undefined; } catch { /* keep raw */ }
+    try {
+      parsed = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      /* keep raw */
+    }
     throw new ApiError(res.status, parsed, raw || res.statusText);
   }
   return res.json() as Promise<T>;

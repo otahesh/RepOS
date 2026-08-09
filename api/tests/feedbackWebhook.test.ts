@@ -20,7 +20,12 @@ describe('buildDiscordPayload', () => {
   });
 
   it('falls back to placeholders for null context', () => {
-    const p = buildDiscordPayload({ ...ROW, route: null, app_sha: null, user_email_at_submit: null });
+    const p = buildDiscordPayload({
+      ...ROW,
+      route: null,
+      app_sha: null,
+      user_email_at_submit: null,
+    });
     expect(p.embeds[0].fields.find((f) => f.name === 'From')?.value).toBe('unknown');
     expect(p.embeds[0].fields.find((f) => f.name === 'Route')?.value).toBe('—');
   });
@@ -32,7 +37,10 @@ describe('postWithRetry', () => {
 
   it('returns ok on a 2xx first try', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-    const r = await postWithRetry('http://hook', payload, { fetchImpl: fetchImpl as never, sleep: noSleep });
+    const r = await postWithRetry('http://hook', payload, {
+      fetchImpl: fetchImpl as never,
+      sleep: noSleep,
+    });
     expect(r).toEqual({ ok: true, attempts: 1 });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -42,20 +50,30 @@ describe('postWithRetry', () => {
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 429 })
       .mockResolvedValueOnce({ ok: true, status: 204 });
-    const r = await postWithRetry('http://hook', payload, { fetchImpl: fetchImpl as never, sleep: noSleep });
+    const r = await postWithRetry('http://hook', payload, {
+      fetchImpl: fetchImpl as never,
+      sleep: noSleep,
+    });
     expect(r).toEqual({ ok: true, attempts: 2 });
   });
 
   it('gives up after maxAttempts on persistent 5xx', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500 });
-    const r = await postWithRetry('http://hook', payload, { fetchImpl: fetchImpl as never, sleep: noSleep, maxAttempts: 3 });
+    const r = await postWithRetry('http://hook', payload, {
+      fetchImpl: fetchImpl as never,
+      sleep: noSleep,
+      maxAttempts: 3,
+    });
     expect(r.ok).toBe(false);
     expect(r.attempts).toBe(3);
   });
 
   it('does NOT retry on a non-429 4xx', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 400 });
-    const r = await postWithRetry('http://hook', payload, { fetchImpl: fetchImpl as never, sleep: noSleep });
+    const r = await postWithRetry('http://hook', payload, {
+      fetchImpl: fetchImpl as never,
+      sleep: noSleep,
+    });
     expect(r).toEqual({ ok: false, attempts: 1 });
   });
 });

@@ -29,10 +29,11 @@ let targetExerciseId: string | undefined;
 
 beforeAll(async () => {
   app = await buildApp();
-  const { rows: [u] } = await db.query(
-    `INSERT INTO users (email) VALUES ($1) RETURNING id`,
-    [`vitest.contract.plannedsets.${Date.now()}@repos.test`],
-  );
+  const {
+    rows: [u],
+  } = await db.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [
+    `vitest.contract.plannedsets.${Date.now()}@repos.test`,
+  ]);
   userId = u.id;
   const mint = await app.inject({
     method: 'POST',
@@ -42,11 +43,15 @@ beforeAll(async () => {
   token = mint.json<{ token: string }>().token;
 
   // Try to set up a materialized mesocycle so we can get a real planned_set id
-  const { rows: [tmpl] } = await db.query(
+  const {
+    rows: [tmpl],
+  } = await db.query(
     `SELECT id, version, name FROM program_templates WHERE archived_at IS NULL LIMIT 1`,
   );
   if (tmpl) {
-    const { rows: [up] } = await db.query(
+    const {
+      rows: [up],
+    } = await db.query(
       `INSERT INTO user_programs (user_id, template_id, template_version, name, customizations, status)
        VALUES ($1, $2, $3, $4, '{}'::jsonb, 'draft')
        RETURNING id`,
@@ -61,7 +66,9 @@ beforeAll(async () => {
     if (startRes.statusCode === 201) {
       const { mesocycle_run_id } = startRes.json<{ mesocycle_run_id: string }>();
       // Find a planned_set row for today or future
-      const { rows: [ps] } = await db.query(
+      const {
+        rows: [ps],
+      } = await db.query(
         `SELECT ps.id FROM planned_sets ps
          JOIN day_workouts dw ON dw.id = ps.day_workout_id
          JOIN mesocycle_runs mr ON mr.id = dw.mesocycle_run_id
@@ -72,7 +79,9 @@ beforeAll(async () => {
       plannedSetId = ps?.id;
 
       // Find a different exercise to substitute to
-      const { rows: [ex] } = await db.query(
+      const {
+        rows: [ex],
+      } = await db.query(
         `SELECT e.id FROM exercises e
          JOIN planned_sets ps2 ON ps2.id = $1
          WHERE e.id != ps2.exercise_id AND e.archived_at IS NULL
@@ -141,7 +150,9 @@ describe('PATCH /api/planned-sets/:id contract', () => {
     }
     expect(res.statusCode).toBe(200);
     const parsed = PlannedSetPatchResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
   });
 });
 
@@ -180,7 +191,9 @@ describe('POST /api/planned-sets/:id/substitute contract', () => {
     }
     expect(res.statusCode).toBe(200);
     const parsed = PlannedSetSubstituteResponseSchema.safeParse(res.json());
-    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+    expect(parsed.success, `Schema parse failed: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+      true,
+    );
     if (parsed.success) {
       expect(parsed.data.exercise_id).toBe(targetExerciseId);
     }

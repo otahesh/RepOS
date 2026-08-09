@@ -37,7 +37,9 @@ describe('<Toast>', () => {
 
   it('respects custom durationMs', () => {
     const onDismiss = vi.fn();
-    render(<Toast id="t2" severity="success" body="custom" durationMs={2000} onDismiss={onDismiss} />);
+    render(
+      <Toast id="t2" severity="success" body="custom" durationMs={2000} onDismiss={onDismiss} />,
+    );
     act(() => {
       vi.advanceTimersByTime(1500);
     });

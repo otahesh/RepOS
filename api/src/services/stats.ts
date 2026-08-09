@@ -9,7 +9,9 @@ export async function computeStats(userId: string, rangeStart: Date) {
     [userId, rangeStart],
   );
 
-  const { rows: [current] } = await db.query(
+  const {
+    rows: [current],
+  } = await db.query(
     `SELECT weight_lbs::float AS weight_lbs, sample_date::text AS date, sample_time::text AS time
      FROM health_weight_samples
      WHERE user_id = $1
@@ -32,7 +34,9 @@ export async function computeStats(userId: string, rangeStart: Date) {
   };
 
   const [trend7d, trend30d, trend90d] = await Promise.all([
-    trendDelta(7), trendDelta(30), trendDelta(90),
+    trendDelta(7),
+    trendDelta(30),
+    trendDelta(90),
   ]);
 
   // Adherence and missed days over the requested range
@@ -45,9 +49,16 @@ export async function computeStats(userId: string, rangeStart: Date) {
     const iso = d.toISOString().slice(0, 10);
     if (!datesWithSample.has(iso)) missedDays.push(iso);
   }
-  const adherencePct = datesWithSample.size > 0
-    ? +((datesWithSample.size / totalDays) * 100).toFixed(1)
-    : null;
+  const adherencePct =
+    datesWithSample.size > 0 ? +((datesWithSample.size / totalDays) * 100).toFixed(1) : null;
 
-  return { samples, current: current ?? null, trend7d, trend30d, trend90d, adherencePct, missedDays };
+  return {
+    samples,
+    current: current ?? null,
+    trend7d,
+    trend30d,
+    trend90d,
+    adherencePct,
+    missedDays,
+  };
 }

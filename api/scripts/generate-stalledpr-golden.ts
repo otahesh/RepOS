@@ -21,7 +21,9 @@ import { db } from '../src/db/client.js';
   const out: Array<{ week: number; triggered: boolean; exercise_slug: string | null }> = [];
   for (let w = 1; w <= 5; w++) {
     const res = await stalledPrEvaluator.evaluate({
-      userId: seed.userId, runId: seed.mesocycleRunId, weekIdx: w,
+      userId: seed.userId,
+      runId: seed.mesocycleRunId,
+      weekIdx: w,
     });
     let slug: string | null = null;
     if (res.triggered && res.payload?.exercise_id) {

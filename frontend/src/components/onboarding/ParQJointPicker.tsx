@@ -42,10 +42,14 @@ export function ParQJointPicker({
               aria-checked={on}
               onClick={() => toggle(j.id)}
               style={{
-                padding: '8px 12px', borderRadius: 999, fontSize: 13,
+                padding: '8px 12px',
+                borderRadius: 999,
+                fontSize: 13,
                 border: `1px solid ${on ? TOKENS.accent : TOKENS.line}`,
                 background: on ? TOKENS.accentGlow : TOKENS.bg,
-                color: TOKENS.text, cursor: 'pointer', fontFamily: 'inherit',
+                color: TOKENS.text,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
               }}
             >
               {j.label}

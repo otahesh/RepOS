@@ -1,11 +1,7 @@
 import { db } from '../db/client.js';
 import type { PredicateT } from '../schemas/predicate.js';
 import { allPredicatesSatisfied } from './_equipmentPredicate.js';
-import {
-  applyInjuryAdvisory,
-  fetchUserInjuries,
-  type JointStressProfile,
-} from './injuryRanker.js';
+import { applyInjuryAdvisory, fetchUserInjuries, type JointStressProfile } from './injuryRanker.js';
 import type { InjuryJoint } from '../schemas/userInjuries.js';
 
 export type SubResult = {
@@ -42,19 +38,34 @@ export async function findSubstitutions(
   // demotes candidates whose joint stress overlaps the user's recorded
   // injuries; when undefined, the ranker is skipped entirely.
   userId?: string,
+  // Optional pre-fetched injuries: callers resolving substitutions for many
+  // slugs in one request (getTodayWorkout) fetch injuries once and pass them
+  // down instead of re-querying per call. Ignored when userId is absent.
+  injuries?: Awaited<ReturnType<typeof fetchUserInjuries>>,
 ): Promise<SubResult | null> {
-  const { rows: [target] } = await db.query<{
-    id: string; name: string; movement_pattern: string; primary_muscle_id: number;
+  const {
+    rows: [target],
+  } = await db.query<{
+    id: string;
+    name: string;
+    movement_pattern: string;
+    primary_muscle_id: number;
+    measurement: 'reps' | 'duration';
   }>(
-    `SELECT id, name, movement_pattern, primary_muscle_id
+    `SELECT id, name, movement_pattern, primary_muscle_id, measurement
      FROM exercises WHERE slug=$1 AND archived_at IS NULL`,
     [targetSlug],
   );
   if (!target) return null;
 
-  const onlyV = Object.keys(userEquipmentProfile).filter(k => k !== '_v').length === 0;
+  const onlyV = Object.keys(userEquipmentProfile).filter((k) => k !== '_v').length === 0;
   if (onlyV) {
-    return { from: { slug: targetSlug, name: target.name }, subs: [], truncated: false, reason: 'no_equipment_profile' };
+    return {
+      from: { slug: targetSlug, name: target.name },
+      subs: [],
+      truncated: false,
+      reason: 'no_equipment_profile',
+    };
   }
 
   // Single query: fetch all candidates with scores computed inline via
@@ -64,11 +75,16 @@ export async function findSubstitutions(
   // [FIX-13] Extend SELECT with `e.joint_stress_profile` so the injuryRanker
   // can read per-joint stress without a second round-trip per candidate.
   const { rows: candidates } = await db.query<{
-    id: string; slug: string; name: string;
-    movement_pattern: string; primary_muscle_id: number;
+    id: string;
+    slug: string;
+    name: string;
+    movement_pattern: string;
+    primary_muscle_id: number;
     required_equipment: { _v: number; requires: PredicateT[] };
     joint_stress_profile: JointStressProfile;
-    pattern_score: number; primary_score: number; overlap_score: number;
+    pattern_score: number;
+    primary_score: number;
+    overlap_score: number;
   }>(
     `SELECT
        e.id, e.slug, e.name, e.movement_pattern, e.primary_muscle_id,
@@ -83,37 +99,52 @@ export async function findSubstitutions(
          WHERE t.exercise_id = $1
        ), 0) AS overlap_score
      FROM exercises e
-     WHERE e.id <> $1 AND e.archived_at IS NULL`,
-    [target.id, target.movement_pattern, target.primary_muscle_id],
+     WHERE e.id <> $1 AND e.archived_at IS NULL
+       -- Cross-measurement swaps are forbidden: the substitute endpoint keeps
+       -- the old row's targets, so a duration exercise on a reps slot (or vice
+       -- versa) would strand mismatched targets. Pattern match is a score, not
+       -- a filter — this must be a hard predicate.
+       AND e.measurement = $4`,
+    [target.id, target.movement_pattern, target.primary_muscle_id, target.measurement],
   );
 
   const profile = userEquipmentProfile;
 
   const passing = candidates
-    .filter(c => allPredicatesSatisfied((c.required_equipment?.requires ?? []) as PredicateT[], profile))
-    .map(c => {
+    .filter((c) =>
+      allPredicatesSatisfied((c.required_equipment?.requires ?? []) as PredicateT[], profile),
+    )
+    .map((c) => {
       const score = c.pattern_score + c.primary_score + c.overlap_score;
       let reason = '';
-      if (c.pattern_score > 0) { reason = 'Same pattern'; }
-      if (c.primary_score > 0) { reason = reason ? `${reason} · same primary` : 'Same primary muscle'; }
+      if (c.pattern_score > 0) {
+        reason = 'Same pattern';
+      }
+      if (c.primary_score > 0) {
+        reason = reason ? `${reason} · same primary` : 'Same primary muscle';
+      }
       if (!reason) reason = 'Muscle overlap';
       return { ...c, score, reason };
     })
-    .filter(c => c.score >= SCORE_FLOOR)
-    .sort((a, b) => (b.score - a.score) || a.slug.localeCompare(b.slug));
+    .filter((c) => c.score >= SCORE_FLOOR)
+    .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug));
 
   if (passing.length === 0) {
     // Score-based closest_partial: highest-scored candidate from the full
     // set (equipment-agnostic), so the suggestion is relevant not alphabetical.
     const closestPartial = candidates
-      .map(c => ({ ...c, score: c.pattern_score + c.primary_score + c.overlap_score }))
-      .filter(c => c.score >= SCORE_FLOOR)
-      .sort((a, b) => (b.score - a.score) || a.slug.localeCompare(b.slug))[0];
+      .map((c) => ({ ...c, score: c.pattern_score + c.primary_score + c.overlap_score }))
+      .filter((c) => c.score >= SCORE_FLOOR)
+      .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))[0];
 
     return {
       from: { slug: targetSlug, name: target.name },
-      subs: [], truncated: false, reason: 'no_equipment_match',
-      closest_partial: closestPartial ? { slug: closestPartial.slug, name: closestPartial.name } : undefined,
+      subs: [],
+      truncated: false,
+      reason: 'no_equipment_match',
+      closest_partial: closestPartial
+        ? { slug: closestPartial.slug, name: closestPartial.name }
+        : undefined,
     };
   }
 
@@ -132,7 +163,7 @@ export async function findSubstitutions(
           reason: c.reason,
           joint_stress_profile: c.joint_stress_profile,
         })),
-        await fetchUserInjuries(userId),
+        injuries ?? (await fetchUserInjuries(userId)),
       )
     : passing;
 
@@ -153,4 +184,3 @@ export async function findSubstitutions(
     ...(passing.length > TRUNCATION ? { total_matches: passing.length } : {}),
   };
 }
-

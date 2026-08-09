@@ -19,9 +19,6 @@
  *      return the right shape after three POSTs?". That is best served by a
  *      vitest integration test against the real fastify app + real DB, which
  *      is exactly the pattern in api/tests/integration/set-logs-flow.test.ts.
- *
- * The plan's W3 UI assertion (an overreaching toast on /today) ships as a
- * `test.skip` placeholder until W3.1 lands the evaluator + toast.
  */
 
 import 'dotenv/config';
@@ -51,13 +48,12 @@ afterAll(async () => {
  * spec can POST three set_logs against three distinct planned_set_ids on a
  * single exercise — which is the shape the W3 evaluator will look for.
  */
-async function addExtraPlannedSets(
-  seed: SeedHandle,
-  count: number,
-): Promise<string[]> {
+async function addExtraPlannedSets(seed: SeedHandle, count: number): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 1; i <= count; i++) {
-    const { rows: [r] } = await db.query<{ id: string }>(
+    const {
+      rows: [r],
+    } = await db.query<{ id: string }>(
       `INSERT INTO planned_sets
          (day_workout_id, block_idx, set_idx, exercise_id,
           target_reps_low, target_reps_high, target_rir, rest_sec)
@@ -87,9 +83,7 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     // Three RIR-0 logs, one per planned_set, spread one day apart so they all
     // fall in the last-7-days window but in distinct minute buckets.
     for (let i = 0; i < 3; i++) {
-      const performed_at = new Date(
-        Date.now() - i * 24 * 60 * 60 * 1000,
-      ).toISOString();
+      const performed_at = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString();
       const resp = await app.inject({
         method: 'POST',
         url: '/api/set-logs',
@@ -130,13 +124,10 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     await app.close();
   });
 
-  // [W3.1 Task 13] Re-enabled. The W1.5 author left this as an
-  // it.skip-with-expected-fail placeholder pending the W3 evaluator landing.
-  // Now that overreachingEvaluator + route registration + telemetry are in
-  // place (Tasks 10–12.5), GET /api/recovery-flags returns the flag whenever
-  // the strict AND-gate conditions hold. seedUserOverreaching seeds exactly
-  // those conditions: 3 RIR-0 compound sessions in 7d + current-week
-  // performed_sets >= MAV. This locks in the cross-wave W1→W3 contract.
+  // GET /api/recovery-flags returns the flag whenever the strict AND-gate
+  // conditions hold. seedUserOverreaching seeds exactly those conditions:
+  // 3 RIR-0 compound sessions in 7d + current-week performed_sets >= MAV.
+  // This locks in the cross-wave W1→W3 contract.
   it('the /today overreaching toast appears after three RIR-0 logs (W3.1)', async () => {
     const app = await build();
     const seed = await seedUserOverreaching();
@@ -149,9 +140,7 @@ describe('W1.5.1 — set_logs → W3 evaluator signal', () => {
     });
     expect(flags.statusCode).toBe(200);
     expect(
-      flags.json<{ flags: Array<{ flag: string }> }>().flags.some(
-        (f) => f.flag === 'overreaching',
-      ),
+      flags.json<{ flags: Array<{ flag: string }> }>().flags.some((f) => f.flag === 'overreaching'),
     ).toBe(true);
 
     await app.close();
