@@ -5,7 +5,8 @@
 // Proton-hosted mail on jpmtech.com.
 //
 // There is NO invite token and no magic link (Q6). The email links to the app;
-// authentication is CF Access + Google, authorization is the pre-created row.
+// authentication is CF Access (Google, Cloudflare, or one-time PIN — the app
+// allows every configured IdP), authorization is the pre-created row.
 // A token would be a second, weaker credential path into the same app.
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -104,8 +105,9 @@ export function renderInviteHtml(input: InviteCopyInput): string {
         Your data is backed up nightly, but do not treat it as your only copy.
       </td></tr>
       <tr><td style="font-size:14px;line-height:22px;padding-bottom:16px;">
-        <strong>Sign in with the Google account for this exact address</strong> —
-        <span style="font-family:monospace;">${toEmail}</span>. Any other address will be turned
+        <strong>Sign in with this exact address</strong> —
+        <span style="font-family:monospace;">${toEmail}</span>. Use Google, your Cloudflare
+        account, or have a one-time code emailed to you. Any other address will be turned
         away at the door with no explanation.
       </td></tr>
       <tr><td style="padding-bottom:18px;">
@@ -133,7 +135,8 @@ export function renderInviteText({ toEmail, invitedByEmail }: InviteCopyInput): 
     'THIS IS A BETA. Expect rough edges, occasional downtime, and changes without',
     'notice. Your data is backed up nightly, but do not treat it as your only copy.',
     '',
-    `Sign in with the Google account for this exact address: ${toEmail}`,
+    `Sign in with this exact address: ${toEmail}`,
+    'Use Google, your Cloudflare account, or have a one-time code emailed to you.',
     'Any other address will be turned away at the door with no explanation.',
     '',
     `Open RepOS: ${APP_URL}`,

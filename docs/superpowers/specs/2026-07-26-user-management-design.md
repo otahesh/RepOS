@@ -203,7 +203,7 @@ Shaped by G14, which requires each Beta user to have a disclaimer and a document
 
 1. Who invited them; one line on what RepOS is.
 2. An explicit Beta disclaimer.
-3. **"Sign in with the Google account for this exact address."** The `repos` Access application allows only the Google IdP (`allowed_idps` lists Google alone; the org's one-time-PIN provider is not enabled on it), so an invitee attempting a non-Google address is bounced with no in-app explanation. This exact confusion cost a live debugging session on 2026-07-26, when `REPOS_ADMIN_EMAILS` was found pointing at a ProtonMail-hosted address that could never authenticate.
+3. **"Sign in with this exact address."** The constraint is the **address**, not the method. *(Amended 2026-08-09 with Jason's explicit authorization — the external fact this clause described changed during deployment. It previously read "Sign in with the Google account for this exact address" and asserted that `allowed_idps` listed Google alone with one-time PIN not enabled on the app.)* The `repos` application now sets `allowed_idps` to all three configured providers — Google, Cloudflare, and one-time PIN — with `auto_redirect_to_identity` off, so an invitee picks a method. Naming a single method is worse than naming none: it sends Proton-hosted invitees hunting for a Google account they do not need. What still bounces with no in-app explanation is arriving on a *different address*, which is the confusion that cost a live debugging session on 2026-07-26, when `REPOS_ADMIN_EMAILS` was found pointing at a ProtonMail-hosted address that could not then authenticate.
 4. A contact path for problems.
 5. A plain link to `https://repos.jpmtech.com`.
 

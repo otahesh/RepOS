@@ -3267,13 +3267,22 @@ describe('idempotency keys (Q30)', () => {
 describe('copy (G14)', () => {
   const input = { toEmail: 'new@repos.test', invitedByEmail: 'admin@repos.test' };
 
-  it('names the inviter, carries the Beta disclaimer, the Google instruction, a contact path and the link', () => {
+  it('names the inviter, carries the Beta disclaimer, the sign-in instruction, a contact path and the link', () => {
     for (const body of [renderInviteHtml(input), renderInviteText(input)]) {
+      // The HTML wraps sentences across source lines and splits them with
+      // tags; collapse whitespace so one assertion covers both renderers.
+      const flat = body.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
       expect(body).toContain('admin@repos.test');
       expect(body.toLowerCase()).toContain('beta');
-      // The repos Access application allows ONLY the Google IdP; an invitee
-      // trying a non-Google address is bounced with no in-app explanation.
-      expect(body).toContain('Sign in with the Google account for this exact address');
+      // The repos Access application accepts every configured IdP (Google,
+      // Cloudflare, one-time PIN), so the constraint is the ADDRESS, not the
+      // method — an invitee arriving on any other address is bounced with no
+      // in-app explanation. Naming one method sends Proton-hosted invitees
+      // hunting for a Google account they do not need.
+      expect(flat).toContain('Sign in with this exact address');
+      expect(flat).toContain(
+        'Use Google, your Cloudflare account, or have a one-time code emailed to you.',
+      );
       expect(body).toContain('new@repos.test');
       expect(body).toContain(APP_URL);
     }
@@ -3597,8 +3606,9 @@ export function renderInviteHtml(input: InviteCopyInput): string {
         Your data is backed up nightly, but do not treat it as your only copy.
       </td></tr>
       <tr><td style="font-size:14px;line-height:22px;padding-bottom:16px;">
-        <strong>Sign in with the Google account for this exact address</strong> —
-        <span style="font-family:monospace;">${toEmail}</span>. Any other address will be turned
+        <strong>Sign in with this exact address</strong> —
+        <span style="font-family:monospace;">${toEmail}</span>. Use Google, your Cloudflare
+        account, or have a one-time code emailed to you. Any other address will be turned
         away at the door with no explanation.
       </td></tr>
       <tr><td style="padding-bottom:18px;">
@@ -3626,7 +3636,8 @@ export function renderInviteText({ toEmail, invitedByEmail }: InviteCopyInput): 
     'THIS IS A BETA. Expect rough edges, occasional downtime, and changes without',
     'notice. Your data is backed up nightly, but do not treat it as your only copy.',
     '',
-    `Sign in with the Google account for this exact address: ${toEmail}`,
+    `Sign in with this exact address: ${toEmail}`,
+    'Use Google, your Cloudflare account, or have a one-time code emailed to you.',
     'Any other address will be turned away at the door with no explanation.',
     '',
     `Open RepOS: ${APP_URL}`,
