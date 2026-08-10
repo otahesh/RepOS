@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Migration range:** `080–089`. **Three** migrations are added by this plan: `080_users_roles_status.sql` (Task 2), `081_invite_request.sql` (the frozen invite request, Q30 — listed under Task 11), and `082_cf_sync_stamp_guard.sql` (Q24 as a trigger, Task 15b). Any harness that reconstructs a pre-W9 database must unwind **all three**, or it silently proves nothing about the ones it left applied — which has now happened twice, to 081 and then to 082. There is exactly one unwind: `unwindToPreW9` in `api/tests/helpers/migration-unwind.ts`. Do not write a second; extend that one, and note it drops 082's trigger and function **before** the columns they depend on.
-- **Founding admin email constant:** `jason.meyer1@gmail.com` (Q35). Hard-coded in migration 080 and exported from `api/src/constants/users.ts`.
+- **Founding admin email constant:** `jason@jpmtech.com` (Q35). Hard-coded in migration 080 and exported from `api/src/constants/users.ts`; the two copies are held equal by a test in `migration-080.test.ts` that reads the `.sql` text. **Changed from `jason.meyer1@gmail.com` on 2026-08-09** — see the deployment note in Task 2.
 - **Cohort cap:** `10`, counted as `status IN ('active','invited','deleting')` (Q12). Applies to invite **and** reinstate.
 - **Cloudflare account id:** `400d0b4a35d63a32b86ab774b9feb4ab`. **Access policy id:** `b4a92a15-27d5-477b-ad36-f78fcdae931c`.
 - **New env vars (set-once):** `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ACCESS_POLICY_ID`, `RESEND_API_KEY`, `INVITE_FROM_EMAIL`. All five fail at **use** time and never at boot. Only `CF_API_TOKEN` and `RESEND_API_KEY` emit a boot advisory naming what is disabled (`bootstrap-guards.ts:44-49`); the other three are silent until used. (Corrected 2026-08-04 — this line previously said all five were advisory at boot.)
@@ -374,7 +374,7 @@ EOF
 **Interfaces:**
 - Consumes: `runMigrations`, `createEphemeralDb` (Task 1).
 - Produces:
-  - `FOUNDING_ADMIN_EMAIL = 'jason.meyer1@gmail.com'`, `COHORT_CAP = 10`
+  - `FOUNDING_ADMIN_EMAIL = 'jason@jpmtech.com'`, `COHORT_CAP = 10`
   - `type UserStatus = 'invited' | 'active' | 'suspended' | 'deleting'`
   - `type UserRole = 'member' | 'admin'`
   - `users` columns: `role`, `status`, `invited_by`, `invited_at`, `activated_at`, `cf_synced_at`, `invite_sent_at`, `invite_message_id`.
@@ -569,7 +569,7 @@ Create `api/src/constants/users.ts`:
  * reintroduce exactly the redeploy-coupled config W9 removes (Q11).
  * Keep in sync with the literal inside 080_users_roles_status.sql.
  */
-export const FOUNDING_ADMIN_EMAIL = 'jason.meyer1@gmail.com';
+export const FOUNDING_ADMIN_EMAIL = 'jason@jpmtech.com';
 
 /**
  * Q12 — the G14 cohort cap, enforced in code rather than left as prose.
@@ -645,7 +645,9 @@ CREATE INDEX IF NOT EXISTS users_status_idx ON users (status);
 -- "promote the oldest row" would hand admin to a random Beta user.
 DO $$
 DECLARE
-  founding_email CONSTANT TEXT := 'jason.meyer1@gmail.com';
+  -- Must equal FOUNDING_ADMIN_EMAIL in api/src/constants/users.ts; asserted by
+  -- migration-080.test.ts, which reads this file rather than trusting prose.
+  founding_email CONSTANT TEXT := 'jason@jpmtech.com';
   target_id UUID;
 BEGIN
   IF EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND status = 'active') THEN
