@@ -7577,13 +7577,19 @@ active admin on every schema-entry path with no Cloudflare dependency.
 SSH to Unraid, then:
 
 Note the `sh -c` wrapper and the **single** outer quotes. `DATABASE_URL` must be
-expanded by the shell *inside* the container; writing `docker exec repos psql
-"$DATABASE_URL"` makes the Unraid host expand it first, and since the host has
-no such variable psql receives an empty connection string and silently falls
-back to libpq defaults instead of the container's configured database.
+expanded by the shell *inside* the container. Writing them in double quotes
+makes the Unraid host expand them first, and since the host has no such
+variables psql receives an empty connection string and silently falls back to
+libpq defaults instead of the container's configured database.
+
+**Do not use `$DATABASE_URL` here.** It is not part of the container
+environment — the three s6 scripts that need it each construct it and export it
+into their own service (`run-api:6`, `init-migrations:8`, `init-seed:8`), and
+`docker exec` inherits none of that. The container is named **`RepOS`**,
+capitalised.
 
 ```bash
-docker exec -it repos sh -c 'psql "$DATABASE_URL" -c \
+docker exec -it RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}" -c \
   "UPDATE users SET role='"'"'admin'"'"', status='"'"'active'"'"', cf_synced_at=NULL WHERE lower(email)='"'"'<email>'"'"';"'
 ```
 
@@ -7591,7 +7597,7 @@ If quoting that densely is uncomfortable, the equivalent heredoc form is easier
 to get right and is what the runbook prefers:
 
 ```bash
-docker exec -i repos sh -c 'psql "$DATABASE_URL"' <<'SQL'
+docker exec -i RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}"' <<'SQL'
 UPDATE users SET role='admin', status='active', cf_synced_at=NULL WHERE lower(email)='<email>';
 SQL
 ```
@@ -7609,7 +7615,7 @@ If the identity has no row at all (deny-by-default means it cannot sign in to
 create one):
 
 ```bash
-docker exec -i repos sh -c 'psql "$DATABASE_URL"' <<'SQL'
+docker exec -i RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}"' <<'SQL'
 INSERT INTO users (email, role, status) VALUES ('<email>','admin','active');
 SQL
 ```
@@ -8279,7 +8285,10 @@ Create `scripts/cutover/002-w9-cf-baseline.sh` (`chmod +x`):
 # Run ONCE, after migration 080 has been applied, from inside the container so
 # CF_API_TOKEN / CF_ACCOUNT_ID / CF_ACCESS_POLICY_ID and DATABASE_URL are set:
 #
-#   docker exec -it repos /scripts/cutover/002-w9-cf-baseline.sh
+#   docker exec -it RepOS /scripts/cutover/002-w9-cf-baseline.sh
+#
+# The container is named RepOS, capitalised. `docker exec ... repos` is a
+# different (nonexistent) container and fails before this script is reached.
 #
 # NOTE the path: the Dockerfile does `COPY scripts /scripts` (docker/Dockerfile:57).
 # `/app/scripts` is the LOCAL-dev default only — see api/.env.example's
@@ -8294,6 +8303,21 @@ Create `scripts/cutover/002-w9-cf-baseline.sh` (`chmod +x`):
 # Founding-admin promotion is NOT here — it lives in migration 080 (Q35), so a
 # restore that never runs this script still yields a working admin.
 set -euo pipefail
+
+# DATABASE_URL is NOT part of the container environment. The three s6 scripts
+# that need it each build it themselves and export it into their own service
+# (run-api:6, init-migrations:8, init-seed:8) — `docker exec` starts a fresh
+# process that inherits none of that. The header of this file used to claim it
+# "is set", and the first production run on 2026-08-09 died with
+#   FATAL 28000: no PostgreSQL user name specified in startup packet
+# because an unset connection string makes pg fall back to libpq defaults.
+# Built here the same way those three build it, and only when absent, so an
+# explicit override still wins.
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  db_name="${POSTGRES_DB:-repos}"
+  db_user="${POSTGRES_USER:-repos}"
+  export DATABASE_URL="postgres://${db_user}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${db_name}"
+fi
 
 # REPOS_API_DIR, not API_DIR: run-restore.sh:37 already reads that name for the
 # same directory, and two sibling scripts honouring different overrides for one
@@ -9922,7 +9946,7 @@ Not a task — the operator runs this once, and it is the only redeploy this wav
 2. Add the Resend SPF and DKIM records on **`send.jpmtech.com`** via the Cloudflare API. Root SPF (`v=spf1 include:_spf.protonmail.ch mx ~all`) and the root Proton DKIM CNAMEs stay **unmodified**; root DMARC `p=quarantine` covers the subdomain by inheritance and Resend's signature aligns.
 3. Recreate the container (env vars are fixed at create time — stop + rm + run, not restart).
 4. Migration 080 applies on boot. Confirm an active admin exists.
-5. Run the cutover: `docker exec -it repos /scripts/cutover/002-w9-cf-baseline.sh` (the Dockerfile COPYs `scripts` to `/scripts`, not `/app/scripts`). Expect `thesugardog@gmail.com` in `imported`.
+5. Run the cutover: `docker exec -it RepOS /scripts/cutover/002-w9-cf-baseline.sh` (container name is capitalised) (the Dockerfile COPYs `scripts` to `/scripts`, not `/app/scripts`). Expect `thesugardog@gmail.com` in `imported`.
 6. Open `/settings/users`, confirm no drift (no policy-error advisory; a banner appears only for confirmed divergence), and send one real invite to a disposable address to verify delivery end to end.
 7. **Close G14 for the identities the mailer never reached.** The cohort cap is enforced for everyone, but the documented contact path and the Beta disclaimer ride in the *invite email* — so anyone who never received one has neither. That is two populations by construction: the Q31b imports from step 5 (`cfReconcile.ts` inserts them `invited` and deliberately sends no mail, because they were granted out of band) and any `users` row predating W9. List them — `SELECT email, status, invited_at, invite_sent_at FROM users WHERE invite_sent_at IS NULL` — and deliver both out of band, or record in the PASSDOWN comms log that they already had them. PAR-Q-lite is separate and applies to everyone.
 8. **Delete that test user from `/settings/users`.** The verification invite is not free — it leaves a durable `users` row, a real address in the Cloudflare Access policy, and a consumed slot against `COHORT_CAP`. Delete through the UI so the Q33 path also removes the Cloudflare grant; deleting the row in SQL would strand the address in the policy. Same rule as the `RESEND_API_KEY` rotation in `docs/runbooks/secret-rotation.md`.
