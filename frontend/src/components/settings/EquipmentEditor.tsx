@@ -7,6 +7,7 @@ import {
 import { listMyPrograms } from '../../lib/api/userPrograms.ts';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { pushToast } from '../common/ToastHost';
+import { Button, DataState, Page, PageHeader } from '../ui';
 
 type Section = { title: string; items: ItemDef[] };
 type ItemDef =
@@ -81,12 +82,17 @@ export function EquipmentEditor() {
   const [hasActiveProgram, setHasActiveProgram] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    getEquipmentProfile().then((p) => {
-      setProfile(p);
-      setDraft(p);
-    });
+    setLoadError(false);
+    getEquipmentProfile()
+      .then((p) => {
+        setProfile(p);
+        setDraft(p);
+      })
+      .catch(() => setLoadError(true));
     listMyPrograms()
       .then((programs) => {
         setHasActiveProgram(programs.some((p) => p.status === 'active' || p.status === 'paused'));
@@ -97,7 +103,7 @@ export function EquipmentEditor() {
         // the destructive action is never silent.
         setHasActiveProgram(false);
       });
-  }, []);
+  }, [retryKey]);
 
   const updateKey = (key: string, val: unknown) => {
     setDraft((d) => ({ ...d, [key]: val }));
@@ -152,14 +158,36 @@ export function EquipmentEditor() {
     }
   };
 
-  if (!profile) return <div style={{ padding: 24 }}>Loading…</div>;
+  if (loadError)
+    return (
+      <Page width="standard">
+        <DataState
+          kind="error"
+          title="Equipment could not be loaded"
+          body="Your saved equipment was not changed."
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+
+  if (!profile)
+    return (
+      <Page width="standard">
+        <DataState kind="loading" title="Loading equipment" />
+      </Page>
+    );
 
   return (
-    <div style={{ padding: '20px 32px', maxWidth: 800, fontFamily: 'Inter Tight, system-ui' }}>
-      <h2 style={{ fontSize: 22, color: '#fff', marginBottom: 8 }}>Equipment</h2>
-      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 24 }}>
-        What you own determines which exercises and substitutions you'll see.
-      </p>
+    <Page width="standard" style={{ fontFamily: 'Inter Tight, system-ui' }}>
+      <PageHeader
+        eyebrow="Training"
+        title="Equipment"
+        description="What you own determines which exercises and substitutions you'll see."
+      />
       {SECTIONS.map((section) => (
         <details
           key={section.title}
@@ -194,40 +222,13 @@ export function EquipmentEditor() {
           </div>
         </details>
       ))}
-      <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button
-          onClick={save}
-          disabled={saving}
-          style={{
-            padding: '10px 20px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#4D8DFF',
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: saving ? 'wait' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          type="button"
-          onClick={onResetClick}
-          disabled={resetting}
-          style={{
-            padding: '10px 20px',
-            borderRadius: 8,
-            border: '1px solid rgba(255,106,106,0.5)',
-            background: 'transparent',
-            color: '#FF6A6A',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: resetting ? 'wait' : 'pointer',
-          }}
-        >
+      <div className="repos-sticky-actions">
+        <Button variant="danger" type="button" onClick={onResetClick} disabled={resetting}>
           {resetting ? 'Resetting…' : 'Reset all equipment'}
-        </button>
+        </Button>
+        <Button variant="primary" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
       </div>
 
       <ConfirmDialog
@@ -240,7 +241,7 @@ export function EquipmentEditor() {
         onConfirm={() => void performReset()}
         onCancel={() => setResetOpen(false)}
       />
-    </div>
+    </Page>
   );
 }
 
@@ -312,9 +313,9 @@ function ItemRow({
         </label>
         {have && (
           <div
+            className="equipment-range-grid"
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
               gap: 8,
               marginLeft: 28,
               marginTop: 6,

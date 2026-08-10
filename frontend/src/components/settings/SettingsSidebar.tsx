@@ -10,21 +10,77 @@ export interface SettingsSection {
   label: string;
   to: string;
   disabled: boolean;
+  group: 'Profile' | 'Training' | 'Data and Integrations' | 'Administration';
   ownerWave: 'W6' | 'W1' | 'W2' | 'W3' | 'W4' | 'W5' | 'W7' | 'W9';
   /** W9 — rendered only when /api/me reports is_admin. The API enforces it server-side regardless. */
   adminOnly?: boolean;
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { label: 'Account', to: '/settings/account', disabled: false, ownerWave: 'W6' },
-  { label: 'Health', to: '/settings/health', disabled: false, ownerWave: 'W2' },
-  { label: 'Equipment', to: '/settings/equipment', disabled: false, ownerWave: 'W1' },
-  { label: 'Integrations', to: '/settings/integrations', disabled: false, ownerWave: 'W1' },
-  { label: 'Program prefs', to: '/settings/program-prefs', disabled: false, ownerWave: 'W4' }, // W4.3 landed
-  { label: 'Backups', to: '/settings/backups', disabled: false, ownerWave: 'W5' }, // W5 landed
-  { label: 'Feedback', to: '/settings/feedback', disabled: false, ownerWave: 'W7' }, // W7 landed
-  { label: 'Users', to: '/settings/users', disabled: false, ownerWave: 'W9', adminOnly: true },
-  // D7: Storage + Injuries stay top-level.
-  { label: 'Storage', to: '/settings/storage', disabled: false, ownerWave: 'W1' },
-  { label: 'Injuries', to: '/settings/injuries', disabled: false, ownerWave: 'W3' },
+  { label: 'Account', to: '/settings/account', disabled: false, ownerWave: 'W6', group: 'Profile' },
+  { label: 'Health', to: '/settings/health', disabled: false, ownerWave: 'W2', group: 'Profile' },
+  {
+    label: 'Injuries',
+    to: '/settings/injuries',
+    disabled: false,
+    ownerWave: 'W3',
+    group: 'Profile',
+  },
+  {
+    label: 'Equipment',
+    to: '/settings/equipment',
+    disabled: false,
+    ownerWave: 'W1',
+    group: 'Training',
+  },
+  {
+    label: 'Program prefs',
+    to: '/settings/program-prefs',
+    disabled: false,
+    ownerWave: 'W4',
+    group: 'Training',
+  },
+  {
+    label: 'Integrations',
+    to: '/settings/integrations',
+    disabled: false,
+    ownerWave: 'W1',
+    group: 'Data and Integrations',
+  },
+  {
+    label: 'Backups',
+    to: '/settings/backups',
+    disabled: false,
+    ownerWave: 'W5',
+    group: 'Data and Integrations',
+  },
+  {
+    label: 'Storage',
+    to: '/settings/storage',
+    disabled: false,
+    ownerWave: 'W1',
+    group: 'Data and Integrations',
+  },
+  {
+    label: 'Feedback',
+    to: '/settings/feedback',
+    disabled: false,
+    ownerWave: 'W7',
+    group: 'Administration',
+  },
+  {
+    label: 'Users',
+    to: '/settings/users',
+    disabled: false,
+    ownerWave: 'W9',
+    adminOnly: true,
+    group: 'Administration',
+  },
+] as const;
+
+export const SETTINGS_GROUPS = [
+  'Profile',
+  'Training',
+  'Data and Integrations',
+  'Administration',
 ] as const;

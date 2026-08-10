@@ -10,6 +10,7 @@ import {
 // Seed defaults — read-side mirror so the UI can compute soft-caps without a
 // round-trip. The AUTHORITATIVE check is the server zod schema.
 import { MUSCLE_LANDMARKS_SEED } from '../../lib/muscleLandmarksSeed';
+import { Button, DataState, Page, PageHeader } from '../ui';
 
 type RowDraft = { mv?: string; mev: string; mav: string; mrv: string };
 type Draft = Record<string, RowDraft>;
@@ -87,16 +88,19 @@ export function LandmarksEditor() {
   const [injuryConstraints, setInjuryConstraints] = useState<Record<string, InjuryConstraint>>({});
   // [I-INJURY-OVERRIDE-CONFIRM] Per-muscle override acceptance (transient).
   const [overridesAccepted, setOverridesAccepted] = useState<Set<string>>(new Set());
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
+    setLoadError(false);
     getLandmarks()
       .then((r) => {
         setDraft(toDraft(r.landmarks));
         setParQActive(r.par_q_advisory_active);
         setInjuryConstraints(r.injury_constraints);
       })
-      .catch((e) => setTopErr(e instanceof Error ? e.message : String(e)));
-  }, []);
+      .catch(() => setLoadError(true));
+  }, [retryKey]);
 
   // [D2 + I-INJURY-OVERRIDE-CONFIRM] Which muscles are CURRENTLY soft-capped?
   // PAR-Q caps ALL muscles. High-severity injury caps the constrained muscle.
@@ -115,7 +119,28 @@ export function LandmarksEditor() {
     return out;
   }, [draft, parQActive, injuryConstraints, overridesAccepted]);
 
-  if (!draft) return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading landmarks…</div>;
+  if (loadError)
+    return (
+      <Page width="standard">
+        <DataState
+          kind="error"
+          title="Program preferences could not be loaded"
+          body="Your saved volume landmarks were not changed."
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+
+  if (!draft)
+    return (
+      <Page width="standard">
+        <DataState kind="loading" title="Loading landmarks…" />
+      </Page>
+    );
 
   async function save() {
     if (!draft) return;
@@ -163,7 +188,17 @@ export function LandmarksEditor() {
   }
 
   return (
-    <div style={{ padding: 24, fontFamily: FONTS.ui, color: TOKENS.text, maxWidth: 820 }}>
+    <Page width="standard" style={{ fontFamily: FONTS.ui, color: TOKENS.text }}>
+      <PageHeader
+        eyebrow="Training"
+        title="Program preferences"
+        description={
+          <>
+            Tune future program volume without changing the <Term k="mesocycle" /> already in
+            progress.
+          </>
+        }
+      />
       <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>
         Volume{' '}
         <Term k="landmark" variant="abbr">
@@ -231,7 +266,10 @@ export function LandmarksEditor() {
         </div>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <table
+        className="responsive-landmarks"
+        style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}
+      >
         <thead>
           <tr style={{ borderBottom: `1px solid ${TOKENS.line}` }}>
             <th style={th()}>Muscle</th>
@@ -264,7 +302,7 @@ export function LandmarksEditor() {
                   background: rowErr ? 'rgba(255,80,80,0.04)' : 'transparent',
                 }}
               >
-                <td style={td()}>
+                <td data-label="Muscle" style={td()}>
                   {slug.replace(/_/g, ' ')}
                   {/* [I-INJURY-OVERLAY-COPY] Named injury chip */}
                   {constraint && (
@@ -283,7 +321,7 @@ export function LandmarksEditor() {
                   )}
                 </td>
                 {(['mv', 'mev', 'mav', 'mrv'] as const).map((k) => (
-                  <td key={k} style={td()}>
+                  <td key={k} data-label={k.toUpperCase()} style={td()}>
                     <input
                       aria-label={`${slug} ${k}`}
                       value={draft[slug][k] ?? ''}
@@ -303,7 +341,7 @@ export function LandmarksEditor() {
                     />
                   </td>
                 ))}
-                <td style={td()}>
+                <td data-label="Status" style={td()}>
                   {rowErr && (
                     <div role="alert" style={{ color: TOKENS.danger, fontSize: 11 }}>
                       {rowErr}
@@ -340,24 +378,17 @@ export function LandmarksEditor() {
         </tbody>
       </table>
 
-      <button
-        type="button"
-        disabled={saving}
-        onClick={save}
-        style={{
-          marginTop: 16,
-          padding: '10px 16px',
-          background: TOKENS.accent,
-          color: '#fff',
-          border: 'none',
-          borderRadius: 8,
-          cursor: saving ? 'wait' : 'pointer',
-          fontWeight: 600,
-        }}
-      >
-        {saving ? 'Saving…' : 'Save landmarks'}
-      </button>
-    </div>
+      <div className="repos-sticky-actions">
+        <button
+          type="button"
+          className="repos-button repos-button--primary"
+          disabled={saving}
+          onClick={save}
+        >
+          {saving ? 'Saving…' : 'Save landmarks'}
+        </button>
+      </div>
+    </Page>
   );
 }
 

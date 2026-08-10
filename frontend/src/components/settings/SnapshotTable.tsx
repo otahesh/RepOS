@@ -1,8 +1,7 @@
 // frontend/src/components/settings/SnapshotTable.tsx
 //
-// W5 — Backups list. Desktop-primary surface (per project memory
-// project_device_split.md). Mobile renders a read-only list — no
-// Backup Now / Restore / Delete affordances (the action column is omitted).
+// Backups list. Desktop uses a dense table; phone and tablet use cards. Every
+// action is reachable in both compositions.
 //
 // [ABS-2] Verified-restorable badge tiers good/warn/danger; Restore disabled
 // when badge=danger; Download disabled (greyed) when badge=warn
@@ -11,12 +10,13 @@
 // I-WINDOW-PROMPT — no window.prompt EVER. The Restore flow uses W6's
 // ConfirmDialog (heavy tier, requireTyped="RESTORE") — the canonical
 // destructive-confirm primitive. Delete uses W6's pushToast (light feedback).
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { listBackups, deleteBackup, restoreBackup, type BackupItem } from '../../lib/api/backups';
-import { useIsMobile } from '../../lib/useIsMobile';
+import { useIsBelowTablet } from '../../lib/useIsMobile';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { pushToast } from '../common/ToastHost';
+import { Button, DataState } from '../ui';
 
 function Badge({ tier }: { tier: BackupItem['verified_restorable'] }): JSX.Element {
   const palette = {
@@ -49,18 +49,25 @@ function Badge({ tier }: { tier: BackupItem['verified_restorable'] }): JSX.Eleme
 }
 
 export function SnapshotTable(): JSX.Element {
-  const [items, setItems] = useState<BackupItem[]>([]);
+  const [items, setItems] = useState<BackupItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingRestoreId, setPendingRestoreId] = useState<string | null>(null);
-  const isMobile = useIsMobile();
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const isCompact = useIsBelowTablet();
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError(null);
+    setItems(null);
     listBackups()
       .then((r) => setItems(r.items))
       .catch((e: Error) =>
         setError(`Couldn't load snapshots — ${e.message}. Check API logs at /config/log/api.`),
       );
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const onRestoreConfirm = async (): Promise<void> => {
     if (!pendingRestoreId) return;
@@ -74,78 +81,178 @@ export function SnapshotTable(): JSX.Element {
     }
   };
 
-  // I-DELETE-CONFIRM — light-tier feedback via W6's ToastHost.
-  const onDeleteClick = (id: string): void => {
-    deleteBackup(id)
+  const onDeleteConfirm = async (): Promise<void> => {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
+    setPendingDeleteId(null);
+    await deleteBackup(id)
       .then(() => {
-        setItems((prev) => prev.filter((x) => x.id !== id));
+        setItems((prev) => (prev ?? []).filter((x) => x.id !== id));
         pushToast({ severity: 'success', body: `Deleted ${id}.` });
       })
       .catch((e: Error) => pushToast({ severity: 'error', body: `Delete failed — ${e.message}.` }));
   };
 
-  if (error) return <div style={{ color: TOKENS.danger }}>{error}</div>;
+  if (error) {
+    return (
+      <DataState
+        kind="error"
+        title="Backups could not be loaded"
+        body={error}
+        action={
+          <Button variant="secondary" onClick={load}>
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (items === null) return <DataState kind="loading" title="Loading backups" />;
+
+  if (items.length === 0) {
+    return (
+      <DataState
+        title="No snapshots yet"
+        body="Create a backup before a major program, integration, or administration change."
+      />
+    );
+  }
 
   return (
     <>
-      <table
-        style={{
-          width: '100%',
-          fontFamily: FONTS.ui,
-          color: TOKENS.text,
-          borderCollapse: 'collapse',
-        }}
-      >
-        <thead>
-          <tr style={{ textAlign: 'left', color: TOKENS.textDim, fontSize: 11 }}>
-            <th style={{ textAlign: 'left', padding: '6px 8px' }}>FILE</th>
-            <th style={{ padding: '6px 8px' }}>TRIGGER</th>
-            <th style={{ padding: '6px 8px' }}>SIZE</th>
-            <th style={{ padding: '6px 8px' }}>CREATED</th>
-            <th style={{ padding: '6px 8px' }}>STATUS</th>
-            {!isMobile && <th style={{ padding: '6px 8px' }}>ACTIONS</th>}
-          </tr>
-        </thead>
-        <tbody>
+      {isCompact ? (
+        <div style={{ display: 'grid', gap: 12 }}>
           {items.map((it) => (
-            <tr key={it.id} style={{ borderTop: `1px solid ${TOKENS.line}`, fontSize: 13 }}>
-              <td style={{ padding: '8px', fontFamily: FONTS.mono, fontSize: 12 }}>{it.id}</td>
-              <td style={{ padding: '8px' }}>{it.trigger}</td>
-              <td style={{ padding: '8px', fontFamily: FONTS.mono }}>
-                {Math.round(it.size_bytes / 1024)} KiB
-              </td>
-              <td style={{ padding: '8px', fontFamily: FONTS.mono, fontSize: 11 }}>
-                {it.created_at}
-              </td>
-              <td style={{ padding: '8px' }}>
+            <article key={it.id} className="repos-data-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <strong
+                  style={{
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                    fontFamily: FONTS.mono,
+                    fontSize: 12,
+                  }}
+                >
+                  {it.id}
+                </strong>
                 <Badge tier={it.verified_restorable} />
-              </td>
-              {!isMobile && (
-                <td style={{ padding: '8px', display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <button
-                    onClick={() => setPendingRestoreId(it.id)}
-                    disabled={it.verified_restorable === 'danger'}
+              </div>
+              <dl
+                style={{
+                  margin: 0,
+                  display: 'grid',
+                  gridTemplateColumns: '86px minmax(0, 1fr)',
+                  gap: '7px 12px',
+                  color: TOKENS.textDim,
+                  fontSize: 12,
+                }}
+              >
+                <dt>Trigger</dt>
+                <dd style={{ margin: 0 }}>{it.trigger}</dd>
+                <dt>Size</dt>
+                <dd style={{ margin: 0, fontFamily: FONTS.mono }}>
+                  {Math.round(it.size_bytes / 1024)} KiB
+                </dd>
+                <dt>Created</dt>
+                <dd style={{ margin: 0, fontFamily: FONTS.mono }}>{it.created_at}</dd>
+              </dl>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <Button
+                  variant="warning"
+                  onClick={() => setPendingRestoreId(it.id)}
+                  disabled={it.verified_restorable === 'danger'}
+                >
+                  Restore
+                </Button>
+                {it.verified_restorable === 'warn' ? (
+                  <span className="repos-button repos-button--quiet" aria-disabled="true">
+                    Download unavailable
+                  </span>
+                ) : (
+                  <a
+                    className="repos-button repos-button--secondary"
+                    href={`/api/backups/${encodeURIComponent(it.id)}/download`}
                   >
-                    Restore
-                  </button>
-                  {/* I-BADGE-WARN-DOWNLOAD — disable Download when file missing on disk */}
-                  {it.verified_restorable === 'warn' ? (
-                    <span
-                      title="File missing on disk"
-                      style={{ color: TOKENS.textMute, opacity: 0.5 }}
-                    >
-                      Download
-                    </span>
-                  ) : (
-                    <a href={`/api/backups/${encodeURIComponent(it.id)}/download`}>Download</a>
-                  )}
-                  <button onClick={() => onDeleteClick(it.id)}>Delete</button>
-                </td>
-              )}
-            </tr>
+                    Download
+                  </a>
+                )}
+                <Button variant="danger" onClick={() => setPendingDeleteId(it.id)}>
+                  Delete
+                </Button>
+              </div>
+            </article>
           ))}
-        </tbody>
-      </table>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto', border: `1px solid ${TOKENS.line}`, borderRadius: 12 }}>
+          <table
+            style={{
+              width: '100%',
+              minWidth: 840,
+              fontFamily: FONTS.ui,
+              color: TOKENS.text,
+              borderCollapse: 'collapse',
+            }}
+          >
+            <thead>
+              <tr style={{ textAlign: 'left', color: TOKENS.textDim, fontSize: 11 }}>
+                <th style={{ textAlign: 'left', padding: '10px 12px' }}>FILE</th>
+                <th style={{ padding: '10px 12px' }}>TRIGGER</th>
+                <th style={{ padding: '10px 12px' }}>SIZE</th>
+                <th style={{ padding: '10px 12px' }}>CREATED</th>
+                <th style={{ padding: '10px 12px' }}>STATUS</th>
+                <th style={{ padding: '10px 12px' }}>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it) => (
+                <tr key={it.id} style={{ borderTop: `1px solid ${TOKENS.line}`, fontSize: 13 }}>
+                  <td style={{ padding: 12, fontFamily: FONTS.mono, fontSize: 12 }}>{it.id}</td>
+                  <td style={{ padding: 12 }}>{it.trigger}</td>
+                  <td style={{ padding: 12, fontFamily: FONTS.mono }}>
+                    {Math.round(it.size_bytes / 1024)} KiB
+                  </td>
+                  <td style={{ padding: 12, fontFamily: FONTS.mono, fontSize: 11 }}>
+                    {it.created_at}
+                  </td>
+                  <td style={{ padding: 12 }}>
+                    <Badge tier={it.verified_restorable} />
+                  </td>
+                  <td style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Button
+                      variant="warning"
+                      onClick={() => setPendingRestoreId(it.id)}
+                      disabled={it.verified_restorable === 'danger'}
+                    >
+                      Restore
+                    </Button>
+                    {/* I-BADGE-WARN-DOWNLOAD — disable Download when file missing on disk */}
+                    {it.verified_restorable === 'warn' ? (
+                      <span
+                        title="File missing on disk"
+                        style={{ color: TOKENS.textMute, opacity: 0.5 }}
+                      >
+                        Download
+                      </span>
+                    ) : (
+                      <a
+                        className="repos-button repos-button--quiet"
+                        href={`/api/backups/${encodeURIComponent(it.id)}/download`}
+                      >
+                        Download
+                      </a>
+                    )}
+                    <Button variant="danger" onClick={() => setPendingDeleteId(it.id)}>
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* I-WINDOW-PROMPT — typed-RESTORE confirm via W6's ConfirmDialog. */}
       <ConfirmDialog
@@ -162,6 +269,20 @@ export function SnapshotTable(): JSX.Element {
         confirmLabel="Confirm restore"
         onConfirm={onRestoreConfirm}
         onCancel={() => setPendingRestoreId(null)}
+      />
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        tier="medium"
+        severity="danger"
+        title="Delete this snapshot?"
+        body={
+          pendingDeleteId
+            ? `${pendingDeleteId} will be permanently removed. It cannot be used for download or recovery afterward.`
+            : ''
+        }
+        confirmLabel="Delete snapshot"
+        onConfirm={() => void onDeleteConfirm()}
+        onCancel={() => setPendingDeleteId(null)}
       />
     </>
   );

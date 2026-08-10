@@ -9,7 +9,12 @@ import {
   AreaChart,
 } from 'recharts';
 import { TOKENS, FONTS } from '../../tokens';
-import type { WeightSampleRow, WeightStats, CurrentWeight } from '../../lib/api/health';
+import type {
+  WeightSampleRow,
+  WeightStats,
+  CurrentWeight,
+  WeightRange,
+} from '../../lib/api/health';
 import { formatShortDate } from '../../lib/formatDate';
 
 // Re-export for consumers that imported WeightSample from this module.
@@ -20,7 +25,18 @@ interface Props {
   samples: WeightSampleRow[];
   current: CurrentWeight | null;
   stats: WeightStats | null;
+  range: WeightRange;
+  /** A real, persisted user goal. Omit when the account has no configured goal. */
+  goalLbs?: number | null;
 }
+
+const RANGE_LABEL: Record<WeightRange, string> = {
+  '7d': '7D',
+  '30d': '30D',
+  '90d': '90D',
+  '1y': '1Y',
+  all: 'ALL TIME',
+};
 
 // 7-day moving average
 function computeSmoothed(samples: WeightSample[]): { date: string; avg: number }[] {
@@ -123,7 +139,7 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
-export default function BodyweightChart({ samples, current, stats }: Props) {
+export default function BodyweightChart({ samples, current, stats, range, goalLbs = null }: Props) {
   if (samples.length === 0) return null;
 
   const smoothed = computeSmoothed(samples);
@@ -136,7 +152,21 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
   const weights = samples.map((s) => s.weight_lbs);
   const minW = Math.min(...weights) - 2;
   const maxW = Math.max(...weights) + 2;
-  const GOAL = 180;
+  const sources = [...new Set(samples.map((sample) => sample.source.trim()).filter(Boolean))];
+  const sourceLabel =
+    sources.length === 0
+      ? 'SOURCE UNKNOWN'
+      : sources.length === 1
+        ? sources[0].toUpperCase()
+        : 'MIXED SOURCES';
+  const selectedTrend =
+    range === '7d'
+      ? stats?.trend_7d_lbs
+      : range === '30d'
+        ? stats?.trend_30d_lbs
+        : range === '90d'
+          ? stats?.trend_90d_lbs
+          : null;
 
   // Determine tick indices for x-axis (show ~5 labels)
   const tickIndices =
@@ -184,7 +214,7 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
               marginBottom: 4,
             }}
           >
-            BODYWEIGHT · 90D · APPLE HEALTH
+            {`BODYWEIGHT · ${RANGE_LABEL[range]} · ${sourceLabel}`}
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, whiteSpace: 'nowrap' }}>
             <span
@@ -199,18 +229,18 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
               {current?.weight_lbs.toFixed(1) ?? '—'}
             </span>
             <span style={{ fontSize: 12, color: TOKENS.textMute, fontFamily: FONTS.mono }}>lb</span>
-            {stats?.trend_90d_lbs !== null && stats?.trend_90d_lbs !== undefined && (
+            {selectedTrend !== null && selectedTrend !== undefined && (
               <span
                 style={{
                   fontFamily: FONTS.mono,
                   fontSize: 11,
-                  color: stats.trend_90d_lbs < 0 ? TOKENS.good : TOKENS.warn,
+                  color: selectedTrend < 0 ? TOKENS.good : TOKENS.warn,
                   marginLeft: 6,
                   whiteSpace: 'nowrap',
                 }}
               >
-                {stats.trend_90d_lbs < 0 ? '↓' : '↑'} {Math.abs(stats.trend_90d_lbs).toFixed(1)} lb
-                · 90d
+                {selectedTrend < 0 ? '↓' : '↑'} {Math.abs(selectedTrend).toFixed(1)} lb ·{' '}
+                {RANGE_LABEL[range].toLowerCase()}
               </span>
             )}
           </div>
@@ -250,14 +280,14 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
           />
           <Tooltip content={<CustomTooltip />} />
           {/* Goal reference line */}
-          {GOAL >= minW && GOAL <= maxW && (
+          {goalLbs !== null && goalLbs >= minW && goalLbs <= maxW && (
             <ReferenceLine
-              y={GOAL}
+              y={goalLbs}
               stroke={TOKENS.good}
               strokeDasharray="4 4"
               strokeOpacity={0.7}
               label={{
-                value: 'GOAL 180',
+                value: `GOAL ${goalLbs.toFixed(1)}`,
                 position: 'insideTopRight',
                 fill: TOKENS.good,
                 fontFamily: FONTS.mono,
@@ -312,7 +342,7 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
               letterSpacing: 0.6,
             }}
           >
-            DAILY · SHORTCUT
+            RAW MEASUREMENTS
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -328,19 +358,21 @@ export default function BodyweightChart({ samples, current, stats }: Props) {
             7-DAY AVG
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 14, height: 0, borderTop: `1.5px dashed ${TOKENS.good}` }} />
-          <span
-            style={{
-              fontFamily: FONTS.mono,
-              fontSize: 10,
-              color: TOKENS.textDim,
-              letterSpacing: 0.6,
-            }}
-          >
-            GOAL 180 lb
-          </span>
-        </div>
+        {goalLbs !== null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 14, height: 0, borderTop: `1.5px dashed ${TOKENS.good}` }} />
+            <span
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+                color: TOKENS.textDim,
+                letterSpacing: 0.6,
+              }}
+            >
+              GOAL {goalLbs.toFixed(1)} lb
+            </span>
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         {adherence !== null && (
           <span

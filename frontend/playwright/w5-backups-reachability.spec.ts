@@ -41,12 +41,13 @@ test('W5 — desktop user reaches /settings/backups in 2 clicks from /', async (
   await expect(page.getByRole('button', { name: /backup now/i })).toBeVisible();
 });
 
-test('W5 — mobile viewport hides Backup Now affordance', async ({ page }) => {
+test('W5 — mobile viewport preserves backup management', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await stubBootstrap(page);
   await page.goto('/settings/backups');
-  await expect(page.getByText(/managed from desktop|on desktop/i)).toBeVisible();
-  await expect(page.getByRole('button', { name: /backup now/i })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Backups' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /backup now/i })).toBeVisible();
+  await expect(page.getByText(/managed from desktop|on desktop/i)).toHaveCount(0);
 });
 
 // C-MOBILE-MAINTENANCE — restore-completes-mid-logger should NOT force-reload.

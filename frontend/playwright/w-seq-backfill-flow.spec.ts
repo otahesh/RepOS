@@ -1,7 +1,7 @@
 // frontend/playwright/w-seq-backfill-flow.spec.ts
 // sequence-workouts / Task 10 — the behind-pace backfill flow, end to end, on a
-// MOBILE viewport (the logger is mobile-only; TodayLoggerMobileGate redirects
-// to /today on desktop).
+// MOBILE viewport (desktop now has the same capability in a split workspace;
+// this spec intentionally covers the phone's hub → focus composition).
 //
 // Flow: `/` (behind pace) → LOG PAST WORKOUT → date picker prefilled with the
 // suggested date → LOG → logger opens at ?for=<date> with the "Logging for …"
@@ -22,7 +22,8 @@ const USER = {
   display_name: 'Tester',
   timezone: 'UTC',
   is_admin: false,
-  onboarding_completed_at: '2026-01-01T00:00:00Z', beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
+  onboarding_completed_at: '2026-01-01T00:00:00Z',
+  beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
   par_q_version: 1,
   par_q_advisory_active: false,
 };

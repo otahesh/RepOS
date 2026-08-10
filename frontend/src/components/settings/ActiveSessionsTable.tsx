@@ -7,8 +7,8 @@
 // ("here are your sessions") has a matching action affordance, and the 6th
 // G2 contamination test covers the cross-user revoke path on the server.
 //
-// Per I-SESSIONS-MOBILE: viewport <600px renders cards; >=600px renders a
-// table. We use window.innerWidth + a resize listener (matches the spec's
+// Phone and tablet widths render cards; desktop renders a table. We use
+// window.innerWidth + a resize listener (matches the spec's
 // "useEffect + useState" hint and works reliably under jsdom in vitest —
 // matchMedia.addEventListener isn't natively supported there).
 //
@@ -24,7 +24,7 @@ import { listSessions, revokeSession, type SessionRow } from '../../lib/api/acco
 import { pushToast } from '../common/ToastHost';
 import { Term } from '../Term';
 
-const MOBILE_BREAKPOINT_PX = 600;
+const MOBILE_BREAKPOINT_PX = 1024;
 
 function readIsMobile(): boolean {
   if (typeof window === 'undefined') return false;
@@ -52,8 +52,8 @@ export function ActiveSessionsTable(): JSX.Element {
       const rows = await listSessions();
       setSessions(rows);
       setLoadErr(null);
-    } catch (err) {
-      setLoadErr(err instanceof Error ? err.message : 'Failed to load sessions.');
+    } catch {
+      setLoadErr('Active sessions could not be refreshed. No sessions were changed.');
       setSessions([]);
     }
   }, []);
@@ -108,12 +108,28 @@ export function ActiveSessionsTable(): JSX.Element {
       </h3>
 
       {loadErr ? (
-        <div role="alert" style={{ fontSize: 12, color: TOKENS.danger }}>
-          {loadErr}
+        <div
+          role="alert"
+          style={{
+            padding: 12,
+            border: `1px solid rgba(255,106,106,0.45)`,
+            borderRadius: 8,
+            background: 'rgba(255,106,106,0.07)',
+            fontSize: 12,
+            color: TOKENS.textDim,
+          }}
+        >
+          <div>{loadErr}</div>
+          <button
+            type="button"
+            className="repos-button repos-button--secondary"
+            onClick={() => void refetch()}
+            style={{ marginTop: 10 }}
+          >
+            Retry
+          </button>
         </div>
-      ) : null}
-
-      {sessions === null ? (
+      ) : sessions === null ? (
         <div
           style={{
             fontFamily: FONTS.mono,
@@ -188,7 +204,7 @@ export function ActiveSessionsTable(): JSX.Element {
                   onClick={() => void handleRevoke(s.id)}
                   disabled={revokingId === s.id}
                   style={{
-                    height: 28,
+                    minHeight: 44,
                     padding: '0 12px',
                     borderRadius: 6,
                     border: `1px solid rgba(255,106,106,0.3)`,
@@ -296,7 +312,7 @@ export function ActiveSessionsTable(): JSX.Element {
                   disabled={revokingId === s.id}
                   aria-label={`Revoke session ${s.label ?? s.id}`}
                   style={{
-                    height: 28,
+                    minHeight: 36,
                     padding: '0 10px',
                     borderRadius: 6,
                     border: `1px solid rgba(255,106,106,0.3)`,

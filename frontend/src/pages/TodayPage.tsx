@@ -5,17 +5,7 @@ import { TodayWorkoutMobile } from '../components/programs/TodayWorkoutMobile';
 import MobileWeightChip from '../components/MobileWeightChip';
 import DesktopDashboard from '../components/dashboard/DesktopDashboard';
 import { RecoveryFlagBanner } from '../components/dashboard/RecoveryFlagBanner';
-import { pushToast } from '../components/common/ToastHost';
-
-// Desktop TodayCard's onStart still routes through this placeholder until the
-// desktop logger ships (W2.x); mobile path now navigates via TodayWorkoutMobile's
-// internal useNavigate to /today/:runId/log.
-function handleDesktopStart(_runId: string, _dayId: string) {
-  pushToast({
-    severity: 'info',
-    body: 'Desktop workout execution lands later in Beta. Use the mobile logger.',
-  });
-}
+import { Page, PageHeader, SectionHeader } from '../components/ui';
 
 export default function TodayPage() {
   const isMobile = useIsMobile();
@@ -23,22 +13,65 @@ export default function TodayPage() {
   if (isMobile) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, color: TOKENS.text }}>
-        <div style={{ padding: '0 16px' }}>
+        <section aria-labelledby="today-next-heading">
+          <h2 id="today-next-heading" style={mobileSectionHeading}>
+            Next workout
+          </h2>
+          <TodayWorkoutMobile />
+        </section>
+        <section style={{ padding: '0 16px' }} aria-labelledby="today-recovery-heading">
+          <h2 id="today-recovery-heading" style={{ ...mobileSectionHeading, padding: 0 }}>
+            Recovery
+          </h2>
           <RecoveryFlagBanner />
-        </div>
-        <TodayWorkoutMobile />
-        <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-start' }}>
-          <MobileWeightChip />
-        </div>
+        </section>
+        <section style={{ padding: '0 16px 20px' }} aria-labelledby="today-progress-heading">
+          <h2 id="today-progress-heading" style={{ ...mobileSectionHeading, padding: 0 }}>
+            Progress
+          </h2>
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <MobileWeightChip />
+          </div>
+        </section>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, color: TOKENS.text }}>
-      <RecoveryFlagBanner />
-      <TodayCard onStart={handleDesktopStart} />
-      <DesktopDashboard />
-    </div>
+    <Page width="data">
+      <PageHeader
+        eyebrow="Training"
+        title="Today"
+        description="Your next training action first, with recovery context and progress close by."
+      />
+      <div className="today-overview-grid">
+        <section aria-labelledby="desktop-next-heading">
+          <SectionHeader id="desktop-next-heading" title="Next workout" />
+          <TodayCard />
+        </section>
+        <section aria-labelledby="desktop-recovery-heading">
+          <SectionHeader id="desktop-recovery-heading" title="Recovery" />
+          <RecoveryFlagBanner />
+        </section>
+      </div>
+      <section aria-labelledby="desktop-progress-heading" style={{ marginTop: 28 }}>
+        <SectionHeader
+          id="desktop-progress-heading"
+          title="Progress"
+          description="Bodyweight measurements and rolling trends."
+        />
+        <DesktopDashboard />
+      </section>
+    </Page>
   );
 }
+
+const mobileSectionHeading: React.CSSProperties = {
+  margin: '0 0 10px',
+  padding: '0 16px',
+  color: TOKENS.textMute,
+  fontFamily: 'JetBrains Mono',
+  fontSize: 10,
+  letterSpacing: 1.2,
+  textTransform: 'uppercase',
+};

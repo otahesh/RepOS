@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, Fragment } from 'react';
+import { useCallback, useEffect, useMemo, useState, Fragment } from 'react';
 import {
   getMesocycle,
   getVolumeRollup,
@@ -6,6 +6,9 @@ import {
   type VolumeRollup,
 } from '../../lib/api/mesocycles';
 import { Term } from '../Term';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { Button, Card, DataState, StatusBadge } from '../ui';
+import { FONTS, TOKENS } from '../../tokens';
 
 function tierColor(sets: number, mev: number, mav: number, mrv: number): string {
   if (sets < mev) return '#3D4048';
@@ -71,38 +74,59 @@ function cellText(planned: number, performed: number): string {
 export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
   const [run, setRun] = useState<MesocycleRunDetail | null>(null);
   const [vol, setVol] = useState<VolumeRollup | null>(null);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  const isMobile = useIsMobile();
+
   useEffect(() => {
-    getMesocycle(mesocycleRunId)
-      .then(setRun)
-      .catch(() => setRun(null));
-    getVolumeRollup(mesocycleRunId)
-      .then(setVol)
-      .catch(() => setVol(null));
-  }, [mesocycleRunId]);
+    let ignore = false;
+    setError(false);
+    Promise.all([getMesocycle(mesocycleRunId), getVolumeRollup(mesocycleRunId)])
+      .then(([nextRun, nextVol]) => {
+        if (ignore) return;
+        setRun(nextRun);
+        setVol(nextVol);
+      })
+      .catch(() => {
+        if (!ignore) setError(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [mesocycleRunId, retryKey]);
   const pivot = useMemo(() => (vol ? pivotByMuscle(vol) : null), [vol]);
-  if (!run || !vol || !pivot)
-    return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+  const retry = useCallback(() => {
+    setRun(null);
+    setVol(null);
+    setRetryKey((key) => key + 1);
+  }, []);
+
+  if (error)
+    return (
+      <DataState
+        kind="error"
+        title="Program progress could not be loaded"
+        body="Your program and logged sets were not changed."
+        action={
+          <Button variant="secondary" onClick={retry}>
+            Retry
+          </Button>
+        }
+      />
+    );
+  if (!run || !vol || !pivot) return <DataState kind="loading" title="Loading program progress" />;
 
   const muscles = pivot.muscles;
 
   return (
-    <div
-      style={{
-        padding: 24,
-        fontFamily: 'Inter Tight',
-        color: '#fff',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 24,
-      }}
-    >
+    <Card style={{ padding: isMobile ? 16 : 24, display: 'grid', gap: 24 }}>
       <header>
         <div
           style={{
-            fontFamily: 'JetBrains Mono',
+            fontFamily: FONTS.mono,
             fontSize: 11,
             letterSpacing: 1,
-            color: '#4D8DFF',
+            color: TOKENS.accent,
             textTransform: 'uppercase',
           }}
         >
@@ -113,7 +137,7 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           {' of '}
           {run.weeks}
         </div>
-        <h2 style={{ margin: '8px 0', fontSize: 22 }}>
+        <h2 style={{ margin: '8px 0 0', fontSize: 22 }}>
           <Term k="mesocycle">Mesocycle</Term>
           {' Run'}
         </h2>
@@ -124,88 +148,154 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           <Term k="working_set" />
           {' heatmap (logged / planned per week)'}
         </h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `auto repeat(${run.weeks}, 1fr)`,
-            gap: 4,
-            fontFamily: 'JetBrains Mono',
-            fontSize: 11,
-          }}
-        >
-          <div></div>
-          {Array.from({ length: run.weeks }, (_, i) => (
-            <div
-              key={`hdr-${i}`}
-              style={{
-                textAlign: 'center',
-                color: i + 1 === run.current_week ? '#4D8DFF' : 'rgba(255,255,255,0.5)',
-              }}
-            >
-              {`W${i + 1}`}
-            </div>
-          ))}
-          {muscles.map((m) => {
-            const lm = pivot.landmarks[m];
-            const cells = pivot.setsByMuscleByWeek[m] ?? [];
-            const performed = pivot.performedByMuscleByWeek[m] ?? [];
-            return (
-              <Fragment key={m}>
-                <div data-testid={`heatmap-row-${m}`} style={{ color: 'rgba(255,255,255,0.7)' }}>
-                  {m}
+        {isMobile ? (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {muscles.map((muscle) => {
+              const lm = pivot.landmarks[muscle];
+              const cells = pivot.setsByMuscleByWeek[muscle] ?? [];
+              const performed = pivot.performedByMuscleByWeek[muscle] ?? [];
+              return (
+                <div key={muscle} className="repos-data-card" data-testid={`heatmap-row-${muscle}`}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <strong style={{ textTransform: 'capitalize' }}>{muscle}</strong>
+                    <StatusBadge tone="neutral">
+                      <Term k="MEV" variant="abbr" /> {lm.mev} · <Term k="MAV" variant="abbr" />{' '}
+                      {lm.mav} · <Term k="MRV" variant="abbr" /> {lm.mrv}
+                    </StatusBadge>
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `repeat(${run.weeks}, 1fr)`,
+                      gap: 5,
+                    }}
+                  >
+                    {cells.map((sets, week) => {
+                      const done = performed[week] ?? 0;
+                      const description = `${muscle}, week ${week + 1}: ${Math.round(done)} logged of ${Math.round(sets)} planned. Min Effective ${lm.mev}, Max Adaptive ${lm.mav}, Max Recoverable ${lm.mrv}.`;
+                      return (
+                        <div key={week} style={{ display: 'grid', gap: 4, textAlign: 'center' }}>
+                          <span
+                            style={{
+                              color:
+                                week + 1 === run.current_week ? TOKENS.accent : TOKENS.textMute,
+                              fontFamily: FONTS.mono,
+                              fontSize: 9,
+                            }}
+                          >
+                            W{week + 1}
+                          </span>
+                          <div
+                            data-testid={`heatmap-cell-${muscle}-w${week + 1}`}
+                            aria-label={description}
+                            tabIndex={0}
+                            style={{
+                              background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
+                              borderRadius: 5,
+                              minHeight: 44,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: cellTextColor(sets, lm.mev),
+                              fontFamily: FONTS.mono,
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {cellText(sets, done)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                {cells.map((sets, w) => {
-                  const done = performed[w] ?? 0;
-                  // Hidden description region keyed via aria-describedby so
-                  // screen readers and AT can surface the full landmarks
-                  // context. The native `title` is retained for sighted-pointer
-                  // hover, but is hidden from most ATs and untouchable on
-                  // touch devices.
-                  const describeId = `heatmap-${m}-w${w + 1}-desc`;
-                  const description = `${m}, week ${w + 1}: ${Math.round(done)} logged of ${Math.round(sets)} planned. Min Effective ${lm.mev}, Max Adaptive ${lm.mav}, Max Recoverable ${lm.mrv}.`;
-                  return (
-                    <div
-                      key={`${m}-${w}`}
-                      data-testid={`heatmap-cell-${m}-w${w + 1}`}
-                      aria-describedby={describeId}
-                      title={description}
-                      tabIndex={0}
-                      style={{
-                        background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
-                        borderRadius: 3,
-                        minHeight: 24,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: cellTextColor(sets, lm.mev),
-                        fontWeight: 600,
-                      }}
-                    >
-                      {cellText(sets, done)}
-                      <span
-                        id={describeId}
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `auto repeat(${run.weeks}, 1fr)`,
+              gap: 4,
+              fontFamily: FONTS.mono,
+              fontSize: 11,
+            }}
+          >
+            <div></div>
+            {Array.from({ length: run.weeks }, (_, i) => (
+              <div
+                key={`hdr-${i}`}
+                style={{
+                  textAlign: 'center',
+                  color: i + 1 === run.current_week ? TOKENS.accent : TOKENS.textMute,
+                }}
+              >
+                {`W${i + 1}`}
+              </div>
+            ))}
+            {muscles.map((m) => {
+              const lm = pivot.landmarks[m];
+              const cells = pivot.setsByMuscleByWeek[m] ?? [];
+              const performed = pivot.performedByMuscleByWeek[m] ?? [];
+              return (
+                <Fragment key={m}>
+                  <div data-testid={`heatmap-row-${m}`} style={{ color: TOKENS.textDim }}>
+                    {m}
+                  </div>
+                  {cells.map((sets, w) => {
+                    const done = performed[w] ?? 0;
+                    // Hidden description region keyed via aria-describedby so
+                    // screen readers and AT can surface the full landmarks
+                    // context. The native `title` is retained for sighted-pointer
+                    // hover, but is hidden from most ATs and untouchable on
+                    // touch devices.
+                    const describeId = `heatmap-${m}-w${w + 1}-desc`;
+                    const description = `${m}, week ${w + 1}: ${Math.round(done)} logged of ${Math.round(sets)} planned. Min Effective ${lm.mev}, Max Adaptive ${lm.mav}, Max Recoverable ${lm.mrv}.`;
+                    return (
+                      <div
+                        key={`${m}-${w}`}
+                        data-testid={`heatmap-cell-${m}-w${w + 1}`}
+                        aria-describedby={describeId}
+                        title={description}
+                        tabIndex={0}
                         style={{
-                          position: 'absolute',
-                          width: 1,
-                          height: 1,
-                          padding: 0,
-                          margin: -1,
-                          overflow: 'hidden',
-                          clip: 'rect(0,0,0,0)',
-                          whiteSpace: 'nowrap',
-                          border: 0,
+                          background: tierColor(sets, lm.mev, lm.mav, lm.mrv),
+                          borderRadius: 3,
+                          minHeight: 24,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: cellTextColor(sets, lm.mev),
+                          fontWeight: 600,
                         }}
                       >
-                        {description}
-                      </span>
-                    </div>
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        </div>
-        <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                        {cellText(sets, done)}
+                        <span
+                          id={describeId}
+                          style={{
+                            position: 'absolute',
+                            width: 1,
+                            height: 1,
+                            padding: 0,
+                            margin: -1,
+                            overflow: 'hidden',
+                            clip: 'rect(0,0,0,0)',
+                            whiteSpace: 'nowrap',
+                            border: 0,
+                          }}
+                        >
+                          {description}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ marginTop: 10, fontSize: 11, color: TOKENS.textDim }}>
           {'Tile color: planned tier ('}
           <Term k="MEV" />
           {' → '}
@@ -217,6 +307,6 @@ export function ProgramPage({ mesocycleRunId }: { mesocycleRunId: string }) {
           }
         </div>
       </section>
-    </div>
+    </Card>
   );
 }

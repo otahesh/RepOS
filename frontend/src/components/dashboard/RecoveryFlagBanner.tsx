@@ -22,6 +22,7 @@ import {
 import { Term } from '../Term';
 import { pushToast } from '../common/ToastHost';
 import type { TermKey } from '../../lib/terms';
+import { Button, DataState, StatusBadge } from '../ui';
 
 // Terms-of-art inside API-provided advisory copy get Term tooltips. The copy
 // arrives at runtime, so the JSX-literal term-coverage script can't see it —
@@ -48,6 +49,9 @@ function renderMessage(f: RecoveryFlag): ReactNode {
 export function RecoveryFlagBanner(): JSX.Element | null {
   const [flags, setFlags] = useState<RecoveryFlag[]>([]);
   const [pending, setPending] = useState<RecoveryFlag['flag'] | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,17 +59,63 @@ export function RecoveryFlagBanner(): JSX.Element | null {
       .then((res) => {
         // `?? []` — a malformed payload must degrade to "no advisories",
         // same contract as the catch below.
-        if (!cancelled) setFlags(res?.flags ?? []);
+        if (!cancelled) {
+          setFlags(res?.flags ?? []);
+          setLoadError(false);
+          setLoaded(true);
+        }
       })
       .catch(() => {
-        /* advisory surface — never break Today */
+        if (!cancelled) {
+          setLoadError(true);
+          setLoaded(true);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryKey]);
 
-  if (flags.length === 0) return null;
+  if (!loaded) return <DataState compact kind="loading" title="Checking recovery" />;
+
+  if (loadError)
+    return (
+      <DataState
+        compact
+        kind="warning"
+        title="Recovery status is unavailable"
+        body="This does not block your workout, but current advisories could not be verified."
+        action={
+          <Button variant="warning" onClick={() => setRetryKey((key) => key + 1)}>
+            Retry
+          </Button>
+        }
+      />
+    );
+
+  if (flags.length === 0)
+    return (
+      <div className="repos-card" role="status" style={{ padding: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <div>
+            <strong style={{ display: 'block', color: TOKENS.text, fontSize: 14 }}>
+              No active advisories
+            </strong>
+            <span style={{ display: 'block', marginTop: 4, color: TOKENS.textDim, fontSize: 12 }}>
+              Train as planned and keep logging recovery signals.
+            </span>
+          </div>
+          <StatusBadge tone="good">Ready</StatusBadge>
+        </div>
+      </div>
+    );
 
   const dismiss = async (flag: RecoveryFlag['flag']): Promise<void> => {
     setPending(flag);

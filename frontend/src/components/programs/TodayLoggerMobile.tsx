@@ -26,6 +26,8 @@ import { ExerciseFocus } from './logger/ExerciseFocus';
 import { HistorySheet } from './logger/HistorySheet';
 import { SetupCardSheet } from './logger/SetupCardSheet';
 import type { RowState, RowInputs } from './logger/SetRow';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { Button, DataState, Page } from '../ui';
 
 // =============================================================================
 // TodayLoggerMobile — container for the hub+focus mobile logger.
@@ -55,11 +57,17 @@ export interface TodayLoggerMobileProps {
     cardio?: TodayCardio[];
     track?: string | null;
   };
+  /** Story/test override; production uses the viewport breakpoint. */
+  layout?: 'responsive' | 'mobile' | 'desktop';
 }
 
-export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps) {
+export default function TodayLoggerMobile({
+  preloaded,
+  layout = 'responsive',
+}: TodayLoggerMobileProps) {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
+  const viewportIsMobile = useIsMobile();
   const [data, setData] = useState<{
     run_id: string;
     day: TodayDay;
@@ -68,11 +76,15 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
     track?: string | null;
   } | null>(preloaded ?? null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [quotaError, setQuotaError] = useState<string | null>(null);
 
   useEffect(() => {
     if (preloaded) return;
     let cancelled = false;
+    setLoadError(null);
+    setLoadFailed(false);
     getTodayWorkout()
       .then((res: TodayWorkoutResponse) => {
         if (cancelled) return;
@@ -95,35 +107,51 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : 'Failed to load workout');
+        setLoadError(
+          err instanceof Error && err.message
+            ? `RepOS could not reach your workout: ${err.message}`
+            : 'RepOS could not reach your workout.',
+        );
+        setLoadFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [preloaded]);
+  }, [preloaded, reloadKey]);
 
   if (loadError) {
     return (
-      <div style={{ padding: 16, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-        {loadError}{' '}
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: TOKENS.accent,
-            textDecoration: 'underline',
-            cursor: 'pointer',
-            fontFamily: FONTS.ui,
-          }}
-        >
-          Back to Today
-        </button>
-      </div>
+      <Page width="narrow">
+        <DataState
+          kind={loadFailed ? 'error' : 'empty'}
+          title={loadError}
+          body={
+            loadFailed
+              ? 'Any sets already saved on this device are still queued safely.'
+              : 'Return to Today to choose the next available action.'
+          }
+          action={
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {loadFailed ? (
+                <Button variant="primary" onClick={() => setReloadKey((key) => key + 1)}>
+                  Try again
+                </Button>
+              ) : null}
+              <Button variant="secondary" onClick={() => navigate('/')}>
+                Back to Today
+              </Button>
+            </div>
+          }
+        />
+      </Page>
     );
   }
   if (!data) {
-    return <div style={{ padding: 16, color: TOKENS.textDim, fontFamily: FONTS.ui }}>Loading…</div>;
+    return (
+      <Page width="wide">
+        <DataState kind="loading" title="Loading…" />
+      </Page>
+    );
   }
 
   return (
@@ -133,6 +161,9 @@ export default function TodayLoggerMobile({ preloaded }: TodayLoggerMobileProps)
       currentUserTz={user?.timezone ?? null}
       quotaError={quotaError}
       setQuotaError={setQuotaError}
+      isMobile={
+        layout === 'mobile' || (layout === 'responsive' && (preloaded ? true : viewportIsMobile))
+      }
     />
   );
 }
@@ -181,6 +212,7 @@ function LoggerInner({
   currentUserTz,
   quotaError,
   setQuotaError,
+  isMobile,
 }: {
   data: {
     run_id: string;
@@ -193,6 +225,7 @@ function LoggerInner({
   currentUserTz: string | null;
   quotaError: string | null;
   setQuotaError: (msg: string | null) => void;
+  isMobile: boolean;
 }) {
   const navigate = useNavigate();
   const { blockIdx: blockIdxParam } = useParams<{ blockIdx?: string }>();
@@ -294,6 +327,10 @@ function LoggerInner({
     return blocks.find(([b]) => b === idx) ?? null;
   }, [blockIdxParam, blocks]);
 
+  // Desktop opens directly into the first exercise while keeping the sequence
+  // visible beside it. Mobile preserves the deliberate hub → focus flow.
+  const activeEntry = focusedEntry ?? (!isMobile ? (blocks[0] ?? null) : null);
+
   // Last-session history per exercise slug: powers prefill + the last-time
   // line. Fetched lazily when a block is first focused; the ref dedupes
   // in-flight/completed fetches so each slug is requested at most once.
@@ -308,8 +345,8 @@ function LoggerInner({
   }, []);
 
   useEffect(() => {
-    if (!focusedEntry) return;
-    const sets = focusedEntry[1];
+    if (!activeEntry) return;
+    const sets = activeEntry[1];
     const slug = sets[0]?.exercise.slug;
     if (!slug || histRequested.current.has(slug)) return;
     histRequested.current.add(slug);
@@ -360,7 +397,7 @@ function LoggerInner({
         // History is a nicety — logging must not depend on it.
         setHistBySlug((prev) => ({ ...prev, [slug]: null }));
       });
-  }, [focusedEntry]);
+  }, [activeEntry]);
 
   // Setup-card guide per exercise slug: powers the ⓘ button + SetupCardSheet.
   // Fetched lazily when a block is first focused; the ref dedupes
@@ -371,8 +408,8 @@ function LoggerInner({
   const guideRequested = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!focusedEntry) return;
-    const slug = focusedEntry[1][0]?.exercise.slug;
+    if (!activeEntry) return;
+    const slug = activeEntry[1][0]?.exercise.slug;
     if (!slug || guideRequested.current.has(slug)) return;
     guideRequested.current.add(slug);
     // No cancellation on cleanup — same reasoning as the history effect above:
@@ -385,7 +422,7 @@ function LoggerInner({
       .catch(() => {
         setGuideBySlug((prev) => ({ ...prev, [slug]: null }));
       });
-  }, [focusedEntry]);
+  }, [activeEntry]);
 
   // Bottom sheets — a single state slot so "both sheets open" is
   // unrepresentable (each sheet installs a document-level Escape listener at
@@ -399,7 +436,7 @@ function LoggerInner({
   const [openSheet, setOpenSheet] = useState<'history' | 'guide' | null>(null);
   useEffect(() => {
     setOpenSheet(null);
-  }, [focusedEntry]);
+  }, [activeEntry]);
 
   // Focus chain: weight-input refs keyed by set id; after a successful Log
   // we focus the next set's weight input.
@@ -673,6 +710,323 @@ function LoggerInner({
   // countdown state) is never remounted by hub↔focus navigation — a set is
   // usually logged right before backing out to the hub, and the countdown
   // must survive that transition.
+  if (!isMobile && activeEntry) {
+    const [activeBlockIdx, activeSets] = activeEntry;
+    const activePosition = blocks.findIndex(([idx]) => idx === activeBlockIdx);
+    const slug = activeSets[0].exercise.slug;
+    const meta = exMeta[slug];
+    const guide = guideBySlug[slug] ?? null;
+    const firstSet = activeSets[0];
+    const mode = rowMode(firstSet);
+    const target =
+      mode === 'duration'
+        ? `${firstSet.target_duration_low_sec ?? '—'}–${firstSet.target_duration_high_sec ?? '—'} sec`
+        : `${firstSet.target_reps_low ?? '—'}–${firstSet.target_reps_high ?? '—'} reps`;
+    const totalSets = hubBlocks.reduce((sum, block) => sum + block.setsTotal, 0);
+    const completedSets = hubBlocks.reduce((sum, block) => sum + block.setsDone, 0);
+    const nextEntry = blocks[activePosition + 1] ?? null;
+    const openBlock = (idx: number) => navigate(`/today/${data.run_id}/log/${idx}${logSearch}`);
+
+    return (
+      <div style={{ minHeight: '100%', paddingBottom: restActive ? 84 : 0 }}>
+        {backfillBanner}
+        {quotaBanner}
+        {completeErrorBanner}
+        <div
+          className="desktop-workout-grid"
+          style={{
+            maxWidth: 1360,
+            margin: '0 auto',
+            padding: 20,
+            display: 'grid',
+            gridTemplateColumns: '220px minmax(440px, 1fr) 260px',
+            gap: 16,
+            alignItems: 'start',
+          }}
+        >
+          <aside
+            aria-label="Exercise sequence"
+            style={{
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.surface,
+              borderRadius: 12,
+              padding: 14,
+            }}
+          >
+            <div
+              style={{
+                font: `700 10px ${FONTS.mono}`,
+                letterSpacing: 1.2,
+                color: TOKENS.textMute,
+              }}
+            >
+              WORKOUT PLAN
+            </div>
+            <h1 style={{ margin: '6px 0 4px', fontSize: 19 }}>{data.day.name}</h1>
+            <div style={{ color: TOKENS.textDim, font: `500 11px ${FONTS.mono}` }}>
+              {completedSets}/{totalSets} sets logged
+            </div>
+            <div
+              aria-hidden="true"
+              style={{
+                height: 3,
+                borderRadius: 99,
+                background: TOKENS.surface3,
+                margin: '12px 0 14px',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${totalSets === 0 ? 0 : (completedSets / totalSets) * 100}%`,
+                  borderRadius: 99,
+                  background: completedSets === totalSets ? TOKENS.good : TOKENS.accent,
+                }}
+              />
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {hubBlocks.map((block, index) => {
+                const selected = block.blockIdx === activeBlockIdx;
+                const complete = block.setsDone === block.setsTotal;
+                return (
+                  <button
+                    key={block.blockIdx}
+                    type="button"
+                    aria-current={selected ? 'step' : undefined}
+                    onClick={() => openBlock(block.blockIdx)}
+                    style={{
+                      minHeight: 54,
+                      display: 'grid',
+                      gridTemplateColumns: '24px 1fr',
+                      gap: 8,
+                      alignItems: 'center',
+                      padding: '8px 9px',
+                      borderRadius: 8,
+                      border: `1px solid ${selected ? TOKENS.accent : 'transparent'}`,
+                      background: selected ? TOKENS.accentGlow : 'transparent',
+                      color: TOKENS.text,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 99,
+                        display: 'grid',
+                        placeItems: 'center',
+                        background: complete ? 'rgba(107,226,139,0.14)' : TOKENS.surface2,
+                        color: complete ? TOKENS.good : selected ? TOKENS.accent : TOKENS.textDim,
+                        font: `700 10px ${FONTS.mono}`,
+                      }}
+                    >
+                      {complete ? '✓' : index + 1}
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: 13,
+                          fontWeight: 650,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {block.exerciseName}
+                      </span>
+                      <span style={{ color: TOKENS.textDim, font: `500 10px ${FONTS.mono}` }}>
+                        {block.setsDone}/{block.setsTotal} sets
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {data.cardio?.map((cardio) => (
+              <CardioBlockRow key={cardio.id} block={cardio} />
+            ))}
+          </aside>
+
+          <main
+            style={{
+              minWidth: 0,
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.surface,
+              borderRadius: 12,
+              overflow: 'hidden',
+            }}
+          >
+            <ExerciseFocus
+              layout="desktop"
+              position={{ current: activePosition + 1, total: blocks.length }}
+              exercise={{
+                name: firstSet.exercise.name,
+                muscle: meta?.muscle ?? '',
+                equipmentLabel: meta?.equipmentLabel ?? '',
+                slug,
+              }}
+              sets={activeSets}
+              track={data.track}
+              rowStates={rowStates}
+              rowInputs={rowInputs}
+              onInputChange={setInput}
+              onLog={handleLogWithRest}
+              onSkip={(setId) => setRow(setId, { phase: 'input' })}
+              lastSession={histBySlug[slug] ?? null}
+              onOpenHistory={() => setOpenSheet('history')}
+              onOpenGuide={guide ? () => setOpenSheet('guide') : null}
+              onBack={() => undefined}
+              onDone={() => undefined}
+              getWeightInputRef={getWeightInputRef}
+            />
+          </main>
+
+          <aside style={{ display: 'grid', gap: 12 }}>
+            <section
+              style={{
+                border: `1px solid ${TOKENS.line}`,
+                background: TOKENS.surface,
+                borderRadius: 12,
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  color: TOKENS.textMute,
+                  font: `700 10px ${FONTS.mono}`,
+                  letterSpacing: 1.1,
+                }}
+              >
+                TARGETS
+              </div>
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                <Metric label={mode === 'duration' ? 'Hold' : 'Reps'} value={target} />
+                <Metric label="Effort" value={`RIR ${firstSet.target_rir}`} />
+                <Metric label="Rest" value={`${firstSet.rest_sec || 90} sec`} />
+              </div>
+            </section>
+            <section
+              style={{
+                border: `1px solid ${TOKENS.line}`,
+                background: TOKENS.surface,
+                borderRadius: 12,
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  color: TOKENS.textMute,
+                  font: `700 10px ${FONTS.mono}`,
+                  letterSpacing: 1.1,
+                }}
+              >
+                CONTEXT
+              </div>
+              <p
+                style={{
+                  margin: '10px 0 12px',
+                  color: TOKENS.textDim,
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                Compare prior sets or review setup without leaving the workout.
+              </p>
+              <button
+                type="button"
+                onClick={() => setOpenSheet('history')}
+                style={desktopQuietButton}
+              >
+                Exercise history
+              </button>
+              {guide && (
+                <button
+                  type="button"
+                  onClick={() => setOpenSheet('guide')}
+                  style={desktopQuietButton}
+                >
+                  Setup and cues
+                </button>
+              )}
+            </section>
+          </aside>
+        </div>
+
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 4,
+            borderTop: `1px solid ${TOKENS.lineStrong}`,
+            background: 'rgba(10,13,18,0.94)',
+            backdropFilter: 'blur(12px)',
+            padding: '10px 20px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10,
+          }}
+        >
+          <button
+            type="button"
+            disabled={!nextEntry}
+            onClick={() => nextEntry && openBlock(nextEntry[0])}
+            style={{
+              ...desktopQuietButton,
+              width: 'auto',
+              padding: '0 16px',
+              opacity: nextEntry ? 1 : 0.45,
+            }}
+          >
+            Skip exercise
+          </button>
+          <button
+            type="button"
+            disabled={finishing}
+            onClick={requestFinish}
+            style={{
+              minHeight: 44,
+              padding: '0 20px',
+              border: `1px solid ${unloggedCount === 0 ? TOKENS.good : TOKENS.lineStrong}`,
+              borderRadius: 8,
+              background: unloggedCount === 0 ? TOKENS.good : TOKENS.surface2,
+              color: unloggedCount === 0 ? TOKENS.bg : TOKENS.text,
+              fontWeight: 750,
+              opacity: finishing ? 0.5 : 1,
+            }}
+          >
+            {finishing ? 'Finishing…' : 'Finish workout'}
+          </button>
+        </div>
+
+        <ConfirmDialog
+          open={confirmFinish}
+          tier="medium"
+          title={`${unloggedCount} set${unloggedCount === 1 ? '' : 's'} unlogged.`}
+          body="This day will be marked complete with only the sets you've logged. Finish anyway?"
+          confirmLabel="Finish Anyway"
+          onConfirm={() => {
+            setConfirmFinish(false);
+            void doFinish();
+          }}
+          onCancel={() => setConfirmFinish(false)}
+        />
+        {openSheet === 'history' ? (
+          <HistorySheet slug={slug} track={data.track} onClose={() => setOpenSheet(null)} />
+        ) : null}
+        {openSheet === 'guide' && guide ? (
+          <SetupCardSheet
+            exerciseName={firstSet.exercise.name}
+            guide={guide}
+            onClose={() => setOpenSheet(null)}
+          />
+        ) : null}
+        <RestTimerPill startRef={restStartRef} onActiveChange={setRestActive} />
+      </div>
+    );
+  }
+
   let body: React.ReactNode;
   if (!focusedEntry) {
     body = (
@@ -762,6 +1116,41 @@ function LoggerInner({
     <div style={{ paddingBottom: restActive ? 72 : 0 }}>
       {body}
       <RestTimerPill startRef={restStartRef} onActiveChange={setRestActive} />
+    </div>
+  );
+}
+
+const desktopQuietButton: React.CSSProperties = {
+  width: '100%',
+  minHeight: 44,
+  padding: '0 12px',
+  border: `1px solid ${TOKENS.line}`,
+  borderRadius: 8,
+  background: TOKENS.surface2,
+  color: TOKENS.text,
+  fontFamily: FONTS.ui,
+  fontSize: 13,
+  fontWeight: 650,
+  textAlign: 'left',
+};
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}
+    >
+      <span style={{ color: TOKENS.textMute, fontSize: 12 }}>{label}</span>
+      <span
+        style={{
+          color: TOKENS.text,
+          fontFamily: FONTS.mono,
+          fontSize: 12,
+          fontWeight: 700,
+          textAlign: 'right',
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }

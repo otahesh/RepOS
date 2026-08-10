@@ -1,10 +1,12 @@
 // frontend/src/components/programs/ProgramTemplateDetail.tsx
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { rpeFromRir, rowMode } from '../../lib/effort';
 import { getProgramTemplate, type ProgramTemplate } from '../../lib/api/programs';
 import { Term } from '../Term';
 import { TrackChip } from './TrackChip';
 import { isBeginnerTrack, effortCue } from '../../lib/programTracks';
+import { Button, DataState, Page, PageHeader } from '../ui';
+import { TOKENS } from '../../tokens';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -17,43 +19,63 @@ export function ProgramTemplateDetail({
   onFork,
 }: {
   slug: string;
-  onFork: (slug: string) => void;
+  onFork: (slug: string, template: ProgramTemplate) => void;
 }) {
   const [t, setT] = useState<ProgramTemplate | null>(null);
-  useEffect(() => {
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const load = useCallback(() => {
+    setT(null);
+    setError(null);
     getProgramTemplate(slug)
       .then(setT)
-      .catch(() => setT(null));
+      .catch(() => setError('This template could not be refreshed. Try again.'));
   }, [slug]);
-  if (!t) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+
+  useEffect(() => {
+    load();
+  }, [load, retryKey]);
+  if (error) {
+    return (
+      <Page width="wide">
+        <DataState
+          kind="error"
+          title="Template could not be loaded"
+          body={error}
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+  }
+  if (!t)
+    return (
+      <Page width="wide">
+        <DataState kind="loading" title="Loading program template" />
+      </Page>
+    );
   const days = t.structure?.days ?? [];
   return (
-    <div style={{ padding: 24, fontFamily: 'Inter Tight', color: '#fff' }}>
-      <header style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            fontFamily: 'JetBrains Mono',
-            fontSize: 11,
-            letterSpacing: 1,
-            color: '#4D8DFF',
-            textTransform: 'uppercase',
-          }}
-        >
-          <span>
-            {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk
+    <Page width="data" style={{ fontFamily: 'Inter Tight', color: '#fff' }}>
+      <PageHeader
+        eyebrow={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>
+              {t.weeks}-week <Term k="mesocycle" /> · {t.days_per_week} days/wk
+            </span>
+            <TrackChip track={t.track} />
           </span>
-          <TrackChip track={t.track} />
-        </div>
-        <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>{t.name}</h2>
-        <p style={{ margin: 0, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{t.description}</p>
-      </header>
+        }
+        title={t.name}
+        description={t.description}
+      />
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${days.length}, 1fr)`,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))',
           gap: 12,
           marginBottom: 16,
         }}
@@ -63,9 +85,9 @@ export function ProgramTemplateDetail({
             key={d.idx}
             style={{
               background: '#10141C',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: 8,
-              padding: 12,
+              border: `1px solid ${TOKENS.line}`,
+              borderRadius: 12,
+              padding: 16,
             }}
           >
             <div
@@ -133,22 +155,11 @@ export function ProgramTemplateDetail({
           </div>
         ))}
       </div>
-      <button
-        onClick={() => onFork(t.slug)}
-        style={{
-          padding: '12px 20px',
-          background: '#4D8DFF',
-          border: 'none',
-          borderRadius: 6,
-          color: '#fff',
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          cursor: 'pointer',
-        }}
-      >
-        Fork & Customize
-      </button>
-    </div>
+      <div className="repos-sticky-actions">
+        <Button variant="primary" onClick={() => onFork(t.slug, t)}>
+          Customize this program
+        </Button>
+      </div>
+    </Page>
   );
 }

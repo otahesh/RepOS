@@ -16,7 +16,7 @@ export function DeloadThisWeekButton({
   runId: string;
   onChanged?: () => void;
   // 'menuitem' renders a plain row for use inside an overflow menu (mobile).
-  variant?: 'button' | 'menuitem';
+  variant?: 'button' | 'menuitem' | 'quiet';
 }) {
   const [open, setOpen] = useState(false);
 
@@ -33,18 +33,31 @@ export function DeloadThisWeekButton({
           fontFamily: FONTS.ui,
           fontSize: 14,
         }
-      : {
-          background: 'transparent',
-          border: `1px solid ${TOKENS.warn}`,
-          color: TOKENS.warn,
-          borderRadius: 10,
-          padding: '10px 16px',
-          cursor: 'pointer',
-          fontFamily: FONTS.ui,
-          fontSize: 13,
-          fontWeight: 600,
-          letterSpacing: 0.3,
-        };
+      : variant === 'quiet'
+        ? {
+            minHeight: 44,
+            background: 'transparent',
+            border: `1px solid ${TOKENS.line}`,
+            color: TOKENS.textDim,
+            borderRadius: 8,
+            padding: '0 12px',
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
+            fontSize: 12,
+            fontWeight: 600,
+          }
+        : {
+            background: 'transparent',
+            border: `1px solid ${TOKENS.warn}`,
+            color: TOKENS.warn,
+            borderRadius: 10,
+            padding: '10px 16px',
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: 0.3,
+          };
 
   return (
     <>

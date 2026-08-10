@@ -29,6 +29,7 @@ export function ExerciseFocus({
   onDone,
   getWeightInputRef,
   onOpenGuide,
+  layout = 'mobile',
 }: {
   position: { current: number; total: number };
   exercise: { name: string; muscle: string; equipmentLabel: string; slug: string };
@@ -48,6 +49,8 @@ export function ExerciseFocus({
   getWeightInputRef?: (setId: string) => (el: HTMLInputElement | null) => void;
   /** null = no guide exists for this exercise → ⓘ is hidden (spec §4). */
   onOpenGuide?: (() => void) | null;
+  /** Desktop keeps plan/context visible beside this surface. */
+  layout?: 'mobile' | 'desktop';
 }) {
   const beginner = isBeginnerTrack(track);
   const lastTimeLine = formatLastTime(lastSession);
@@ -56,11 +59,11 @@ export function ExerciseFocus({
   return (
     <div
       style={{
-        padding: 16,
+        padding: layout === 'mobile' ? 16 : 24,
         fontFamily: FONTS.ui,
         color: TOKENS.text,
-        maxWidth: 480,
-        margin: '0 auto',
+        maxWidth: layout === 'mobile' ? 480 : 'none',
+        margin: layout === 'mobile' ? '0 auto' : 0,
       }}
     >
       <header style={{ marginBottom: 16 }}>
@@ -72,27 +75,42 @@ export function ExerciseFocus({
             marginBottom: 8,
           }}
         >
-          <button
-            type="button"
-            aria-label="Back to plan"
-            onClick={onBack}
-            style={{
-              flex: 1,
-              textAlign: 'left',
-              minHeight: 44,
-              padding: '8px 4px',
-              background: 'none',
-              border: 'none',
-              color: TOKENS.accent,
-              fontFamily: FONTS.ui,
-              fontWeight: 600,
-              fontSize: 13,
-              letterSpacing: 0.5,
-              cursor: 'pointer',
-            }}
-          >
-            ← PLAN
-          </button>
+          {layout === 'mobile' ? (
+            <button
+              type="button"
+              aria-label="Back to plan"
+              onClick={onBack}
+              style={{
+                flex: 1,
+                textAlign: 'left',
+                minHeight: 44,
+                padding: '8px 4px',
+                background: 'none',
+                border: 'none',
+                color: TOKENS.accent,
+                fontFamily: FONTS.ui,
+                fontWeight: 600,
+                fontSize: 13,
+                letterSpacing: 0.5,
+                cursor: 'pointer',
+              }}
+            >
+              ← PLAN
+            </button>
+          ) : (
+            <span
+              style={{
+                flex: 1,
+                color: TOKENS.textMute,
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 1.2,
+              }}
+            >
+              ACTIVE EXERCISE
+            </span>
+          )}
           <span
             style={{
               fontFamily: FONTS.mono,
@@ -213,28 +231,30 @@ export function ExerciseFocus({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        aria-label="Done, back to plan"
-        onClick={onDone}
-        style={{
-          marginTop: 24,
-          padding: 14,
-          width: '100%',
-          background: TOKENS.accent,
-          border: 'none',
-          borderRadius: 8,
-          color: TOKENS.text,
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          fontSize: 14,
-          cursor: 'pointer',
-          fontFamily: FONTS.ui,
-        }}
-      >
-        DONE → BACK TO PLAN
-      </button>
+      {layout === 'mobile' && (
+        <button
+          type="button"
+          aria-label="Done, back to plan"
+          onClick={onDone}
+          style={{
+            marginTop: 24,
+            padding: 14,
+            width: '100%',
+            background: TOKENS.accent,
+            border: 'none',
+            borderRadius: 8,
+            color: TOKENS.text,
+            fontWeight: 600,
+            letterSpacing: 1,
+            textTransform: 'uppercase',
+            fontSize: 14,
+            cursor: 'pointer',
+            fontFamily: FONTS.ui,
+          }}
+        >
+          DONE → BACK TO PLAN
+        </button>
+      )}
     </div>
   );
 }

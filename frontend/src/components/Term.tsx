@@ -73,6 +73,7 @@ function TermButton({
       <Popover.Trigger asChild>
         <button
           type="button"
+          className="repos-term-trigger"
           aria-label={`${term.full} — definition`}
           style={{
             background: 'transparent',
@@ -154,6 +155,7 @@ function TermAbbr({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Anchor asChild>
         <abbr
+          className="repos-term-trigger repos-term-trigger--abbr"
           title={term.full}
           aria-describedby={open ? tooltipId : undefined}
           style={{

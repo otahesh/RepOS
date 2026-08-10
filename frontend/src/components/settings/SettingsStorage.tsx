@@ -3,6 +3,7 @@ import { TOKENS, FONTS } from '../../tokens';
 import { useIdbQueueCounts } from '../../hooks/useIdbQueueCounts';
 import { idbQueue } from '../../lib/idbQueue';
 import { logBuffer } from '../../lib/logBuffer';
+import { Button, Card, Page, PageHeader } from '../ui';
 
 // W1.3.8 — Settings → Storage. Surfaces the offline-queue state and a single
 // safe-to-clear bucket (rejected). Pending and syncing rows are intentionally
@@ -144,96 +145,34 @@ export default function SettingsStorage(): JSX.Element {
 
   const retryButton =
     stalled > 0 ? (
-      <button
+      <Button
+        variant="secondary"
         type="button"
         onClick={() => {
           void onRetry();
         }}
         disabled={retrying}
-        style={{
-          background: 'transparent',
-          color: TOKENS.accent,
-          border: `1px solid ${TOKENS.accent}`,
-          padding: '6px 12px',
-          borderRadius: 6,
-          fontFamily: FONTS.ui,
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          cursor: retrying ? 'not-allowed' : 'pointer',
-          opacity: retrying ? 0.6 : 1,
-        }}
       >
         Retry sync
-      </button>
+      </Button>
     ) : undefined;
 
   const clearButton =
     rejected > 0 && !confirming ? (
-      <button
-        type="button"
-        onClick={() => setConfirming(true)}
-        style={{
-          background: 'transparent',
-          color: TOKENS.danger,
-          border: `1px solid ${TOKENS.danger}`,
-          padding: '6px 12px',
-          borderRadius: 6,
-          fontFamily: FONTS.ui,
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-          cursor: 'pointer',
-        }}
-      >
+      <Button variant="danger" type="button" onClick={() => setConfirming(true)}>
         Clear rejected
-      </button>
+      </Button>
     ) : undefined;
 
   return (
-    <div
-      style={{
-        padding: '24px 32px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        maxWidth: 640,
-      }}
-    >
-      <div>
-        <div
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            color: TOKENS.textMute,
-            letterSpacing: 1.2,
-            marginBottom: 4,
-          }}
-        >
-          SETTINGS
-        </div>
-        <h2
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: -0.5,
-            color: TOKENS.text,
-          }}
-        >
-          Storage
-        </h2>
-      </div>
+    <Page width="narrow">
+      <PageHeader
+        eyebrow="Data and integrations"
+        title="Storage"
+        description="Review offline workout data and recover sets that have stopped synchronizing."
+      />
 
-      <div
-        style={{
-          background: TOKENS.surface,
-          borderRadius: 12,
-          border: `1px solid ${TOKENS.line}`,
-          padding: '4px 22px 18px',
-        }}
-      >
+      <Card style={{ padding: '4px 22px 18px' }}>
         <StorageRow
           label="Pending"
           count={pending}
@@ -254,7 +193,7 @@ export default function SettingsStorage(): JSX.Element {
           caption="Server refused these (deleted plan, audit window closed, or data it couldn't accept). Safe to clear."
           action={clearButton}
         />
-      </div>
+      </Card>
 
       {confirming && (
         <div
@@ -351,6 +290,6 @@ export default function SettingsStorage(): JSX.Element {
           </div>
         </div>
       )}
-    </div>
+    </Page>
   );
 }
