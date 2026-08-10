@@ -10,6 +10,7 @@ import { Term } from '../../Term';
 import { listProgramTemplates, type ProgramTemplate } from '../../../lib/api/programs';
 import { PROGRAM_TRACKS, TRACK_META } from '../../../lib/programTracks';
 import type { OnboardingGoal } from '../../../lib/api/onboarding';
+import { Button, DataState } from '../../ui';
 
 export default function ProgramStep({
   goal,
@@ -22,6 +23,8 @@ export default function ProgramStep({
 }) {
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   // Onboarding is a short, skippable step, not the full catalog — cap at 4 cards
   // total (same budget as before track-grouping was introduced).
@@ -30,12 +33,14 @@ export default function ProgramStep({
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(false);
     listProgramTemplates()
       .then((t) => {
         if (!cancelled) setTemplates(t);
       })
       .catch(() => {
-        if (!cancelled) setTemplates([]);
+        if (!cancelled) setError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -43,7 +48,7 @@ export default function ProgramStep({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryKey]);
 
   return (
     <div style={{ fontFamily: FONTS.ui }}>
@@ -52,7 +57,18 @@ export default function ProgramStep({
         page. (Goal: <strong style={{ color: TOKENS.text }}>{goal}</strong>.)
       </p>
       {loading ? (
-        <div style={{ color: TOKENS.textMute, fontSize: 13 }}>Loading programs…</div>
+        <DataState kind="loading" title="Loading program recommendations" />
+      ) : error ? (
+        <DataState
+          kind="error"
+          title="Programs could not be loaded"
+          body="You can retry here or skip and browse the full library later."
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
       ) : (
         <div style={{ display: 'grid', gap: 14 }}>
           {PROGRAM_TRACKS.map((track) => {

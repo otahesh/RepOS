@@ -204,6 +204,25 @@ describe('<TodayLoggerMobile>', () => {
   });
 
   describe('hub', () => {
+    it('renders the complete desktop workspace without a device redirect', async () => {
+      render(
+        <MemoryRouter initialEntries={['/today/mr-1/log']}>
+          <Routes>
+            <Route
+              path="/today/:mesocycleRunId/log"
+              element={<TodayLoggerMobile preloaded={PRELOADED} layout="desktop" />}
+            />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByRole('complementary', { name: /exercise sequence/i })).toBeInTheDocument();
+      expect(screen.getByText('ACTIVE EXERCISE')).toBeInTheDocument();
+      expect(screen.getByTestId('set-row-0')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /finish workout/i })).toBeInTheDocument();
+      await flush();
+    });
+
     it('renders the day name and one hub row per block with set counts', async () => {
       renderLogger();
       expect(screen.getByText(/Upper Heavy/)).toBeInTheDocument();

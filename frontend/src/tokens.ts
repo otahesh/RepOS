@@ -9,14 +9,17 @@ export const TOKENS = {
   line: 'rgba(255,255,255,0.08)',
   lineStrong: 'rgba(255,255,255,0.14)',
   text: '#E8EEF7',
-  textDim: '#9BA7BA',
-  textMute: '#5A6577',
+  textDim: '#AAB5C6',
+  // Muted copy is still real copy. Keep it above AA on the app's common
+  // background and card surfaces; reserve opacity for decorative marks.
+  textMute: '#7F8CA2',
   accent: '#4D8DFF',
   accentGlow: 'rgba(77,141,255,0.18)',
   accentDim: 'rgba(77,141,255,0.45)',
   good: '#6BE28B',
   warn: '#F5B544',
   danger: '#FF6A6A',
+  info: '#7FB0FF',
   heat0: '#10141C',
   heat1: '#1A2840',
   heat2: '#254472',
@@ -37,6 +40,23 @@ export const TOKENS = {
     zAuth: 2000, // SessionExpiredBanner
     zPopover: 2500, // Term help popover — above every modal surface, below toasts
   },
+} as const;
+
+export const LAYOUT = {
+  narrow: 560,
+  standard: 880,
+  wide: 1120,
+  data: 1360,
+  sidebar: 232,
+  phoneMax: 767,
+  tabletMax: 1023,
+} as const;
+
+export const MOTION = {
+  fast: '120ms',
+  standard: '180ms',
+  slow: '240ms',
+  easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
 } as const;
 
 export const FONTS = {

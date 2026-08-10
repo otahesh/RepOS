@@ -1,197 +1,146 @@
-// frontend/src/components/programs/ProgramCatalog.tsx
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
 import {
   listProgramTemplates,
   extractEquipment,
   type ProgramTemplate,
 } from '../../lib/api/programs';
 import { PROGRAM_TRACKS, TRACK_META, type ProgramTrack } from '../../lib/programTracks';
-import { Term } from '../Term';
+import { FONTS, TOKENS } from '../../tokens';
+import { Button, DataState, SegmentedControl, SkeletonCards, StatusBadge } from '../ui';
 
 export type ProgramCatalogProps = {
   onPick: (slug: string) => void;
-  /** Scope the catalog to a single track (e.g. from a `?track=` deep link off
-   *  a template's track badge). Omit for the default full-catalog view. */
   initialTrack?: ProgramTrack;
 };
 
+type TrackFilter = 'all' | ProgramTrack;
+
+const FILTERS: ReadonlyArray<{ value: TrackFilter; label: string }> = [
+  { value: 'all', label: 'All levels' },
+  ...PROGRAM_TRACKS.map((track) => ({ value: track, label: TRACK_META[track].label })),
+];
+
 export function ProgramCatalog({ onPick, initialTrack }: ProgramCatalogProps) {
+  const [track, setTrack] = useState<TrackFilter>(initialTrack ?? 'all');
   const [rows, setRows] = useState<ProgramTemplate[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+
+  const load = useCallback(() => {
+    setRows(null);
+    setErr(null);
+    listProgramTemplates(track === 'all' ? undefined : track)
+      .then(setRows)
+      .catch(() => setErr('Templates could not be refreshed. Your program library is unchanged.'));
+  }, [track]);
 
   useEffect(() => {
-    setRows(null);
-    listProgramTemplates(initialTrack)
-      .then(setRows)
-      .catch((e) => setErr(String(e)));
-  }, [initialTrack]);
-
-  if (err)
-    return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load programs: {err}</div>;
-  if (!rows) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
-
-  const tracks = initialTrack ? [initialTrack] : PROGRAM_TRACKS;
+    load();
+  }, [load, retryKey]);
 
   return (
-    <div
-      style={{
-        padding: 16,
-        fontFamily: 'Inter Tight',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 28,
-      }}
-    >
-      {initialTrack && (
-        <Link
-          to="/programs"
-          style={{
-            fontSize: 12,
-            color: 'rgba(255,255,255,0.5)',
-            textDecoration: 'none',
-            fontFamily: 'JetBrains Mono',
-          }}
-        >
-          ← All tracks
-        </Link>
+    <div style={{ display: 'grid', gap: 16 }}>
+      <SegmentedControl
+        label="Experience level"
+        value={track}
+        options={FILTERS}
+        onChange={setTrack}
+      />
+
+      {err ? (
+        <DataState
+          kind="error"
+          title="Templates could not be loaded"
+          body={err}
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      ) : rows === null ? (
+        <SkeletonCards />
+      ) : rows.length === 0 ? (
+        <DataState
+          title={`No ${track === 'all' ? '' : TRACK_META[track].label.toLowerCase() + ' '}templates yet`}
+          body="New programs will appear here as they become available. You can still build and customize a program on this device."
+        />
+      ) : (
+        <div className="repos-grid-3" data-testid="program-template-grid">
+          {rows.map((template) => (
+            <TemplateCard key={template.slug} template={template} onPick={onPick} />
+          ))}
+        </div>
       )}
-      {tracks.map((key) => {
-        const meta = TRACK_META[key];
-        const group = rows.filter((t) => t.track === key);
-        return (
-          <section key={key}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span
-                aria-hidden
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 999,
-                  background: meta.color,
-                  flexShrink: 0,
-                }}
-              />
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: 13,
-                  letterSpacing: 1,
-                  textTransform: 'uppercase',
-                  color: 'rgba(255,255,255,0.85)',
-                  fontFamily: 'JetBrains Mono',
-                }}
-              >
-                {meta.label}
-              </h3>
-            </div>
-            <p style={{ margin: '4px 0 12px 16px', fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-              {meta.blurb}
-            </p>
-            {group.length === 0 ? (
-              <div
-                style={{
-                  padding: 20,
-                  background: '#10141C',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: 12,
-                  color: 'rgba(255,255,255,0.5)',
-                  fontSize: 13,
-                }}
-              >
-                More coming — new {meta.label} programs are on the way.
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: 16,
-                }}
-              >
-                {group.map((t) => {
-                  const equipment = extractEquipment(t.description);
-                  return (
-                    <article
-                      key={t.slug}
-                      style={{
-                        background: '#10141C',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: 12,
-                        padding: 20,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 12,
-                        color: '#fff',
-                      }}
-                    >
-                      <header>
-                        <div
-                          style={{
-                            fontFamily: 'JetBrains Mono',
-                            fontSize: 11,
-                            letterSpacing: 1,
-                            color: '#4D8DFF',
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          {t.weeks}-week <Term k="mesocycle" />
-                        </div>
-                        <h4 style={{ margin: '6px 0 0', fontSize: 18 }}>{t.name}</h4>
-                      </header>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: 13,
-                          color: 'rgba(255,255,255,0.7)',
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {t.description}
-                      </p>
-                      <div
-                        style={{
-                          fontFamily: 'JetBrains Mono',
-                          fontSize: 11,
-                          color: 'rgba(255,255,255,0.5)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 4,
-                        }}
-                      >
-                        <span>{t.days_per_week} days/week</span>
-                        {equipment && (
-                          <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-                            Equipment: {equipment}
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => onPick(t.slug)}
-                        style={{
-                          marginTop: 'auto',
-                          padding: '10px 14px',
-                          background: '#4D8DFF',
-                          border: 'none',
-                          borderRadius: 6,
-                          color: '#fff',
-                          fontFamily: 'Inter Tight',
-                          fontWeight: 600,
-                          letterSpacing: 1,
-                          textTransform: 'uppercase',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Customize & Fork
-                      </button>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        );
-      })}
     </div>
+  );
+}
+
+function TemplateCard({
+  template,
+  onPick,
+}: {
+  template: ProgramTemplate;
+  onPick: (slug: string) => void;
+}) {
+  const equipment = extractEquipment(template.description);
+  const meta = TRACK_META[template.track];
+  const description = template.description.replace(/\s*Equipment minimum:[^.]+\.?/i, '').trim();
+  const tone =
+    template.track === 'beginner'
+      ? ('good' as const)
+      : template.track === 'advanced'
+        ? ('warning' as const)
+        : ('accent' as const);
+
+  return (
+    <article
+      className="repos-card repos-card--interactive"
+      style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 248 }}
+    >
+      <header>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+          <StatusBadge tone={tone}>{meta.label}</StatusBadge>
+          <span
+            style={{
+              fontFamily: FONTS.mono,
+              color: TOKENS.textMute,
+              fontSize: 10,
+              letterSpacing: 0.6,
+            }}
+          >
+            {template.weeks} weeks
+          </span>
+        </div>
+        <h3 style={{ margin: '12px 0 0', fontSize: 18, color: TOKENS.text, lineHeight: 1.2 }}>
+          {template.name}
+        </h3>
+      </header>
+
+      <p style={{ margin: 0, color: TOKENS.textDim, fontSize: 13, lineHeight: 1.45 }}>
+        {description || meta.blurb}
+      </p>
+
+      <dl
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'auto minmax(0, 1fr)',
+          gap: '5px 10px',
+          margin: 'auto 0 0',
+          color: TOKENS.textDim,
+          fontFamily: FONTS.mono,
+          fontSize: 10,
+        }}
+      >
+        <dt>Schedule</dt>
+        <dd style={{ margin: 0, color: TOKENS.text }}>{template.days_per_week} days / week</dd>
+        <dt>Equipment</dt>
+        <dd style={{ margin: 0, color: TOKENS.text }}>{equipment ?? 'See program details'}</dd>
+      </dl>
+
+      <Button variant="primary" onClick={() => onPick(template.slug)}>
+        Customize program
+      </Button>
+    </article>
   );
 }

@@ -7,7 +7,7 @@
 // `user` from useCurrentUser drives the effect dependency so the profile
 // refetches if the authenticated identity changes.
 import { useEffect, useState } from 'react';
-import { TOKENS, FONTS } from '../../tokens';
+import { TOKENS } from '../../tokens';
 import { useCurrentUser, apiFetch } from '../../auth';
 import { AccountProfileEditor } from './AccountProfileEditor';
 import { ActiveSessionsTable } from './ActiveSessionsTable';
@@ -15,53 +15,60 @@ import { SignOutEverywhereButton } from './SignOutEverywhereButton';
 import { AccountEventsTimeline } from './AccountEventsTimeline';
 import { DeleteAccountSection } from './DeleteAccountSection';
 import type { ProfileResponse } from '../../lib/api/account';
+import { Button, DataState, Page, PageHeader } from '../ui';
 
 export default function SettingsAccount(): JSX.Element {
   const { user } = useCurrentUser();
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    void apiFetch('/api/me').then(async (r) => {
-      if (!r.ok) return;
-      const me = (await r.json()) as ProfileResponse;
-      setProfile(me);
-    });
-  }, [user]);
+    setError(false);
+    void apiFetch('/api/me')
+      .then(async (r) => {
+        if (!r.ok) throw new Error('profile unavailable');
+        const me = (await r.json()) as ProfileResponse;
+        setProfile(me);
+      })
+      .catch(() => setError(true));
+  }, [user, retryKey]);
+
+  if (error) {
+    return (
+      <Page width="standard">
+        <DataState
+          kind="error"
+          title="Account settings could not be loaded"
+          body="Your profile and security settings were not changed."
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+  }
 
   if (!profile) {
     return (
-      <div style={{ padding: 24, color: TOKENS.textDim, fontFamily: FONTS.mono, fontSize: 11 }}>
-        LOADING…
-      </div>
+      <Page width="standard">
+        <DataState kind="loading" title="Loading account settings" />
+      </Page>
     );
   }
 
   return (
-    <div
-      style={{
-        padding: '24px 32px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        maxWidth: 720,
-      }}
+    <Page
+      width="standard"
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, color: TOKENS.text }}
     >
-      <div>
-        <div
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            color: TOKENS.textMute,
-            letterSpacing: 1.2,
-            marginBottom: 4,
-          }}
-        >
-          SETTINGS
-        </div>
-        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -0.5, color: TOKENS.text }}>
-          Account
-        </h2>
-      </div>
+      <PageHeader
+        eyebrow="Profile"
+        title="Account"
+        description="Manage your profile, active sessions, security history, and account recovery."
+      />
 
       <AccountProfileEditor user={profile} />
 
@@ -85,6 +92,6 @@ export default function SettingsAccount(): JSX.Element {
       <AccountEventsTimeline />
 
       <DeleteAccountSection email={profile.email} />
-    </div>
+    </Page>
   );
 }

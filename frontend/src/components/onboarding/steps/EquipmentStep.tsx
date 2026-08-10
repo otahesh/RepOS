@@ -38,11 +38,17 @@ export default function EquipmentStep({
   onSkip: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const pick = async (id: PresetId) => {
     setBusy(true);
+    setError(null);
     try {
       await applyPreset(id);
       onNext();
+    } catch {
+      setError(
+        'That equipment profile could not be saved. Choose it again or skip and edit later.',
+      );
     } finally {
       setBusy(false);
     }
@@ -54,6 +60,22 @@ export default function EquipmentStep({
         Pick the kit you train with. RepOS filters exercise suggestions to what you can actually do.
         You can edit this any time in Settings → Equipment.
       </p>
+      {error ? (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 12,
+            padding: 11,
+            borderRadius: 8,
+            border: `1px solid rgba(255,106,106,0.45)`,
+            color: TOKENS.text,
+            background: 'rgba(255,106,106,0.07)',
+            fontSize: 13,
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
       <div
         style={{
           display: 'grid',

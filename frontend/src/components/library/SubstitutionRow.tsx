@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getSubstitutions, type SubResult } from '../../lib/api/exercises.ts';
+import { TOKENS } from '../../tokens';
+import { Button, DataState } from '../ui';
 
 export type SubstitutionRowProps = {
   fromSlug: string;
@@ -16,14 +18,32 @@ export function SubstitutionRow({
 }: SubstitutionRowProps) {
   const [data, setData] = useState<SubResult | null>(null);
   const [expanded, setExpanded] = useState(showAll);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
+    setError(false);
     getSubstitutions(fromSlug)
       .then(setData)
-      .catch(() => setData(null));
-  }, [fromSlug]);
+      .catch(() => setError(true));
+  }, [fromSlug, retryKey]);
 
-  if (!data) return null;
+  if (error)
+    return (
+      <DataState
+        compact
+        kind="error"
+        title="Substitutions could not be loaded"
+        body="Your current exercise remains selected."
+        action={
+          <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+            Retry
+          </Button>
+        }
+      />
+    );
+
+  if (!data) return <DataState compact kind="loading" title="Loading substitutions" />;
 
   if (data.subs.length === 0) {
     return (
@@ -31,7 +51,7 @@ export function SubstitutionRow({
         style={{
           padding: 12,
           fontSize: 13,
-          color: 'rgba(255,255,255,0.6)',
+          color: TOKENS.textDim,
           fontFamily: 'Inter Tight',
         }}
       >
@@ -70,16 +90,12 @@ export function SubstitutionRow({
         >
           <div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</div>
-            <div
-              style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'rgba(255,255,255,0.5)' }}
-            >
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: TOKENS.textMute }}>
               {s.reason}
             </div>
           </div>
           {plannedLoadLb !== undefined && (
-            <div
-              style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: 'rgba(255,255,255,0.5)' }}
-            >
+            <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11, color: TOKENS.textMute }}>
               {plannedLoadLb} lb
             </div>
           )}
@@ -94,7 +110,7 @@ export function SubstitutionRow({
             fontSize: 11,
             background: 'transparent',
             border: 'none',
-            color: 'rgba(255,255,255,0.5)',
+            color: TOKENS.textMute,
             cursor: 'pointer',
             textAlign: 'left',
           }}

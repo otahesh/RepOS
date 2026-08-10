@@ -24,6 +24,7 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { Term } from '../components/Term';
 import { DeloadThisWeekButton } from '../components/programs/DeloadThisWeekButton';
 import { DesktopSwapSheet } from '../components/programs/DesktopSwapSheet';
+import { Button, DataState, Page } from '../components/ui';
 
 // :id here is the mesocycle_run_id — that's what ProgramPage and the
 // volume rollup keys off. The user_program_id is derived from the run.
@@ -33,7 +34,8 @@ export default function MyProgramPage() {
   const [run, setRun] = useState<MesocycleRunDetail | null>(null);
   const [up, setUp] = useState<UserProgramDetail | null>(null);
   const [warnings, setWarnings] = useState<ScheduleWarning[]>([]);
-  const [err, setErr] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [recapStats, setRecapStats] = useState<MesocycleRecapStats | null>(null);
   const [recapErr, setRecapErr] = useState<string | null>(null);
   const [recapLoading, setRecapLoading] = useState(false);
@@ -53,7 +55,7 @@ export default function MyProgramPage() {
         if (!ignore) setRun(r);
       })
       .catch((e) => {
-        if (!ignore) setErr(String(e));
+        if (!ignore) setLoadError(String(e));
       });
     return () => {
       ignore = true;
@@ -68,7 +70,7 @@ export default function MyProgramPage() {
         if (!ignore) setUp(p);
       })
       .catch((e) => {
-        if (!ignore) setErr(String(e));
+        if (!ignore) setLoadError(String(e));
       });
     getUserProgramWarnings(run.user_program_id)
       .then((w) => {
@@ -122,7 +124,7 @@ export default function MyProgramPage() {
         const r = await startMesocycle({ user_program_id: up.id, intent: 'normal' });
         navigate(`/my-programs/${r.mesocycle_run_id}`);
       } catch (e) {
-        setErr(`Couldn't restart mesocycle: ${e instanceof Error ? e.message : String(e)}`);
+        setActionError(`Couldn't restart mesocycle: ${e instanceof Error ? e.message : String(e)}`);
       }
     } else {
       // 'new_program' — browse catalog.
@@ -140,7 +142,9 @@ export default function MyProgramPage() {
       const r = await startMesocycle({ user_program_id: up.id, intent: 'deload' });
       navigate(`/my-programs/${r.mesocycle_run_id}`);
     } catch (e) {
-      setErr(`Couldn't start deload mesocycle: ${e instanceof Error ? e.message : String(e)}`);
+      setActionError(
+        `Couldn't start deload mesocycle: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setConfirmDeload(false);
     }
@@ -152,7 +156,7 @@ export default function MyProgramPage() {
       const refreshed = await getUserProgram(up.id);
       setUp(refreshed);
     } catch (e) {
-      setErr(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+      setActionError(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -162,7 +166,7 @@ export default function MyProgramPage() {
       await patchUserProgram(up.id, { op: 'add_set', day_idx: dayIdx, block_idx: blockIdx });
       await refreshUserProgram();
     } catch (e) {
-      setErr(`Add set failed: ${e instanceof Error ? e.message : String(e)}`);
+      setActionError(`Add set failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -172,7 +176,7 @@ export default function MyProgramPage() {
       await patchUserProgram(up.id, { op: 'remove_set', day_idx: dayIdx, block_idx: blockIdx });
       await refreshUserProgram();
     } catch (e) {
-      setErr(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`);
+      setActionError(`Remove set failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -188,25 +192,56 @@ export default function MyProgramPage() {
       navigate('/programs');
     } catch (e) {
       setAbandonOpen(false);
-      setErr(`Abandon failed: ${e instanceof Error ? e.message : String(e)}`);
+      setActionError(`Abandon failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setAbandoning(false);
     }
   }
 
-  if (err)
-    return <div style={{ padding: 16, color: TOKENS.danger }}>Couldn't load program: {err}</div>;
-  if (!run) return <div style={{ padding: 16, color: TOKENS.textDim }}>Loading…</div>;
+  if (loadError)
+    return (
+      <Page width="wide">
+        <DataState
+          kind="error"
+          title="Program could not be loaded"
+          body={loadError}
+          action={
+            <Button variant="secondary" onClick={() => window.location.reload()}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+  if (!run)
+    return (
+      <Page width="wide">
+        <DataState kind="loading" title="Loading…" />
+      </Page>
+    );
 
   if (run.status === 'completed') {
     if (recapLoading) {
-      return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>;
+      return (
+        <Page width="wide">
+          <DataState kind="loading" title="Loading recap…" />
+        </Page>
+      );
     }
     if (recapErr) {
       return (
-        <div style={{ padding: 24, color: TOKENS.danger }}>
-          Couldn't load recap stats: {recapErr}
-        </div>
+        <Page width="wide">
+          <DataState
+            kind="error"
+            title="Couldn't load recap stats"
+            body={recapErr}
+            action={
+              <Button variant="secondary" onClick={() => window.location.reload()}>
+                Retry
+              </Button>
+            }
+          />
+        </Page>
       );
     }
     if (recapStats) {
@@ -236,14 +271,34 @@ export default function MyProgramPage() {
     }
     // recapStats not yet populated (first render before effect fires) — show
     // a brief spinner to avoid a flash of empty content.
-    return <div style={{ padding: 24, color: TOKENS.textDim }}>Loading recap…</div>;
+    return (
+      <Page width="wide">
+        <DataState kind="loading" title="Loading recap…" />
+      </Page>
+    );
   }
 
   const programName = up?.effective_name ?? up?.name ?? '';
 
   return (
-    <div style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ padding: '0 24px', display: 'flex', justifyContent: 'flex-end' }}>
+    <Page
+      width="wide"
+      style={{ color: TOKENS.text, display: 'flex', flexDirection: 'column', gap: 24 }}
+    >
+      {actionError ? (
+        <DataState
+          kind="error"
+          compact
+          title="That program change was not saved"
+          body={actionError}
+          action={
+            <Button variant="quiet" onClick={() => setActionError(null)}>
+              Dismiss
+            </Button>
+          }
+        />
+      ) : null}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Link
           to="/history"
           style={{
@@ -261,7 +316,7 @@ export default function MyProgramPage() {
 
       {/* W2.6 — manual mid-meso deload (active runs only). */}
       {run.status === 'active' && (
-        <section style={{ padding: '0 24px', display: 'flex', justifyContent: 'flex-end' }}>
+        <section style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <DeloadThisWeekButton runId={run.id} onChanged={() => setReloadTick((t) => t + 1)} />
         </section>
       )}
@@ -269,7 +324,7 @@ export default function MyProgramPage() {
       <ScheduleWarnings warnings={warnings} />
 
       {up ? (
-        <section style={{ padding: '0 24px 24px' }}>
+        <section>
           <h3
             style={{
               margin: '0 0 12px',
@@ -337,14 +392,14 @@ export default function MyProgramPage() {
                   await refreshUserProgram();
                   setSwapTarget(null);
                 } catch (e) {
-                  setErr(`Swap failed: ${e instanceof Error ? e.message : String(e)}`);
+                  setActionError(`Swap failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
               }}
             />
           );
         })()}
 
-      <section style={{ padding: '0 24px 32px' }}>
+      <section style={{ paddingBottom: 8 }}>
         <h3
           style={{
             margin: '0 0 8px',
@@ -396,6 +451,6 @@ export default function MyProgramPage() {
         onConfirm={() => void handleAbandon()}
         onCancel={() => setAbandonOpen(false)}
       />
-    </div>
+    </Page>
   );
 }

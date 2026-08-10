@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getTodayWorkout, type TodayWorkoutResponse } from '../../lib/api/mesocycles';
 import { skipDayWorkout } from '../../lib/api/dayWorkouts';
 import { Term } from '../Term';
@@ -7,23 +7,43 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PacingChip } from './PacingChip';
 import { formatSessionDate } from './logger/HistorySheet';
 import { pushToast } from '../common/ToastHost';
+import { Button, DataState } from '../ui';
 
-export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string) => void }) {
+export function TodayCard({ onStart }: { onStart?: (runId: string, dayId: string) => void }) {
+  const navigate = useNavigate();
   const [data, setData] = useState<TodayWorkoutResponse | null>(null);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [skipping, setSkipping] = useState(false);
+  const [logPastOpen, setLogPastOpen] = useState(false);
+  const [pastDate, setPastDate] = useState('');
+  const [loadError, setLoadError] = useState(false);
 
   const fetchToday = useCallback(() => {
+    setLoadError(false);
     getTodayWorkout()
       .then(setData)
-      .catch(() => setData(null));
+      .catch(() => setLoadError(true));
   }, []);
 
   useEffect(() => {
     fetchToday();
   }, [fetchToday]);
 
-  if (!data) return <div style={card('rgba(255,255,255,0.5)')}>Loading…</div>;
+  if (loadError)
+    return (
+      <DataState
+        compact
+        kind="error"
+        title="Today's workout could not be loaded"
+        body="Your training plan was not changed."
+        action={
+          <Button variant="secondary" onClick={fetchToday}>
+            Retry
+          </Button>
+        }
+      />
+    );
+  if (!data) return <DataState kind="loading" title="Loading…" />;
   if (data.state === 'no_active_run')
     return <div style={card('rgba(255,255,255,0.5)')}>Pick a program to get started.</div>;
   if (data.state === 'mesocycle_complete')
@@ -119,7 +139,13 @@ export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string)
         </>
       )}
 
-      <button onClick={() => onStart(run_id, day.id)} style={primaryBtn}>
+      <button
+        onClick={() => {
+          if (onStart) onStart(run_id, day.id);
+          else navigate(`/today/${run_id}/log`);
+        }}
+        style={primaryBtn}
+      >
         {completed_today ? 'Start Anyway' : 'Start Workout'}
       </button>
 
@@ -128,22 +154,55 @@ export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string)
           Skip
         </button>
         {behind ? (
-          <button
-            onClick={() =>
-              // Desktop has no logger during Beta (mirrors handleDesktopStart's
-              // toast). Backfill logging happens on the mobile logger; a raw
-              // navigate here would silently bounce off TodayLoggerMobileGate.
-              pushToast({
-                severity: 'info',
-                body: 'Backfill logging is on mobile during Beta. Open RepOS on your phone to log a past workout.',
-              })
-            }
-            style={textBtn('#F5B544')}
-          >
+          <button onClick={() => setLogPastOpen((open) => !open)} style={textBtn('#F5B544')}>
             Log Past Workout
           </button>
         ) : null}
       </div>
+
+      {behind && logPastOpen ? (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            border: '1px solid rgba(245,181,68,0.45)',
+            borderRadius: 8,
+            background: 'rgba(245,181,68,0.07)',
+            display: 'flex',
+            alignItems: 'end',
+            gap: 10,
+            flexWrap: 'wrap',
+          }}
+        >
+          <label style={{ display: 'grid', gap: 5, color: 'rgba(255,255,255,0.72)', fontSize: 12 }}>
+            Workout date
+            <input
+              type="date"
+              value={pastDate}
+              min={data.start_date}
+              max={todayISO()}
+              onChange={(event) => setPastDate(event.target.value)}
+              style={{
+                minHeight: 44,
+                border: '1px solid rgba(255,255,255,0.14)',
+                borderRadius: 7,
+                background: '#0A0D12',
+                color: '#E8EEF7',
+                padding: '0 10px',
+                colorScheme: 'dark',
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!pastDate}
+            onClick={() => navigate(`/today/${run_id}/log?for=${pastDate}`)}
+            style={{ ...primaryBtn, width: 'auto', minHeight: 44, opacity: pastDate ? 1 : 0.5 }}
+          >
+            Open logger
+          </button>
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={confirmSkip}
@@ -157,6 +216,13 @@ export function TodayCard({ onStart }: { onStart: (runId: string, dayId: string)
       />
     </div>
   );
+}
+
+function todayISO(): string {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
 }
 
 const primaryBtn: React.CSSProperties = {
@@ -176,7 +242,9 @@ function textBtn(color: string): React.CSSProperties {
   return {
     background: 'none',
     border: 'none',
-    padding: 0,
+    minWidth: 44,
+    minHeight: 44,
+    padding: '0 8px',
     color,
     fontFamily: 'Inter Tight',
     fontSize: 12,

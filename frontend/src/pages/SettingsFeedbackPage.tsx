@@ -5,28 +5,20 @@ import { Link } from 'react-router-dom';
 import { TOKENS, FONTS } from '../tokens';
 import { useCurrentUser } from '../auth';
 import { FeedbackForm } from '../components/feedback/FeedbackForm';
+import { Page, PageHeader } from '../components/ui';
 
 export default function SettingsFeedbackPage() {
   const { user } = useCurrentUser();
   return (
-    <div
-      style={{
-        maxWidth: 560,
-        margin: '0 auto',
-        padding: '24px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}
+    <Page
+      width="narrow"
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONTS.ui }}
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>
-          Feedback
-        </h1>
-        <p style={{ margin: 0, fontSize: 13, color: TOKENS.textDim }}>
-          Found a bug or have an idea? Tell us — it goes straight to the team.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Administration"
+        title="Feedback"
+        description="Found a bug or have an idea? Send the details directly to the team."
+      />
       <section
         style={{
           background: TOKENS.surface,
@@ -45,6 +37,6 @@ export default function SettingsFeedbackPage() {
           VIEW ALL FEEDBACK →
         </Link>
       )}
-    </div>
+    </Page>
   );
 }

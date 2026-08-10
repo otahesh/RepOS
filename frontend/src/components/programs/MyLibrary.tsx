@@ -16,6 +16,7 @@ import { TOKENS, FONTS } from '../../tokens';
 import { Term } from '../Term';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { pushToast } from '../common/ToastHost';
+import { Button, DataState, SegmentedControl, SkeletonCards, StatusBadge } from '../ui';
 
 type ViewTab = 'active' | 'past' | 'archived';
 
@@ -37,21 +38,6 @@ const STATUS_LABEL: Record<string, string> = {
   abandoned: 'Abandoned',
   archived: 'Archived',
 };
-
-function statusColor(status: UserProgramRecord['status']): string {
-  switch (status) {
-    case 'active':
-      return TOKENS.good;
-    case 'paused':
-      return TOKENS.warn;
-    case 'completed':
-      return TOKENS.accent;
-    case 'abandoned':
-      return TOKENS.textMute;
-    default:
-      return TOKENS.textDim;
-  }
-}
 
 function ProgramCard({
   program,
@@ -79,12 +65,19 @@ function ProgramCard({
   const badgeLabel = program.has_live_run
     ? 'Active'
     : (STATUS_LABEL[program.status] ?? program.status);
-  const badgeColor = program.has_live_run ? TOKENS.good : statusColor(program.status);
+  const badgeTone = program.has_live_run
+    ? ('good' as const)
+    : program.status === 'paused'
+      ? ('warning' as const)
+      : program.status === 'completed'
+        ? ('accent' as const)
+        : ('neutral' as const);
   return (
     <article
+      className="repos-card repos-card--interactive"
       style={{
         background: faded ? 'rgba(16,20,28,0.5)' : TOKENS.surface,
-        border: `1px solid ${faded ? TOKENS.line : TOKENS.lineStrong}`,
+        border: `1px solid ${program.has_live_run ? TOKENS.accentDim : faded ? TOKENS.line : TOKENS.lineStrong}`,
         borderRadius: 12,
         padding: 20,
         display: 'flex',
@@ -115,22 +108,7 @@ function ProgramCard({
             {program.name}
           </h3>
         </div>
-        <span
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            letterSpacing: 0.8,
-            textTransform: 'uppercase',
-            color: badgeColor,
-            border: `1px solid ${badgeColor}`,
-            borderRadius: 4,
-            padding: '2px 6px',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          {badgeLabel}
-        </span>
+        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
       </header>
 
       <div
@@ -142,6 +120,21 @@ function ProgramCard({
           day: 'numeric',
         })}
       </div>
+
+      {program.has_live_run ? (
+        <div
+          style={{
+            padding: '9px 10px',
+            borderRadius: 8,
+            background: TOKENS.accentGlow,
+            color: TOKENS.textDim,
+            fontSize: 12,
+            lineHeight: 1.4,
+          }}
+        >
+          Current program. Your next workout and weekly progress are ready on Today.
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 'auto' }}>
         {onOpen && (
@@ -387,19 +380,6 @@ export function MyLibrary({
     }
   }
 
-  const tabStyle = (active: boolean): React.CSSProperties => ({
-    padding: '6px 16px',
-    border: 'none',
-    borderRadius: 6,
-    fontFamily: FONTS.ui,
-    fontSize: 13,
-    fontWeight: active ? 600 : 500,
-    cursor: 'pointer',
-    background: active ? TOKENS.surface3 : 'transparent',
-    color: active ? TOKENS.text : TOKENS.textDim,
-    borderBottom: active ? `2px solid ${TOKENS.accent}` : '2px solid transparent',
-  });
-
   return (
     <section style={{ padding: '0 0 24px', fontFamily: FONTS.ui }}>
       <div
@@ -408,6 +388,8 @@ export function MyLibrary({
           alignItems: 'center',
           justifyContent: 'space-between',
           marginBottom: 16,
+          gap: 12,
+          flexWrap: 'wrap',
         }}
       >
         <h2
@@ -421,32 +403,29 @@ export function MyLibrary({
         >
           My Programs
         </h2>
-        <div
-          style={{
-            display: 'flex',
-            gap: 2,
-            background: TOKENS.surface,
-            border: `1px solid ${TOKENS.line}`,
-            borderRadius: 8,
-            padding: 3,
-          }}
-        >
-          <button style={tabStyle(tab === 'active')} onClick={() => setTab('active')}>
-            Active
-          </button>
-          <button style={tabStyle(tab === 'past')} onClick={() => setTab('past')}>
-            Past
-          </button>
-          <button style={tabStyle(tab === 'archived')} onClick={() => setTab('archived')}>
-            Archived
-          </button>
-        </div>
+        <SegmentedControl
+          label="Program library view"
+          value={tab}
+          options={[
+            { value: 'active', label: 'Active' },
+            { value: 'past', label: 'Past' },
+            { value: 'archived', label: 'Archived' },
+          ]}
+          onChange={setTab}
+        />
       </div>
 
       {err && (
-        <div style={{ color: TOKENS.danger, fontSize: 13, padding: '8px 0' }}>
-          Couldn't load programs: {err}
-        </div>
+        <DataState
+          kind="error"
+          title="Programs could not be loaded"
+          body={err}
+          action={
+            <Button variant="secondary" onClick={() => setReloadKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
       )}
 
       {recapErr && (
@@ -455,20 +434,29 @@ export function MyLibrary({
         </div>
       )}
 
-      {!err && !filtered && <div style={{ color: TOKENS.textDim, fontSize: 13 }}>Loading…</div>}
+      {!err && !filtered && <SkeletonCards count={2} />}
 
       {!err && filtered && filtered.length === 0 && (
-        <div style={{ color: TOKENS.textMute, fontSize: 13, padding: '16px 0' }}>
-          {tab === 'archived' ? (
-            'No archived programs. Archive a program to tuck it away here — it stays restorable.'
-          ) : tab === 'past' ? (
-            'No past programs yet. Abandoned or completed programs appear here.'
-          ) : (
-            <>
-              No active programs. Pick a <Term k="mesocycle" /> template below to get started.
-            </>
-          )}
-        </div>
+        <DataState
+          title={
+            tab === 'archived'
+              ? 'No archived programs'
+              : tab === 'past'
+                ? 'No past programs yet'
+                : 'No active program'
+          }
+          body={
+            tab === 'archived' ? (
+              'Archive a program to tuck it away here. It remains restorable.'
+            ) : tab === 'past' ? (
+              'Completed and abandoned programs appear here for review or restart.'
+            ) : (
+              <>
+                Pick a <Term k="mesocycle" /> template below to get started.
+              </>
+            )
+          }
+        />
       )}
 
       {!err && filtered && filtered.length > 0 && (

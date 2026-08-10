@@ -26,6 +26,7 @@ type Step = 1 | 2 | 3 | 4 | 5;
 export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<Step>(1);
   const [goal, setGoal] = useState<OnboardingGoal>('maintain');
+  const [finishError, setFinishError] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
@@ -73,8 +74,15 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   async function finish() {
-    await completeOnboarding(goal);
-    onComplete();
+    setFinishError(null);
+    try {
+      await completeOnboarding(goal);
+      onComplete();
+    } catch {
+      setFinishError(
+        'Setup could not be completed. Your choices are saved on this screen; try again.',
+      );
+    }
   }
 
   return (
@@ -118,6 +126,31 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
         >
           ONBOARDING · STEP {step} / 5
         </div>
+        <div
+          role="progressbar"
+          aria-label="Onboarding progress"
+          aria-valuemin={1}
+          aria-valuemax={5}
+          aria-valuenow={step}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 6,
+            marginBottom: 18,
+          }}
+        >
+          {[1, 2, 3, 4, 5].map((position) => (
+            <span
+              key={position}
+              aria-hidden="true"
+              style={{
+                height: 3,
+                borderRadius: 99,
+                background: position <= step ? TOKENS.accent : TOKENS.surface3,
+              }}
+            />
+          ))}
+        </div>
         <h2
           id="onboarding-title"
           style={{
@@ -138,6 +171,36 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
             </>
           )}
         </h2>
+        {step > 1 ? (
+          <button
+            type="button"
+            className="repos-button repos-button--quiet"
+            onClick={() => {
+              setFinishError(null);
+              setStep((current) => Math.max(1, current - 1) as Step);
+            }}
+            style={{ margin: '-4px 0 14px', paddingInline: 0 }}
+          >
+            ← Back
+          </button>
+        ) : null}
+        {finishError ? (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 14,
+              padding: 12,
+              border: `1px solid rgba(255,106,106,0.45)`,
+              borderRadius: 9,
+              background: 'rgba(255,106,106,0.07)',
+              color: TOKENS.text,
+              fontSize: 13,
+              lineHeight: 1.45,
+            }}
+          >
+            {finishError}
+          </div>
+        ) : null}
         {step === 1 && <WelcomeStep onNext={() => setStep(2)} />}
         {step === 2 && <EquipmentStep onNext={() => setStep(3)} onSkip={() => setStep(3)} />}
         {step === 3 && (

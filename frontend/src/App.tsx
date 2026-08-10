@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/layout/AppShell';
 import SettingsIntegrations from './components/settings/SettingsIntegrations';
@@ -23,27 +23,21 @@ import SettingsFeedbackPage from './pages/SettingsFeedbackPage';
 import SettingsUsersPage from './pages/SettingsUsersPage';
 import AdminFeedbackPage from './pages/AdminFeedbackPage';
 import TodayLoggerMobile from './components/programs/TodayLoggerMobile';
-import { useIsMobile } from './lib/useIsMobile';
-
-// TodayLoggerMobile is intentionally mobile-only (per project memory
-// project_device_split.md: desktop = data management, mobile = live workout).
-// A desktop user landing on /today/:run/log would otherwise get the mobile-
-// styled logger compressed into a 480px column on a 1440px display. Until the
-// desktop logger exists, redirect to /today which routes to the appropriate
-// device-aware surface.
-function TodayLoggerMobileGate() {
-  const isMobile = useIsMobile();
-  if (!isMobile) return <Navigate to="/today" replace />;
-  return <TodayLoggerMobile />;
-}
+import SettingsOverviewPage from './pages/SettingsOverviewPage';
+import { Button, DataState } from './components/ui';
 
 function AppInner() {
   const [profile, setProfile] = useState<EquipmentProfile | null>(null);
-  useEffect(() => {
+  const [profileError, setProfileError] = useState(false);
+  const loadProfile = useCallback(() => {
+    setProfileError(false);
     getEquipmentProfile()
       .then(setProfile)
-      .catch(() => setProfile({ _v: 1 }));
+      .catch(() => setProfileError(true));
   }, []);
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
   const showWizard = profile && isProfileEmpty(profile);
   return (
     <>
@@ -56,8 +50,9 @@ function AppInner() {
             <Route path="programs/draft/:userProgramId" element={<DraftProgramPage />} />
             <Route path="my-programs/:id" element={<MyProgramPage />} />
             <Route path="history" element={<WorkoutHistoryPage />} />
-            <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobileGate />} />
-            <Route path="today/:mesocycleRunId/log/:blockIdx" element={<TodayLoggerMobileGate />} />
+            <Route path="today/:mesocycleRunId/log" element={<TodayLoggerMobile />} />
+            <Route path="today/:mesocycleRunId/log/:blockIdx" element={<TodayLoggerMobile />} />
+            <Route path="settings" element={<SettingsOverviewPage />} />
             <Route path="settings/integrations" element={<SettingsIntegrations />} />
             <Route path="settings/equipment" element={<EquipmentEditor />} />
             <Route path="settings/account" element={<SettingsAccount />} />
@@ -74,6 +69,21 @@ function AppInner() {
           </Route>
         </Routes>
       </BrowserRouter>
+      {profileError ? (
+        <div style={{ position: 'fixed', inset: 'auto 16px 16px', zIndex: 3000 }}>
+          <DataState
+            compact
+            kind="warning"
+            title="Equipment setup could not be checked"
+            body="RepOS will not ask you to overwrite it. Retry when your connection is stable."
+            action={
+              <Button variant="warning" onClick={loadProfile}>
+                Retry
+              </Button>
+            }
+          />
+        </div>
+      ) : null}
       {showWizard && <EquipmentWizard onComplete={setProfile} />}
     </>
   );

@@ -3,6 +3,7 @@ import { TOKENS, FONTS } from '../tokens';
 import { apiFetch } from '../auth';
 import Icon from './Icon';
 import type { SyncStatusResponse, WeightRangeResponse } from '../lib/api/health';
+import { Button, StatusBadge } from './ui';
 
 // Local aliases for readability
 type SyncStatus = SyncStatusResponse;
@@ -11,6 +12,11 @@ type WeightData = Pick<WeightRangeResponse, 'current' | 'stats'>;
 export default function MobileWeightChip() {
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [weight, setWeight] = useState<WeightData | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -18,16 +24,14 @@ export default function MobileWeightChip() {
         apiFetch('/api/health/sync/status'),
         apiFetch('/api/health/weight?range=7d'),
       ]);
-      if (syncRes.ok) {
-        const s: SyncStatus = await syncRes.json();
-        setSync(s);
-      }
-      if (weightRes.ok) {
-        const w: WeightData = await weightRes.json();
-        setWeight(w);
-      }
+      if (!syncRes.ok || !weightRes.ok) throw new Error('health data unavailable');
+      const s: SyncStatus = await syncRes.json();
+      const w: WeightData = await weightRes.json();
+      setSync(s);
+      setWeight(w);
+      setLoadError(false);
     } catch {
-      // silently fail — chip is non-critical
+      setLoadError(true);
     }
   }, []);
 
@@ -51,95 +55,176 @@ export default function MobileWeightChip() {
 
   const trend = weight?.stats?.trend_7d_lbs ?? null;
 
+  async function saveManualWeight(event: React.FormEvent) {
+    event.preventDefault();
+    const value = Number(draft);
+    if (!Number.isFinite(value) || value < 50 || value > 600) {
+      setError('Enter a weight from 50.0 to 600.0 lb.');
+      return;
+    }
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+      now.getDate(),
+    ).padStart(2, '0')}`;
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(
+      2,
+      '0',
+    )}:${String(now.getSeconds()).padStart(2, '0')}`;
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await apiFetch('/api/health/weight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight_lbs: value, date, time, source: 'Manual' }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? 'The measurement was not accepted.');
+      }
+      await fetchData();
+      setDraft('');
+      setEditing(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Weight could not be saved. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div
+      className="repos-card"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '7px 10px',
-        borderRadius: 6,
-        background: TOKENS.surface2,
-        border: `1px solid ${TOKENS.line}`,
-        flexShrink: 0,
+        width: '100%',
+        display: 'grid',
+        gap: 12,
+        padding: 14,
       }}
     >
-      <Icon name="heart" size={12} color={TOKENS.accent} />
-
-      <span
-        style={{
-          fontFamily: FONTS.mono,
-          fontSize: 10,
-          color: TOKENS.textMute,
-          letterSpacing: 1.2,
-        }}
-      >
-        BW
-      </span>
-
-      <span
-        style={{
-          fontFamily: FONTS.mono,
-          fontSize: 14,
-          fontWeight: 700,
-          color: TOKENS.text,
-          fontVariantNumeric: 'tabular-nums',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {weight?.current?.weight_lbs.toFixed(1) ?? '—'}
-      </span>
-
-      <span
-        style={{
-          fontFamily: FONTS.mono,
-          fontSize: 10,
-          color: TOKENS.textMute,
-          letterSpacing: 0.4,
-        }}
-      >
-        lb
-      </span>
-
-      {trend !== null && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span
+          aria-hidden="true"
           style={{
-            fontFamily: FONTS.mono,
-            fontSize: 10,
-            color: trend < 0 ? TOKENS.good : TOKENS.warn,
-            letterSpacing: 0.4,
-            marginLeft: 2,
-            whiteSpace: 'nowrap',
+            width: 36,
+            height: 36,
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 9,
+            background: TOKENS.accentGlow,
           }}
         >
-          {trend < 0 ? '↓' : '↑'} {Math.abs(trend).toFixed(1)} · 7D
+          <Icon name="heart" size={16} color={TOKENS.accent} />
         </span>
-      )}
-
-      {sync?.last_success_at && (
-        <span
-          style={{
-            fontFamily: FONTS.mono,
-            fontSize: 9,
-            color: TOKENS.textMute,
-            letterSpacing: 0.6,
-          }}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: TOKENS.textDim, fontSize: 12 }}>Current bodyweight</div>
+          <div
+            style={{
+              marginTop: 2,
+              fontFamily: FONTS.mono,
+              fontSize: 20,
+              fontWeight: 700,
+              color: TOKENS.text,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {weight?.current?.weight_lbs.toFixed(1) ?? '—'}{' '}
+            <span style={{ color: TOKENS.textMute, fontSize: 10 }}>lb</span>
+          </div>
+        </div>
+        <StatusBadge
+          tone={
+            !sync
+              ? 'neutral'
+              : sync.state === 'fresh'
+                ? 'good'
+                : sync.state === 'stale'
+                  ? 'warning'
+                  : 'danger'
+          }
         >
-          · {formatTime(sync.last_success_at)}
-        </span>
-      )}
+          {sync?.state ?? 'unknown'}
+        </StatusBadge>
+      </div>
 
-      {/* Sync state dot */}
       <div
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: 10,
-          background: stateColor,
-          boxShadow: `0 0 6px ${stateColor}`,
-          marginLeft: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          color: TOKENS.textDim,
+          fontFamily: FONTS.mono,
+          fontSize: 10,
         }}
-      />
+      >
+        <span>
+          {trend === null
+            ? '7-day trend unavailable'
+            : `${trend < 0 ? '↓' : '↑'} ${Math.abs(trend).toFixed(1)} lb · 7 days`}
+        </span>
+        <span style={{ color: stateColor }}>
+          {sync?.last_success_at ? `Updated ${formatTime(sync.last_success_at)}` : 'Not synced'}
+        </span>
+      </div>
+
+      {loadError ? (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            color: TOKENS.warn,
+            fontSize: 12,
+          }}
+        >
+          <span>Bodyweight data is unavailable.</span>
+          <Button variant="warning" onClick={() => void fetchData()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
+      {editing ? (
+        <form
+          noValidate
+          onSubmit={(event) => void saveManualWeight(event)}
+          style={{ display: 'grid', gap: 10 }}
+        >
+          <label className="repos-field">
+            Today's weight in pounds
+            <input
+              autoFocus
+              inputMode="decimal"
+              type="number"
+              min="50"
+              max="600"
+              step="0.1"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </label>
+          {error ? (
+            <div role="alert" style={{ color: TOKENS.danger, fontSize: 12 }}>
+              {error}
+            </div>
+          ) : null}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Button type="button" variant="quiet" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Save weight'}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <Button variant="secondary" onClick={() => setEditing(true)}>
+          Add manual measurement
+        </Button>
+      )}
     </div>
   );
 }

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TOKENS, FONTS } from '../../tokens';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { useCurrentUser } from '../../auth';
 import {
   getWorkoutHistory,
   ApiError,
+  type HistoryExercise,
   type HistoryItem,
   type HistorySet,
 } from '../../lib/api/workoutHistory';
@@ -14,6 +15,10 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatHistorySet } from '../programs/logger/HistorySheet';
 import { formatSessionDate, formatZonedDate } from '../../lib/formatDate';
 import Icon from '../Icon';
+import { Button, DataState, Page, PageHeader, SegmentedControl, StatusBadge } from '../ui';
+
+type DateFilter = '30d' | '90d' | '1y' | 'all';
+type StatusFilter = 'all' | 'completed' | 'skipped';
 
 // =============================================================================
 // WorkoutHistoryPage — the /history surface (spec §4/§7).
@@ -43,6 +48,14 @@ export default function WorkoutHistoryPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [reopenTarget, setReopenTarget] = useState<HistoryItem | null>(null);
   const [reopening, setReopening] = useState(false);
+  const [exerciseFilter, setExerciseFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('90d');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+  const filteredItems = useMemo(
+    () => filterHistory(items ?? [], exerciseFilter, dateFilter, statusFilter),
+    [items, exerciseFilter, dateFilter, statusFilter],
+  );
 
   function load(): void {
     setError(null);
@@ -128,25 +141,15 @@ export default function WorkoutHistoryPage() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 880,
-        margin: '0 auto',
-        width: '100%',
-        boxSizing: 'border-box',
-        padding: isMobile ? '20px 16px 40px' : '24px 24px 48px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        color: TOKENS.text,
-      }}
+    <Page
+      width="wide"
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, color: TOKENS.text }}
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: FONTS.ui }}>History</h1>
-        <p style={{ margin: 0, fontSize: 13, color: TOKENS.textDim, fontFamily: FONTS.ui }}>
-          Your finished workouts, newest first.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Progress"
+        title="Workout history"
+        description="Review completed and skipped workouts, compare prior performance, and recover an entry when needed."
+      />
 
       {error && (
         <div
@@ -175,26 +178,43 @@ export default function WorkoutHistoryPage() {
       {!error && items === null && <HistorySkeleton isMobile={isMobile} />}
 
       {!error && items?.length === 0 && (
-        <div
-          style={{
-            padding: '48px 20px',
-            textAlign: 'center',
-            color: TOKENS.textMute,
-            fontFamily: FONTS.ui,
-            fontSize: 14,
-            border: `1px dashed ${TOKENS.line}`,
-            borderRadius: 12,
-          }}
-        >
-          No workouts yet — your finished sessions land here.
-        </div>
+        <DataState
+          title="No workouts yet"
+          body="Complete or skip a workout and it will appear here with its logged performance."
+        />
       )}
 
       {!error && items && items.length > 0 && (
         <>
-          {isMobile ? (
+          <HistoryFilters
+            exercise={exerciseFilter}
+            onExercise={setExerciseFilter}
+            date={dateFilter}
+            onDate={setDateFilter}
+            status={statusFilter}
+            onStatus={setStatusFilter}
+          />
+
+          {filteredItems.length === 0 ? (
+            <DataState
+              title="No workouts match these filters"
+              body="Adjust the exercise, date range, or completion state to broaden the result."
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setExerciseFilter('');
+                    setDateFilter('all');
+                    setStatusFilter('all');
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : isMobile ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {items.map((item) => (
+              {filteredItems.map((item) => (
                 <HistoryCard
                   key={item.id}
                   item={item}
@@ -202,11 +222,13 @@ export default function WorkoutHistoryPage() {
                   open={expanded.has(item.id)}
                   onToggle={() => toggle(item.id)}
                   onReopen={() => setReopenTarget(item)}
+                  allItems={items}
+                  isMobile
                 />
               ))}
             </div>
           ) : (
-            groupByWeek(items).map(([week, weekItems]) => (
+            groupByWeek(filteredItems).map(([week, weekItems]) => (
               <section key={week} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <h2
                   style={{
@@ -236,6 +258,8 @@ export default function WorkoutHistoryPage() {
                       open={expanded.has(item.id)}
                       onToggle={() => toggle(item.id)}
                       onReopen={() => setReopenTarget(item)}
+                      allItems={items}
+                      isMobile={false}
                     />
                   ))}
                 </div>
@@ -283,8 +307,89 @@ export default function WorkoutHistoryPage() {
         onConfirm={() => void confirmReopen()}
         onCancel={() => setReopenTarget(null)}
       />
-    </div>
+    </Page>
   );
+}
+
+function HistoryFilters({
+  exercise,
+  onExercise,
+  date,
+  onDate,
+  status,
+  onStatus,
+}: {
+  exercise: string;
+  onExercise: (value: string) => void;
+  date: DateFilter;
+  onDate: (value: DateFilter) => void;
+  status: StatusFilter;
+  onStatus: (value: StatusFilter) => void;
+}) {
+  return (
+    <section
+      aria-label="History filters"
+      className="repos-card"
+      style={{ padding: 14, display: 'grid', gap: 12 }}
+    >
+      <label className="repos-field">
+        Exercise or workout
+        <input
+          type="search"
+          value={exercise}
+          placeholder="Filter by name"
+          onChange={(event) => onExercise(event.target.value)}
+        />
+      </label>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <SegmentedControl
+          label="History date range"
+          value={date}
+          options={[
+            { value: '30d', label: '30 days' },
+            { value: '90d', label: '90 days' },
+            { value: '1y', label: '1 year' },
+            { value: 'all', label: 'All time' },
+          ]}
+          onChange={onDate}
+        />
+        <SegmentedControl
+          label="Workout completion state"
+          value={status}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'completed', label: 'Completed' },
+            { value: 'skipped', label: 'Skipped' },
+          ]}
+          onChange={onStatus}
+        />
+      </div>
+    </section>
+  );
+}
+
+function filterHistory(
+  items: HistoryItem[],
+  exerciseFilter: string,
+  dateFilter: DateFilter,
+  statusFilter: StatusFilter,
+): HistoryItem[] {
+  const query = exerciseFilter.trim().toLocaleLowerCase();
+  const rangeDays =
+    dateFilter === '30d' ? 30 : dateFilter === '90d' ? 90 : dateFilter === '1y' ? 365 : null;
+  const cutoff = rangeDays === null ? null : Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+  return items.filter((item) => {
+    if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+    if (cutoff !== null) {
+      const date = new Date(`${item.scheduled_date}T12:00:00`).getTime();
+      if (Number.isFinite(date) && date < cutoff) return false;
+    }
+    if (!query) return true;
+    return (
+      item.name.toLocaleLowerCase().includes(query) ||
+      item.exercises.some((exercise) => exercise.name.toLocaleLowerCase().includes(query))
+    );
+  });
 }
 
 // Preserve encounter order (API is newest-first): first-seen week ordering wins.
@@ -324,12 +429,16 @@ function HistoryCard({
   open,
   onToggle,
   onReopen,
+  allItems,
+  isMobile,
 }: {
   item: HistoryItem;
   tz: string;
   open: boolean;
   onToggle: () => void;
   onReopen: () => void;
+  allItems: HistoryItem[];
+  isMobile: boolean;
 }) {
   const skipped = item.status === 'skipped';
   const hasSets = item.exercises.some((ex) => ex.sets.length > 0);
@@ -343,6 +452,7 @@ function HistoryCard({
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
+        gridColumn: open && !isMobile ? '1 / -1' : undefined,
       }}
     >
       <button
@@ -414,27 +524,58 @@ function HistoryCard({
               {skipped ? 'Skipped — no sets logged.' : 'No sets logged.'}
             </div>
           ) : (
-            item.exercises.map((ex) => (
-              <div key={ex.slug} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: TOKENS.textDim }}>
-                  {ex.name}
-                </div>
-                {ex.sets.length === 0 ? (
-                  <div style={{ fontFamily: FONTS.mono, fontSize: 12, color: TOKENS.textMute }}>
-                    No sets logged.
-                  </div>
-                ) : (
-                  ex.sets.map((set, i) => (
-                    <div
-                      key={i}
-                      style={{ fontFamily: FONTS.mono, fontSize: 13, color: TOKENS.text }}
-                    >
-                      {formatSet(set)}
+            item.exercises.map((ex) => {
+              const comparison = compareExercise(item, ex, allItems);
+              return (
+                <div key={ex.slug} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 650, color: TOKENS.text }}>
+                      {ex.name}
                     </div>
-                  ))
-                )}
-              </div>
-            ))
+                    {comparison.isPr ? (
+                      <StatusBadge tone="good">Personal record</StatusBadge>
+                    ) : null}
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: isMobile
+                        ? 'minmax(0, 1fr)'
+                        : 'repeat(2, minmax(0, 1fr))',
+                      gap: 8,
+                    }}
+                  >
+                    <SetComparisonColumn label="This workout" sets={ex.sets} />
+                    <SetComparisonColumn
+                      label="Previous"
+                      sets={comparison.previous?.sets ?? []}
+                      emptyCopy={
+                        comparison.previous ? 'No sets logged.' : 'First logged performance.'
+                      }
+                    />
+                  </div>
+                  {comparison.delta ? (
+                    <div
+                      style={{
+                        color: comparison.isPr ? TOKENS.good : TOKENS.textDim,
+                        fontFamily: FONTS.mono,
+                        fontSize: 10,
+                      }}
+                    >
+                      {comparison.delta}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -468,6 +609,101 @@ function HistoryCard({
       )}
     </div>
   );
+}
+
+function SetComparisonColumn({
+  label,
+  sets,
+  emptyCopy = 'No sets logged.',
+}: {
+  label: string;
+  sets: HistorySet[];
+  emptyCopy?: string;
+}) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: 10,
+        border: `1px solid ${TOKENS.line}`,
+        borderRadius: 8,
+        background: TOKENS.bg,
+      }}
+    >
+      <div
+        style={{
+          marginBottom: 6,
+          color: TOKENS.textMute,
+          fontFamily: FONTS.mono,
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: 0.7,
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </div>
+      {sets.length === 0 ? (
+        <div style={{ color: TOKENS.textMute, fontSize: 12 }}>{emptyCopy}</div>
+      ) : (
+        sets.map((set, index) => (
+          <div
+            key={`${set.performed_at}-${index}`}
+            style={{ fontFamily: FONTS.mono, fontSize: 12, color: TOKENS.text, lineHeight: 1.6 }}
+          >
+            {formatSet(set)}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function compareExercise(item: HistoryItem, exercise: HistoryExercise, allItems: HistoryItem[]) {
+  const itemIndex = allItems.findIndex((candidate) => candidate.id === item.id);
+  const older = allItems
+    .slice(itemIndex + 1)
+    .flatMap((candidate) => candidate.exercises)
+    .filter((candidate) => candidate.slug === exercise.slug && candidate.sets.length > 0);
+  const previous = older[0] ?? null;
+  const currentTop = topSet(exercise.sets);
+  const previousTop = topSet(previous?.sets ?? []);
+  if (!currentTop) return { previous, isPr: false, delta: null as string | null };
+
+  const usesLoad = currentTop.weight_lbs !== null;
+  const currentMetric = usesLoad ? (currentTop.weight_lbs ?? 0) : (currentTop.reps ?? 0);
+  const olderBest = older.reduce((best, candidate) => {
+    const top = topSet(candidate.sets);
+    const metric = usesLoad ? (top?.weight_lbs ?? 0) : (top?.reps ?? 0);
+    return Math.max(best, metric);
+  }, 0);
+  const isPr = older.length > 0 && currentMetric > olderBest;
+
+  let delta: string | null = null;
+  if (previousTop) {
+    const changes: string[] = [];
+    if (currentTop.weight_lbs !== null && previousTop.weight_lbs !== null) {
+      const loadDelta = currentTop.weight_lbs - previousTop.weight_lbs;
+      if (Math.abs(loadDelta) >= 0.05)
+        changes.push(`${loadDelta > 0 ? '+' : ''}${loadDelta.toFixed(1)} lb`);
+    }
+    if (currentTop.reps !== null && previousTop.reps !== null) {
+      const repDelta = currentTop.reps - previousTop.reps;
+      if (repDelta !== 0) changes.push(`${repDelta > 0 ? '+' : ''}${repDelta} reps`);
+    }
+    delta = changes.length > 0 ? `${changes.join(' · ')} vs previous` : 'Matched previous top set';
+  }
+
+  return { previous, isPr, delta };
+}
+
+function topSet(sets: HistorySet[]): HistorySet | null {
+  if (sets.length === 0) return null;
+  return [...sets].sort((a, b) => {
+    const load = (b.weight_lbs ?? 0) - (a.weight_lbs ?? 0);
+    if (load !== 0) return load;
+    return (b.reps ?? 0) - (a.reps ?? 0);
+  })[0];
 }
 
 // Non-beginner formatting (`135 × 8 @RIR 2` / `BW × 8`) — history is a review

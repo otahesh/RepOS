@@ -1,19 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { SETTINGS_SECTIONS } from './SettingsSidebar';
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from './SettingsSidebar';
 
 describe('SETTINGS_SECTIONS authoritative layout (D7 + W2 Health)', () => {
   it('ships the W6 lineup plus W2 Health and the W9 admin-only Users entry', () => {
     expect(SETTINGS_SECTIONS.map((s) => s.label)).toEqual([
       'Account',
       'Health',
+      'Injuries',
       'Equipment',
-      'Integrations',
       'Program prefs',
+      'Integrations',
       'Backups',
+      'Storage',
       'Feedback',
       'Users',
-      'Storage',
-      'Injuries',
+    ]);
+  });
+
+  it('groups destinations by user intent without adding route depth', () => {
+    expect(SETTINGS_GROUPS).toEqual([
+      'Profile',
+      'Training',
+      'Data and Integrations',
+      'Administration',
+    ]);
+    expect(SETTINGS_SECTIONS.filter((s) => s.group === 'Training').map((s) => s.label)).toEqual([
+      'Equipment',
+      'Program prefs',
     ]);
   });
 

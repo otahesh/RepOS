@@ -153,20 +153,16 @@ describe('<TodayCard>', () => {
     );
   });
 
-  it('behind (desktop): LOG PAST WORKOUT points the user to the mobile logger via toast', async () => {
+  it('behind (desktop): LOG PAST WORKOUT opens a date picker for the desktop logger', async () => {
     vi.spyOn(api, 'getTodayWorkout').mockResolvedValue(
       workout({ pacing: { status: 'behind', days_behind: 2, suggested_date: '2026-05-03' } }),
     );
-    const toastSpy = vi.spyOn(toast, 'pushToast').mockReturnValue('t-1');
     const user = userEvent.setup();
     renderCard();
     await screen.findByText(/Upper Heavy/);
     await user.click(screen.getByRole('button', { name: /log past workout/i }));
-    expect(toastSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: 'info', body: expect.stringMatching(/mobile/i) }),
-    );
-    // Desktop has no date picker — the affordance is discoverable, the action is a toast.
-    expect(screen.queryByLabelText(/date/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/workout date/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open logger/i })).toBeDisabled();
   });
 
   it('behind is the only state that offers LOG PAST WORKOUT', async () => {

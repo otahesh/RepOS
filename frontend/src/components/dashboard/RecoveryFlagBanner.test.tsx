@@ -15,11 +15,11 @@ beforeEach(() => {
 });
 
 describe('RecoveryFlagBanner', () => {
-  it('renders nothing when no flags are active', async () => {
+  it('renders a calm healthy state when no flags are active', async () => {
     (api.listRecoveryFlags as any).mockResolvedValue({ flags: [] });
-    const { container } = render(<RecoveryFlagBanner />);
+    render(<RecoveryFlagBanner />);
     await waitFor(() => expect(api.listRecoveryFlags).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    expect(await screen.findByText(/no active advisories/i)).toBeInTheDocument();
   });
 
   it('renders one advisory per flag with its message', async () => {
@@ -93,11 +93,12 @@ describe('RecoveryFlagBanner', () => {
     await waitFor(() => expect(screen.queryByText(/Heavy week/)).not.toBeInTheDocument());
   });
 
-  it('renders nothing when the flags fetch fails (advisories never break Today)', async () => {
+  it('renders a non-blocking retry state when the flags fetch fails', async () => {
     (api.listRecoveryFlags as any).mockRejectedValue(new Error('boom'));
-    const { container } = render(<RecoveryFlagBanner />);
+    render(<RecoveryFlagBanner />);
     await waitFor(() => expect(api.listRecoveryFlags).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    expect(await screen.findByText(/recovery status is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 
   it('wraps the deload term in the overreaching message without duplicating the word', async () => {

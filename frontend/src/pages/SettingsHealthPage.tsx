@@ -15,16 +15,20 @@ import { Term } from '../components/Term';
 import { ParQGate } from '../components/onboarding/ParQGate';
 import { getParQStatus, markPARQCleared, type ParQStatus } from '../lib/api/parQ';
 import { pushToast } from '../components/common/ToastHost';
+import { Button, DataState, Page, PageHeader } from '../components/ui';
 
 export default function SettingsHealthPage(): JSX.Element {
   const [status, setStatus] = useState<ParQStatus | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(() => {
+    setLoadError(false);
+    setStatus(null);
     getParQStatus()
       .then(setStatus)
-      .catch(() => setStatus(null));
+      .catch(() => setLoadError(true));
   }, []);
 
   useEffect(() => {
@@ -48,13 +52,32 @@ export default function SettingsHealthPage(): JSX.Element {
   }
 
   return (
-    <main style={{ padding: 16, color: TOKENS.text, fontFamily: FONTS.ui, maxWidth: 720 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 8 }}>Health</h1>
-      <p style={{ color: TOKENS.textDim, fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-        Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status. It is
-        a <Term k="soft_gate" /> — answering "yes" never blocks training, it just keeps your program
-        conservative until a clinician clears you.
-      </p>
+    <Page width="standard" style={{ color: TOKENS.text, fontFamily: FONTS.ui }}>
+      <PageHeader
+        eyebrow="Profile"
+        title="Health"
+        description={
+          <>
+            Your <Term k="PAR_Q" /> acknowledgment and clinical <Term k="advisory_mode" /> status.
+            Answering “yes” never blocks training; it keeps progression conservative until cleared.
+          </>
+        }
+      />
+
+      {loadError ? (
+        <DataState
+          kind="error"
+          title="Health settings could not be loaded"
+          body="Your readiness and advisory state were not changed."
+          action={
+            <Button variant="secondary" onClick={load}>
+              Retry
+            </Button>
+          }
+        />
+      ) : !status ? (
+        <DataState kind="loading" title="Loading health settings" />
+      ) : null}
 
       {status && (
         <section style={card}>
@@ -129,7 +152,7 @@ export default function SettingsHealthPage(): JSX.Element {
           }}
         />
       )}
-    </main>
+    </Page>
   );
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { TOKENS, FONTS } from '../tokens';
 import { listAdminFeedback, triageFeedback, type AdminFeedbackItem } from '../lib/api/feedback';
 import { pushToast } from '../components/common/ToastHost';
+import { Button, Card, DataState, Page, PageHeader, StatusBadge } from '../components/ui';
 
 export default function AdminFeedbackPage() {
   const [items, setItems] = useState<AdminFeedbackItem[] | null>(null);
@@ -46,68 +47,47 @@ export default function AdminFeedbackPage() {
 
   if (denied) {
     return (
-      <div style={{ padding: 32, color: TOKENS.danger, fontFamily: FONTS.mono }}>
-        Not authorized.
-      </div>
+      <Page width="standard">
+        <DataState
+          kind="error"
+          title="Not authorized"
+          body="Feedback triage is available to RepOS administrators."
+        />
+      </Page>
     );
   }
 
   return (
-    <div
-      style={{
-        maxWidth: 760,
-        margin: '0 auto',
-        padding: '24px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>
-        Feedback triage
-      </h1>
+    <Page width="standard" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <PageHeader
+        eyebrow="Administration"
+        title="Feedback triage"
+        description="Review product reports and mark resolved items without losing delivery context."
+      />
       {error && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 10,
-            color: TOKENS.danger,
-            fontFamily: FONTS.mono,
-            fontSize: 12,
-          }}
-        >
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={load}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: `1px solid ${TOKENS.line}`,
-              background: TOKENS.bg,
-              color: TOKENS.text,
-              fontFamily: FONTS.ui,
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Retry
-          </button>
-        </div>
+        <DataState
+          kind="error"
+          title="Feedback could not be loaded"
+          body={error}
+          action={
+            <Button variant="secondary" onClick={load}>
+              Retry
+            </Button>
+          }
+        />
       )}
-      {!error && items === null && (
-        <div style={{ color: TOKENS.textMute, fontFamily: FONTS.mono, fontSize: 12 }}>Loading…</div>
+      {!error && items === null && <DataState kind="loading" title="Loading…" />}
+      {items?.length === 0 && (
+        <DataState
+          kind="empty"
+          title="No feedback yet"
+          body="New reports will appear here with route and delivery details."
+        />
       )}
-      {items?.length === 0 && <div style={{ color: TOKENS.textMute }}>No feedback yet.</div>}
       {items?.map((i) => (
-        <div
+        <Card
           key={i.id}
           style={{
-            background: TOKENS.surface,
-            border: `1px solid ${TOKENS.line}`,
-            borderRadius: 10,
             padding: 14,
             opacity: i.triaged_at ? 0.55 : 1,
             display: 'flex',
@@ -129,32 +109,23 @@ export default function AdminFeedbackPage() {
             <span>{i.user_email_at_submit ?? 'unknown'}</span>
             <span>{i.route ?? '—'}</span>
             <span>{i.app_sha ?? 'dev'}</span>
-            <span style={{ color: i.webhook_delivered_at ? TOKENS.good : TOKENS.warn }}>
+            <StatusBadge tone={i.webhook_delivered_at ? 'good' : 'warning'}>
               {i.webhook_delivered_at ? 'delivered' : 'not delivered'}
-            </span>
+            </StatusBadge>
             <span>{i.created_at}</span>
           </div>
           {!i.triaged_at && (
-            <button
+            <Button
+              variant="secondary"
               type="button"
               onClick={() => void handleTriage(i.id)}
-              style={{
-                alignSelf: 'flex-start',
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: `1px solid ${TOKENS.line}`,
-                background: TOKENS.bg,
-                color: TOKENS.text,
-                fontFamily: FONTS.ui,
-                fontSize: 12,
-                cursor: 'pointer',
-              }}
+              style={{ alignSelf: 'flex-start' }}
             >
               Mark triaged
-            </button>
+            </Button>
           )}
-        </div>
+        </Card>
       ))}
-    </div>
+    </Page>
   );
 }

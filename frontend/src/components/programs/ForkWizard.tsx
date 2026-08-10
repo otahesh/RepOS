@@ -18,6 +18,8 @@ import { Term } from '../Term';
 import { DayCard } from './DayCard';
 import { DesktopSwapSheet } from './DesktopSwapSheet';
 import { ScheduleWarnings, type ScheduleWarning } from './ScheduleWarnings';
+import { useIsMobile } from '../../lib/useIsMobile';
+import { Button, DataState, Page, StatusBadge } from '../ui';
 
 type ConflictState = { runId: string } | null;
 
@@ -29,6 +31,7 @@ export function ForkWizard({
   onStarted: (mesocycleRunId: string) => void;
 }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [up, setUp] = useState<UserProgramDetail | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -38,20 +41,25 @@ export function ForkWizard({
   const [refork, setRefork] = useState<{ latestVersion: number } | null>(null);
   const [abandoning, setAbandoning] = useState(false);
   const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; blockIdx: number } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [mobileStep, setMobileStep] = useState<1 | 2 | 3>(1);
 
   useEffect(() => {
+    setLoadError(null);
+    setUp(null);
     getUserProgram(userProgramId)
       .then((p) => {
         setUp(p);
         setName(p.name);
       })
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+      .catch(() => setLoadError('The program draft could not be refreshed.'));
     getUserProgramWarnings(userProgramId)
       .then(setWarnings)
       .catch(() => setWarnings([]));
     refreshActiveRun();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userProgramId]);
+  }, [userProgramId, retryKey]);
 
   function readActiveRun(today: TodayWorkoutResponse): ConflictState {
     // Only an in-progress 'workout' run is a real conflict. 'mesocycle_complete'
@@ -70,8 +78,27 @@ export function ForkWizard({
     }
   }
 
-  if (err) return <div style={{ color: '#FF6A6A', padding: 16 }}>Couldn't load: {err}</div>;
-  if (!up) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+  if (loadError)
+    return (
+      <Page width="wide">
+        <DataState
+          kind="error"
+          title="Couldn't load program"
+          body={loadError}
+          action={
+            <Button variant="secondary" onClick={() => setRetryKey((key) => key + 1)}>
+              Retry
+            </Button>
+          }
+        />
+      </Page>
+    );
+  if (!up)
+    return (
+      <Page width="wide">
+        <DataState kind="loading" title="Loading program editor" />
+      </Page>
+    );
 
   async function refreshProgram() {
     if (!up) return;
@@ -170,9 +197,9 @@ export function ForkWizard({
   const startDisabled = saving || hasBlock || !!conflict || !!refork;
 
   return (
-    <div
+    <Page
+      width="data"
       style={{
-        padding: 24,
         fontFamily: 'Inter Tight',
         color: '#fff',
         display: 'flex',
@@ -180,6 +207,34 @@ export function ForkWizard({
         gap: 24,
       }}
     >
+      {isMobile ? (
+        <div style={{ display: 'grid', gap: 9 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 650 }}>Build your program</span>
+            <StatusBadge tone="accent">Step {mobileStep} of 3</StatusBadge>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Program editor progress"
+            aria-valuemin={1}
+            aria-valuemax={3}
+            aria-valuenow={mobileStep}
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}
+          >
+            {[1, 2, 3].map((step) => (
+              <span
+                key={step}
+                aria-hidden="true"
+                style={{
+                  height: 3,
+                  borderRadius: 99,
+                  background: step <= mobileStep ? '#4D8DFF' : 'rgba(255,255,255,0.12)',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
       {conflict ? (
         <div
           role="alert"
@@ -249,75 +304,79 @@ export function ForkWizard({
         </div>
       ) : null}
 
-      <header>
-        <div
-          style={{
-            fontFamily: 'JetBrains Mono',
-            fontSize: 11,
-            letterSpacing: 1,
-            color: '#4D8DFF',
-            textTransform: 'uppercase',
-          }}
-        >
-          Customize before <Term k="mesocycle" /> start
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 4 }}>
-            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>Program name</span>
-            <input
-              aria-label="Program name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                background: '#0A0D12',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 6,
-                color: '#fff',
-                fontFamily: 'Inter Tight',
-                fontSize: 14,
-              }}
-            />
-          </label>
-          <button
-            onClick={saveName}
-            disabled={saving || name === up.name}
+      {(!isMobile || mobileStep === 1) && (
+        <header>
+          <div
             style={{
-              padding: '8px 14px',
-              background: '#10141C',
-              border: '1px solid rgba(77,141,255,0.5)',
-              borderRadius: 6,
+              fontFamily: 'JetBrains Mono',
+              fontSize: 11,
+              letterSpacing: 1,
               color: '#4D8DFF',
-              cursor: 'pointer',
-              alignSelf: 'flex-end',
+              textTransform: 'uppercase',
             }}
           >
-            Save name
-          </button>
-        </div>
-      </header>
+            Customize before <Term k="mesocycle" /> start
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>Program name</span>
+              <input
+                aria-label="Program name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  background: '#0A0D12',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 6,
+                  color: '#fff',
+                  fontFamily: 'Inter Tight',
+                  fontSize: 14,
+                }}
+              />
+            </label>
+            <button
+              onClick={saveName}
+              disabled={saving || name === up.name}
+              style={{
+                padding: '8px 14px',
+                background: '#10141C',
+                border: '1px solid rgba(77,141,255,0.5)',
+                borderRadius: 6,
+                color: '#4D8DFF',
+                cursor: 'pointer',
+                alignSelf: 'flex-end',
+              }}
+            >
+              Save name
+            </button>
+          </div>
+        </header>
+      )}
 
-      <section>
-        <h3 style={{ marginTop: 0, fontSize: 16 }}>Days</h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(auto-fit, minmax(240px, 1fr))`,
-            gap: 12,
-          }}
-        >
-          {up.effective_structure.days.map((d) => (
-            <DayCard
-              key={d.idx}
-              day={d}
-              track={up.track}
-              onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
-              onRemoveSet={(dayIdx, blockIdx, _setIdx) => void handleRemoveSet(dayIdx, blockIdx)}
-              onSwap={(dayIdx, blockIdx) => setSwapTarget({ dayIdx, blockIdx })}
-            />
-          ))}
-        </div>
-      </section>
+      {(!isMobile || mobileStep === 2) && (
+        <section>
+          <h3 style={{ marginTop: 0, fontSize: 16 }}>Days</h3>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(auto-fit, minmax(240px, 1fr))`,
+              gap: 12,
+            }}
+          >
+            {up.effective_structure.days.map((d) => (
+              <DayCard
+                key={d.idx}
+                day={d}
+                track={up.track}
+                onAddSet={(dayIdx, blockIdx) => void handleAddSet(dayIdx, blockIdx)}
+                onRemoveSet={(dayIdx, blockIdx, _setIdx) => void handleRemoveSet(dayIdx, blockIdx)}
+                onSwap={(dayIdx, blockIdx) => setSwapTarget({ dayIdx, blockIdx })}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Pre-start swap picker. Unlike MyProgramPage (where mobile is steered to
           the live-workout swap flow), a draft fork has no live run yet — the
@@ -359,30 +418,32 @@ export function ForkWizard({
           );
         })()}
 
-      <ScheduleWarnings warnings={warnings} />
+      {(!isMobile || mobileStep === 3) && <ScheduleWarnings warnings={warnings} />}
 
-      <button
-        onClick={start}
-        disabled={startDisabled}
-        style={{
-          padding: '14px 22px',
-          background: startDisabled ? 'rgba(77,141,255,0.3)' : '#4D8DFF',
-          border: 'none',
-          borderRadius: 6,
-          color: '#fff',
-          fontWeight: 600,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          cursor: startDisabled ? 'not-allowed' : 'pointer',
-          alignSelf: 'flex-start',
-        }}
-      >
-        {/* "Mesocycle" left as a string literal — the term lives inside an interactive
+      <div className={isMobile ? 'repos-sticky-actions' : undefined}>
+        {isMobile && mobileStep > 1 ? (
+          <Button variant="quiet" onClick={() => setMobileStep((step) => (step - 1) as 1 | 2)}>
+            Back
+          </Button>
+        ) : null}
+        {isMobile && mobileStep < 3 ? (
+          <Button variant="primary" onClick={() => setMobileStep((step) => (step + 1) as 2 | 3)}>
+            Continue
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={start} disabled={startDisabled}>
+            {/* "Mesocycle" left as a string literal — the term lives inside an interactive
             button, where a nested <Term> popover would be a nested interactive. The
             term is explained in the wizard header and conflict banner above. */}
-        {'Start Mesocycle'}
-      </button>
-      {err ? <div style={{ color: '#FF6A6A', fontSize: 13 }}>{err}</div> : null}
-    </div>
+            {'Start Mesocycle'}
+          </Button>
+        )}
+      </div>
+      {err ? (
+        <div role="alert" style={{ color: '#FF6A6A', fontSize: 13 }}>
+          {err}
+        </div>
+      ) : null}
+    </Page>
   );
 }

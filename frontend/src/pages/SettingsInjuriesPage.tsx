@@ -7,16 +7,17 @@
 
 import { FONTS } from '../tokens';
 import { InjuryChipsEditor } from '../components/settings/InjuryChipsEditor';
+import { Page, PageHeader } from '../components/ui';
 
 export default function SettingsInjuriesPage(): JSX.Element {
   return (
-    <main style={{ padding: 16, color: '#fff', fontFamily: FONTS.ui }}>
-      <h1 style={{ fontSize: 22, marginBottom: 12 }}>Injuries</h1>
-      <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 16 }}>
-        Tap a chip to mark a joint. Active chips demote (but never block) load-bearing exercises
-        during workouts.
-      </p>
+    <Page width="standard" style={{ color: '#fff', fontFamily: FONTS.ui }}>
+      <PageHeader
+        eyebrow="Profile"
+        title="Injuries"
+        description="Mark affected joints. RepOS demotes—but never hides—load-bearing exercise suggestions."
+      />
       <InjuryChipsEditor />
-    </main>
+    </Page>
   );
 }

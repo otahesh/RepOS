@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import FocusTrap from 'focus-trap-react';
 import { applyPreset, type EquipmentProfile } from '../../lib/api/equipment.ts';
+import { FONTS, TOKENS } from '../../tokens';
+import { Button, DataState } from '../ui';
 
 type Preset = {
   id: 'home_minimal' | 'garage_gym' | 'commercial_gym';
@@ -31,10 +34,15 @@ const PRESETS: Preset[] = [
 
 export function EquipmentWizard({ onComplete }: { onComplete: (p: EquipmentProfile) => void }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const firstPresetRef = useRef<HTMLButtonElement | null>(null);
   const handlePreset = async (id: Preset['id']) => {
     setBusy(true);
+    setError(null);
     try {
       onComplete(await applyPreset(id));
+    } catch {
+      setError('That equipment profile could not be saved. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -48,112 +56,114 @@ export function EquipmentWizard({ onComplete }: { onComplete: (p: EquipmentProfi
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 100,
+        zIndex: TOKENS.zModal.zOverlay,
       }}
     >
-      <div
-        style={{
-          background: '#10141C',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 16,
-          padding: '32px 36px',
-          maxWidth: 720,
-          fontFamily: 'Inter Tight, system-ui, sans-serif',
+      <FocusTrap
+        focusTrapOptions={{
+          initialFocus: () => firstPresetRef.current,
+          fallbackFocus: '#equipment-wizard',
+          escapeDeactivates: false,
+          allowOutsideClick: false,
         }}
       >
         <div
+          id="equipment-wizard"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="equipment-wizard-title"
+          tabIndex={-1}
+          className="equipment-wizard"
           style={{
-            fontFamily: 'JetBrains Mono',
-            fontSize: 11,
-            letterSpacing: 1.4,
-            color: '#4D8DFF',
-            marginBottom: 8,
+            background: TOKENS.surface,
+            border: `1px solid ${TOKENS.lineStrong}`,
+            borderRadius: 16,
+            padding: '32px 36px',
+            width: 'min(720px, calc(100vw - 32px))',
+            maxHeight: 'calc(100dvh - 32px)',
+            overflowY: 'auto',
+            fontFamily: FONTS.ui,
           }}
         >
-          GET STARTED
-        </div>
-        <h2
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            color: '#fff',
-            margin: '0 0 6px',
-            letterSpacing: -0.4,
-          }}
-        >
-          What equipment do you have?
-        </h2>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', margin: '0 0 24px' }}>
-          Pick a starting profile. You can edit it any time in Settings → Equipment.
-        </p>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => handlePreset(p.id)}
-              disabled={busy}
-              style={{
-                textAlign: 'left',
-                padding: '20px 18px',
-                borderRadius: 12,
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: '#0A0D12',
-                color: '#fff',
-                cursor: busy ? 'wait' : 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              <div
+          <div className="repos-eyebrow" style={{ marginBottom: 8 }}>
+            Get started · 1 of 3
+          </div>
+          <h2
+            id="equipment-wizard-title"
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              color: TOKENS.text,
+              margin: '0 0 6px',
+              letterSpacing: -0.4,
+            }}
+          >
+            What equipment do you have?
+          </h2>
+          <p style={{ fontSize: 14, color: TOKENS.textDim, margin: '0 0 24px' }}>
+            Pick a starting profile. You can edit it any time in Settings → Equipment.
+          </p>
+          {error ? (
+            <DataState
+              kind="error"
+              title="Equipment was not saved"
+              body={error}
+              action={<span>Choose a profile below to retry.</span>}
+            />
+          ) : null}
+          <div className="repos-grid-3" style={{ marginTop: error ? 16 : 0 }}>
+            {PRESETS.map((p, index) => (
+              <button
+                ref={index === 0 ? firstPresetRef : undefined}
+                key={p.id}
+                onClick={() => void handlePreset(p.id)}
+                disabled={busy}
+                className="repos-card repos-card--interactive"
                 style={{
-                  fontFamily: 'JetBrains Mono',
-                  fontSize: 10,
-                  letterSpacing: 1.4,
-                  color: '#4D8DFF',
-                  marginBottom: 8,
+                  textAlign: 'left',
+                  padding: '20px 18px',
+                  color: TOKENS.text,
+                  cursor: busy ? 'wait' : 'pointer',
+                  fontFamily: 'inherit',
                 }}
               >
-                {p.title}
-              </div>
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{p.subtitle}</div>
-              <ul
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: 0,
-                  fontSize: 12,
-                  color: 'rgba(255,255,255,0.6)',
-                }}
-              >
-                {p.items.map((it) => (
-                  <li key={it} style={{ marginBottom: 4 }}>
-                    · {it}
-                  </li>
-                ))}
-              </ul>
-            </button>
-          ))}
+                <div className="repos-eyebrow" style={{ marginBottom: 8 }}>
+                  {p.title}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{p.subtitle}</div>
+                <ul
+                  style={{
+                    listStyle: 'none',
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 12,
+                    color: TOKENS.textDim,
+                  }}
+                >
+                  {p.items.map((it) => (
+                    <li key={it} style={{ marginBottom: 4 }}>
+                      · {it}
+                    </li>
+                  ))}
+                </ul>
+              </button>
+            ))}
+          </div>
+          <Button
+            variant="quiet"
+            onClick={() => onComplete({ _v: 1 })}
+            disabled={busy}
+            style={{ marginTop: 16 }}
+          >
+            Skip and edit later →
+          </Button>
+          {busy ? (
+            <div role="status" aria-live="polite" className="sr-only">
+              Saving equipment profile
+            </div>
+          ) : null}
         </div>
-        <button
-          onClick={() => onComplete({ _v: 1 })}
-          disabled={busy}
-          style={{
-            marginTop: 20,
-            background: 'transparent',
-            border: 'none',
-            color: 'rgba(255,255,255,0.5)',
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          Skip &amp; edit later →
-        </button>
-      </div>
+      </FocusTrap>
     </div>
   );
 }

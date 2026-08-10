@@ -172,10 +172,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { status, error } = useCurrentUser();
+  const { status } = useCurrentUser();
 
   if (status === 'loading') {
-    return null;
+    return (
+      <main
+        aria-busy="true"
+        aria-label="Loading RepOS"
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: TOKENS.bg,
+          color: TOKENS.text,
+          fontFamily: FONTS.ui,
+          padding: 24,
+        }}
+      >
+        <div style={{ width: 'min(100%, 360px)' }}>
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              color: TOKENS.accent,
+              fontWeight: 800,
+              letterSpacing: 2.4,
+              marginBottom: 28,
+            }}
+          >
+            RepOS
+          </div>
+          <div
+            role="status"
+            style={{
+              border: `1px solid ${TOKENS.line}`,
+              background: TOKENS.surface,
+              borderRadius: 12,
+              padding: 20,
+            }}
+          >
+            <div style={{ fontSize: 17, fontWeight: 650, marginBottom: 6 }}>
+              Preparing your training data
+            </div>
+            <div style={{ color: TOKENS.textDim, fontSize: 14, lineHeight: 1.5 }}>
+              Verifying access and restoring your workspace.
+            </div>
+            <div
+              aria-hidden="true"
+              style={{
+                height: 3,
+                borderRadius: 999,
+                background: TOKENS.surface3,
+                marginTop: 18,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: '42%',
+                  height: '100%',
+                  borderRadius: 999,
+                  background: TOKENS.accent,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (status === 'error') {
@@ -187,15 +250,56 @@ export function AuthGate({ children }: { children: ReactNode }) {
           alignItems: 'center',
           justifyContent: 'center',
           background: TOKENS.bg,
-          color: TOKENS.danger,
-          fontFamily: FONTS.mono,
-          fontSize: 13,
-          letterSpacing: 0.4,
+          color: TOKENS.text,
+          fontFamily: FONTS.ui,
           padding: 24,
-          textAlign: 'center',
         }}
       >
-        AUTH ERROR: {error ?? 'unknown'}
+        <div
+          role="alert"
+          style={{
+            width: 'min(100%, 420px)',
+            border: `1px solid rgba(255,106,106,0.55)`,
+            background: TOKENS.surface,
+            borderRadius: 12,
+            padding: 24,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: FONTS.mono,
+              color: TOKENS.danger,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 1.2,
+              marginBottom: 10,
+            }}
+          >
+            SIGN-IN UNAVAILABLE
+          </div>
+          <h1 style={{ fontSize: 22, lineHeight: 1.2, marginBottom: 8 }}>
+            We couldn't verify your sign-in.
+          </h1>
+          <p style={{ color: TOKENS.textDim, fontSize: 14, lineHeight: 1.5 }}>
+            Your data is unchanged. Check your connection, then try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              minHeight: 44,
+              marginTop: 20,
+              padding: '0 18px',
+              border: 0,
+              borderRadius: 8,
+              background: TOKENS.accent,
+              color: '#fff',
+              fontWeight: 700,
+            }}
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }

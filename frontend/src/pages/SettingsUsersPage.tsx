@@ -33,6 +33,7 @@ import {
   type InviteOutcome,
   type PatchOutcome,
 } from '../lib/api/adminUsers';
+import { Button, DataState, Page, PageHeader, StatusBadge } from '../components/ui';
 
 function statusOf(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
@@ -203,66 +204,47 @@ export default function SettingsUsersPage(): JSX.Element {
 
   if (denied) {
     return (
-      <div style={{ padding: 32, color: TOKENS.danger, fontFamily: FONTS.mono }}>
-        Not authorized.
-      </div>
+      <Page width="wide">
+        <DataState
+          kind="error"
+          title="Not authorized"
+          body="Your account does not have permission to manage RepOS users."
+        />
+      </Page>
     );
   }
 
   const drift = data?.drift;
 
   return (
-    <div
-      style={{
-        maxWidth: 1040,
-        margin: '0 auto',
-        padding: '24px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 14,
-      }}
+    <Page
+      width="data"
+      style={{ display: 'flex', flexDirection: 'column', gap: 14, color: TOKENS.text }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontFamily: FONTS.ui, color: TOKENS.text }}>Users</h1>
-        {data && (
-          <span
-            title="Counted cohort: active + invited + deleting"
-            style={{
-              fontFamily: FONTS.mono,
-              fontSize: 12,
-              color: data.cohort.count >= data.cohort.cap ? TOKENS.warn : TOKENS.textDim,
-              border: `1px solid ${TOKENS.line}`,
-              borderRadius: 999,
-              padding: '3px 10px',
-            }}
-          >
-            {data.cohort.count} / {data.cohort.cap}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            setInviteError(null);
-            setInviteOpen(true);
-          }}
-          style={{
-            marginLeft: 'auto',
-            padding: '7px 14px',
-            borderRadius: 6,
-            border: `1px solid ${TOKENS.accent}`,
-            background: TOKENS.accent,
-            color: '#fff',
-            fontFamily: FONTS.ui,
-            fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: 0.5,
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-          }}
-        >
-          Invite user
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="Administration"
+        title="Users"
+        description="Manage access, roles, synchronization, and account recovery."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {data ? (
+              <StatusBadge tone={data.cohort.count >= data.cohort.cap ? 'warning' : 'neutral'}>
+                {data.cohort.count} / {data.cohort.cap} seats
+              </StatusBadge>
+            ) : null}
+            <Button
+              variant="primary"
+              type="button"
+              onClick={() => {
+                setInviteError(null);
+                setInviteOpen(true);
+              }}
+            >
+              Invite user
+            </Button>
+          </div>
+        }
+      />
 
       {error && (
         <div
@@ -354,9 +336,7 @@ export default function SettingsUsersPage(): JSX.Element {
         </div>
       )}
 
-      {!error && data === null && (
-        <div style={{ color: TOKENS.textMute, fontFamily: FONTS.mono, fontSize: 12 }}>Loading…</div>
-      )}
+      {!error && data === null && <DataState kind="loading" title="Loading users" />}
 
       {data && (
         <UsersTable
@@ -374,6 +354,6 @@ export default function SettingsUsersPage(): JSX.Element {
         onSubmit={(email, role) => void handleInvite(email, role)}
         onCancel={() => setInviteOpen(false)}
       />
-    </div>
+    </Page>
   );
 }

@@ -4,8 +4,7 @@
 // card with its set detail (weight × reps @RIR).
 //
 // Desktop: the History nav link is always in the sidebar → 1 click.
-// Mobile:  the sidebar is a drawer, so it takes the Topbar hamburger
-//          ("Open navigation") THEN the History link → 2 clicks.
+// Mobile:  the four-item bottom navigation exposes History directly → 1 click.
 //
 // Hermetic: a catch-all `**/api/**` returns `{}` for anything not explicitly
 // wired (registered FIRST so the specific routes below win — Playwright matches
@@ -20,7 +19,8 @@ const USER = {
   display_name: 'Tester',
   timezone: 'UTC',
   is_admin: false,
-  onboarding_completed_at: '2026-01-01T00:00:00Z', beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
+  onboarding_completed_at: '2026-01-01T00:00:00Z',
+  beta_disclaimer_ack_at: '2026-01-01T00:00:00Z',
   par_q_version: 1,
   par_q_advisory_active: false,
 };
@@ -136,10 +136,12 @@ test('seq/history: reachable from / in <=3 clicks on MOBILE with set detail', as
   const page = await ctx.newPage();
   await page.goto('/');
 
-  // On mobile the sidebar is a drawer. 1: open it via the Topbar hamburger.
-  await page.getByRole('button', { name: /open navigation/i }).click();
-  // 2: the History link inside the now-visible drawer.
-  await page.getByRole('link', { name: /^history$/i }).click();
+  // The mobile bottom navigation makes this a single direct action. The drawer
+  // remains available for deeper account and settings destinations.
+  await page
+    .getByLabel('Primary')
+    .getByRole('link', { name: /^history$/i })
+    .click();
 
   // Completed workout card + set detail (mobile renders a flat single-column
   // list; first card auto-expands).

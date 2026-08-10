@@ -13,6 +13,7 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PacingChip } from './PacingChip';
 import { formatSessionDate } from './logger/HistorySheet';
 import { pushToast } from '../common/ToastHost';
+import { Button, DataState } from '../ui';
 
 type SwapTarget = { plannedSetId: string; fromName: string; toId: string; toName: string };
 
@@ -43,17 +44,40 @@ export function TodayWorkoutMobile({
   const [skipping, setSkipping] = useState(false);
   const [logPastOpen, setLogPastOpen] = useState(false);
   const [pastDate, setPastDate] = useState('');
+  const [loadError, setLoadError] = useState(false);
 
   const fetchToday = useCallback(() => {
+    setLoadError(false);
     getTodayWorkout()
       .then(setData)
-      .catch(() => setData(null));
+      .catch(() => setLoadError(true));
   }, []);
 
   useEffect(() => {
     fetchToday();
   }, [fetchToday]);
-  if (!data) return <div style={{ padding: 16, color: 'rgba(255,255,255,0.5)' }}>Loading…</div>;
+  if (loadError)
+    return (
+      <div style={{ padding: 16 }}>
+        <DataState
+          compact
+          kind="error"
+          title="Today's workout could not be loaded"
+          body="Your training plan was not changed."
+          action={
+            <Button variant="secondary" onClick={fetchToday}>
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    );
+  if (!data)
+    return (
+      <div style={{ padding: 16 }}>
+        <DataState kind="loading" title="Loading…" />
+      </div>
+    );
   if (data.state === 'no_active_run')
     return (
       <div style={{ padding: 16, color: 'rgba(255,255,255,0.7)' }}>
@@ -153,7 +177,7 @@ export function TodayWorkoutMobile({
           )}
         </div>
         {/* W2.6 — session-level manual deload (mobile). */}
-        <DeloadThisWeekButton runId={data.run_id} onChanged={fetchToday} />
+        <DeloadThisWeekButton runId={data.run_id} onChanged={fetchToday} variant="quiet" />
       </header>
       <ul
         style={{
@@ -445,7 +469,9 @@ function textBtn(color: string): React.CSSProperties {
   return {
     background: 'none',
     border: 'none',
-    padding: 0,
+    minWidth: 44,
+    minHeight: 44,
+    padding: '0 8px',
     color,
     fontFamily: 'Inter Tight',
     fontSize: 13,

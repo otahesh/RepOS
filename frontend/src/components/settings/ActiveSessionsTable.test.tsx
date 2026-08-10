@@ -6,7 +6,7 @@
 //   1. lists active sessions with label + last_used_at + truncated /24 IP
 //      (desktop layout — table rows).
 //   2. renders empty state "No active sessions" when listSessions resolves []
-//   3. renders card layout at <600px viewport (per I-SESSIONS-MOBILE)
+//   3. renders card layout below desktop width.
 //
 // The component reads window.innerWidth + listens to resize to flip layouts,
 // so each test sets innerWidth + fires a resize event before render.
@@ -69,8 +69,8 @@ describe('ActiveSessionsTable', () => {
     expect(screen.queryByTestId('session-card')).toBeNull();
   });
 
-  it('renders card layout at <600px viewport (per I-SESSIONS-MOBILE)', async () => {
-    setViewport(500);
+  it('renders card layout at tablet width', async () => {
+    setViewport(768);
     vi.mocked(api.listSessions).mockResolvedValue([
       {
         id: 'sess-1',

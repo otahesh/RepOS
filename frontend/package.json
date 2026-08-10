@@ -11,6 +11,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:responsive": "playwright test playwright/responsive-visual-regression.spec.ts",
     "test:watch": "vitest",
     "check-pages": "node scripts/check-page-reachability.mjs",
     "check-tz-sync": "node ../scripts/check-tz-sync.mjs",

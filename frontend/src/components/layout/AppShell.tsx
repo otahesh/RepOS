@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { RouteErrorBoundary } from './RouteErrorBoundary';
@@ -14,6 +14,8 @@ import { OnboardingOverlay } from '../onboarding/OnboardingOverlay';
 import { ParQGate } from '../onboarding/ParQGate';
 import { BetaDisclaimer } from '../onboarding/BetaDisclaimer';
 import { getParQStatus } from '../../lib/api/parQ';
+import Icon from '../Icon';
+import { TOKENS, FONTS } from '../../tokens';
 
 // W2 (panel C-MOUNT) — derived state machine that mounts ONE of the AppShell
 // overlays (or none) as a sibling of <Outlet>. Disclaimer precedes onboarding
@@ -69,6 +71,7 @@ export default function AppShell() {
   const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const activeWorkout = /^\/today\/[^/]+\/log/.test(location.pathname);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const onboardingOverlay = useOnboardingGate();
 
@@ -120,7 +123,7 @@ export default function AppShell() {
           overflow: 'hidden',
           background: 'var(--color-bg)',
           display: 'grid',
-          gridTemplateRows: '72px 1fr',
+          gridTemplateRows: activeWorkout ? '72px 1fr' : '72px 1fr 64px',
           minHeight: 0,
         }}
       >
@@ -129,6 +132,7 @@ export default function AppShell() {
         <SyncStatusPill />
         <SessionExpiredBanner />
         <main
+          className="app-main"
           style={{
             overflow: 'auto',
             minHeight: 0,
@@ -139,6 +143,7 @@ export default function AppShell() {
             <Outlet />
           </RouteErrorBoundary>
         </main>
+        {!activeWorkout && <MobileBottomNav />}
         <ToastHost />
         {onboardingOverlay}
 
@@ -188,6 +193,7 @@ export default function AppShell() {
         <SyncStatusPill />
         <SessionExpiredBanner />
         <main
+          className="app-main"
           style={{
             overflow: 'auto',
             minHeight: 0,
@@ -201,5 +207,71 @@ export default function AppShell() {
       </div>
       {onboardingOverlay}
     </div>
+  );
+}
+
+const BOTTOM_NAV = [
+  { label: 'Today', to: '/', icon: 'flame' as const, match: (path: string) => path === '/' },
+  {
+    label: 'Programs',
+    to: '/programs',
+    icon: 'dumbbell' as const,
+    match: (path: string) => path.startsWith('/programs') || path.startsWith('/my-programs'),
+  },
+  {
+    label: 'History',
+    to: '/history',
+    icon: 'clock' as const,
+    match: (path: string) => path.startsWith('/history'),
+  },
+  {
+    label: 'Settings',
+    to: '/settings',
+    icon: 'settings' as const,
+    match: (path: string) => path.startsWith('/settings'),
+  },
+] as const;
+
+function MobileBottomNav() {
+  const location = useLocation();
+  return (
+    <nav
+      aria-label="Primary"
+      style={{
+        borderTop: `1px solid ${TOKENS.lineStrong}`,
+        background: TOKENS.surface,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        padding: '4px 8px env(safe-area-inset-bottom)',
+        zIndex: 20,
+      }}
+    >
+      {BOTTOM_NAV.map((item) => {
+        const active = item.match(location.pathname);
+        return (
+          <NavLink
+            key={item.label}
+            to={item.to}
+            aria-current={active ? 'page' : undefined}
+            style={{
+              minHeight: 52,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 3,
+              borderRadius: 8,
+              color: active ? TOKENS.accent : TOKENS.textDim,
+              fontFamily: FONTS.ui,
+              fontSize: 11,
+              fontWeight: active ? 700 : 550,
+            }}
+          >
+            <Icon name={item.icon} size={18} color={active ? TOKENS.accent : TOKENS.textDim} />
+            <span>{item.label}</span>
+          </NavLink>
+        );
+      })}
+    </nav>
   );
 }

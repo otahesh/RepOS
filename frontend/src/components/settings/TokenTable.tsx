@@ -1,6 +1,8 @@
 import { TOKENS, FONTS } from '../../tokens';
 import Icon from '../Icon';
 import { formatShortDate } from '../../lib/formatDate';
+import { useIsBelowTablet } from '../../lib/useIsMobile';
+import { Button, DataState } from '../ui';
 
 export interface TokenRow {
   id: string;
@@ -21,22 +23,51 @@ function formatDate(isoString: string | null): string {
 }
 
 export default function TokenTable({ tokens, onRevoke, revoking }: Props) {
+  const isCompact = useIsBelowTablet();
   if (tokens.length === 0) {
     return (
-      <div
-        style={{
-          padding: '24px 20px',
-          textAlign: 'center',
-          fontFamily: FONTS.mono,
-          fontSize: 12,
-          color: TOKENS.textMute,
-          letterSpacing: 0.6,
-          background: TOKENS.bg,
-          borderRadius: 8,
-          border: `1px solid ${TOKENS.line}`,
-        }}
-      >
-        NO TOKENS. GENERATE ONE TO CONNECT YOUR SHORTCUT.
+      <DataState
+        title="No access tokens"
+        body="Generate one to connect your Shortcut. The secret is shown once."
+      />
+    );
+  }
+
+  if (isCompact) {
+    return (
+      <div style={{ display: 'grid', gap: 10 }}>
+        {tokens.map((token) => (
+          <article key={token.id} className="repos-data-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="key" size={15} color={TOKENS.accent} />
+              <strong style={{ color: TOKENS.text, fontSize: 14 }}>{token.label}</strong>
+            </div>
+            <dl
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '88px minmax(0, 1fr)',
+                gap: '6px 10px',
+                margin: 0,
+                color: TOKENS.textDim,
+                fontFamily: FONTS.mono,
+                fontSize: 10,
+              }}
+            >
+              <dt>Created</dt>
+              <dd style={{ margin: 0 }}>{formatDate(token.created_at)}</dd>
+              <dt>Last used</dt>
+              <dd style={{ margin: 0 }}>{formatDate(token.last_used_at)}</dd>
+            </dl>
+            <Button
+              variant="danger"
+              onClick={() => onRevoke(token.id)}
+              disabled={revoking === token.id}
+            >
+              <Icon name="trash" size={13} color={TOKENS.danger} />
+              {revoking === token.id ? 'Revoking…' : 'Revoke token'}
+            </Button>
+          </article>
+        ))}
       </div>
     );
   }
@@ -135,30 +166,18 @@ export default function TokenTable({ tokens, onRevoke, revoking }: Props) {
           </div>
 
           <div>
-            <button
+            <Button
+              variant="danger"
               onClick={() => onRevoke(token.id)}
               disabled={revoking === token.id}
               style={{
-                height: 28,
-                padding: '0 10px',
-                borderRadius: 6,
-                border: `1px solid rgba(255,106,106,0.3)`,
-                background: 'rgba(255,106,106,0.08)',
-                color: TOKENS.danger,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontFamily: FONTS.mono,
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: 0.4,
-                cursor: revoking === token.id ? 'not-allowed' : 'pointer',
-                opacity: revoking === token.id ? 0.5 : 1,
+                minHeight: 34,
+                paddingInline: 10,
               }}
             >
               <Icon name="trash" size={10} color={TOKENS.danger} />
-              {revoking === token.id ? '...' : 'REVOKE'}
-            </button>
+              {revoking === token.id ? '...' : 'Revoke'}
+            </Button>
           </div>
         </div>
       ))}

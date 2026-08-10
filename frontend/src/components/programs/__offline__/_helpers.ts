@@ -211,10 +211,9 @@ async function installOfflineHatch(page: Page): Promise<void> {
 export async function seedMesocycle(page: Page, opts: SeedOptions = {}): Promise<MockServer> {
   await installOfflineHatch(page);
 
-  // The live logger is mobile-only: TodayLoggerMobileGate redirects desktop
-  // widths to /today, so set-row-0 never mounts. useIsMobile keys on
-  // (max-width: 767px) and Playwright's default Desktop Chrome is 1280px — set
-  // a phone viewport BEFORE navigation so the logger actually renders.
+  // These offline suites exercise the one-handed mobile composition. Set a
+  // phone viewport before navigation so they keep covering the hub → focus
+  // flow rather than the capability-equivalent desktop workspace.
   await page.setViewportSize({ width: 390, height: 844 });
 
   const user = opts.user ?? DEFAULT_USER;

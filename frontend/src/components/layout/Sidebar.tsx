@@ -5,7 +5,7 @@ import { TOKENS, FONTS } from '../../tokens';
 import { useCurrentUser } from '../../auth';
 import { useIsMobile } from '../../lib/useIsMobile';
 import Icon from '../Icon';
-import { SETTINGS_SECTIONS } from '../settings/SettingsSidebar';
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from '../settings/SettingsSidebar';
 
 function monogram(displayName: string | null | undefined, email: string): string {
   const trimmedName = displayName?.trim() ?? '';
@@ -36,9 +36,7 @@ const NAV_ITEMS: NavItem[] = [
     matchPrefixes: ['/programs', '/my-programs'],
   },
   { name: 'History', icon: 'clock', to: '/history' },
-  // I-MOBILE-SIGNOUT-PATH (W6 D7): Settings nav now lands on /settings/account
-  // (Account is the W6 owner-wave entry and first in SETTINGS_SECTIONS).
-  { name: 'Settings', icon: 'settings', to: '/settings/account', matchPrefixes: ['/settings'] },
+  { name: 'Settings', icon: 'settings', to: '/settings', matchPrefixes: ['/settings'] },
 ];
 
 interface SidebarProps {
@@ -200,12 +198,12 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
                 </div>
               </NavLink>
 
-              {/* Settings sub-nav — flat list over SETTINGS_SECTIONS (D7:
-                  Storage + Injuries stay top-level, no nested tiers). */}
-              {item.name === 'Settings' && isSettings && (
+              {/* Desktop keeps every destination one click away. Mobile uses
+                  the grouped Settings overview instead of a long drawer. */}
+              {item.name === 'Settings' && isSettings && !isMobile && (
                 <div
                   style={{
-                    paddingLeft: 38,
+                    paddingLeft: 28,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 2,
@@ -213,54 +211,50 @@ export default function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
                     marginTop: 2,
                   }}
                 >
-                  {visibleSections.map((sub) => {
-                    if (sub.disabled) {
-                      // Non-navigable placeholder for W4/W5/W7 slots. Skips
-                      // tab order via aria-disabled + tabIndex=-1.
-                      return (
-                        <div
-                          key={sub.label}
-                          aria-disabled="true"
-                          tabIndex={-1}
-                          style={{
-                            fontSize: 12,
-                            padding: '5px 10px',
-                            borderRadius: 6,
-                            color: TOKENS.textMute,
-                            fontWeight: 500,
-                            background: 'transparent',
-                            cursor: 'not-allowed',
-                            opacity: 0.6,
-                          }}
-                        >
-                          {sub.label}
-                        </div>
-                      );
-                    }
-                    const subActive = location.pathname === sub.to;
-                    return (
-                      <NavLink
-                        key={sub.label}
-                        to={sub.to}
-                        onClick={handleNavClick}
-                        style={{ textDecoration: 'none' }}
+                  {SETTINGS_GROUPS.map((group) => (
+                    <div key={group} style={{ marginTop: 7 }}>
+                      <div
+                        style={{
+                          padding: '2px 10px 4px',
+                          color: TOKENS.textMute,
+                          fontFamily: FONTS.mono,
+                          fontSize: 8,
+                          fontWeight: 700,
+                          letterSpacing: 0.9,
+                          textTransform: 'uppercase',
+                        }}
                       >
-                        <div
-                          style={{
-                            fontSize: 12,
-                            padding: '5px 10px',
-                            borderRadius: 6,
-                            color: subActive ? TOKENS.accent : TOKENS.textMute,
-                            fontWeight: subActive ? 600 : 500,
-                            background: subActive ? TOKENS.accentGlow : 'transparent',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {sub.label}
-                        </div>
-                      </NavLink>
-                    );
-                  })}
+                        {group}
+                      </div>
+                      {visibleSections
+                        .filter((section) => section.group === group)
+                        .map((sub) => {
+                          const subActive = location.pathname === sub.to;
+                          return (
+                            <NavLink
+                              key={sub.label}
+                              to={sub.to}
+                              onClick={handleNavClick}
+                              style={{ textDecoration: 'none' }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  color: subActive ? TOKENS.accent : TOKENS.textMute,
+                                  fontWeight: subActive ? 600 : 500,
+                                  background: subActive ? TOKENS.accentGlow : 'transparent',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {sub.label}
+                              </div>
+                            </NavLink>
+                          );
+                        })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
