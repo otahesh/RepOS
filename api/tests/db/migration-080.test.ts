@@ -2,6 +2,8 @@
 // Cloudflare dependency. Round-6 review finding 1: a genuinely EMPTY database
 // has nothing to promote, so clause (3) inserts the founding row.
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, afterAll } from 'vitest';
 import pg from 'pg';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
@@ -12,6 +14,26 @@ import { FOUNDING_ADMIN_EMAIL } from '../../src/constants/users.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterAll(async () => {
   for (const c of cleanups) await c();
+});
+
+describe('the founding-admin literal is not duplicated by hand', () => {
+  // The constant and the SQL each hold their own copy of the address, and
+  // "keep them in sync" lived only in a comment. On 2026-08-09 they drifted:
+  // the founding identity moved and 080 still named the old address, so on a
+  // database without the old row clause (3) INSERTED a second admin rather
+  // than promoting the real one. Every other case in this file runs the
+  // migration and asserts against the CONSTANT, so all of them stayed green
+  // through that drift — they cannot see it by construction. This one reads
+  // the .sql text itself, which is the only thing that can.
+  it('080_users_roles_status.sql declares exactly FOUNDING_ADMIN_EMAIL', () => {
+    const sql = readFileSync(
+      fileURLToPath(new URL('../../src/db/migrations/080_users_roles_status.sql', import.meta.url)),
+      'utf8',
+    );
+    const declared = sql.match(/founding_email\s+CONSTANT\s+TEXT\s*:=\s*'([^']+)'/);
+    expect(declared, 'the founding_email declaration was not found in 080').not.toBeNull();
+    expect(declared![1]).toBe(FOUNDING_ADMIN_EMAIL);
+  });
 });
 
 async function freshPool(tag: string): Promise<pg.Pool> {
