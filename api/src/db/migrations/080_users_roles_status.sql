@@ -54,7 +54,9 @@ CREATE INDEX IF NOT EXISTS users_status_idx ON users (status);
 -- "promote the oldest row" would hand admin to a random Beta user.
 DO $$
 DECLARE
-  founding_email CONSTANT TEXT := 'jason.meyer1@gmail.com';
+  -- Must equal FOUNDING_ADMIN_EMAIL in api/src/constants/users.ts; asserted by
+  -- migration-080.test.ts, which reads this file rather than trusting prose.
+  founding_email CONSTANT TEXT := 'jason@jpmtech.com';
   target_id UUID;
 BEGIN
   IF EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND status = 'active') THEN

@@ -22,14 +22,27 @@ active admin on every schema-entry path with no Cloudflare dependency.
 
 SSH to Unraid, then:
 
-Note the `sh -c` wrapper and the **single** outer quotes. `DATABASE_URL` must be
-expanded by the shell *inside* the container; writing `docker exec repos psql
-"$DATABASE_URL"` makes the Unraid host expand it first, and since the host has
-no such variable psql receives an empty connection string and silently falls
-back to libpq defaults instead of the container's configured database.
+Note the `sh -c` wrapper and the **single** outer quotes: the variables must be
+expanded by the shell *inside* the container. Writing them in double quotes
+makes the Unraid host expand them first, and since the host has no such
+variables psql receives an empty connection string and silently falls back to
+libpq defaults instead of the container's configured database.
+
+**Do not use `$DATABASE_URL` here.** It is not part of the container
+environment — the three s6 scripts that need it each construct it and export it
+into their own service (`run-api:6`, `init-migrations:8`, `init-seed:8`), and
+`docker exec` inherits none of that. Verified on the live container
+2026-08-09: `docker exec RepOS sh -c 'echo ${DATABASE_URL:-<UNSET>}'` prints
+`<UNSET>`, and the earlier form of these commands failed with
+`connection to server on socket "/run/postgresql/.s.PGSQL.5432" failed`. The
+connection string below is built from `POSTGRES_*`, which *are* in the
+environment, the same way those three scripts build it.
+
+The container is named **`RepOS`**, capitalised. `docker exec ... repos`
+targets a container that does not exist.
 
 ```bash
-docker exec -it repos sh -c 'psql "$DATABASE_URL" -c \
+docker exec -it RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}" -c \
   "UPDATE users SET role='"'"'admin'"'"', status='"'"'active'"'"', cf_synced_at=NULL WHERE lower(email)='"'"'<email>'"'"';"'
 ```
 
@@ -37,7 +50,7 @@ If quoting that densely is uncomfortable, the equivalent heredoc form is easier
 to get right and is what the runbook prefers:
 
 ```bash
-docker exec -i repos sh -c 'psql "$DATABASE_URL"' <<'SQL'
+docker exec -i RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}"' <<'SQL'
 UPDATE users SET role='admin', status='active', cf_synced_at=NULL WHERE lower(email)='<email>';
 SQL
 ```
@@ -55,7 +68,7 @@ If the identity has no row at all (deny-by-default means it cannot sign in to
 create one):
 
 ```bash
-docker exec -i repos sh -c 'psql "$DATABASE_URL"' <<'SQL'
+docker exec -i RepOS sh -c 'psql "postgres://${POSTGRES_USER:-repos}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-repos}"' <<'SQL'
 INSERT INTO users (email, role, status) VALUES ('<email>','admin','active');
 SQL
 ```
