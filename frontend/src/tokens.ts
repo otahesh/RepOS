@@ -64,5 +64,9 @@ export const FONTS = {
   mono: '"JetBrains Mono", "SF Mono", ui-monospace, monospace',
 } as const;
 
+// An explicitly-set empty value is meaningful: both .env.development and
+// .env.production use it to select the same-origin path (vite proxy / nginx).
+// Only an entirely unset var falls back, and never to localhost in a prod build.
 export const API_BASE: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3001';
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (import.meta.env.DEV ? 'http://localhost:3001' : '');

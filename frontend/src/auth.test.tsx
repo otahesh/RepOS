@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor, screen } from '@testing-library/react';
-import { AuthProvider, useCurrentUser } from './auth';
+import { AuthProvider, isAllowedCfAccessUrl, useCurrentUser } from './auth';
 import { idbQueue, type PendingSetLog } from './lib/idbQueue';
 
 function mkPendingRow(over: Partial<PendingSetLog> = {}): PendingSetLog {
@@ -166,5 +166,18 @@ describe('AuthProvider', () => {
 
     expect(await idbQueue.peekPending()).toHaveLength(1);
     expect(await idbQueue.getQueueOwnerUserId()).toBe('user-A');
+  });
+});
+
+describe('isAllowedCfAccessUrl', () => {
+  it('accepts only HTTPS Access paths on the configured team host', () => {
+    expect(
+      isAllowedCfAccessUrl('https://jpmtech.cloudflareaccess.com/cdn-cgi/access/login/repos'),
+    ).toBe(true);
+    expect(
+      isAllowedCfAccessUrl('http://jpmtech.cloudflareaccess.com/cdn-cgi/access/login/repos'),
+    ).toBe(false);
+    expect(isAllowedCfAccessUrl('https://evil.example/cdn-cgi/access/login/repos')).toBe(false);
+    expect(isAllowedCfAccessUrl('javascript:alert(1)')).toBe(false);
   });
 });

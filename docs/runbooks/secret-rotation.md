@@ -45,8 +45,8 @@ call the same permission *Write*. There is no narrower option: the permission
 group is account-scoped only, with no per-policy variant. "Cloudflare Access
 Policy Admin" is a **member role** granted to account members — it is not
 offered when minting an API token, so do not go looking for it under My Profile
-→ API Tokens. (The policy this token drives is
-`b4a92a15-27d5-477b-ad36-f78fcdae931c`.)
+→ API Tokens. The target policy is the one configured by
+`CF_ACCESS_POLICY_ID`; do not repeat its live identifier in tracked docs.
 
 **Never grant `Access: Organizations Revoke`.** RepOS makes no
 session-revocation call (Q17a) — that endpoint revokes access across *all*

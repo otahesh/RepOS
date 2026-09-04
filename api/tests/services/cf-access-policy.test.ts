@@ -7,8 +7,8 @@ import {
   __setFetchForTesting,
 } from '../../src/services/cfAccessPolicy.js';
 
-const ACCOUNT = '400d0b4a35d63a32b86ab774b9feb4ab';
-const POLICY = 'b4a92a15-27d5-477b-ad36-f78fcdae931c';
+const ACCOUNT = '11111111111111111111111111111111';
+const POLICY = '22222222-2222-4222-8222-222222222222';
 
 function policyResult(over: Record<string, unknown> = {}) {
   return {

@@ -5,6 +5,10 @@
 // status='failed' backup_runs row with the error message, and rethrow.
 import 'dotenv/config';
 import { describe, it, expect, afterAll, afterEach } from 'vitest';
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runManualBackup, dumpToFile } from '../../src/services/backupRunner.js';
 import { db } from '../../src/db/client.js';
 
@@ -28,8 +32,20 @@ describe('backupRunner failure branches', () => {
     await expect(dumpToFile('/tmp/never-written.dump.gz')).rejects.toThrow(/DATABASE_URL/);
   });
 
+  it('passes a hostile-looking DATABASE_URL as data rather than shell syntax', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'repos-backup-argv-'));
+    const marker = join(dir, 'command-ran');
+    process.env.DATABASE_URL = `postgres://invalid/db"$(touch ${marker})`;
+    try {
+      await expect(dumpToFile(join(dir, 'out.dump.gz'))).rejects.toThrow();
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('runManualBackup records a failed backup_runs row and rethrows when the dump cannot be written', async () => {
-    // Unwritable destination: the shell pipe exits non-zero, so the catch
+    // Unwritable destination: the output stream fails, so the catch
     // branch must stamp the run failed with the error message.
     process.env.BACKUPS_DIR = `/nonexistent-vitest-${process.pid}`;
 

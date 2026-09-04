@@ -37,6 +37,23 @@ export interface AuthState {
   error: string | null;
 }
 
+export const CF_ACCESS_TEAM_HOST = 'jpmtech.cloudflareaccess.com';
+
+/** Only accept the exact production team login endpoint surfaced by the API. */
+export function isAllowedCfAccessUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === CF_ACCESS_TEAM_HOST &&
+      url.port === '' &&
+      url.pathname.startsWith('/cdn-cgi/access/')
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Same-origin JSON fetch with cookie credentials. Prepends API_BASE for dev
  * cross-origin (`http://localhost:3001`); empty in prod for same-origin.
@@ -59,7 +76,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     const wwwAuth = res.headers.get('WWW-Authenticate') ?? '';
     // Match: CFAccess url=<url>   (url may be quoted or bare)
     const match = wwwAuth.match(/CFAccess\s+url=("?)([^"\s]+)\1/i);
-    if (match && match[2]) {
+    if (match && match[2] && isAllowedCfAccessUrl(match[2])) {
       window.location.assign(match[2]);
       // Return a never-resolving promise so callers don't proceed during nav.
       return new Promise<Response>(() => {});

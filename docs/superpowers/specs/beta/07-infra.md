@@ -127,14 +127,9 @@ Alternative if the user doesn't want to touch the host daemon config: pass `--lo
 # Find the previous image's sha tag
 ssh unraid 'docker image ls ghcr.io/otahesh/repos --format "{{.Tag}}\t{{.CreatedAt}}" | sort -k2'
 
-# Roll back: same recipe as redeploy, but pull a sha tag, not latest
-docker pull ghcr.io/otahesh/repos:sha-<previous>
-docker stop RepOS && docker rm RepOS
-docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
-  --restart unless-stopped \
-  -v /mnt/user/appdata/repos/config:/config \
-  --env-file /tmp/repos.env \
-  ghcr.io/otahesh/repos:sha-<previous>
+# From the repository, use the hardened env-preserving rollback helper. It
+# creates a mode-0600 env file under /root and removes it on every exit path.
+docker/scripts/rollback.sh <previous-sha>
 ```
 
 **Note on schema rollback:** rolling the *image* back is safe. Rolling a *migration* back is not — the migration runner is forward-only (see `api/src/db/migrate.ts`). If a deploy applies migration N and N is destructive, image rollback to a build that doesn't know about column-N's existence may break runtime. This is the subject of §"Migration runbook" below.
@@ -173,7 +168,7 @@ docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
 ## Nice-to-have for Beta
 
 - **Backup off-box redundancy.** Memory `project_arr_style_db_recovery.md` says the Unraid host already backs up `/mnt/user/appdata/` out-of-band; trust that. If the user wants belt-and-suspenders, `rclone` the `/config/backups/` dir to a remote (B2/S3) on a daily host cron. Skip for Beta — duplicates effort already covered host-side.
-- **Build provenance / SBOM.** `docker.yml` currently sets `provenance: false`. For a single-user app behind CF Access this is fine. Revisit at GA if multi-user.
+- **SBOM.** Build provenance is enabled at `mode=max`; add a separately published SBOM if release policy later requires one.
 - **Restore CLI helper.** A `repos-restore.sh` companion to `repos-backup.sh` that takes a dump file, stops the API service via `s6-rc -d`, drops + recreates the DB, restores, restarts the API. Useful for the in-app `*arr`-style restore UI Backend will design — they should call this script via a privileged endpoint rather than reimplementing pg_restore in TS. Coordinate with Backend.
 - **Container resource limits.** Currently no `--memory` or `--cpus` flag in the run recipe. Beta single-user load is well under a single core; postgres will happily use whatever RAM you give it for buffer cache. Set `--memory=2g --memory-swap=2g --cpus=2` in the run recipe — it's a guardrail against a pathological query, not a tuning target.
 - **Postgres connection metrics on the sync-status endpoint.** Already half-there (`/api/health/sync/status` returns sync state). Adding pool-utilization fields gives the operator one more failure-mode signal at zero extra round-trip cost.
@@ -356,7 +351,7 @@ docker run -d --name RepOS --network br0 --ip 192.168.88.65 \
 
 6. **Roll-forward over fix-forward-under-pressure.** Documented rollback procedure (Must-have #6).
 
-7. **Provenance:** keep `provenance: false` for Beta. Revisit at GA.
+7. **Provenance:** enabled at `mode=max` in `docker.yml`; retain it for Beta and GA.
 
 8. **Out of scope for Beta:** automated Unraid deploy via webhook (the SSH-and-recreate dance is fine for current cadence — adds operational surface in exchange for saving 5 min per deploy, which we don't deploy often enough to justify).
 
