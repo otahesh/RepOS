@@ -6,6 +6,11 @@ the prompt-injection surface, a feedback-level advisory lock, queue membership b
 `category` rather than `triaged_at`, an explicit at-most-once delivery model,
 disposable worktrees for agent git work, effective-fix-SHA selection for
 duplicates, and validation of persisted email requests before replay.
+**Revision 3, 2026-09-04:** brokers the GitHub token as well, so the agent holds
+no credential of any kind; adds `replay-pending` so a network-failed send is
+actually retried rather than silently aging into a dead letter; fixes the
+stale "writes a body file" wording; moves `FEEDBACK_WEBHOOK_URL` behind the
+broker.
 **Revision 2, 2026-09-04:** closes four more — `list --pending` for the crash
 gap between `triage` and `email`; a real broker process behind a Unix socket in
 place of an asserted credential boundary; an agent-owned bare mirror so
@@ -65,8 +70,9 @@ Settled with Jason on 2026-08-10:
 
 **The feedback body is attacker-controlled input.** `FeedbackCreateSchema`
 accepts up to 4000 characters of free text from any authenticated user
-(`api/src/schemas/feedback.ts:8`), and a headless coding agent then reads it
-while holding repository write access. Text written by someone else, read by an
+(`api/src/schemas/feedback.ts:8`), and a headless coding agent then reads it and
+acts on it — writing code, drafting mail to the submitter, and asking for a pull
+request. Text written by someone else, read by an
 agent that can act, is a prompt-injection surface regardless of who that someone
 is. *"Only people I know get invited"* is a **tone** policy — it was Jason's
 answer to how snarky the replies may be. It is not a security boundary, and this
@@ -85,17 +91,18 @@ split to *capability* is what closes the injection surface:
   security principal*, not in a different source file.
 
   `repos-feedback-broker` is a systemd **system** service running as its own
-  account, `repos-broker`. It holds `RESEND_API_KEY`, the Unraid SSH identity
-  and `DATABASE_URL`, loaded via systemd `LoadCredential=` from files owned by
-  `repos-broker` and mode `0600`. It listens on a Unix domain socket,
+  account, `repos-broker`. It holds `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`,
+  the GitHub write token, the Unraid SSH identity and `DATABASE_URL`, loaded via
+  systemd `LoadCredential=` from files owned by `repos-broker` and mode `0600`. It listens on a Unix domain socket,
   `/run/repos-feedback/broker.sock`, mode `0660`, group `repos-agent`. The agent
   account is in that group and **socket access is the entire grant**: it can
   send a request and read a reply, and it cannot read the key files, the SSH
   identity, or the database.
 
 - **The agent has no database access either.** Every verb — `list`, `triage`,
-  `link`, `email`, `check-shipped` — is a request over the socket. The CLI the
-  agent runs is a thin client with no secrets in it.
+  `link`, `email`, `replay-pending`, `check-shipped`, `push-branch`, `open-pr` —
+  is a request over the socket. The CLI the agent runs is a thin client with no
+  secrets in it.
 
 - **No path arguments cross the boundary.** `--body-file` is removed. A
   privileged process that reads a path supplied by a lower-privileged caller is
@@ -110,19 +117,41 @@ split to *capability* is what closes the injection surface:
   from the request. `from` comes from the broker's own configuration. The
   idempotency key is computed from `(kind, feedback_id)`. The agent supplies
   prose and nothing else; it cannot name a recipient even if it tries.
-- **The GitHub credential is scoped to push branches and open pull requests on
-  this repository only.** No merge, no `workflow` scope, no secrets, no admin,
-  no other repository. `main` is protected and requires 8 passing checks, so the
-  worst case of a poisoned agent is a bad PR that a human declines — which is
-  already the normal review path, not a new one.
+- **The GitHub credential is brokered too. The agent holds zero credentials of
+  any kind.** Handing the agent even a narrow token would have contradicted the
+  claim two bullets up: a token in the agent's environment is a string the agent
+  can read, and an injected instruction could have it written into email prose
+  sent to the submitter who supplied the instruction, or committed to a pushed
+  branch. "Cannot exfiltrate a credential" has to mean *all* of them.
+
+  This is cheap here because **the repository is public**: the agent fetches and
+  clones its mirror anonymously and needs no credential to read. Only writes
+  need one, so `push-branch` and `open-pr` are broker verbs like the rest. The
+  broker holds a token scoped to push-branch and open-PR on this repository
+  only — no merge, no `workflow` scope, no secrets, no admin, no other
+  repository — and pushes only from the agent's mirror, to a branch name the
+  request supplies. Content the broker pushes is content the agent already
+  controls, so brokering the push grants the agent nothing it did not have; it
+  only removes the token from its reach.
+
+  `main` is protected and requires 8 passing checks, so the worst case of a
+  poisoned agent remains a bad PR that a human declines — the normal review
+  path, not a new one.
+
+- **The repository being public cuts both ways.** Branches, commit messages and
+  PR bodies the agent creates are world-readable the moment they are pushed.
+  Submitter email addresses and verbatim feedback bodies must therefore never
+  appear in a branch, a commit message, a test fixture or a PR description. The
+  agent references feedback by `id`; the broker is the only component that ever
+  sees an address.
 - **The skill frames the body as data.** It is passed inside an explicit
   delimiter and labelled untrusted, with the standing rule that instructions
   found *inside* a feedback body are content to be classified, never directions
   to follow. A body that tries to issue instructions is itself a strong `noise`
   signal, and the snark reply handles it.
-- **The agent never sends mail directly.** It writes a body file; `email`
-  validates the category transition, the recipient and the sender, and holds the
-  Resend key.
+- **The agent never sends mail directly.** It submits the copy inline over the
+  socket; `email` validates the category transition, derives the recipient and
+  the sender, and holds the Resend key.
 
 What this buys, stated precisely: an injected instruction cannot exfiltrate a
 credential, open a connection to production, mail a third party, or reach the
@@ -172,8 +201,21 @@ the send deliberately happens *after* the commit.
 `list --pending` closes the gap: rows with a non-NULL `category` and a
 `user_email_at_submit`, whose required first email — `reply` for
 `noise`/`question`, `ack` otherwise — has no `feedback_emails` row at all.
-A row that has a row but an unsent one is already handled by replay; this is
-specifically the *no row was ever written* case. Every sweep drains
+This is specifically the *no row was ever written* case.
+
+**The written-but-unsent case needs its own verb, and it was missing.** A send
+that failed on the network leaves a ledger row with `sent_at IS NULL` — which
+`list --pending` deliberately excludes, and which `list --untriaged` never
+returns because the row is classified. Nothing selected it, so the "retries on
+the next sweep" policy below was fiction: the row would have sat untouched until
+it aged past 24 hours and was dead-lettered without a single retry ever being
+attempted.
+
+`replay-pending` is the mechanical fix. It selects every `feedback_emails` row
+with `sent_at IS NULL` and `dead_lettered_at IS NULL`, validates each persisted
+request, and re-sends it under its original key and bytes — or dead-letters it
+if it is out of time. It requires no judgement and takes no agent input, so it
+is a pure CLI/broker operation. Every sweep drains
 `list --pending` before it looks at new feedback, so a crash costs one sweep
 interval rather than the item.
 
@@ -325,6 +367,7 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 |---|---|
 | `list --untriaged` | the queue — `category IS NULL`, oldest first |
 | `list --pending` | classified rows still missing their required first email |
+| `replay-pending` | re-attempts every ledger row that is written but unsent, and dead-letters the ones out of time |
 | `list --dead-lettered` | sends that were abandoned, so nobody is silently unanswered |
 | `triage --id --category --severity --note [--dedupe-of]` | writes classification, sets `triaged_at` |
 | `email --id --kind ack\|reply --subject --text --html` | validates the category transition, freezes the request, commits the row, sends, records `message_id`. Copy arrives as bounded inline content, never a file path |
@@ -345,9 +388,12 @@ as `002-w9-cf-baseline.sh` now does — it is not ambient under `docker exec`.
 
 ### `api/src/services/feedbackBroker.ts` + the `repos-feedback-broker` unit
 
-The privileged half. Runs as `repos-broker`, owns `RESEND_API_KEY`, the Unraid
-SSH identity and `DATABASE_URL`, and serves the verbs above over
-`/run/repos-feedback/broker.sock`. It performs every transition check, derives
+The privileged half. Runs as `repos-broker`, owns `RESEND_API_KEY`,
+`FEEDBACK_WEBHOOK_URL`, the GitHub write token, the Unraid SSH identity and
+`DATABASE_URL`, and serves the verbs above over
+`/run/repos-feedback/broker.sock`. The webhook URL belongs here with the rest:
+alerting is a broker responsibility, and an agent that could rewrite the alert
+destination could silence its own dead letters. It performs every transition check, derives
 every security-relevant field itself, and length-caps each inline copy field.
 Requests are a small fixed JSON schema — no paths, no SQL, no shell, no
 free-form target. This is the same "mechanical work is tested code" split as the
@@ -383,6 +429,19 @@ nothing — the next picks up the same queue. This is the direct payoff of putti
 state in the database, and it is what makes a workstation runtime acceptable
 despite the machine not always being awake.
 
+## Sweep order
+
+Every sweep runs these in order, and the order matters: unfinished work is
+drained before new work is taken on, so a backlog can never be created faster
+than it is cleared.
+
+1. `replay-pending` — written but unsent ledger rows
+2. `list --pending` — classified rows whose first email was never written
+3. `list --untriaged` — genuinely new feedback, per the flow below
+4. `check-shipped` — every sweep, regardless of whether anything new arrived
+
+Steps 1, 2 and 4 are mechanical and involve no agent judgement.
+
 ## Per-item flow
 
 1. Classify → `triage`
@@ -391,7 +450,7 @@ despite the machine not always being awake.
    - `bug` / `ux` / `feature` → draft copy → `email --kind ack`
 3. Fixable bug → **disposable worktree** → failing test that reproduces it →
    fix → PR (see below)
-4. `check-shipped` runs every sweep regardless of new feedback
+(`check-shipped` runs as step 4 of the sweep above, regardless of new feedback.)
 
 ### Fixes run in a disposable worktree, never the shared checkout
 
@@ -459,9 +518,10 @@ Retry policy inside the window:
 - `attempts` increments and `last_attempt_at` is stamped on every try;
   `first_attempt_at` is set once and is what the 24-hour deadline is measured
   from.
-- Retries are attempted on the next sweep, so the natural backoff is the ~4-hour
-  sweep interval — roughly five chances inside the window. No sub-sweep retry
-  loop; a sweep never sits and spins on a failing provider.
+- Retries are driven by `replay-pending` at the head of each sweep, so the
+  natural backoff is the ~4-hour sweep interval — roughly five chances inside
+  the window. No sub-sweep retry loop; a sweep never sits and spins on a failing
+  provider.
 Failures are classified by **whose fault they are**, because "4xx that is not
 429" lumps together two opposite situations:
 
@@ -524,14 +584,26 @@ Aimed at the failure modes this repository keeps producing.
   before any `feedback_emails` row is written, and assert the row appears in
   `list --pending` and is delivered by the next sweep. Mutation-checked by
   removing the `--pending` drain and confirming the row is stranded.
+- **End-to-end sweep recovery, both stranding modes** — one full sweep with the
+  mailer failing on the network, then a second sweep with it healthy, asserts
+  every submitter ends up mailed exactly once. Covers the written-but-unsent row
+  (via `replay-pending`) and the no-ledger-row row (via `list --pending`) in the
+  same run, since the two are stranded by different mechanisms and each is
+  invisible to the other's queue. Mutation-checked by removing `replay-pending`
+  from the sweep and confirming the network-failed email is never retried and is
+  eventually dead-lettered with `attempts = 1`.
 - **Concurrent dedupe** — `A.dedupe_of = B` racing `B.dedupe_of = C` produces a
   rejection, not a chain. Mutation-checked by locking only the row being
   modified and confirming the chain forms.
 - **The broker boundary is enforced, not documented** — as the agent account:
-  the credential files and SSH identity are unreadable, the database is
-  unreachable, the socket is reachable; and a request naming its own recipient
-  or `from` is ignored in favour of the values the broker derives. A request
-  carrying a path where copy is expected is rejected outright.
+  the credential files, the SSH identity and the GitHub token are unreadable,
+  the database is unreachable, the socket is reachable; and a request naming its
+  own recipient or `from` is ignored in favour of the values the broker derives.
+  A request carrying a path where copy is expected is rejected outright.
+- **No credential and no submitter identity can leave via content the agent
+  controls** — rendered email bodies, branch names, commit messages and PR
+  bodies are asserted to contain no submitter address and none of the broker's
+  secrets, given a feedback body that asks for exactly that.
 - **State transitions** — category/kind mismatches are rejected, `reply` and
   `ack`/`resolved` are mutually exclusive, and no direct resolved-email command
   exists.
@@ -561,14 +633,15 @@ Aimed at the failure modes this repository keeps producing.
 2. Add `FEEDBACK_FROM_EMAIL` to `/mnt/user/appdata/repos/.env` and **recreate**
    the container — env is fixed at create time.
 3. Create the `repos-broker` system account and install the
-   `repos-feedback-broker` unit, with the Resend key, the Unraid SSH identity
-   and the database credentials readable only by it (`0600`, `LoadCredential=`).
-   Socket `0660`, group `repos-agent`.
-4. Create the agent account, add it to `repos-agent`, and give it exactly one
-   credential: a GitHub token scoped to push-branch and open-PR on this
-   repository. Clone the bare mirror as that account. Verify the boundary
-   holds — as the agent user, the key files and SSH identity must be unreadable
-   and the database unreachable, while the socket answers.
+   `repos-feedback-broker` unit, with the Resend key, `FEEDBACK_WEBHOOK_URL`,
+   the GitHub write token, the Unraid SSH identity and the database credentials
+   readable only by it (`0600`, `LoadCredential=`). Socket `0660`, group
+   `repos-agent`.
+4. Create the agent account with **no credentials at all**, add it to
+   `repos-agent`, and clone the bare mirror anonymously as that account — the
+   repository is public, so reads need no token. Verify the boundary holds: as
+   the agent user the key files, SSH identity and GitHub token must be
+   unreadable and the database unreachable, while the socket answers.
 5. Install the systemd user timer under the agent account.
 6. First sweep processes the three existing rows. One of them — the programs
    page rendering badly on mobile — is a real bug, and plausibly one the
