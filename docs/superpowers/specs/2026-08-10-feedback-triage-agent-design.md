@@ -28,7 +28,8 @@ bug can no longer vanish after its acknowledgement; adds the normative
 principal/credential/route table and a second socket for `repos-git`; widens the
 privacy test to the patch body.
 **Revision 6, 2026-09-04:** resolves four invariants the principal split
-created — `reconcile-fixes` becomes the sole writer of `fix_status` (the git
+created — `reconcile-fixes` becomes the sole writer of the **remote-derived**
+`fix_status` transitions, `triage` and `defer` keeping the local ones (the git
 principal has no database and cannot call the broker); a revised patch advances
 the branch by a fast-forward replacement commit rather than the force push the
 constraints forbid; duplicates are `n/a` and never enter the fix queue while
@@ -278,7 +279,7 @@ shared between W9 and origin's own migrations, and production is applied through
 | `fix_status` | TEXT, CHECK in (`n/a`,`needed`,`patch_submitted`,`pr_open`,`merged`,`deferred`) | where the fix itself has got to |
 | `fix_base_sha` | TEXT, CHECK full lowercase 40-hex SHA | the pinned `origin/main` the patch applies to |
 | `fix_patch_digest` | TEXT | SHA-256 of the submitted diff; makes resubmission idempotent |
-| `fix_branch` | TEXT | derived `feedback/<id>-<slug>`, recorded once pushed |
+| `fix_branch` | TEXT | derived `feedback/<id>`, recorded once observed on the remote |
 | `fix_pr_number` | INT | the open pull request |
 
 `triaged_at` already exists and keeps its meaning — which is precisely why it
@@ -567,7 +568,7 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 | `link --id --sha` | records a full merged/squash commit reachable from `origin/main` |
 | `check-shipped` | the only code path that creates and sends `resolved` emails |
 | `approve-patch --id --diff` | broker-side privacy scan against that row's address and body; returns a signed approval over the patch digest, or a rejection with a reason |
-| `submit-patch --id --diff --approval` | verifies the approval covers these exact bytes, then applies an inert diff in `repos-git`'s own clone on the pinned base, commits, and pushes to the derived `feedback/<id>-<slug>` branch. Fast-forward only. Replaces revision 3's `push-branch`, which took a repository rather than a patch |
+| `submit-patch --id --diff --approval` | verifies the approval covers these exact bytes, then applies an inert diff in `repos-git`'s own clone on the pinned base, commits, and pushes to the derived `feedback/<id>` branch. Fast-forward only. Replaces revision 3's `push-branch`, which took a repository rather than a patch |
 | `open-pr --id` | opens the pull request for that branch; body and title are derived, and carry no submitter address |
 
 **The CLI owning `email` is what makes autonomy safe.** It permits `reply` only
@@ -726,9 +727,12 @@ the 2026-09-04 session. An unattended sweep would have hung or failed opaquely.
 
 ### `submit-patch` is constrained server-side
 
-The branch name is **derived, not accepted**: `feedback/<id>-<slug>`, where `id`
-is the feedback row and `slug` is generated from the classification, not from
-the feedback body. The agent cannot name a ref. `repos-git` additionally
+The branch name is **derived, not accepted**: `feedback/<id>`, and nothing more.
+`repos-git` has no database, so the feedback id is the only fact it has — a slug
+would have to come from the agent or the broker, which either lets the agent
+influence a ref name or forces a cross-principal call this design forbids. The
+id alone is also unambiguous and, because it is a pure function of the row, it is
+what makes remote state rediscoverable. The agent cannot name a ref. `repos-git` additionally
 refuses: any push to `main` or a protected branch, any tag, any ref outside the
 `feedback/` namespace, any deletion, any force or non-fast-forward push, and any
 remote other than its own configured `origin`. Each of those is a test, not a
@@ -742,7 +746,7 @@ convention.
 | Resend rejects the recipient (422 / suppressed / hard bounce), or a send is still unsent 24h after the first attempt | Dead-lettered: `dead_lettered_at` stamped, never retried, alert fired, listed by `list --dead-lettered` |
 | Resend returns 401/403 | Sending halts for the sweep, alert fired, **nothing dead-lettered** — the queue drains once the key is fixed |
 | Crash between `triage` and `email` | Row is classified with no ledger row; `list --pending` selects it and the next sweep sends |
-| Crash between `ack`, `submit-patch`, `open-pr` and `link` | `fix_status` records the last completed step; `list --fix-pending` selects the row and the next sweep resumes |
+| Crash between `ack`, `submit-patch`, `open-pr` and `link` | The remote records the last completed step — branch pushed, PR opened — and `reconcile-fixes` reads it into `fix_status` on the next run, first or last of a sweep. Until that reconcile the row still reads as its previous state; `list --fix-pending` selects it either way and the next sweep resumes |
 | Push or PR succeeded but the response was lost | `reconcile-fixes` observes the remote and heals the row; `submit-patch` and `open-pr` are no-ops when the work already exists |
 | Workstation asleep / SSH fails | Sweep aborts before any write. Nothing partial |
 | Deployed SHA unreadable | `check-shipped` no-ops |
