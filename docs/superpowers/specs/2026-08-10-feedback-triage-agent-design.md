@@ -21,6 +21,12 @@ revision 3 — privileged git no longer runs inside an agent-writable repository
 the boundary is crossed by a **patch**, not a repository. Adds a model
 credential proxy so the agent's own inference credential is not readable by it
 either, and constrains `push-branch` to a server-derived namespace.
+**Revision 5, 2026-09-04:** gives the fix its own durable state
+(`fix_status` and friends, `list --fix-pending`, idempotent
+`submit-patch`/`open-pr`, and a `reconcile-fixes` repair verb), so a classified
+bug can no longer vanish after its acknowledgement; adds the normative
+principal/credential/route table and a second socket for `repos-git`; widens the
+privacy test to the patch body.
 **Author:** Claude, with Jason.
 **Supersedes nothing.** Extends the W7 feedback capture surface (migration 070).
 
@@ -133,7 +139,8 @@ split to *capability* is what closes the injection surface:
   This is cheap here because **the repository is public**: the agent fetches and
   clones its mirror anonymously and needs no credential to read. Only writes
   need one, so `submit-patch` and `open-pr` are brokered verbs. The token is
-  scoped to push-branch and open-PR on this repository only — no merge, no
+  scoped to create branches and open pull requests on this repository only — no
+  merge, no
   `workflow` scope, no secrets, no admin, no other repository — and it is held
   by `repos-git`, a **third** principal, not by the broker and not by the agent.
   The agent submits a **diff**, never a repository; see *Privileged git never
@@ -175,6 +182,38 @@ split to *capability* is what closes the injection surface:
   socket; `email` validates the category transition, derives the recipient and
   the sender, and holds the Resend key.
 
+### Principals, credentials and routes
+
+The single normative statement of who holds what and who answers which verb.
+Prose elsewhere in this document describes; **this table decides**.
+
+| Principal | Holds | Serves | Reachable by |
+|---|---|---|---|
+| `repos-agent` (the agent) | nothing | — | — |
+| `repos-broker` | `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`, Unraid SSH identity, `DATABASE_URL` | `list`, `triage`, `email`, `link`, `replay-pending`, `check-shipped`, `reconcile-fixes` | agent, over `/run/repos-feedback/broker.sock` (`0660`, group `repos-agent`) |
+| `repos-git` | GitHub write token | `submit-patch`, `open-pr` | agent, over `/run/repos-git/git.sock` (`0660`, group `repos-agent`) |
+| model proxy | Anthropic credential | inference forwarding | agent, over loopback via `ANTHROPIC_BASE_URL` |
+
+**Two sockets, not one.** An earlier draft said every verb went to the broker
+socket while `repos-git` performed the git work, which would have meant the
+broker proxying into the git principal — putting the mail-and-database principal
+on the path of every push and re-coupling the two credentials this design just
+separated. The agent talks to each principal directly instead, and neither one
+can invoke the other.
+
+**Neither principal needs to call the other, and neither needs the other's
+data.** `repos-git` derives the branch name from the feedback id alone — a pure
+function, no database — and validates the submitted base SHA against its own
+clone with `git merge-base --is-ancestor <base> origin/main`. It never gets a
+database handle, so a compromised `repos-git` can push a branch and cannot read
+a submitter address or send mail.
+
+The broker, in turn, does not need `repos-git` to report back. Because the
+repository is **public** and the branch name is **derived**, the broker
+rediscovers remote state anonymously over HTTPS — no credential, no token, no
+cross-principal call. That is what makes the fix lifecycle below recoverable
+rather than merely recorded.
+
 What this buys, stated precisely: an injected instruction cannot exfiltrate a
 credential, open a connection to production, mail a third party, or reach the
 database directly, because none of those capabilities exist in the agent's
@@ -198,6 +237,11 @@ shared between W9 and origin's own migrations, and production is applied through
 | `triage_note` | TEXT | why it was classified that way, in the agent's words |
 | `dedupe_of` | BIGINT REFERENCES feedback(id), CHECK not self | canonical row when the same thing is reported twice |
 | `fix_commit_sha` | TEXT, CHECK full lowercase 40-hex SHA | set when the fix merges; NULL until then |
+| `fix_status` | TEXT, CHECK in (`n/a`,`needed`,`patch_submitted`,`pr_open`,`merged`,`deferred`) | where the fix itself has got to |
+| `fix_base_sha` | TEXT, CHECK full lowercase 40-hex SHA | the pinned `origin/main` the patch applies to |
+| `fix_patch_digest` | TEXT | SHA-256 of the submitted diff; makes resubmission idempotent |
+| `fix_branch` | TEXT | derived `feedback/<id>-<slug>`, recorded once pushed |
+| `fix_pr_number` | INT | the open pull request |
 
 `triaged_at` already exists and keeps its meaning — which is precisely why it
 **must not** define queue membership. `PATCH /admin/feedback/:id/triage`
@@ -335,6 +379,55 @@ lifecycle.
 Rows with a NULL `user_email_at_submit` are classified and triaged, and the
 email step is skipped with the reason recorded in `triage_note`.
 
+### The fix has its own durable state, because otherwise it is lost
+
+Up to revision 4 a classified bug vanished the moment its acknowledgement was
+sent. It was excluded from `list --untriaged` (it has a `category`), from
+`list --pending` (it has a ledger row), from `replay-pending` (that row is
+sent), and from `check-shipped` (`fix_commit_sha` is NULL until `link`). A crash
+anywhere between `ack`, `submit-patch`, `open-pr` and `link` stranded it
+permanently, and a response lost *after* a successful push left a branch nobody
+would ever look at again. That directly contradicted the stateless-sweep claim:
+a sweep can only be stateless if the state it resumes from is in the database.
+
+`fix_status` supplies it:
+
+```
+n/a          noise / question — no fix is expected
+needed       classified as bug/ux/feature, acknowledged, no patch yet
+patch_submitted   branch pushed at fix_base_sha with fix_patch_digest
+pr_open      fix_pr_number is open
+merged       fix_commit_sha recorded; check-shipped now owns the row
+deferred     terminal, no fix planned — reason in triage_note
+```
+
+`deferred` matters as much as the rest: a feature request nobody intends to
+build would otherwise sit in the fix queue forever. It is terminal and requires
+a recorded reason. The `ack` copy must therefore not promise a fix, only that
+the item was received and read.
+
+`list --fix-pending` returns rows in `needed`, `patch_submitted` or `pr_open`,
+oldest first, and is drained as its own sweep step.
+
+**Every transition is idempotent, and recovery does not depend on having been
+told.** Because the branch name is derived from the feedback id and the
+repository is public, the true state is always observable:
+
+- `submit-patch` — if `fix_branch` already exists on the remote at the same
+  `fix_patch_digest`, it is a no-op returning the existing branch. A different
+  digest for the same row is a new patch and replaces the branch.
+- `open-pr` — if a pull request already exists with that head branch, it is
+  returned rather than duplicated.
+- `reconcile-fixes` — the repair verb. For every row not in a terminal state it
+  observes the remote anonymously and heals the row to match: branch present but
+  `fix_status` still `needed` → `patch_submitted`; PR found → `pr_open` with its
+  number; PR merged → `merged` with the squash SHA written to `fix_commit_sha`,
+  which is the same fact `link` records by hand. A lost response therefore costs
+  one sweep, not the fix.
+
+`link` remains for the case where a human merges something the agent did not
+push.
+
 Duplicates keep their own ack. When the canonical row's fix ships, the resolved
 email is sent to the duplicate's submitter too, traversing `dedupe_of`.
 `triage` only accepts a canonical row (`dedupe_of IS NULL`) as the target and
@@ -391,6 +484,9 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 | `list --pending` | classified rows still missing their required first email |
 | `replay-pending` | re-attempts every ledger row that is written but unsent, and dead-letters the ones out of time |
 | `list --dead-lettered` | sends that were abandoned, so nobody is silently unanswered |
+| `list --fix-pending` | acknowledged bug/ux/feature rows whose fix is not yet merged or deferred |
+| `reconcile-fixes` | heals `fix_status` from observed remote state; recovers any lost response |
+| `defer --id --reason` | terminal `deferred`, for an item no fix is planned for |
 | `triage --id --category --severity --note [--dedupe-of]` | writes classification, sets `triaged_at` |
 | `email --id --kind ack\|reply --subject --text --html` | validates the category transition, freezes the request, commits the row, sends, records `message_id`. Copy arrives as bounded inline content, never a file path |
 | `link --id --sha` | records a full merged/squash commit reachable from `origin/main` |
@@ -450,9 +546,12 @@ diff.
 Invoked by a systemd user timer every 4 hours. Runs Claude Code headless against
 the `/feedback-sweep` skill.
 
-A sweep is **stateless**: read queue, act, write back. A missed run costs
-nothing — the next picks up the same queue. This is the direct payoff of putting
-state in the database, and it is what makes a workstation runtime acceptable
+A sweep holds **no state of its own**: read the queues, act, write back. Every
+step it might be interrupted at is recoverable from the database or from
+observable remote state, which is what the `fix_status` lifecycle and
+`reconcile-fixes` exist to guarantee — the claim is only true because that state
+is durable. A missed or half-finished run therefore costs at most one sweep
+interval, never an item, and that is what makes a workstation runtime acceptable
 despite the machine not always being awake.
 
 ## Sweep order
@@ -461,12 +560,17 @@ Every sweep runs these in order, and the order matters: unfinished work is
 drained before new work is taken on, so a backlog can never be created faster
 than it is cleared.
 
-1. `replay-pending` — written but unsent ledger rows
-2. `list --pending` — classified rows whose first email was never written
-3. `list --untriaged` — genuinely new feedback, per the flow below
-4. `check-shipped` — every sweep, regardless of whether anything new arrived
+1. `reconcile-fixes` — heal fix state from the remote before deciding anything
+2. `replay-pending` — written but unsent ledger rows
+3. `list --pending` — classified rows whose first email was never written
+4. `list --fix-pending` — acknowledged items whose fix is unfinished
+5. `list --untriaged` — genuinely new feedback, per the flow below
+6. `check-shipped` — every sweep, regardless of whether anything new arrived
 
-Steps 1, 2 and 4 are mechanical and involve no agent judgement.
+Steps 1, 2 and 6 are mechanical and involve no agent judgement. Step 4 resumes
+work the agent already started; step 5 is the only one that takes on anything
+new. `reconcile-fixes` runs first so the rest of the sweep reasons about
+observed reality rather than about what the last run believed.
 
 ## Per-item flow
 
@@ -474,8 +578,11 @@ Steps 1, 2 and 4 are mechanical and involve no agent judgement.
 2. Then, by category:
    - `noise` / `question` → draft copy → `email --kind reply`. Terminal.
    - `bug` / `ux` / `feature` → draft copy → `email --kind ack`
-3. Fixable bug → **disposable worktree** → failing test that reproduces it →
-   fix → `submit-patch` → `open-pr` (see below)
+3. Fixable bug → `fix_status='needed'` → **disposable worktree** → failing test
+   that reproduces it → fix → `submit-patch` → `open-pr` (see below). Each verb
+   advances `fix_status`, so an interrupted attempt resumes from where it stopped
+   rather than restarting or vanishing. An item no fix is planned for gets
+   `defer` with a reason.
 (`check-shipped` runs as step 4 of the sweep above, regardless of new feedback.)
 
 ### Fixes run in a disposable worktree, never the shared checkout
@@ -539,7 +646,7 @@ SSH to `github.com:22` is currently timing out here, which broke a push during
 the 2026-09-04 session. An unattended sweep would have hung or failed opaquely.
 `repos-git` names its remote and transport explicitly and inherits nothing.
 
-### `push-branch` is constrained server-side
+### `submit-patch` is constrained server-side
 
 The branch name is **derived, not accepted**: `feedback/<id>-<slug>`, where `id`
 is the feedback row and `slug` is generated from the classification, not from
@@ -557,6 +664,8 @@ convention.
 | Resend rejects the recipient (422 / suppressed / hard bounce), or a send is still unsent 24h after the first attempt | Dead-lettered: `dead_lettered_at` stamped, never retried, alert fired, listed by `list --dead-lettered` |
 | Resend returns 401/403 | Sending halts for the sweep, alert fired, **nothing dead-lettered** — the queue drains once the key is fixed |
 | Crash between `triage` and `email` | Row is classified with no ledger row; `list --pending` selects it and the next sweep sends |
+| Crash between `ack`, `submit-patch`, `open-pr` and `link` | `fix_status` records the last completed step; `list --fix-pending` selects the row and the next sweep resumes |
+| Push or PR succeeded but the response was lost | `reconcile-fixes` observes the remote and heals the row; `submit-patch` and `open-pr` are no-ops when the work already exists |
 | Workstation asleep / SSH fails | Sweep aborts before any write. Nothing partial |
 | Deployed SHA unreadable | `check-shipped` no-ops |
 | No submitter address | Classified, triaged, email skipped, reason recorded |
@@ -650,6 +759,17 @@ Aimed at the failure modes this repository keeps producing.
   before any `feedback_emails` row is written, and assert the row appears in
   `list --pending` and is delivered by the next sweep. Mutation-checked by
   removing the `--pending` drain and confirming the row is stranded.
+- **Fix lifecycle survives a crash at every step** — kill the run after `ack`,
+  after `submit-patch` and after `open-pr` in turn; each time the row is
+  returned by `list --fix-pending` and the next sweep resumes rather than
+  restarting or duplicating. Mutation-checked by removing `fix_status` updates
+  and confirming the row is stranded.
+- **Lost response is recovered, not duplicated** — push succeeds but the reply
+  is dropped; `reconcile-fixes` heals the row from the remote, and a repeated
+  `submit-patch` with the same digest returns the existing branch rather than
+  creating a second one. A changed digest replaces the branch instead.
+- **`deferred` is terminal** — a deferred row leaves `list --fix-pending`
+  permanently and never receives a `resolved` email.
 - **End-to-end sweep recovery, both stranding modes** — one full sweep with the
   mailer failing on the network, then a second sweep with it healthy, asserts
   every submitter ends up mailed exactly once. Covers the written-but-unsent row
@@ -672,7 +792,7 @@ Aimed at the failure modes this repository keeps producing.
   transferred, and that `repos-git` operates only in its own clone. Mutation-
   checked by pointing the git principal at the agent's mirror and confirming the
   hook fires.
-- **`push-branch` constraints** — pushes to `main`, to a tag, outside the
+- **`submit-patch` constraints** — pushes to `main`, to a tag, outside the
   `feedback/` namespace, as a deletion, as a force update, or to a remote other
   than the configured origin are each rejected. The branch name is derived, so a
   request attempting to supply one is ignored.
@@ -680,9 +800,13 @@ Aimed at the failure modes this repository keeps producing.
   key file is unreadable, while an inference request through the loopback proxy
   succeeds.
 - **No credential and no submitter identity can leave via content the agent
-  controls** — rendered email bodies, branch names, commit messages and PR
-  bodies are asserted to contain no submitter address and none of the broker's
-  secrets, given a feedback body that asks for exactly that.
+  controls** — given a feedback body that asks for exactly that, assert no
+  submitter address and no secret appears in: rendered email bodies, branch
+  names, commit messages, PR titles and bodies, **and the submitted patch
+  itself** — its diff hunks, any test fixture it adds, and any file path it
+  creates. The patch is the largest agent-authored artefact that becomes
+  world-readable, and metadata-only assertions would miss the obvious case of a
+  regression test seeded with the reporter's own words and address.
 - **State transitions** — category/kind mismatches are rejected, `reply` and
   `ack`/`resolved` are mutually exclusive, and no direct resolved-email command
   exists.
