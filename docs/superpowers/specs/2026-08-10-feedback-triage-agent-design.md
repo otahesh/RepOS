@@ -1,11 +1,17 @@
 # Feedback triage agent — design
 
 **Status:** revised 2026-09-04 after review. Not implemented.
-**Revision 2026-09-04:** closes seven review findings — a trust boundary for the
-prompt-injection surface, a feedback-level advisory lock, queue membership by
+**Revision 1, 2026-09-04:** closes seven review findings — a trust boundary for
+the prompt-injection surface, a feedback-level advisory lock, queue membership by
 `category` rather than `triaged_at`, an explicit at-most-once delivery model,
 disposable worktrees for agent git work, effective-fix-SHA selection for
 duplicates, and validation of persisted email requests before replay.
+**Revision 2, 2026-09-04:** closes four more — `list --pending` for the crash
+gap between `triage` and `email`; a real broker process behind a Unix socket in
+place of an asserted credential boundary; an agent-owned bare mirror so
+worktrees do not touch Jason's checkout; two-lock ordering for dedupe. Delivery
+now separates authentication failures (pause and alert) from recipient-level
+ones (dead-letter), and dead letters alert actively.
 **Author:** Claude, with Jason.
 **Supersedes nothing.** Extends the W7 feedback capture surface (migration 070).
 
@@ -71,14 +77,39 @@ The design already splits work by judgment: mechanical verbs are tested code,
 and only classification, copy and fixes are left to the agent. Extending that
 split to *capability* is what closes the injection surface:
 
-- **The agent process holds no production credentials.** No `RESEND_API_KEY`,
-  no `CF_API_TOKEN`, no Unraid SSH key, no admin key in its environment. It runs
-  as a dedicated user account, not as Jason.
-- **Every production-touching operation is a CLI verb, never a capability.**
-  `check-shipped` is the only thing that reads `APP_SHA` from the container, and
-  it holds the SSH identity itself. The agent invokes the verb and receives an
-  answer; it cannot open its own connection to production, and no prompt can
-  make it do so because the ability is absent rather than forbidden.
+- **A broker process owns every credential; the agent owns none.** An earlier
+  draft said the CLI "holds the SSH identity itself" while running as the agent
+  user. That is not a boundary — a credential an ordinary CLI can read as the
+  agent user is a credential the agent can read directly, and any instruction in
+  a feedback body could tell it to. The privilege has to live in a *different
+  security principal*, not in a different source file.
+
+  `repos-feedback-broker` is a systemd **system** service running as its own
+  account, `repos-broker`. It holds `RESEND_API_KEY`, the Unraid SSH identity
+  and `DATABASE_URL`, loaded via systemd `LoadCredential=` from files owned by
+  `repos-broker` and mode `0600`. It listens on a Unix domain socket,
+  `/run/repos-feedback/broker.sock`, mode `0660`, group `repos-agent`. The agent
+  account is in that group and **socket access is the entire grant**: it can
+  send a request and read a reply, and it cannot read the key files, the SSH
+  identity, or the database.
+
+- **The agent has no database access either.** Every verb — `list`, `triage`,
+  `link`, `email`, `check-shipped` — is a request over the socket. The CLI the
+  agent runs is a thin client with no secrets in it.
+
+- **No path arguments cross the boundary.** `--body-file` is removed. A
+  privileged process that reads a path supplied by a lower-privileged caller is
+  an arbitrary-file-read oracle: the agent could pass the broker its own
+  credential file and have the bytes mailed to a submitter. Email copy is sent
+  as **bounded inline content** in the request — subject, text and html, each
+  length-capped — and never as a reference to something the broker must go and
+  read.
+
+- **The broker re-derives everything security-relevant server-side.** The
+  recipient comes from that row's `user_email_at_submit` in the database, never
+  from the request. `from` comes from the broker's own configuration. The
+  idempotency key is computed from `(kind, feedback_id)`. The agent supplies
+  prose and nothing else; it cannot name a recipient even if it tries.
 - **The GitHub credential is scoped to push branches and open pull requests on
   this repository only.** No merge, no `workflow` scope, no secrets, no admin,
   no other repository. `main` is protected and requires 8 passing checks, so the
@@ -93,11 +124,13 @@ split to *capability* is what closes the injection surface:
   validates the category transition, the recipient and the sender, and holds the
   Resend key.
 
-What this deliberately does not do: sandbox the machine, sign commits, or vet
-the agent's diffs mechanically. The protection against a malicious *diff* is CI
-plus Jason's review on a protected branch. The protection here is against a
-malicious *instruction* reaching a capability, and it works by not granting the
-capability.
+What this buys, stated precisely: an injected instruction cannot exfiltrate a
+credential, open a connection to production, mail a third party, or reach the
+database directly, because none of those capabilities exist in the agent's
+principal. What it does **not** buy: a poisoned agent can still write a bad
+patch or rude prose. Those are bounded by CI and Jason's review on a protected
+branch, and by the broker's own transition rules — not by this boundary. The
+machine is not sandboxed and commits are not signed; neither is claimed.
 
 ## Data model
 
@@ -128,6 +161,21 @@ everyone hears back.
 **Queue membership is therefore `category IS NULL`.** `triaged_at` means "a
 human or the agent has looked at this"; `category` means "it has been
 classified". Only the latter gates the agent's work.
+
+**That leaves a second queue, and it must exist.** `triage` and `email` are
+separate verbs, so the moment `triage` commits a `category` the row leaves
+`list --untriaged` — and if the sweep dies before `email` creates its ledger
+row, nothing selects the row ever again. It is classified, unanswered, and
+invisible. Making the two verbs one transaction would not fix it either, since
+the send deliberately happens *after* the commit.
+
+`list --pending` closes the gap: rows with a non-NULL `category` and a
+`user_email_at_submit`, whose required first email — `reply` for
+`noise`/`question`, `ack` otherwise — has no `feedback_emails` row at all.
+A row that has a row but an unsent one is already handled by replay; this is
+specifically the *no row was ever written* case. Every sweep drains
+`list --pending` before it looks at new feedback, so a crash costs one sweep
+interval rather than the item.
 
 Backfill: rows that already have `triaged_at` set but no `category` stay in the
 queue and are processed normally. In production this is currently a no-op —
@@ -228,6 +276,13 @@ email is sent to the duplicate's submitter too, traversing `dedupe_of`.
 `triage` only accepts a canonical row (`dedupe_of IS NULL`) as the target and
 rejects self-references, chains, and cycles in the same transaction.
 
+**Setting `A.dedupe_of = B` locks both A and B**, not just A. Locking only the
+row being modified leaves the check racy: while A is being pointed at B, a
+concurrent call can point B at C, and both commit having each seen a valid
+canonical target. The result is the A→B→C chain the rule exists to forbid. The
+two locks are always taken in **ascending `feedback_id` order** so two dedupe
+operations touching the same pair cannot deadlock against each other.
+
 ## Ship detection
 
 The resolved email must not be a guess. A merged PR is not a deployed fix — this
@@ -269,9 +324,10 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 | Verb | Behaviour |
 |---|---|
 | `list --untriaged` | the queue — `category IS NULL`, oldest first |
+| `list --pending` | classified rows still missing their required first email |
 | `list --dead-lettered` | sends that were abandoned, so nobody is silently unanswered |
 | `triage --id --category --severity --note [--dedupe-of]` | writes classification, sets `triaged_at` |
-| `email --id --kind ack\|reply --body-file` | validates the category transition, freezes the request, commits the row, sends, records `message_id` |
+| `email --id --kind ack\|reply --subject --text --html` | validates the category transition, freezes the request, commits the row, sends, records `message_id`. Copy arrives as bounded inline content, never a file path |
 | `link --id --sha` | records a full merged/squash commit reachable from `origin/main` |
 | `check-shipped` | the only code path that creates and sends `resolved` emails |
 
@@ -282,8 +338,21 @@ double-send even if it misbehaves or a run dies partway, because the constraint,
 transition checks, and commit-before-send ordering live in code with tests, not
 in the agent's reasoning.
 
-The CLI must build its own `DATABASE_URL` from `POSTGRES_*` when absent, exactly
-as `002-w9-cf-baseline.sh` now does. It is not ambient under `docker exec`.
+**The broker holds the database connection, not the CLI.** The CLI the agent
+runs is a socket client with no `DATABASE_URL` and no credentials of any kind.
+The broker builds its own `DATABASE_URL` from `POSTGRES_*` when absent, exactly
+as `002-w9-cf-baseline.sh` now does — it is not ambient under `docker exec`.
+
+### `api/src/services/feedbackBroker.ts` + the `repos-feedback-broker` unit
+
+The privileged half. Runs as `repos-broker`, owns `RESEND_API_KEY`, the Unraid
+SSH identity and `DATABASE_URL`, and serves the verbs above over
+`/run/repos-feedback/broker.sock`. It performs every transition check, derives
+every security-relevant field itself, and length-caps each inline copy field.
+Requests are a small fixed JSON schema — no paths, no SQL, no shell, no
+free-form target. This is the same "mechanical work is tested code" split as the
+rest of the design, drawn at a process boundary so it is enforced by the kernel
+rather than by convention.
 
 ### `api/src/services/feedbackMailer.ts`
 
@@ -332,12 +401,19 @@ and any work in progress lives alongside it. An agent committing in that
 directory would sooner or later sweep human work into a PR, and `git add -A` is
 already banned in this repository for exactly that reason.
 
-Each fix therefore gets its own throwaway worktree, created from a **pinned
-`origin/main` SHA** resolved once at the start of the sweep, so every item in a
-sweep builds on the same known base and none of them observe each other's
-half-finished state. The worktree is removed when the PR is opened or the
-attempt is abandoned. The agent never runs a git write command in the shared
-checkout.
+Nor can the worktrees hang off that checkout. `git worktree add` writes into the
+source repository's `.git/worktrees`, so worktrees rooted in Jason's clone would
+have the agent mutating his repository metadata — and under a dedicated account
+it would not have permission to anyway. The two mitigations contradict each
+other unless the agent owns its own copy.
+
+The agent account therefore keeps a **bare mirror** of the repository, its own
+clone, fetched with its own scoped credential. Each fix gets a throwaway
+worktree created from that mirror at a **pinned `origin/main` SHA** resolved
+once at the start of the sweep, so every item in a sweep builds on the same
+known base and none of them observe each other's half-finished state. The
+worktree is removed when the PR is opened or the attempt is abandoned. The agent
+never reads from, writes to, or references Jason's checkout at all.
 
 **The fetch must name its transport explicitly.** The workstation's git config
 carries `url.git@github.com:.insteadOf https://github.com/`, which silently
@@ -353,7 +429,9 @@ prefers.
 | Failure | Resting state |
 |---|---|
 | Resend fails, retryable, inside 24h | Row persists, `error` set, `attempts` incremented, `sent_at` NULL. Next sweep validates and replays the same key and bytes |
-| Resend fails past 24h, or permanently (4xx ≠ 429) | Dead-lettered: `dead_lettered_at` stamped, never retried, listed by `list --dead-lettered` |
+| Resend rejects the recipient (422 / suppressed / hard bounce), or a send is still unsent 24h after the first attempt | Dead-lettered: `dead_lettered_at` stamped, never retried, alert fired, listed by `list --dead-lettered` |
+| Resend returns 401/403 | Sending halts for the sweep, alert fired, **nothing dead-lettered** — the queue drains once the key is fixed |
+| Crash between `triage` and `email` | Row is classified with no ledger row; `list --pending` selects it and the next sweep sends |
 | Workstation asleep / SSH fails | Sweep aborts before any write. Nothing partial |
 | Deployed SHA unreadable | `check-shipped` no-ops |
 | No submitter address | Classified, triaged, email skipped, reason recorded |
@@ -384,11 +462,31 @@ Retry policy inside the window:
 - Retries are attempted on the next sweep, so the natural backoff is the ~4-hour
   sweep interval — roughly five chances inside the window. No sub-sweep retry
   loop; a sweep never sits and spins on a failing provider.
-- A **permanent** failure — Resend 4xx other than 429, e.g. an invalid or
-  suppressed recipient — is dead-lettered immediately rather than retried five
-  times to no purpose.
-- Dead-lettered rows are surfaced in `list --dead-lettered` so a human can see
-  who never heard back. They are not a silent gap.
+Failures are classified by **whose fault they are**, because "4xx that is not
+429" lumps together two opposite situations:
+
+| Response | Meaning | Action |
+|---|---|---|
+| 429, 5xx, network error | transient | retry next sweep, inside the 24h window |
+| **401 / 403** | the key is wrong, revoked or misconfigured | **pause and alert.** Nothing is dead-lettered |
+| 422 / documented recipient-level rejection — invalid address, suppressed, hard-bounced | this recipient cannot be mailed | dead-letter immediately |
+| still unsent 24h after `first_attempt_at` | ambiguous | dead-letter |
+
+The 401/403 row is the important distinction. An authentication failure says
+nothing about the message and applies to *every* message: dead-lettering on it
+would burn through the whole queue, abandoning every pending submitter, in
+response to an expired key. Sending therefore **halts** — no further sends this
+sweep, no `dead_lettered_at` stamped, nothing consumed — and the run alerts.
+Once the key is fixed the queue drains normally, because every row is still
+pending and its frozen request is intact.
+
+**Dead letters and pauses alert actively.** A list nobody opens is a silent
+failure with extra steps. Both fire the existing Discord webhook —
+`FEEDBACK_WEBHOOK_URL`, already configured in production and restricted to
+discord.com by the 2026-09-04 hardening — the same channel that already
+announces new feedback. `list --dead-lettered` remains as the audit view, not as
+the notification mechanism. If the webhook is unset the sweep says so loudly at
+start rather than degrading to silence.
 
 Because a dead-lettered `ack` leaves the row in the ack/ship cycle, `check-shipped`
 still sends its `resolved` email later. Dead-lettering one email does not
@@ -414,9 +512,26 @@ Aimed at the failure modes this repository keeps producing.
   key no longer matches the recomputed one, fails hard rather than sending.
   Agent-authored copy containing HTML is escaped in the rendered body.
 - **Dead-lettering** — a send first attempted more than 24 hours ago is
-  abandoned rather than retried; a permanent 4xx is abandoned on the first
-  response; a 429 is not; a dead-lettered `ack` still permits a later
-  `resolved`.
+  abandoned rather than retried; a recipient-level rejection is abandoned on the
+  first response; a 429 is not; a dead-lettered `ack` still permits a later
+  `resolved`; a dead letter fires the alert.
+- **401/403 halts rather than consumes** — a run against a mailer returning 401
+  leaves every row pending with `dead_lettered_at` NULL, fires the alert, and a
+  subsequent run with a working key delivers all of them. This is the test that
+  distinguishes the two failure classes, and it fails if they are merged back
+  into "4xx ≠ 429".
+- **Crash between `triage` and `email`** — commit a classification, kill the run
+  before any `feedback_emails` row is written, and assert the row appears in
+  `list --pending` and is delivered by the next sweep. Mutation-checked by
+  removing the `--pending` drain and confirming the row is stranded.
+- **Concurrent dedupe** — `A.dedupe_of = B` racing `B.dedupe_of = C` produces a
+  rejection, not a chain. Mutation-checked by locking only the row being
+  modified and confirming the chain forms.
+- **The broker boundary is enforced, not documented** — as the agent account:
+  the credential files and SSH identity are unreadable, the database is
+  unreachable, the socket is reachable; and a request naming its own recipient
+  or `from` is ignored in favour of the values the broker derives. A request
+  carrying a path where copy is expected is rejected outright.
 - **State transitions** — category/kind mismatches are rejected, `reply` and
   `ack`/`resolved` are mutually exclusive, and no direct resolved-email command
   exists.
@@ -445,25 +560,27 @@ Aimed at the failure modes this repository keeps producing.
 1. Merge. CI gates as usual.
 2. Add `FEEDBACK_FROM_EMAIL` to `/mnt/user/appdata/repos/.env` and **recreate**
    the container — env is fixed at create time.
-3. Create the agent's own workstation user account, with: a GitHub credential
-   scoped to push-branch and open-PR on this repository only; no Resend key, no
-   Cloudflare token, no Unraid SSH key, no admin key in its environment. The
-   `check-shipped` verb holds the SSH identity separately. Confirm by running a
-   sweep and asserting the agent's environment cannot reach production directly.
-4. Install the systemd user timer under that account.
-5. First sweep processes the three existing rows. One of them — the programs
+3. Create the `repos-broker` system account and install the
+   `repos-feedback-broker` unit, with the Resend key, the Unraid SSH identity
+   and the database credentials readable only by it (`0600`, `LoadCredential=`).
+   Socket `0660`, group `repos-agent`.
+4. Create the agent account, add it to `repos-agent`, and give it exactly one
+   credential: a GitHub token scoped to push-branch and open-PR on this
+   repository. Clone the bare mirror as that account. Verify the boundary
+   holds — as the agent user, the key files and SSH identity must be unreadable
+   and the database unreachable, while the socket answers.
+5. Install the systemd user timer under the agent account.
+6. First sweep processes the three existing rows. One of them — the programs
    page rendering badly on mobile — is a real bug, and plausibly one the
    2026-08-10 visual pass already fixed, which makes it a genuine first exercise
    of `check-shipped` rather than a synthetic one.
 
 ## Open items
 
-- **Confirm the at-most-once choice.** Dead-lettering past 24 hours means a
-  submitter may occasionally never receive an acknowledgement, rather than
-  occasionally receiving two. That trades a visible annoyance for an invisible
-  silence, which is the right trade for the stated goal but is a judgement call
-  and reverses the previous "accept the duplicate" position. `list
-  --dead-lettered` exists so the silence is at least visible to a human.
+- ~~Confirm the at-most-once choice.~~ **Confirmed 2026-09-04**, for
+  *ambiguous* outcomes specifically. The refinement that came with it is now in
+  *Delivery model*: an authentication failure is not ambiguous and must not
+  consume the queue, and a dead letter must alert rather than wait to be found.
 - Revisit the no-rules tone policy when someone Jason does not know personally
   is invited. Note that the **trust boundary above does not depend on this** —
   it was written to survive the cohort changing.
