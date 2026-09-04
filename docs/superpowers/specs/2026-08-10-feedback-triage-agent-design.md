@@ -20,13 +20,20 @@ actually retried rather than silently aging into a dead letter; fixes the stale
 revision 3 — privileged git no longer runs inside an agent-writable repository;
 the boundary is crossed by a **patch**, not a repository. Adds a model
 credential proxy so the agent's own inference credential is not readable by it
-either, and constrains `push-branch` to a server-derived namespace.
+either, and constrains patch submission to a server-derived branch namespace.
 **Revision 5, 2026-09-04:** gives the fix its own durable state
 (`fix_status` and friends, `list --fix-pending`, idempotent
 `submit-patch`/`open-pr`, and a `reconcile-fixes` repair verb), so a classified
 bug can no longer vanish after its acknowledgement; adds the normative
 principal/credential/route table and a second socket for `repos-git`; widens the
 privacy test to the patch body.
+**Revision 6, 2026-09-04:** resolves four invariants the principal split
+created — `reconcile-fixes` becomes the sole writer of `fix_status` (the git
+principal has no database and cannot call the broker); a revised patch advances
+the branch by a fast-forward replacement commit rather than the force push the
+constraints forbid; duplicates are `n/a` and never enter the fix queue while
+still receiving effective-SHA resolved notices; and patch privacy is enforced by
+a broker-signed approval over the patch digest rather than asked of the agent.
 **Author:** Claude, with Jason.
 **Supersedes nothing.** Extends the W7 feedback capture surface (migration 070).
 
@@ -111,9 +118,10 @@ split to *capability* is what closes the injection surface:
   send a request and read a reply, and it cannot read the key files, the SSH
   identity, or the database.
 
-- **The agent has no database access either.** Every verb — `list`, `triage`,
-  `link`, `email`, `replay-pending`, `check-shipped`, `submit-patch`, `open-pr` —
-  is a request over the socket. The CLI the agent runs is a thin client with no
+- **The agent has no database access either.** Every verb is a request over one
+  of two sockets — the broker's for anything touching mail or the database, and
+  `repos-git`'s for the two git verbs. See *Principals, credentials and routes*
+  for the authoritative split. The CLI the agent runs is a thin client with no
   secrets in it.
 
 - **No path arguments cross the boundary.** `--body-file` is removed. A
@@ -153,9 +161,11 @@ split to *capability* is what closes the injection surface:
 - **The repository being public cuts both ways.** Branches, commit messages and
   PR bodies the agent creates are world-readable the moment they are pushed.
   Submitter email addresses and verbatim feedback bodies must therefore never
-  appear in a branch, a commit message, a test fixture or a PR description. The
-  agent references feedback by `id`; the broker is the only component that ever
-  sees an address.
+  appear in a branch, a commit message, a test fixture, a patch hunk or a PR
+  description. The agent references feedback by `id`; the broker is the only
+  component that ever sees an address. This is **enforced rather than asked
+  for** — see *The patch is approved by the broker before `repos-git` will push
+  it*, since a rule the agent could simply disobey would protect nothing.
 - **The agent's own model credential is brokered too.** Claude Code must
   authenticate to run at all, and an OAuth token or API key sitting readable in
   the agent's environment is the original exfiltration path wearing a different
@@ -190,8 +200,8 @@ Prose elsewhere in this document describes; **this table decides**.
 | Principal | Holds | Serves | Reachable by |
 |---|---|---|---|
 | `repos-agent` (the agent) | nothing | — | — |
-| `repos-broker` | `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`, Unraid SSH identity, `DATABASE_URL` | `list`, `triage`, `email`, `link`, `replay-pending`, `check-shipped`, `reconcile-fixes` | agent, over `/run/repos-feedback/broker.sock` (`0660`, group `repos-agent`) |
-| `repos-git` | GitHub write token | `submit-patch`, `open-pr` | agent, over `/run/repos-git/git.sock` (`0660`, group `repos-agent`) |
+| `repos-broker` | `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`, Unraid SSH identity, `DATABASE_URL`, Ed25519 signing key | `list`, `triage`, `email`, `link`, `defer`, `replay-pending`, `check-shipped`, `reconcile-fixes`, `approve-patch` | agent, over `/run/repos-feedback/broker.sock` (`0660`, group `repos-agent`) |
+| `repos-git` | GitHub write token, and the broker's Ed25519 **public** key | `submit-patch`, `open-pr` | agent, over `/run/repos-git/git.sock` (`0660`, group `repos-agent`) |
 | model proxy | Anthropic credential | inference forwarding | agent, over loopback via `ANTHROPIC_BASE_URL` |
 
 **Two sockets, not one.** An earlier draft said every verb went to the broker
@@ -200,6 +210,34 @@ broker proxying into the git principal — putting the mail-and-database princip
 on the path of every push and re-coupling the two credentials this design just
 separated. The agent talks to each principal directly instead, and neither one
 can invoke the other.
+
+### The patch is approved by the broker before `repos-git` will push it
+
+Privacy of the patch cannot be `repos-git`'s job: it deliberately has no
+database, so it does not know the submitter's address or the feedback body and
+cannot tell whether a diff leaks them. Left there, the rule would only ever test
+whether the agent chose to obey it — which is precisely the thing an injected
+instruction attacks.
+
+The check therefore happens where the data is, and travels as a **signed
+approval** rather than as a call:
+
+1. The agent submits the diff to the **broker** (`approve-patch --id --diff`).
+   The broker holds the feedback row, so it can scan the diff for that row's
+   `user_email_at_submit`, for verbatim runs of the feedback body, and for its
+   own secrets. Any hit is a rejection with a reason.
+2. On success the broker returns a detached **Ed25519 signature** over
+   `(feedback_id, base_sha, patch_digest, expiry)`. It signs; it does not
+   transmit anything to `repos-git`.
+3. The agent presents the diff plus that approval to `repos-git`, which holds
+   only the broker's **public** key — not a secret, so this shares no
+   capability. It recomputes the digest of the diff it actually received,
+   verifies the signature covers that digest, checks the expiry, and refuses to
+   push otherwise.
+
+The digest binds the approval to exact bytes, so the agent cannot get one patch
+approved and push another. Neither principal calls the other at any point; the
+agent carries the token, and a token it forges will not verify.
 
 **Neither principal needs to call the other, and neither needs the other's
 data.** `repos-git` derives the branch name from the feedback id alone — a pure
@@ -406,8 +444,24 @@ build would otherwise sit in the fix queue forever. It is terminal and requires
 a recorded reason. The `ack` copy must therefore not promise a fix, only that
 the item was received and read.
 
-`list --fix-pending` returns rows in `needed`, `patch_submitted` or `pr_open`,
-oldest first, and is drained as its own sweep step.
+**A duplicate never enters the fix queue.** Its canonical row owns the fix, so a
+row with `dedupe_of IS NOT NULL` is `n/a` regardless of category, and `triage`
+sets it that way when it assigns `dedupe_of`. A row already in `needed` that is
+*later* recognised as a duplicate transitions to `n/a` in the same transaction.
+Without this, two rows describing one bug would each get a worktree, a patch and
+a pull request for the same defect.
+
+This costs the duplicate's submitter nothing: they still receive their own `ack`,
+and `check-shipped` still notifies them when the fix ships, because it selects on
+the **effective** fix SHA resolved through `dedupe_of` rather than on the row's
+own. The duplicate is excluded from doing the work, not from hearing the outcome.
+
+One consequence to be explicit about: if a canonical row is `deferred`, its
+duplicates are never notified either, because there is no fix to ship. They keep
+their acknowledgement and the reason lives in the canonical row's `triage_note`.
+
+`list --fix-pending` returns rows in `needed`, `patch_submitted` or `pr_open`
+with `dedupe_of IS NULL`, oldest first, and is drained as its own sweep step.
 
 **Every transition is idempotent, and recovery does not depend on having been
 told.** Because the branch name is derived from the feedback id and the
@@ -415,15 +469,36 @@ repository is public, the true state is always observable:
 
 - `submit-patch` — if `fix_branch` already exists on the remote at the same
   `fix_patch_digest`, it is a no-op returning the existing branch. A different
-  digest for the same row is a new patch and replaces the branch.
+  digest is a revision of the fix, and is applied as a **fast-forward
+  replacement commit**: `repos-git` builds the tree that the new patch produces
+  on the pinned base, then commits it with the *current branch tip as parent*.
+  The tip advances, the content becomes exactly the new patch, and the update is
+  an ordinary fast-forward. This matters because force and non-fast-forward
+  pushes are refused outright — an earlier draft said the branch was "replaced",
+  which those constraints made impossible. Nothing is ever rewritten or deleted.
 - `open-pr` — if a pull request already exists with that head branch, it is
   returned rather than duplicated.
-- `reconcile-fixes` — the repair verb. For every row not in a terminal state it
-  observes the remote anonymously and heals the row to match: branch present but
-  `fix_status` still `needed` → `patch_submitted`; PR found → `pr_open` with its
-  number; PR merged → `merged` with the squash SHA written to `fix_commit_sha`,
-  which is the same fact `link` records by hand. A lost response therefore costs
-  one sweep, not the fix.
+- `reconcile-fixes` — **the sole writer of every remote-derived `fix_status`
+  transition**, namely `patch_submitted`, `pr_open` and `merged`. The states
+  that reflect a local decision rather than remote reality — `needed` and `n/a`
+  from `triage`, `deferred` from `defer` — are written by those broker verbs, and
+  the two sets never overlap. `repos-git` has no
+  database and cannot call the broker, so it cannot advance the column and does
+  not try: `submit-patch` and `open-pr` return their result to the agent and
+  change nothing in the database. The truth is instead *observed*. For every row
+  not in a terminal state, `reconcile-fixes` reads the remote anonymously and
+  heals the row to match: branch present while `fix_status` is `needed` →
+  `patch_submitted`; PR found → `pr_open` with its number; PR merged → `merged`
+  with the squash SHA written to `fix_commit_sha`, the same fact `link` records
+  by hand.
+
+  Having exactly one writer for the remote-derived states is what makes the
+  lifecycle honest: for anything that happened on GitHub, the database records
+  what the remote actually shows, never what a verb reported or an agent
+  claimed. It is why `reconcile-fixes` runs **both first and last** in every
+  sweep — first so decisions are made against reality, last so work done during
+  the sweep is recorded before the run ends rather than waiting four hours. A
+  lost response costs one sweep at worst, and usually nothing.
 
 `link` remains for the case where a human merges something the agent did not
 push.
@@ -491,7 +566,8 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 | `email --id --kind ack\|reply --subject --text --html` | validates the category transition, freezes the request, commits the row, sends, records `message_id`. Copy arrives as bounded inline content, never a file path |
 | `link --id --sha` | records a full merged/squash commit reachable from `origin/main` |
 | `check-shipped` | the only code path that creates and sends `resolved` emails |
-| `submit-patch --id --diff` | applies an inert diff in `repos-git`'s own clone on the pinned base, commits, and pushes to the derived `feedback/<id>-<slug>` branch. Replaces revision 3's `push-branch`, which took a repository rather than a patch |
+| `approve-patch --id --diff` | broker-side privacy scan against that row's address and body; returns a signed approval over the patch digest, or a rejection with a reason |
+| `submit-patch --id --diff --approval` | verifies the approval covers these exact bytes, then applies an inert diff in `repos-git`'s own clone on the pinned base, commits, and pushes to the derived `feedback/<id>-<slug>` branch. Fast-forward only. Replaces revision 3's `push-branch`, which took a repository rather than a patch |
 | `open-pr --id` | opens the pull request for that branch; body and title are derived, and carry no submitter address |
 
 **The CLI owning `email` is what makes autonomy safe.** It permits `reply` only
@@ -566,8 +642,9 @@ than it is cleared.
 4. `list --fix-pending` — acknowledged items whose fix is unfinished
 5. `list --untriaged` — genuinely new feedback, per the flow below
 6. `check-shipped` — every sweep, regardless of whether anything new arrived
+7. `reconcile-fixes` again — record work done during this sweep before exiting
 
-Steps 1, 2 and 6 are mechanical and involve no agent judgement. Step 4 resumes
+Steps 1, 2, 6 and 7 are mechanical and involve no agent judgement. Step 4 resumes
 work the agent already started; step 5 is the only one that takes on anything
 new. `reconcile-fixes` runs first so the rest of the sweep reasons about
 observed reality rather than about what the last run believed.
@@ -578,12 +655,13 @@ observed reality rather than about what the last run believed.
 2. Then, by category:
    - `noise` / `question` → draft copy → `email --kind reply`. Terminal.
    - `bug` / `ux` / `feature` → draft copy → `email --kind ack`
-3. Fixable bug → `fix_status='needed'` → **disposable worktree** → failing test
-   that reproduces it → fix → `submit-patch` → `open-pr` (see below). Each verb
-   advances `fix_status`, so an interrupted attempt resumes from where it stopped
-   rather than restarting or vanishing. An item no fix is planned for gets
-   `defer` with a reason.
-(`check-shipped` runs as step 4 of the sweep above, regardless of new feedback.)
+3. Fixable bug → `triage` sets `fix_status='needed'` → **disposable worktree** →
+   failing test that reproduces it → fix → `approve-patch` → `submit-patch` →
+   `open-pr` (see below). The git verbs do **not** write `fix_status`;
+   `reconcile-fixes` observes the remote and advances it, so an interrupted
+   attempt resumes from observed reality rather than from anything the run
+   remembered. An item no fix is planned for gets `defer` with a reason.
+(`check-shipped` runs as step 6 of the sweep above, regardless of new feedback.)
 
 ### Fixes run in a disposable worktree, never the shared checkout
 
@@ -762,14 +840,36 @@ Aimed at the failure modes this repository keeps producing.
 - **Fix lifecycle survives a crash at every step** — kill the run after `ack`,
   after `submit-patch` and after `open-pr` in turn; each time the row is
   returned by `list --fix-pending` and the next sweep resumes rather than
-  restarting or duplicating. Mutation-checked by removing `fix_status` updates
-  and confirming the row is stranded.
+  restarting or duplicating. Mutation-checked by removing the trailing
+  `reconcile-fixes` from the sweep and confirming the row is stranded until the
+  next run.
 - **Lost response is recovered, not duplicated** — push succeeds but the reply
   is dropped; `reconcile-fixes` heals the row from the remote, and a repeated
   `submit-patch` with the same digest returns the existing branch rather than
-  creating a second one. A changed digest replaces the branch instead.
+  creating a second one. A changed digest fast-forwards the branch by one commit
+  instead.
 - **`deferred` is terminal** — a deferred row leaves `list --fix-pending`
   permanently and never receives a `resolved` email.
+- **Duplicates do no fix work but hear the outcome** — a duplicate bug is `n/a`
+  and never appears in `list --fix-pending`, while still receiving its own `ack`
+  and a `resolved` email when the canonical fix ships. A row marked duplicate
+  after reaching `needed` drops to `n/a`. Mutation-checked by removing the
+  `dedupe_of IS NULL` predicate and confirming two PRs are opened for one bug.
+- **Only `reconcile-fixes` writes the remote-derived states** — `submit-patch`
+  and `open-pr` leave `fix_status` untouched; `patch_submitted` and `pr_open`
+  appear only after a reconcile. Asserted by inspecting the column immediately
+  after each git verb. `triage` and `defer` still write `needed`, `n/a` and
+  `deferred`, and no verb writes both sets.
+- **A revised patch fast-forwards** — submitting a different digest for the same
+  row advances the branch by one commit whose tree equals the new patch, with the
+  previous tip as parent, and the push is accepted without force. Asserted
+  together with the force-refusal test, since the two would otherwise contradict.
+- **Patch approval is enforced, not requested** — `repos-git` refuses a patch
+  with no approval, with an expired one, with one signed for a different
+  `feedback_id` or base, and with one whose digest does not match the bytes
+  actually submitted. The broker refuses to sign a diff containing the
+  submitter's address or verbatim feedback body. Mutation-checked by disabling
+  signature verification and confirming a leaking patch reaches the remote.
 - **End-to-end sweep recovery, both stranding modes** — one full sweep with the
   mailer failing on the network, then a second sweep with it healthy, asserts
   every submitter ends up mailed exactly once. Covers the written-but-unsent row
@@ -837,12 +937,14 @@ Aimed at the failure modes this repository keeps producing.
    the container — env is fixed at create time.
 3. Create the `repos-broker` system account and install the
    `repos-feedback-broker` unit, with the Resend key, `FEEDBACK_WEBHOOK_URL`,
-   the Unraid SSH identity and the database credentials readable only by it
-   (`0600`, `LoadCredential=`). Socket `0660`, group `repos-agent`. It does not
-   get the GitHub token.
-4. Create the `repos-git` account holding **only** the GitHub write token, with
-   its own pristine clone that no other account can write. Configure every git
-   invocation with `core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM=1` and
+   the Unraid SSH identity, the database credentials and the Ed25519 **signing**
+   key readable only by it (`0600`, `LoadCredential=`). Socket `0660`, group
+   `repos-agent`. It does not get the GitHub token.
+4. Create the `repos-git` account holding **only** the GitHub write token and
+   the broker's Ed25519 **public** key, with its own pristine clone that no other
+   account can write, and its own socket at `/run/repos-git/git.sock` (`0660`,
+   group `repos-agent`). Configure every git invocation with
+   `core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM=1` and
    `GIT_CONFIG_GLOBAL=/dev/null`.
 5. Stand up the loopback model-credential proxy under its own principal and
    point the agent's `ANTHROPIC_BASE_URL` at it.
