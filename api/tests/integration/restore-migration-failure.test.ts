@@ -194,9 +194,9 @@ describe('G5 case 4 — migration failure rollback to pre-snapshot', () => {
       stdio: 'pipe',
       shell: '/bin/bash',
     });
-    const rev = dumpSchemaRev(okDump);
+    const rev = await dumpSchemaRev(okDump);
     expect(rev).toBe(currentCodeRev());
     expect(rev).toBeGreaterThan(0);
-    expect(() => assertSchemaRevCompatible(okDump)).not.toThrow();
+    await expect(assertSchemaRevCompatible(okDump)).resolves.toBeUndefined();
   });
 });

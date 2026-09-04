@@ -52,6 +52,36 @@ export interface PostOpts {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Restrict configured delivery to real Discord webhook endpoints. Loopback
+ * HTTP is accepted only by the test environment's local webhook fixture.
+ */
+export function validateFeedbackWebhookUrl(raw: string, nodeEnv = process.env.NODE_ENV): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('FEEDBACK_WEBHOOK_URL must be a valid URL');
+  }
+
+  const isDiscordWebhook =
+    url.protocol === 'https:' &&
+    url.hostname === 'discord.com' &&
+    url.port === '' &&
+    url.username === '' &&
+    url.password === '' &&
+    url.pathname.startsWith('/api/webhooks/');
+  const isTestLoopback =
+    nodeEnv === 'test' &&
+    url.protocol === 'http:' &&
+    ['127.0.0.1', '::1', 'localhost'].includes(url.hostname);
+
+  if (!isDiscordWebhook && !isTestLoopback) {
+    throw new Error('FEEDBACK_WEBHOOK_URL must be an HTTPS discord.com/api/webhooks URL');
+  }
+  return url.toString();
+}
+
 // Retries on network error / 429 / 5xx with capped exponential backoff (per
 // CLAUDE.md API-reliability). Gives up immediately on a non-429 4xx (a bad
 // payload won't fix itself). Returns the final outcome + attempt count.
@@ -99,6 +129,7 @@ export async function deliverFeedbackWebhook(
 ): Promise<void> {
   const url = process.env.FEEDBACK_WEBHOOK_URL;
   if (!url) return; // disabled (info-logged at boot in bootstrap-guards)
+  const validatedUrl = validateFeedbackWebhookUrl(url);
 
   const { rows } = await db.query<FeedbackRow>(
     `SELECT id, body, route, app_sha, user_email_at_submit FROM feedback WHERE id=$1`,
@@ -107,7 +138,7 @@ export async function deliverFeedbackWebhook(
   const row = rows[0];
   if (!row) return;
 
-  const { ok, attempts } = await postWithRetry(url, buildDiscordPayload(row), opts);
+  const { ok, attempts } = await postWithRetry(validatedUrl, buildDiscordPayload(row), opts);
   await db.query(
     `UPDATE feedback
        SET webhook_attempts = $2,

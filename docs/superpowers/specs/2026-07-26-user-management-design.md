@@ -178,8 +178,8 @@ Five new env vars, all **set-once infrastructure identity** — none of them cha
 | Var | Purpose |
 |---|---|
 | `CF_API_TOKEN` | Cloudflare API token (Q15). Policy read/write only — deliberately **not** granted `Access: Organizations Revoke`, since RepOS makes no session-revocation call (Q17a) |
-| `CF_ACCOUNT_ID` | `400d0b4a35d63a32b86ab774b9feb4ab` |
-| `CF_ACCESS_POLICY_ID` | `b4a92a15-27d5-477b-ad36-f78fcdae931c` |
+| `CF_ACCOUNT_ID` | Cloudflare account identifier, supplied at deployment |
+| `CF_ACCESS_POLICY_ID` | Access policy identifier, supplied at deployment |
 | `RESEND_API_KEY` | Resend transactional key |
 | `INVITE_FROM_EMAIL` | e.g. `repos@send.jpmtech.com` |
 

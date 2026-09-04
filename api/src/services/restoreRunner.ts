@@ -19,11 +19,12 @@
 //
 // The runner is NOT responsible for clearing the maintenance flag — the admin
 // clears it via /api/maintenance/clear once DB state is verified.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, openSync, writeSync, fsyncSync, closeSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../db/client.js';
+import { pipeChildProcesses } from '../utils/childProcess.js';
 
 export interface RestoreKickoff {
   restore_id: string; // sentinel id (the user reads progress with this)
@@ -70,13 +71,19 @@ function fsyncWrite(path: string, contents: string): void {
   }
 }
 
-function integrityCheck(filePath: string): void {
-  // I-INTEGRITY-AT-RESTORE — bitrot defence. Synchronous because the route
-  // handler awaits the entire kickoff.
-  const res = spawnSync('bash', ['-c', `gunzip -c "${filePath}" | pg_restore -l > /dev/null`]);
-  if (res.status !== 0) {
-    throw new Error(`source dump failed pg_restore -l (bitrot? exit ${res.status})`);
-  }
+async function integrityCheck(filePath: string): Promise<void> {
+  // I-INTEGRITY-AT-RESTORE — bitrot defence. The route handler awaits the
+  // entire check before kickoff. Values are passed as argv entries;
+  // the processes are connected directly without `bash -c`.
+  const gunzip = spawn('gunzip', ['-c', '--', filePath], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const pgRestore = spawn('pg_restore', ['-l'], {
+    stdio: ['pipe', 'ignore', 'inherit'],
+  });
+  await pipeChildProcesses(gunzip, 'gunzip', pgRestore, 'pg_restore -l', {
+    allowEarlyConsumerExit: true,
+  });
 }
 
 /** Highest migration number in api/src/db/migrations (e.g. 062). */
@@ -100,16 +107,43 @@ export function currentCodeRev(): number {
  * pre-_migrations dump); assertSchemaRevCompatible then ALLOWS, so an
  * extraction hiccup never bricks disaster recovery.
  */
-export function dumpSchemaRev(dumpPath: string): number | null {
-  const res = spawnSync(
-    'bash',
-    ['-c', `gunzip -c "${dumpPath}" | pg_restore --data-only --table=_migrations -f - 2>/dev/null`],
-    { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
-  );
-  if (res.status !== 0 || typeof res.stdout !== 'string') return null;
+export async function dumpSchemaRev(dumpPath: string): Promise<number | null> {
+  const gunzip = spawn('gunzip', ['-c', '--', dumpPath], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const pgRestore = spawn('pg_restore', ['--data-only', '--table=_migrations', '--file=-'], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+  });
+
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  const outputDone = (async () => {
+    if (!pgRestore.stdout) throw new Error('pg_restore stdout unavailable');
+    for await (const chunk of pgRestore.stdout) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > 32 * 1024 * 1024) throw new Error('migration extraction exceeded 32 MiB');
+      chunks.push(buffer);
+    }
+  })();
+
+  try {
+    await Promise.all([
+      pipeChildProcesses(gunzip, 'gunzip', pgRestore, 'pg_restore migration extraction', {
+        allowEarlyConsumerExit: true,
+      }),
+      outputDone,
+    ]);
+  } catch {
+    if (gunzip.exitCode === null && gunzip.signalCode === null) gunzip.kill();
+    if (pgRestore.exitCode === null && pgRestore.signalCode === null) pgRestore.kill();
+    return null;
+  }
+
+  const stdout = Buffer.concat(chunks).toString('utf8');
   let max = 0;
   let found = false;
-  for (const line of res.stdout.split('\n')) {
+  for (const line of stdout.split('\n')) {
     // COPY data rows are tab-delimited "<filename>\t<applied_at>"; migration
     // filenames are "NNN_description.sql". The COPY header and \. terminator
     // don't match this shape.
@@ -123,8 +157,8 @@ export function dumpSchemaRev(dumpPath: string): number | null {
   return found ? max : null;
 }
 
-export function assertSchemaRevCompatible(dumpPath: string): void {
-  const dumpRev = dumpSchemaRev(dumpPath);
+export async function assertSchemaRevCompatible(dumpPath: string): Promise<void> {
+  const dumpRev = await dumpSchemaRev(dumpPath);
   if (dumpRev === null) return; // unknown rev → allow (see dumpSchemaRev note)
   const codeRev = currentCodeRev();
   if (dumpRev > codeRev) {
@@ -144,10 +178,10 @@ export async function kickOffRestore(
   }
 
   // 1. Integrity check pre-flag (I-INTEGRITY-AT-RESTORE).
-  integrityCheck(sourcePath);
+  await integrityCheck(sourcePath);
 
   // 2. C-FORWARD-INCOMPAT-CHECK — abort BEFORE writing the maintenance flag.
-  assertSchemaRevCompatible(sourcePath);
+  await assertSchemaRevCompatible(sourcePath);
 
   // 3. Pre-snapshot filename — predetermined so the sentinel is complete from t=0.
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').concat('Z');

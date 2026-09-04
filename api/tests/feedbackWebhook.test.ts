@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildDiscordPayload, postWithRetry } from '../src/lib/feedbackWebhook.js';
+import {
+  buildDiscordPayload,
+  postWithRetry,
+  validateFeedbackWebhookUrl,
+} from '../src/lib/feedbackWebhook.js';
 
 const ROW = {
   id: '42',
@@ -75,5 +79,31 @@ describe('postWithRetry', () => {
       sleep: noSleep,
     });
     expect(r).toEqual({ ok: false, attempts: 1 });
+  });
+});
+
+describe('validateFeedbackWebhookUrl', () => {
+  it('accepts the expected Discord HTTPS endpoint', () => {
+    expect(
+      validateFeedbackWebhookUrl('https://discord.com/api/webhooks/123/token', 'production'),
+    ).toBe('https://discord.com/api/webhooks/123/token');
+  });
+
+  it('rejects arbitrary and insecure production destinations', () => {
+    expect(() =>
+      validateFeedbackWebhookUrl('http://169.254.169.254/latest/meta-data', 'production'),
+    ).toThrow(/discord\.com/);
+    expect(() =>
+      validateFeedbackWebhookUrl('https://example.com/api/webhooks/123/token', 'production'),
+    ).toThrow(/discord\.com/);
+  });
+
+  it('allows loopback HTTP only for test fixtures', () => {
+    expect(validateFeedbackWebhookUrl('http://127.0.0.1:1234/hook', 'test')).toBe(
+      'http://127.0.0.1:1234/hook',
+    );
+    expect(() => validateFeedbackWebhookUrl('http://127.0.0.1:1234/hook', 'production')).toThrow(
+      /discord\.com/,
+    );
   });
 });

@@ -4,12 +4,15 @@
 // run pg_dump directly against process.env.DATABASE_URL so the suite
 // doesn't require s6-overlay. In production the path lives at
 // /usr/local/bin/repos-backup.sh per the container layout, but the
-// manual-snapshot HTTP path shells the same pg_dump|gzip pipe here so the
-// behavior is identical and self-contained.
+// manual-snapshot HTTP path runs the same logical pg_dump→gzip pipeline here
+// with direct process streams, so the behavior is identical and self-contained.
 import { spawn } from 'node:child_process';
-import { statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { createGzip } from 'node:zlib';
 import { db } from '../db/client.js';
+import { pipeChildProcesses, waitForSuccessfulExit } from '../utils/childProcess.js';
 
 export interface BackupResult {
   id: string;
@@ -71,33 +74,39 @@ export async function runManualBackup(caller: ManualBackupCaller): Promise<Backu
 }
 
 export function dumpToFile(filePath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) return reject(new Error('DATABASE_URL not set'));
-    // pg_dump custom-format | gzip → file. shell so the pipe is honored.
-    const child = spawn(
-      'bash',
-      ['-c', `pg_dump --format=custom "${url}" | gzip -6 > "${filePath}"`],
-      { stdio: ['ignore', 'inherit', 'inherit'] },
-    );
-    child.on('error', reject);
-    child.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(`pg_dump exited ${code}`)),
-    );
+  const url = process.env.DATABASE_URL;
+  if (!url) return Promise.reject(new Error('DATABASE_URL not set'));
+
+  // Pass the connection URL as one argv entry and implement compression with
+  // Node streams. Neither the URL nor the destination is parsed by a shell.
+  const pgDump = spawn('pg_dump', ['--format=custom', url], {
+    stdio: ['ignore', 'pipe', 'inherit'],
   });
+  const dumpDone = waitForSuccessfulExit(pgDump, 'pg_dump');
+  const streamDone = pipeline(
+    pgDump.stdout,
+    createGzip({ level: 6 }),
+    createWriteStream(filePath, { mode: 0o640 }),
+  );
+
+  return Promise.all([dumpDone, streamDone])
+    .then(() => undefined)
+    .catch(async (err: unknown) => {
+      if (pgDump.exitCode === null && pgDump.signalCode === null) pgDump.kill();
+      await Promise.allSettled([dumpDone, streamDone]);
+      throw err;
+    });
 }
 
-export function integrityCheck(filePath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('bash', ['-c', `gunzip -c "${filePath}" | pg_restore -l > /dev/null`], {
-      stdio: ['ignore', 'ignore', 'inherit'],
-    });
-    child.on('error', reject);
-    child.on('close', (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(`integrity check failed (gunzip|pg_restore -l exit ${code})`)),
-    );
+export async function integrityCheck(filePath: string): Promise<void> {
+  const gunzip = spawn('gunzip', ['-c', '--', filePath], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const pgRestore = spawn('pg_restore', ['-l'], {
+    stdio: ['pipe', 'ignore', 'inherit'],
+  });
+  await pipeChildProcesses(gunzip, 'gunzip', pgRestore, 'pg_restore -l', {
+    allowEarlyConsumerExit: true,
   });
 }
 

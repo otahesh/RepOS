@@ -54,6 +54,7 @@ if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{7,40}$'; then
 fi
 
 IMAGE="${IMAGE_REPO}:sha-${SHA}"
+REMOTE_ENV_FILE="/root/.repos-rollback.env"
 
 # The env-preserving recreate recipe. In a real run we capture the live env via
 # `docker inspect` over SSH into a temp file, then recreate with --env-file.
@@ -65,7 +66,7 @@ print_recipe() {
 ssh ${UNRAID_SSH} docker pull ${IMAGE}
 # 2. capture the existing container env (don't lose secrets) — but drop the
 #    old image's baked APP_SHA so the pinned image's own value shows through
-ssh ${UNRAID_SSH} "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > /tmp/repos.env"
+ssh ${UNRAID_SSH} "umask 077; docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > ${REMOTE_ENV_FILE}"
 # 3. stop + remove (volumes on /mnt/user/appdata/repos/config survive)
 ssh ${UNRAID_SSH} "docker stop ${CONTAINER} && docker rm ${CONTAINER}"
 # 4. recreate, pinned to ${IMAGE}, env-preserving, with resource caps
@@ -75,8 +76,10 @@ ssh ${UNRAID_SSH} docker run -d \\
   --restart unless-stopped \\
   --memory=2g --cpus=2 \\
   -v /mnt/user/appdata/repos/config:/config \\
-  --env-file /tmp/repos.env \\
+  --env-file ${REMOTE_ENV_FILE} \\
   ${IMAGE}
+# 5. remove the short-lived, mode-0600 secret file
+ssh ${UNRAID_SSH} rm -f ${REMOTE_ENV_FILE}
 RECIPE
 }
 
@@ -89,11 +92,18 @@ fi
 echo "→ Rolling ${CONTAINER} back to ${IMAGE} on ${UNRAID_SSH}..."
 
 ssh "${UNRAID_SSH}" docker pull "${IMAGE}"
+# The captured env contains live secrets. Keep it root-only and guarantee a
+# best-effort remote cleanup on success, failure, or interruption.
+cleanup_remote_env() {
+  ssh "${UNRAID_SSH}" rm -f "${REMOTE_ENV_FILE}" >/dev/null 2>&1 || true
+}
+trap cleanup_remote_env EXIT
+
 # Drop the captured APP_SHA: it's baked into each image, and carrying the old
 # one over via --env-file masks the pinned image's own APP_SHA — during the
 # 2026-07-10 G10 dry-fire this made the rolled-back container report the NEW
 # sha, defeating the operator's verification signal.
-ssh "${UNRAID_SSH}" "docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > /tmp/repos.env"
+ssh "${UNRAID_SSH}" "umask 077; docker inspect ${CONTAINER} --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -v '^APP_SHA=' > ${REMOTE_ENV_FILE}"
 ssh "${UNRAID_SSH}" "docker stop ${CONTAINER} && docker rm ${CONTAINER}"
 ssh "${UNRAID_SSH}" docker run -d \
   --name "${CONTAINER}" \
@@ -101,8 +111,11 @@ ssh "${UNRAID_SSH}" docker run -d \
   --restart unless-stopped \
   --memory=2g --cpus=2 \
   -v /mnt/user/appdata/repos/config:/config \
-  --env-file /tmp/repos.env \
+  --env-file "${REMOTE_ENV_FILE}" \
   "${IMAGE}"
+
+cleanup_remote_env
+trap - EXIT
 
 echo "→ Waiting for healthy..."
 for i in $(seq 1 25); do
