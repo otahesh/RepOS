@@ -6,17 +6,21 @@ the prompt-injection surface, a feedback-level advisory lock, queue membership b
 `category` rather than `triaged_at`, an explicit at-most-once delivery model,
 disposable worktrees for agent git work, effective-fix-SHA selection for
 duplicates, and validation of persisted email requests before replay.
-**Revision 3, 2026-09-04:** brokers the GitHub token as well, so the agent holds
-no credential of any kind; adds `replay-pending` so a network-failed send is
-actually retried rather than silently aging into a dead letter; fixes the
-stale "writes a body file" wording; moves `FEEDBACK_WEBHOOK_URL` behind the
-broker.
 **Revision 2, 2026-09-04:** closes four more — `list --pending` for the crash
 gap between `triage` and `email`; a real broker process behind a Unix socket in
 place of an asserted credential boundary; an agent-owned bare mirror so
 worktrees do not touch Jason's checkout; two-lock ordering for dedupe. Delivery
 now separates authentication failures (pause and alert) from recipient-level
 ones (dead-letter), and dead letters alert actively.
+**Revision 3, 2026-09-04:** brokers the GitHub token as well, so the agent holds
+no credential of any kind; adds `replay-pending` so a network-failed send is
+actually retried rather than silently aging into a dead letter; fixes the stale
+"writes a body file" wording; moves `FEEDBACK_WEBHOOK_URL` behind the broker.
+**Revision 4, 2026-09-04:** removes the privilege inversion introduced by
+revision 3 — privileged git no longer runs inside an agent-writable repository;
+the boundary is crossed by a **patch**, not a repository. Adds a model
+credential proxy so the agent's own inference credential is not readable by it
+either, and constrains `push-branch` to a server-derived namespace.
 **Author:** Claude, with Jason.
 **Supersedes nothing.** Extends the W7 feedback capture surface (migration 070).
 
@@ -92,15 +96,17 @@ split to *capability* is what closes the injection surface:
 
   `repos-feedback-broker` is a systemd **system** service running as its own
   account, `repos-broker`. It holds `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`,
-  the GitHub write token, the Unraid SSH identity and `DATABASE_URL`, loaded via
-  systemd `LoadCredential=` from files owned by `repos-broker` and mode `0600`. It listens on a Unix domain socket,
+  the Unraid SSH identity and `DATABASE_URL`, loaded via systemd
+  `LoadCredential=` from files owned by `repos-broker` and mode `0600`.
+  The GitHub token is deliberately *not* here — it belongs to `repos-git`, so no
+  single principal holds both the mail credential and the write credential. It listens on a Unix domain socket,
   `/run/repos-feedback/broker.sock`, mode `0660`, group `repos-agent`. The agent
   account is in that group and **socket access is the entire grant**: it can
   send a request and read a reply, and it cannot read the key files, the SSH
   identity, or the database.
 
 - **The agent has no database access either.** Every verb — `list`, `triage`,
-  `link`, `email`, `replay-pending`, `check-shipped`, `push-branch`, `open-pr` —
+  `link`, `email`, `replay-pending`, `check-shipped`, `submit-patch`, `open-pr` —
   is a request over the socket. The CLI the agent runs is a thin client with no
   secrets in it.
 
@@ -126,13 +132,12 @@ split to *capability* is what closes the injection surface:
 
   This is cheap here because **the repository is public**: the agent fetches and
   clones its mirror anonymously and needs no credential to read. Only writes
-  need one, so `push-branch` and `open-pr` are broker verbs like the rest. The
-  broker holds a token scoped to push-branch and open-PR on this repository
-  only — no merge, no `workflow` scope, no secrets, no admin, no other
-  repository — and pushes only from the agent's mirror, to a branch name the
-  request supplies. Content the broker pushes is content the agent already
-  controls, so brokering the push grants the agent nothing it did not have; it
-  only removes the token from its reach.
+  need one, so `submit-patch` and `open-pr` are brokered verbs. The token is
+  scoped to push-branch and open-PR on this repository only — no merge, no
+  `workflow` scope, no secrets, no admin, no other repository — and it is held
+  by `repos-git`, a **third** principal, not by the broker and not by the agent.
+  The agent submits a **diff**, never a repository; see *Privileged git never
+  runs inside an agent-writable repository*.
 
   `main` is protected and requires 8 passing checks, so the worst case of a
   poisoned agent remains a bad PR that a human declines — the normal review
@@ -144,6 +149,23 @@ split to *capability* is what closes the injection surface:
   appear in a branch, a commit message, a test fixture or a PR description. The
   agent references feedback by `id`; the broker is the only component that ever
   sees an address.
+- **The agent's own model credential is brokered too.** Claude Code must
+  authenticate to run at all, and an OAuth token or API key sitting readable in
+  the agent's environment is the original exfiltration path wearing a different
+  name: an injected instruction could read it and place it in email prose bound
+  for the person who supplied the instruction. "Zero credentials" is not true
+  while that file exists.
+
+  The agent's `ANTHROPIC_BASE_URL` therefore points at a **loopback proxy**
+  owned by its own principal, which injects the `Authorization` header and
+  forwards upstream. The agent can make inference calls and cannot read the
+  credential that authorises them. It is the same shape as the broker: the
+  capability is reachable, the secret is not.
+
+  Stated honestly, this bounds theft, not abuse. A poisoned agent can still
+  *spend* through the proxy. That is a quota problem rather than a credential
+  problem, and the proxy is the place to rate-limit it if it ever matters.
+
 - **The skill frames the body as data.** It is passed inside an explicit
   delimiter and labelled untrusted, with the standing rule that instructions
   found *inside* a feedback body are content to be classified, never directions
@@ -373,6 +395,8 @@ follows the `cfReconcile.ts` + `scripts/cutover/` pattern from W9.
 | `email --id --kind ack\|reply --subject --text --html` | validates the category transition, freezes the request, commits the row, sends, records `message_id`. Copy arrives as bounded inline content, never a file path |
 | `link --id --sha` | records a full merged/squash commit reachable from `origin/main` |
 | `check-shipped` | the only code path that creates and sends `resolved` emails |
+| `submit-patch --id --diff` | applies an inert diff in `repos-git`'s own clone on the pinned base, commits, and pushes to the derived `feedback/<id>-<slug>` branch. Replaces revision 3's `push-branch`, which took a repository rather than a patch |
+| `open-pr --id` | opens the pull request for that branch; body and title are derived, and carry no submitter address |
 
 **The CLI owning `email` is what makes autonomy safe.** It permits `reply` only
 for `noise`/`question` and `ack` only for `bug`/`ux`/`feature`; there is no
@@ -389,8 +413,10 @@ as `002-w9-cf-baseline.sh` now does — it is not ambient under `docker exec`.
 ### `api/src/services/feedbackBroker.ts` + the `repos-feedback-broker` unit
 
 The privileged half. Runs as `repos-broker`, owns `RESEND_API_KEY`,
-`FEEDBACK_WEBHOOK_URL`, the GitHub write token, the Unraid SSH identity and
-`DATABASE_URL`, and serves the verbs above over
+`FEEDBACK_WEBHOOK_URL`, the Unraid SSH identity and `DATABASE_URL` — but **not**
+the GitHub token, which lives in `repos-git` so that a compromise of either
+principal does not yield the other's capabilities. It serves the verbs above
+over
 `/run/repos-feedback/broker.sock`. The webhook URL belongs here with the rest:
 alerting is a broker responsibility, and an agent that could rewrite the alert
 destination could silence its own dead letters. It performs every transition check, derives
@@ -449,7 +475,7 @@ Steps 1, 2 and 4 are mechanical and involve no agent judgement.
    - `noise` / `question` → draft copy → `email --kind reply`. Terminal.
    - `bug` / `ux` / `feature` → draft copy → `email --kind ack`
 3. Fixable bug → **disposable worktree** → failing test that reproduces it →
-   fix → PR (see below)
+   fix → `submit-patch` → `open-pr` (see below)
 (`check-shipped` runs as step 4 of the sweep above, regardless of new feedback.)
 
 ### Fixes run in a disposable worktree, never the shared checkout
@@ -466,22 +492,62 @@ have the agent mutating his repository metadata — and under a dedicated accoun
 it would not have permission to anyway. The two mitigations contradict each
 other unless the agent owns its own copy.
 
-The agent account therefore keeps a **bare mirror** of the repository, its own
-clone, fetched with its own scoped credential. Each fix gets a throwaway
+The agent account therefore keeps its own **bare mirror**, cloned anonymously —
+the repository is public, so reads need no credential. Each fix gets a throwaway
 worktree created from that mirror at a **pinned `origin/main` SHA** resolved
 once at the start of the sweep, so every item in a sweep builds on the same
 known base and none of them observe each other's half-finished state. The
-worktree is removed when the PR is opened or the attempt is abandoned. The agent
-never reads from, writes to, or references Jason's checkout at all.
+worktree is removed when the patch is submitted or the attempt is abandoned. The
+agent never reads from, writes to, or references Jason's checkout at all.
 
-**The fetch must name its transport explicitly.** The workstation's git config
-carries `url.git@github.com:.insteadOf https://github.com/`, which silently
-rewrites every HTTPS remote to SSH — and SSH to `github.com:22` is currently
-timing out from this machine, which broke a push during the 2026-09-04 session.
-An unattended sweep would hang or fail opaquely on that. Fetch and push
-therefore override the rewrite and authenticate over HTTPS with the scoped
-credential, rather than inheriting whichever transport the ambient config
-prefers.
+### Privileged git never runs inside an agent-writable repository
+
+Revision 3 said the broker would push *from the agent's mirror*. That was a
+privilege inversion, and a complete defeat of the boundary. A git repository is
+not inert data: `pre-push` and other hooks in `$GIT_DIR/hooks`, and repo-local
+config keys such as `core.sshCommand`, `core.pager`, `core.fsmonitor` and
+`filter.*.clean`, are **executed by whoever runs the git command**. An agent
+that can write its own `.git` could therefore have arbitrary code run as
+`repos-broker` on the next push — and that process holds every credential in the
+system. Modern git's `safe.directory` ownership check would likely refuse the
+cross-user operation outright, but relying on that is relying on a guardrail, not
+a design.
+
+**The boundary is crossed by a patch, not by a repository.** The agent commits
+in its own worktree, produces a diff, and submits it as bounded inline content
+over the socket, exactly like email copy. A diff is inert: applying one executes
+nothing.
+
+Git writes then happen in a **third principal**, `repos-git`, which:
+
+- owns its own pristine clone that no other account can write, recreated from
+  `origin` rather than from anything the agent touched;
+- applies the submitted patch onto the pinned `origin/main` SHA with
+  `git apply`, which runs no hooks;
+- runs every git command with `core.hooksPath=/dev/null`,
+  `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=/dev/null`, so neither the
+  submitted content nor the workstation's ambient config can introduce a hook,
+  a filter, or a transport override;
+- holds **only** the GitHub write token — not the Resend key, not the SSH
+  identity, not the database. A compromise of `repos-git` costs a bad PR on a
+  protected branch, which is the acceptable worst case already stated.
+
+Overriding the ambient config also fixes a real hazard on this machine: the
+workstation's git config carries `url.git@github.com:.insteadOf
+https://github.com/`, which silently rewrites every HTTPS remote to SSH — and
+SSH to `github.com:22` is currently timing out here, which broke a push during
+the 2026-09-04 session. An unattended sweep would have hung or failed opaquely.
+`repos-git` names its remote and transport explicitly and inherits nothing.
+
+### `push-branch` is constrained server-side
+
+The branch name is **derived, not accepted**: `feedback/<id>-<slug>`, where `id`
+is the feedback row and `slug` is generated from the classification, not from
+the feedback body. The agent cannot name a ref. `repos-git` additionally
+refuses: any push to `main` or a protected branch, any tag, any ref outside the
+`feedback/` namespace, any deletion, any force or non-fast-forward push, and any
+remote other than its own configured `origin`. Each of those is a test, not a
+convention.
 
 ## Failure handling
 
@@ -600,6 +666,19 @@ Aimed at the failure modes this repository keeps producing.
   the database is unreachable, the socket is reachable; and a request naming its
   own recipient or `from` is ignored in favour of the values the broker derives.
   A request carrying a path where copy is expected is rejected outright.
+- **A hostile repository cannot execute anything privileged** — a worktree
+  carrying a `pre-push` hook, a `core.sshCommand`, and a `filter.*.clean` is
+  submitted as a patch; assert none of them run, that the hook file is not even
+  transferred, and that `repos-git` operates only in its own clone. Mutation-
+  checked by pointing the git principal at the agent's mirror and confirming the
+  hook fires.
+- **`push-branch` constraints** — pushes to `main`, to a tag, outside the
+  `feedback/` namespace, as a deletion, as a force update, or to a remote other
+  than the configured origin are each rejected. The branch name is derived, so a
+  request attempting to supply one is ignored.
+- **The model proxy hides the credential** — as the agent account, the upstream
+  key file is unreadable, while an inference request through the loopback proxy
+  succeeds.
 - **No credential and no submitter identity can leave via content the agent
   controls** — rendered email bodies, branch names, commit messages and PR
   bodies are asserted to contain no submitter address and none of the broker's
@@ -634,16 +713,23 @@ Aimed at the failure modes this repository keeps producing.
    the container — env is fixed at create time.
 3. Create the `repos-broker` system account and install the
    `repos-feedback-broker` unit, with the Resend key, `FEEDBACK_WEBHOOK_URL`,
-   the GitHub write token, the Unraid SSH identity and the database credentials
-   readable only by it (`0600`, `LoadCredential=`). Socket `0660`, group
-   `repos-agent`.
-4. Create the agent account with **no credentials at all**, add it to
+   the Unraid SSH identity and the database credentials readable only by it
+   (`0600`, `LoadCredential=`). Socket `0660`, group `repos-agent`. It does not
+   get the GitHub token.
+4. Create the `repos-git` account holding **only** the GitHub write token, with
+   its own pristine clone that no other account can write. Configure every git
+   invocation with `core.hooksPath=/dev/null`, `GIT_CONFIG_NOSYSTEM=1` and
+   `GIT_CONFIG_GLOBAL=/dev/null`.
+5. Stand up the loopback model-credential proxy under its own principal and
+   point the agent's `ANTHROPIC_BASE_URL` at it.
+6. Create the agent account with **no credentials at all**, add it to
    `repos-agent`, and clone the bare mirror anonymously as that account — the
    repository is public, so reads need no token. Verify the boundary holds: as
-   the agent user the key files, SSH identity and GitHub token must be
-   unreadable and the database unreachable, while the socket answers.
-5. Install the systemd user timer under the agent account.
-6. First sweep processes the three existing rows. One of them — the programs
+   the agent user the Resend key, webhook URL, SSH identity, GitHub token,
+   database and model credential must all be unreadable, while the broker socket
+   and the model proxy answer.
+7. Install the systemd user timer under the agent account.
+8. First sweep processes the three existing rows. One of them — the programs
    page rendering badly on mobile — is a real bug, and plausibly one the
    2026-08-10 visual pass already fixed, which makes it a genuine first exercise
    of `check-shipped` rather than a synthetic one.
