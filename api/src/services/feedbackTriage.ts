@@ -68,9 +68,10 @@ export async function triage(input: TriageInput): Promise<void> {
   }
 
   const run = async () => {
-    const { rows: self } = await db.query<{ id: string }>(`SELECT id FROM feedback WHERE id=$1`, [
-      input.id,
-    ]);
+    const { rows: self } = await db.query<{ id: string; fix_status: FixStatus }>(
+      `SELECT id, fix_status FROM feedback WHERE id=$1`,
+      [input.id],
+    );
     if (self.length === 0) throw new TriageError('not_found', `feedback ${input.id} not found`);
 
     if (input.dedupeOf) {
@@ -100,12 +101,22 @@ export async function triage(input: TriageInput): Promise<void> {
 
     // A duplicate's canonical row owns the fix, so the duplicate never enters
     // the fix queue — including a row that was already `needed` when the
-    // duplication was spotted.
+    // duplication was spotted. This test stays FIRST: it is load-bearing and
+    // outranks every decided state below.
+    //
+    // Otherwise a fix_status that records a DECISION or work already done is
+    // left alone. Recomputing it unconditionally would undo a `defer` (reachable
+    // today: `defer` then `triage`) and, once the git verbs land, would reset
+    // patch_submitted / pr_open / merged and re-open the fix queue for work that
+    // has already shipped.
+    const decided: readonly FixStatus[] = ['patch_submitted', 'pr_open', 'merged', 'deferred'];
     const fixStatus: FixStatus = input.dedupeOf
       ? 'n/a'
-      : FIXABLE.includes(input.category)
-        ? 'needed'
-        : 'n/a';
+      : decided.includes(self[0].fix_status)
+        ? self[0].fix_status
+        : FIXABLE.includes(input.category)
+          ? 'needed'
+          : 'n/a';
 
     await db.query(
       `UPDATE feedback
@@ -189,6 +200,16 @@ export async function listUntriaged(): Promise<QueueRow[]> {
  * listUntriaged, and if the run dies before the ledger row is written nothing
  * else selects it. The written-but-unsent case is NOT here — that is
  * replayPending's job, and the two are stranded by different mechanisms.
+ *
+ * The membership test is ANY email, not the kind the CURRENT category calls
+ * for. The guarantee being enforced is "the submitter has not heard back", and
+ * any email means they have. A kind-specific test strands a re-triaged row
+ * forever: triage `bug`, send its `ack`, then re-triage `noise`, and the row
+ * now demands a `reply` that sendFeedbackEmail refuses to create
+ * (`exclusive_kind_present`, because the ack exists). It would be re-queued
+ * every sweep with no action able to clear it, and nothing would alert. The
+ * spec explicitly permits re-triage across this boundary and says it never
+ * un-sends an email, so the queue must tolerate it.
  */
 export async function listPending(): Promise<QueueRow[]> {
   const { rows } = await db.query<QueueRow>(
@@ -197,9 +218,7 @@ export async function listPending(): Promise<QueueRow[]> {
       WHERE f.category IS NOT NULL
         AND f.user_email_at_submit IS NOT NULL
         AND NOT EXISTS (
-          SELECT 1 FROM feedback_emails e
-           WHERE e.feedback_id = f.id
-             AND e.kind = CASE WHEN f.category IN ('noise','question') THEN 'reply' ELSE 'ack' END
+          SELECT 1 FROM feedback_emails e WHERE e.feedback_id = f.id
         )
       ORDER BY f.created_at, f.id`,
   );

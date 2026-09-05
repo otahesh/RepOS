@@ -187,6 +187,61 @@ describe('defer', () => {
     await expect(defer(id, '  ')).rejects.toMatchObject({ code: 'reason_required' });
   });
 
+  it('survives a re-triage rather than being silently undone', async () => {
+    // `defer` then `triage` is reachable from the CLI today, and recomputing
+    // fix_status unconditionally put a deliberately-deferred row straight back
+    // into the fix queue.
+    const id = await mkFeedback('add a toaster integration');
+    await triage({ id, category: 'feature', severity: 'p3', note: 'x' });
+    await defer(id, 'out of scope for beta');
+    await triage({ id, category: 'bug', severity: 'p2', note: 'reclassified' });
+    const r = await row(id);
+    expect(r.fix_status).toBe('deferred');
+    expect(r.category).toBe('bug'); // the classification itself DID change
+  });
+});
+
+describe('re-triage and fix_status', () => {
+  it.each(['patch_submitted', 'pr_open', 'merged'] as const)(
+    'leaves %s alone, so shipped work is not re-opened',
+    async (state) => {
+      // Plan 2 writes these from observed remote state. Resetting them to
+      // `needed` would re-open the fix queue for work already done, and for
+      // `merged` would ask for a second patch for a shipped fix.
+      const id = await mkFeedback();
+      await triage({ id, category: 'bug', severity: 'p2', note: 'x' });
+      await db.query(`UPDATE feedback SET fix_status=$2 WHERE id=$1`, [id, state]);
+      await triage({ id, category: 'ux', severity: 'p3', note: 'actually a ux problem' });
+      expect((await row(id)).fix_status).toBe(state);
+    },
+  );
+
+  it('still computes fix_status from the category when nothing has been decided', async () => {
+    const id = await mkFeedback();
+    await triage({ id, category: 'noise', note: 'junk' });
+    expect((await row(id)).fix_status).toBe('n/a');
+    await triage({ id, category: 'bug', severity: 'p2', note: 'not junk after all' });
+    expect((await row(id)).fix_status).toBe('needed');
+  });
+
+  it('dedupe_of still outranks every decided state', async () => {
+    // Load-bearing precedence: a duplicate never owns a fix, whatever state its
+    // own row had reached.
+    const canonical = await mkFeedback('a');
+    const dup = await mkFeedback('b');
+    await triage({ id: canonical, category: 'bug', severity: 'p2', note: 'canonical' });
+    await triage({ id: dup, category: 'bug', severity: 'p2', note: 'looked new' });
+    await db.query(`UPDATE feedback SET fix_status='pr_open' WHERE id=$1`, [dup]);
+    await triage({
+      id: dup,
+      category: 'bug',
+      severity: 'p2',
+      note: 'dup after all',
+      dedupeOf: canonical,
+    });
+    expect((await row(dup)).fix_status).toBe('n/a');
+  });
+
   it('refuses to defer an unclassified row', async () => {
     const id = await mkFeedback();
     await expect(defer(id, 'nope')).rejects.toMatchObject({ code: 'not_classified' });

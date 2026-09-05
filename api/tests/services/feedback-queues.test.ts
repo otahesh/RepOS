@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import pg from 'pg';
 import { createEphemeralDb } from '../helpers/ephemeral-db.js';
 import { runMigrations } from '../../src/db/runMigrations.js';
@@ -11,10 +11,14 @@ const eph = await createEphemeralDb('fb-queues');
   await bootstrap.end();
 }
 process.env.DATABASE_URL = eph.url;
+process.env.FEEDBACK_FROM_EMAIL = 'feedback@send.jpmtech.com';
+process.env.RESEND_API_KEY = 'test-key';
 
 const { db } = await import('../../src/db/client.js');
 const { triage, defer, listUntriaged, listPending, listFixPending, listDeadLettered } =
   await import('../../src/services/feedbackTriage.js');
+const mailer = await import('../../src/services/feedbackMailer.js');
+const { sendFeedbackEmail, EmailGateError } = await import('../../src/services/feedbackEmails.js');
 
 afterAll(async () => {
   await db.end();
@@ -55,6 +59,7 @@ async function mkEmail(
 beforeEach(async () => {
   await db.query('DELETE FROM feedback_emails');
   await db.query('DELETE FROM feedback');
+  mailer.__setMailFetchForTesting(null);
 });
 
 describe('listUntriaged', () => {
@@ -95,15 +100,54 @@ describe('listPending', () => {
     expect(await listPending()).toHaveLength(0);
   });
 
-  it('expects reply for noise and question, ack for the rest', async () => {
+  it('excludes a row that has ANY email, even one of a kind its category would not ask for', async () => {
+    // This test previously asserted the opposite — that a `noise` row holding
+    // an `ack` was still pending, because the CASE demanded a `reply`. That was
+    // wrong, and it stranded rows permanently: re-triage across the
+    // FIXABLE/TERMINAL boundary is explicitly permitted and never un-sends an
+    // email, so a row acked as a `bug` and then re-triaged `noise` would be
+    // re-queued every sweep while sendFeedbackEmail refused to create the
+    // `reply` (exclusive_kind_present, the ack exists). Nothing could clear it
+    // and nothing alerted.
+    //
+    // The guarantee listPending enforces is "the submitter has not heard back",
+    // and ANY email means they have.
     const noisy = await mkFeedback('yo');
     await triage({ id: noisy, category: 'noise', note: 'junk' });
-    await mkEmail(noisy, 'ack'); // wrong kind for noise
-    expect((await listPending()).map((r) => r.id)).toEqual([noisy]);
+    await mkEmail(noisy, 'ack');
+    expect(await listPending()).toHaveLength(0);
 
     await db.query('DELETE FROM feedback_emails');
     await mkEmail(noisy, 'reply');
     expect(await listPending()).toHaveLength(0);
+
+    // And with no email at all it is pending, so the exclusion above is doing
+    // the work rather than the row simply never qualifying.
+    await db.query('DELETE FROM feedback_emails');
+    expect((await listPending()).map((r) => r.id)).toEqual([noisy]);
+  });
+
+  it('does not re-queue a row re-triaged across the FIXABLE/TERMINAL boundary', async () => {
+    // The exact strand, end to end: a kind-specific membership test put this
+    // row back in the queue every sweep while no action could clear it.
+    const id = await mkFeedback('looked like a bug');
+    await triage({ id, category: 'bug', severity: 'p2', note: 'real' });
+    mailer.__setMailFetchForTesting(
+      vi.fn(async () => new Response(JSON.stringify({ id: 'msg-1' }), { status: 200 })),
+    );
+    expect(await sendFeedbackEmail({ id, kind: 'ack', bodyText: 'thanks' })).toMatchObject({
+      status: 'sent',
+    });
+
+    await triage({ id, category: 'noise', note: 'on reflection, a joke' });
+
+    // The submitter has heard back, so the row is not pending...
+    expect(await listPending()).toHaveLength(0);
+    // ...and it had better not be, because nothing could ever clear it: the
+    // only email its new category permits is refused outright.
+    await expect(sendFeedbackEmail({ id, kind: 'reply', bodyText: 'ha' })).rejects.toThrow(
+      EmailGateError,
+    );
   });
 
   it('excludes rows with no submitter address', async () => {
