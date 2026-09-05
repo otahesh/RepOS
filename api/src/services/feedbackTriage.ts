@@ -151,3 +151,100 @@ export async function defer(id: string, reason: string): Promise<void> {
     ]);
   });
 }
+
+export interface QueueRow {
+  id: string;
+  body: string;
+  route: string | null;
+  created_at: Date;
+  category: FeedbackCategory | null;
+  severity: FeedbackSeverity | null;
+  user_email_at_submit: string | null;
+  fix_status: FixStatus;
+  dedupe_of: string | null;
+}
+
+const QUEUE_COLS = `id, body, route, created_at, category, severity,
+                    user_email_at_submit, fix_status, dedupe_of`;
+
+/**
+ * The agent's intake queue.
+ *
+ * `category IS NULL`, never `triaged_at IS NULL`. PATCH /admin/feedback/:id/
+ * triage sets only triaged_at, so a triaged_at-based queue would silently drop
+ * any row a human clicked in the admin UI — classified by nobody, answered by
+ * nobody.
+ */
+export async function listUntriaged(): Promise<QueueRow[]> {
+  const { rows } = await db.query<QueueRow>(
+    `SELECT ${QUEUE_COLS} FROM feedback WHERE category IS NULL ORDER BY created_at, id`,
+  );
+  return rows;
+}
+
+/**
+ * Classified rows whose required first email was never written at all.
+ *
+ * This is the crash gap: the moment `triage` commits a category the row leaves
+ * listUntriaged, and if the run dies before the ledger row is written nothing
+ * else selects it. The written-but-unsent case is NOT here — that is
+ * replayPending's job, and the two are stranded by different mechanisms.
+ */
+export async function listPending(): Promise<QueueRow[]> {
+  const { rows } = await db.query<QueueRow>(
+    `SELECT ${QUEUE_COLS}
+       FROM feedback f
+      WHERE f.category IS NOT NULL
+        AND f.user_email_at_submit IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM feedback_emails e
+           WHERE e.feedback_id = f.id
+             AND e.kind = CASE WHEN f.category IN ('noise','question') THEN 'reply' ELSE 'ack' END
+        )
+      ORDER BY f.created_at, f.id`,
+  );
+  return rows;
+}
+
+/**
+ * Acknowledged items whose fix is unfinished.
+ *
+ * `dedupe_of IS NULL` matters: a duplicate's canonical row owns the fix, so
+ * including duplicates would open two pull requests for one defect.
+ */
+export async function listFixPending(): Promise<QueueRow[]> {
+  const { rows } = await db.query<QueueRow>(
+    `SELECT ${QUEUE_COLS}
+       FROM feedback
+      WHERE fix_status IN ('needed','patch_submitted','pr_open')
+        AND dedupe_of IS NULL
+      ORDER BY created_at, id`,
+  );
+  return rows;
+}
+
+/** Sends that were abandoned, so a human can see who never heard back. */
+export async function listDeadLettered(): Promise<
+  Array<{
+    feedback_id: string;
+    kind: string;
+    error: string | null;
+    dead_lettered_at: Date;
+    user_email_at_submit: string | null;
+  }>
+> {
+  const { rows } = await db.query<{
+    feedback_id: string;
+    kind: string;
+    error: string | null;
+    dead_lettered_at: Date;
+    user_email_at_submit: string | null;
+  }>(
+    `SELECT e.feedback_id, e.kind, e.error, e.dead_lettered_at, f.user_email_at_submit
+       FROM feedback_emails e
+       JOIN feedback f ON f.id = e.feedback_id
+      WHERE e.dead_lettered_at IS NOT NULL
+      ORDER BY e.dead_lettered_at DESC`,
+  );
+  return rows;
+}
