@@ -16,7 +16,8 @@
     "validate": "tsx src/seed/validate-cli.ts",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "feedback": "node dist/services/feedbackTriage-cli.js"
   },
   "keywords": [],
   "author": "",
