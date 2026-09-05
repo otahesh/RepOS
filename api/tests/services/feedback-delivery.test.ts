@@ -173,6 +173,51 @@ describe('replayPending', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("skips a row another runner claims between the batch read and this row's own claim", async () => {
+    // The coordinator's suggested version of this test marks the row sent
+    // BEFORE calling replayPending — but replayPending's batch SELECT already
+    // filters on `sent_at IS NULL`, so that row would never be read into the
+    // batch at all, and the claim-UPDATE guard would never run. That would be
+    // a test that passes for the wrong reason.
+    //
+    // To actually exercise the atomic claim-UPDATE, both rows must still be
+    // unsent when the batch SELECT runs. Row `b`'s send is then completed by
+    // a simulated concurrent runner from inside row `a`'s mocked fetch call —
+    // i.e. strictly between the batch SELECT (which read `b` as pending) and
+    // the point in the loop where `b`'s own claim-UPDATE executes.
+    const a = await mkBug();
+    const b = await mkBug();
+    mailer.__setMailFetchForTesting(
+      vi.fn(async () => {
+        throw new Error('seed');
+      }) as unknown as typeof fetch,
+    );
+    await sendFeedbackEmail({ id: a, kind: 'ack', bodyText: 'x' });
+    await sendFeedbackEmail({ id: b, kind: 'ack', bodyText: 'x' });
+
+    const fetchMock = vi.fn(async () => {
+      // Stand in for a concurrent replayPending run winning the race on `b`:
+      // it sends and marks `b` sent while `a`'s send (the only row this mock
+      // is ever invoked for) is in flight.
+      await db.query(
+        `UPDATE feedback_emails SET sent_at=now(), message_id='msg-other' WHERE feedback_id=$1`,
+        [b],
+      );
+      return new Response(JSON.stringify({ id: 'msg-a' }), { status: 200 });
+    });
+    mailer.__setMailFetchForTesting(fetchMock as unknown as typeof fetch);
+
+    const res = await replayPending();
+    expect(res).toMatchObject({ sent: 1, deadLettered: 0, paused: false });
+    // The mock is called exactly once, for `a`. `b`'s own claim-UPDATE found
+    // sent_at already set and returned 'skipped' without ever attempting a
+    // send.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const rowB = await ledgerRow(b);
+    expect(rowB.message_id).toBe('msg-other');
+    expect(rowB.attempts).toBe(1); // not re-incremented by replayPending's claim
+  });
+
   // Helper: seed an unsent row, then run one replay pass.
   async function replayPendingAfterInitial(id: string) {
     await db.query(

@@ -276,14 +276,25 @@ export async function replayPending(
 
     const to = row.user_email_at_submit;
     const outcome = await withFeedbackLock(row.feedback_id, async () => {
-      await db.query(
+      // Make the claim atomic with the check: another replayPending run (a
+      // cron tick racing an operator's CLI invocation) may have sent or
+      // dead-lettered this exact row between our batch SELECT above and this
+      // lock. A separate SELECT-then-UPDATE would just move the race: the
+      // guard has to live in the WHERE clause of the row-claiming UPDATE
+      // itself, not depend on Resend's idempotency window to save us.
+      const claimed = await db.query(
         `UPDATE feedback_emails
             SET attempts = attempts + 1,
                 first_attempt_at = COALESCE(first_attempt_at, now()),
                 last_attempt_at = now()
-          WHERE id = $1`,
+          WHERE id = $1 AND sent_at IS NULL AND dead_lettered_at IS NULL`,
         [row.id],
       );
+      if (claimed.rowCount === 0) {
+        // Another runner already sent or abandoned this row. It is no longer
+        // ours to send.
+        return { kind: 'skipped' as const };
+      }
       try {
         const request = parseFeedbackRequest(row.request, to, fromAddress());
         const { messageId } = await sendFeedbackRequest(request, row.idempotency_key, to);
@@ -314,6 +325,8 @@ export async function replayPending(
       // Halt. Nothing further is attempted or consumed this run.
       return { sent, deadLettered, paused: true };
     }
+    // 'skipped': another runner already claimed this row. Counts toward
+    // neither total; the loop continues to the next row rather than halting.
   }
 
   return { sent, deadLettered, paused: false };
