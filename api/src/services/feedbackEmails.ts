@@ -179,3 +179,142 @@ export async function sendFeedbackEmail(input: {
     }
   });
 }
+
+/** Resend forgets an idempotency key after 24 hours. */
+export const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export type FailureClass = 'retryable' | 'auth' | 'recipient';
+
+/**
+ * Failures are classified by WHOSE fault they are, because "4xx that is not
+ * 429" lumps together two opposite situations.
+ *
+ * 401/403 says nothing about the message and applies to every message: it is
+ * never a reason to abandon a recipient. Everything else 4xx is about this
+ * recipient and will not improve with retrying.
+ */
+export function classifyFailure(err: unknown): FailureClass {
+  if (err instanceof MailerError) {
+    if (err.code === 'mail_timeout' || err.code === 'mail_not_configured') return 'retryable';
+    const status = err.status;
+    if (status === undefined) return 'retryable'; // transport/network
+    if (status === 401 || status === 403) return 'auth';
+    if (status === 429 || status >= 500) return 'retryable';
+    return 'recipient';
+  }
+  return 'retryable';
+}
+
+interface PendingRow {
+  id: string;
+  feedback_id: string;
+  kind: string;
+  request: string;
+  idempotency_key: string;
+  first_attempt_at: Date | null;
+  user_email_at_submit: string | null;
+}
+
+/**
+ * Re-attempt every ledger row that is written but unsent.
+ *
+ * This verb is why the retry policy is real. `listPending` deliberately
+ * excludes rows that already have a ledger row, and `listUntriaged` never
+ * returns a classified row, so without this nothing would ever select a
+ * network-failed send: it would sit untouched until it aged past 24 hours and
+ * was dead-lettered with zero retries actually attempted.
+ *
+ * Sending halts entirely on an auth failure — nothing is consumed, so the queue
+ * drains intact once the key is fixed.
+ */
+export async function replayPending(
+  opts: { now?: Date } = {},
+): Promise<{ sent: number; deadLettered: number; paused: boolean }> {
+  const now = opts.now ?? new Date();
+  const { rows } = await db.query<PendingRow>(
+    `SELECT e.id, e.feedback_id, e.kind, e.request, e.idempotency_key, e.first_attempt_at,
+            f.user_email_at_submit
+       FROM feedback_emails e
+       JOIN feedback f ON f.id = e.feedback_id
+      WHERE e.sent_at IS NULL AND e.dead_lettered_at IS NULL
+      ORDER BY e.first_attempt_at NULLS FIRST, e.id`,
+  );
+
+  let sent = 0;
+  let deadLettered = 0;
+
+  for (const row of rows) {
+    const expired =
+      row.first_attempt_at !== null &&
+      now.getTime() - row.first_attempt_at.getTime() > IDEMPOTENCY_WINDOW_MS;
+
+    if (expired) {
+      // Ambiguous: the message may well have been delivered and only the
+      // response lost. Past the window there is no way to tell, and this design
+      // would rather a submitter miss an acknowledgement than receive it twice.
+      await db.query(
+        `UPDATE feedback_emails
+            SET dead_lettered_at=now(),
+                error=COALESCE(error,'') || ' | abandoned: past the 24h idempotency window'
+          WHERE id=$1`,
+        [row.id],
+      );
+      deadLettered += 1;
+      continue;
+    }
+
+    if (!row.user_email_at_submit) {
+      await db.query(
+        `UPDATE feedback_emails
+            SET dead_lettered_at=now(), error='recipient address is gone'
+          WHERE id=$1`,
+        [row.id],
+      );
+      deadLettered += 1;
+      continue;
+    }
+
+    const to = row.user_email_at_submit;
+    const outcome = await withFeedbackLock(row.feedback_id, async () => {
+      await db.query(
+        `UPDATE feedback_emails
+            SET attempts = attempts + 1,
+                first_attempt_at = COALESCE(first_attempt_at, now()),
+                last_attempt_at = now()
+          WHERE id = $1`,
+        [row.id],
+      );
+      try {
+        const request = parseFeedbackRequest(row.request, to, fromAddress());
+        const { messageId } = await sendFeedbackRequest(request, row.idempotency_key, to);
+        await db.query(
+          `UPDATE feedback_emails SET sent_at=now(), message_id=$2, error=NULL WHERE id=$1`,
+          [row.id, messageId],
+        );
+        return { kind: 'sent' as const };
+      } catch (err) {
+        const cls = classifyFailure(err);
+        const detail = err instanceof Error ? err.message : String(err);
+        await db.query(`UPDATE feedback_emails SET error=$2 WHERE id=$1`, [
+          row.id,
+          detail.slice(0, 500),
+        ]);
+        if (cls === 'recipient') {
+          await db.query(`UPDATE feedback_emails SET dead_lettered_at=now() WHERE id=$1`, [row.id]);
+          return { kind: 'dead' as const };
+        }
+        if (cls === 'auth') return { kind: 'auth' as const };
+        return { kind: 'retry' as const };
+      }
+    });
+
+    if (outcome.kind === 'sent') sent += 1;
+    else if (outcome.kind === 'dead') deadLettered += 1;
+    else if (outcome.kind === 'auth') {
+      // Halt. Nothing further is attempted or consumed this run.
+      return { sent, deadLettered, paused: true };
+    }
+  }
+
+  return { sent, deadLettered, paused: false };
+}
