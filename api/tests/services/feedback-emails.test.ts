@@ -17,7 +17,8 @@ process.env.RESEND_API_KEY = 'test-key';
 const { db } = await import('../../src/db/client.js');
 const { triage } = await import('../../src/services/feedbackTriage.js');
 const mailer = await import('../../src/services/feedbackMailer.js');
-const { sendFeedbackEmail } = await import('../../src/services/feedbackEmails.js');
+const { sendFeedbackEmail, NO_RECIPIENT_NOTE } =
+  await import('../../src/services/feedbackEmails.js');
 
 afterAll(async () => {
   await db.end();
@@ -98,12 +99,37 @@ describe('category / kind gating', () => {
     ).rejects.toMatchObject({ code: 'not_classified' });
   });
 
-  it('refuses a row with no submitter address and writes no ledger row', async () => {
+  it('refuses a row with no submitter address, records the reason, writes no ledger row', async () => {
+    // The spec says such a row is classified and triaged with the email step
+    // skipped AND THE REASON RECORDED. Throwing and writing nothing left an
+    // operator unable to tell why the row was never emailed.
     const id = await mkClassified('bug', null);
     await expect(sendFeedbackEmail({ id, kind: 'ack', bodyText: 'x' })).rejects.toMatchObject({
       code: 'no_recipient',
     });
     expect(await ledger(id)).toHaveLength(0);
+    const { rows } = await db.query<{ triage_note: string }>(
+      `SELECT triage_note FROM feedback WHERE id=$1`,
+      [id],
+    );
+    expect(rows[0].triage_note).toContain('real'); // the original note survives
+    expect(rows[0].triage_note).toContain(NO_RECIPIENT_NOTE);
+  });
+
+  it('appends the skipped-email reason at most once however often it is retried', async () => {
+    // This path is reached again on every sweep that reconsiders the row, so a
+    // note that grows without bound is its own defect.
+    const id = await mkClassified('bug', null);
+    for (let i = 0; i < 3; i += 1) {
+      await expect(sendFeedbackEmail({ id, kind: 'ack', bodyText: 'x' })).rejects.toMatchObject({
+        code: 'no_recipient',
+      });
+    }
+    const { rows } = await db.query<{ triage_note: string }>(
+      `SELECT triage_note FROM feedback WHERE id=$1`,
+      [id],
+    );
+    expect(rows[0].triage_note.split(NO_RECIPIENT_NOTE)).toHaveLength(2);
   });
 });
 

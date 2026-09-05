@@ -8,7 +8,7 @@
 // There is deliberately NO way to send a `resolved` email from here. That kind
 // is created only by deployment verification (check-shipped, Plan 2).
 import { db } from '../db/client.js';
-import { withFeedbackLock } from './feedbackLock.js';
+import { withFeedbackLock, LockTimeoutError } from './feedbackLock.js';
 import { FIXABLE, TERMINAL } from './feedbackTriage.js';
 import type { FeedbackCategory } from './feedbackTriage.js';
 import {
@@ -20,7 +20,7 @@ import {
   serializeFeedbackRequest,
   MailerError,
 } from './feedbackMailer.js';
-import { alertDeadLetter, alertSendingPaused } from './feedbackAlerts.js';
+import { alertDeadLetter, alertSendingPaused, assertAlertingConfigured } from './feedbackAlerts.js';
 
 /** Only the two kinds the agent may ever ask for. */
 export type SendableKind = 'ack' | 'reply';
@@ -51,6 +51,22 @@ export interface SendResult {
   status: 'sent' | 'already_sent' | 'failed';
   messageId?: string;
   error?: string;
+}
+
+/** The reason recorded on a row that can never be emailed. */
+export const NO_RECIPIENT_NOTE = 'Email skipped: the submitter left no address.';
+
+/** Idempotent: appends the reason once, however many times it is called. */
+async function appendSkipReason(id: string): Promise<void> {
+  const { rows } = await db.query<{ triage_note: string | null }>(
+    `SELECT triage_note FROM feedback WHERE id=$1`,
+    [id],
+  );
+  if (rows.length === 0) return;
+  const existing = rows[0].triage_note ?? '';
+  if (existing.includes(NO_RECIPIENT_NOTE)) return;
+  const note = `${existing}\n\n${NO_RECIPIENT_NOTE}`.trim();
+  await db.query(`UPDATE feedback SET triage_note=$2 WHERE id=$1`, [id, note]);
 }
 
 /**
@@ -90,6 +106,13 @@ export async function sendFeedbackEmail(input: {
     if (!to) {
       // Classified and triaged, email skipped — no ledger row is written, so
       // listPending's address predicate keeps it out of the queue forever.
+      //
+      // The spec requires the REASON to be recorded, not merely the absence of
+      // an email: an operator reading the row otherwise cannot tell whether the
+      // send failed or was never possible. Appended idempotently, because this
+      // path is reached again on every sweep that reconsiders the row and a
+      // note that grows without bound is its own defect.
+      await appendSkipReason(input.id);
       throw new EmailGateError('no_recipient', 'row has no submitter address');
     }
 
@@ -191,8 +214,16 @@ export type FailureClass = 'retryable' | 'auth' | 'recipient';
  * 429" lumps together two opposite situations.
  *
  * 401/403 says nothing about the message and applies to every message: it is
- * never a reason to abandon a recipient. Everything else 4xx is about this
- * recipient and will not improve with retrying.
+ * never a reason to abandon a recipient.
+ *
+ * `recipient` is 422 ONLY. Mapping every non-429 4xx here was the same
+ * burn-the-whole-queue harm the 401/403 carve-out exists to prevent, arriving
+ * through a different status code: a systemic 400 (a malformed payload after a
+ * Resend API change) or a 404 is about OUR request, not about this submitter,
+ * and dead-lettering on it abandons every pending row in turn with no retry.
+ * Anything that is not a documented recipient-level rejection therefore falls
+ * through to `retryable`, and a genuinely systemic failure retries for 24h and
+ * then dead-letters with an alert.
  */
 export function classifyFailure(err: unknown): FailureClass {
   if (err instanceof MailerError) {
@@ -200,11 +231,19 @@ export function classifyFailure(err: unknown): FailureClass {
     const status = err.status;
     if (status === undefined) return 'retryable'; // transport/network
     if (status === 401 || status === 403) return 'auth';
-    if (status === 429 || status >= 500) return 'retryable';
-    return 'recipient';
+    if (status === 422) return 'recipient';
+    return 'retryable';
   }
   return 'retryable';
 }
+
+/** What one row's locked send attempt concluded. */
+type LockOutcome =
+  | { kind: 'skipped' }
+  | { kind: 'sent' }
+  | { kind: 'dead'; detail: string; to: string }
+  | { kind: 'auth' }
+  | { kind: 'retry' };
 
 interface PendingRow {
   id: string;
@@ -231,6 +270,12 @@ interface PendingRow {
 export async function replayPending(
   opts: { now?: Date } = {},
 ): Promise<{ sent: number; deadLettered: number; paused: boolean }> {
+  // Before anything is selected, let alone abandoned: this verb dead-letters
+  // and alerts, and with FEEDBACK_WEBHOOK_URL unset or non-Discord every alert
+  // is a silent no-op. A misconfigured sweep must fail loudly rather than
+  // abandon people quietly.
+  assertAlertingConfigured();
+
   const now = opts.now ?? new Date();
   const { rows } = await db.query<PendingRow>(
     `SELECT e.id, e.feedback_id, e.kind, e.request, e.idempotency_key, e.first_attempt_at,
@@ -253,13 +298,21 @@ export async function replayPending(
       // Ambiguous: the message may well have been delivered and only the
       // response lost. Past the window there is no way to tell, and this design
       // would rather a submitter miss an acknowledgement than receive it twice.
-      await db.query(
+      // The same claim guard the send path carries. A bare `WHERE id=$1` here
+      // would stamp dead_lettered_at over a row an operator's concurrent
+      // `feedback email --id X` had just delivered — the row would then read as
+      // "nobody replied", and the documented human response to a dead letter is
+      // to send it by hand, producing exactly the second email this design
+      // forbids. Two concurrent sweeps would also both dead-letter and both
+      // alert.
+      const claimed = await db.query(
         `UPDATE feedback_emails
             SET dead_lettered_at=now(),
                 error=COALESCE(error,'') || ' | abandoned: past the 24h idempotency window'
-          WHERE id=$1`,
+          WHERE id=$1 AND sent_at IS NULL AND dead_lettered_at IS NULL`,
         [row.id],
       );
+      if (claimed.rowCount !== 1) continue; // somebody else resolved it; not ours
       deadLettered += 1;
       await alertDeadLetter({
         feedbackId: row.feedback_id,
@@ -271,12 +324,13 @@ export async function replayPending(
     }
 
     if (!row.user_email_at_submit) {
-      await db.query(
+      const claimed = await db.query(
         `UPDATE feedback_emails
             SET dead_lettered_at=now(), error='recipient address is gone'
-          WHERE id=$1`,
+          WHERE id=$1 AND sent_at IS NULL AND dead_lettered_at IS NULL`,
         [row.id],
       );
+      if (claimed.rowCount !== 1) continue; // somebody else resolved it; not ours
       deadLettered += 1;
       await alertDeadLetter({
         feedbackId: row.feedback_id,
@@ -288,55 +342,68 @@ export async function replayPending(
     }
 
     const to = row.user_email_at_submit;
-    const outcome = await withFeedbackLock(row.feedback_id, async () => {
-      // Make the claim atomic with the check: another replayPending run (a
-      // cron tick racing an operator's CLI invocation) may have sent or
-      // dead-lettered this exact row between our batch SELECT above and this
-      // lock. A separate SELECT-then-UPDATE would just move the race: the
-      // guard has to live in the WHERE clause of the row-claiming UPDATE
-      // itself, not depend on Resend's idempotency window to save us.
-      const claimed = await db.query(
-        `UPDATE feedback_emails
+    let outcome: LockOutcome;
+    try {
+      outcome = await withFeedbackLock(row.feedback_id, async () => {
+        // Make the claim atomic with the check: another replayPending run (a
+        // cron tick racing an operator's CLI invocation) may have sent or
+        // dead-lettered this exact row between our batch SELECT above and this
+        // lock. A separate SELECT-then-UPDATE would just move the race: the
+        // guard has to live in the WHERE clause of the row-claiming UPDATE
+        // itself, not depend on Resend's idempotency window to save us.
+        const claimed = await db.query(
+          `UPDATE feedback_emails
             SET attempts = attempts + 1,
                 first_attempt_at = COALESCE(first_attempt_at, now()),
                 last_attempt_at = now()
           WHERE id = $1 AND sent_at IS NULL AND dead_lettered_at IS NULL`,
-        [row.id],
-      );
-      if (claimed.rowCount === 0) {
-        // Another runner already sent or abandoned this row. It is no longer
-        // ours to send.
-        return { kind: 'skipped' as const };
-      }
-      try {
-        const request = parseFeedbackRequest(row.request, to, fromAddress());
-        const { messageId } = await sendFeedbackRequest(request, row.idempotency_key, to);
-        await db.query(
-          `UPDATE feedback_emails SET sent_at=now(), message_id=$2, error=NULL WHERE id=$1`,
-          [row.id, messageId],
+          [row.id],
         );
-        return { kind: 'sent' as const };
-      } catch (err) {
-        const cls = classifyFailure(err);
-        const detail = err instanceof Error ? err.message : String(err);
-        await db.query(`UPDATE feedback_emails SET error=$2 WHERE id=$1`, [
-          row.id,
-          detail.slice(0, 500),
-        ]);
-        if (cls === 'recipient') {
-          await db.query(`UPDATE feedback_emails SET dead_lettered_at=now() WHERE id=$1`, [row.id]);
-          // Alert AFTER the lock releases (fired by the caller, below): a
-          // 5s advisory network call has no business holding a pooled
-          // connection and the row's advisory lock, whose own acquisition
-          // deadline is also 5s — a concurrent holder (cron racing the CLI)
-          // would have essentially no slack and could hit LockTimeoutError,
-          // which is not caught here and would abort the whole sweep.
-          return { kind: 'dead' as const, detail, to };
+        if (claimed.rowCount === 0) {
+          // Another runner already sent or abandoned this row. It is no longer
+          // ours to send.
+          return { kind: 'skipped' as const };
         }
-        if (cls === 'auth') return { kind: 'auth' as const };
-        return { kind: 'retry' as const };
-      }
-    });
+        try {
+          const request = parseFeedbackRequest(row.request, to, fromAddress());
+          const { messageId } = await sendFeedbackRequest(request, row.idempotency_key, to);
+          await db.query(
+            `UPDATE feedback_emails SET sent_at=now(), message_id=$2, error=NULL WHERE id=$1`,
+            [row.id, messageId],
+          );
+          return { kind: 'sent' as const };
+        } catch (err) {
+          const cls = classifyFailure(err);
+          const detail = err instanceof Error ? err.message : String(err);
+          await db.query(`UPDATE feedback_emails SET error=$2 WHERE id=$1`, [
+            row.id,
+            detail.slice(0, 500),
+          ]);
+          if (cls === 'recipient') {
+            await db.query(`UPDATE feedback_emails SET dead_lettered_at=now() WHERE id=$1`, [
+              row.id,
+            ]);
+            // Alert AFTER the lock releases (fired by the caller, below): a
+            // 5s advisory network call has no business holding a pooled
+            // connection and the row's advisory lock, whose own acquisition
+            // deadline is also 5s — a concurrent holder (cron racing the CLI)
+            // would have essentially no slack and could hit LockTimeoutError,
+            // which is not caught here and would abort the whole sweep.
+            return { kind: 'dead' as const, detail, to };
+          }
+          if (cls === 'auth') return { kind: 'auth' as const };
+          return { kind: 'retry' as const };
+        }
+      });
+    } catch (err) {
+      // Another holder is actively working this row, so it is not ours to
+      // send. Skipping it is correct; letting the error propagate is not —
+      // it would abandon every REMAINING row in the batch, unattempted and
+      // unalerted. That is the same silent-batch-loss class as the
+      // recipient-alert-inside-the-lock bug, reached by a different route.
+      if (err instanceof LockTimeoutError) continue;
+      throw err;
+    }
 
     if (outcome.kind === 'sent') sent += 1;
     else if (outcome.kind === 'dead') {
