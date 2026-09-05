@@ -325,13 +325,13 @@ export async function replayPending(
         ]);
         if (cls === 'recipient') {
           await db.query(`UPDATE feedback_emails SET dead_lettered_at=now() WHERE id=$1`, [row.id]);
-          await alertDeadLetter({
-            feedbackId: row.feedback_id,
-            kind: row.kind,
-            recipient: to,
-            error: detail,
-          });
-          return { kind: 'dead' as const };
+          // Alert AFTER the lock releases (fired by the caller, below): a
+          // 5s advisory network call has no business holding a pooled
+          // connection and the row's advisory lock, whose own acquisition
+          // deadline is also 5s — a concurrent holder (cron racing the CLI)
+          // would have essentially no slack and could hit LockTimeoutError,
+          // which is not caught here and would abort the whole sweep.
+          return { kind: 'dead' as const, detail, to };
         }
         if (cls === 'auth') return { kind: 'auth' as const };
         return { kind: 'retry' as const };
@@ -339,8 +339,17 @@ export async function replayPending(
     });
 
     if (outcome.kind === 'sent') sent += 1;
-    else if (outcome.kind === 'dead') deadLettered += 1;
-    else if (outcome.kind === 'auth') {
+    else if (outcome.kind === 'dead') {
+      deadLettered += 1;
+      // Fired here, after withFeedbackLock has resolved and the lock is
+      // released, so the advisory network call never holds the row lock.
+      await alertDeadLetter({
+        feedbackId: row.feedback_id,
+        kind: row.kind,
+        recipient: outcome.to,
+        error: outcome.detail,
+      });
+    } else if (outcome.kind === 'auth') {
       // Halt. Nothing further is attempted or consumed this run.
       await alertSendingPaused({ reason: 'Resend rejected our credentials (401/403)' });
       return { sent, deadLettered, paused: true };

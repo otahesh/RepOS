@@ -20,6 +20,7 @@ const mailer = await import('../../src/services/feedbackMailer.js');
 const { sendFeedbackEmail, replayPending, classifyFailure, IDEMPOTENCY_WINDOW_MS } =
   await import('../../src/services/feedbackEmails.js');
 const alerts = await import('../../src/services/feedbackAlerts.js');
+const { withFeedbackLock } = await import('../../src/services/feedbackLock.js');
 
 afterAll(async () => {
   await db.end();
@@ -154,6 +155,39 @@ describe('replayPending', () => {
     const res = await replayPendingAfterInitial(id);
     expect(res.deadLettered).toBe(1);
     expect((await ledgerRow(id)).dead_lettered_at).not.toBeNull();
+  });
+
+  it('fires the recipient-rejection dead-letter alert only after the row lock is released', async () => {
+    // Pins the fix for the Critical finding: alertDeadLetter for a
+    // recipient-level rejection must run OUTSIDE withFeedbackLock. If it
+    // ran inside (as it did before the fix), the row's advisory lock would
+    // still be held while this stub is awaited, and the acquisition below
+    // — for the SAME feedback id, with a deadline far shorter than the
+    // alert's own timeout — would throw LockTimeoutError instead of
+    // resolving.
+    process.env.FEEDBACK_WEBHOOK_URL = 'https://discord.com/api/webhooks/123/abc';
+    const id = await mkBug();
+
+    let lockWasFree: boolean | undefined;
+    let lockError: unknown;
+    alerts.__setAlertFetchForTesting(
+      vi.fn(async (_u: string, _init: RequestInit) => {
+        try {
+          await withFeedbackLock(id, async () => {}, { timeoutMs: 200 });
+          lockWasFree = true;
+        } catch (err) {
+          lockWasFree = false;
+          lockError = err;
+        }
+        return new Response('', { status: 204 });
+      }) as unknown as typeof fetch,
+    );
+
+    mailer.__setMailFetchForTesting(status(422));
+    const res = await replayPendingAfterInitial(id);
+
+    expect(res.deadLettered).toBe(1);
+    expect(lockWasFree, `expected the lock to be free; got error: ${String(lockError)}`).toBe(true);
   });
 
   it('does NOT dead-letter a 429', async () => {
