@@ -21,14 +21,13 @@ ALTER TABLE feedback
   ADD COLUMN IF NOT EXISTS fix_branch       TEXT NULL,
   ADD COLUMN IF NOT EXISTS fix_pr_number    INT NULL;
 
-ALTER TABLE feedback
-  DROP CONSTRAINT IF EXISTS feedback_category_check,
-  DROP CONSTRAINT IF EXISTS feedback_severity_check,
-  DROP CONSTRAINT IF EXISTS feedback_fix_status_check,
-  DROP CONSTRAINT IF EXISTS feedback_fix_commit_sha_check,
-  DROP CONSTRAINT IF EXISTS feedback_fix_base_sha_check,
-  DROP CONSTRAINT IF EXISTS feedback_dedupe_of_not_self;
-
+-- No DROP CONSTRAINT IF EXISTS guard here: runMigrations() tracks this file in
+-- _migrations and runs it inside a single transaction, so it executes exactly
+-- once against any database and these constraints never pre-exist. A
+-- drop-then-add pair would also make this file always read as Step-2
+-- (destructive) to scripts/check-migration-dryrun.sh, which flags any DROP
+-- CONSTRAINT regardless of context — an unwarranted cost for a guard this
+-- migration doesn't need.
 ALTER TABLE feedback
   ADD CONSTRAINT feedback_category_check
     CHECK (category IS NULL OR category IN ('bug','ux','feature','question','noise')),
