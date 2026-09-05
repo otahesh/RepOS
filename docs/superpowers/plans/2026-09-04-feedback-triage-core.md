@@ -597,9 +597,16 @@ Expected: PASS — 9 tests.
 
 - [ ] **Step 5: Prove the test can fail (mutation check)**
 
-Temporarily change `FEEDBACK_LOCK_CLASS` usage in `withFeedbackLock` to key on `[FEEDBACK_LOCK_CLASS, objId + Math.random() * 0]`… no — instead make the real mutation: change `acquire`'s key to include the kind by replacing `objId` with a constant `1` in `withFeedbackLock` only.
+In `withFeedbackLock`, temporarily make every id collide onto one lock:
 
-Run the suite. Expected: "does not serialize different ids" FAILS. Revert the mutation and re-run to confirm green.
+```ts
+  return withObjIds([1], fn, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+```
+
+Run: `npx vitest run tests/services/feedback-lock.test.ts`
+Expected: FAIL — "does not serialize different ids" (id 10 and id 11 would now block each other).
+
+Revert and re-run. Expected: PASS. This proves the test would notice if the lock stopped distinguishing rows.
 
 This is the check that matters: it proves the test would notice if the lock stopped distinguishing rows.
 
