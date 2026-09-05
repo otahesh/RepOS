@@ -19,6 +19,7 @@ const { triage } = await import('../../src/services/feedbackTriage.js');
 const mailer = await import('../../src/services/feedbackMailer.js');
 const { sendFeedbackEmail, replayPending, classifyFailure, IDEMPOTENCY_WINDOW_MS } =
   await import('../../src/services/feedbackEmails.js');
+const alerts = await import('../../src/services/feedbackAlerts.js');
 
 afterAll(async () => {
   await db.end();
@@ -46,6 +47,8 @@ beforeEach(async () => {
   await db.query('DELETE FROM feedback_emails');
   await db.query('DELETE FROM feedback');
   mailer.__setMailFetchForTesting(null);
+  alerts.__setAlertFetchForTesting(null);
+  delete process.env.FEEDBACK_WEBHOOK_URL;
 });
 
 describe('classifyFailure', () => {
@@ -113,6 +116,36 @@ describe('replayPending', () => {
     const row = await ledgerRow(id);
     expect(row.dead_lettered_at).not.toBeNull();
     expect(row.sent_at).toBeNull();
+  });
+
+  it('fires a dead-letter alert when a row expires past the 24h window', async () => {
+    process.env.FEEDBACK_WEBHOOK_URL = 'https://discord.com/api/webhooks/123/abc';
+    const alertCalls: Array<{ url: string; body: string }> = [];
+    alerts.__setAlertFetchForTesting(
+      vi.fn(async (url: string, init: RequestInit) => {
+        alertCalls.push({ url: String(url), body: String(init.body) });
+        return new Response('', { status: 204 });
+      }) as unknown as typeof fetch,
+    );
+
+    const id = await mkBug();
+    mailer.__setMailFetchForTesting(
+      vi.fn(async () => {
+        throw new Error('down');
+      }) as unknown as typeof fetch,
+    );
+    await sendFeedbackEmail({ id, kind: 'ack', bodyText: 'x' });
+    await db.query(
+      `UPDATE feedback_emails SET first_attempt_at = now() - interval '25 hours' WHERE feedback_id=$1`,
+      [id],
+    );
+
+    mailer.__setMailFetchForTesting(ok());
+    const res = await replayPending();
+
+    expect(res.deadLettered).toBe(1);
+    expect(alertCalls).toHaveLength(1);
+    expect(alertCalls[0].body).toContain(`feedback ${id}`);
   });
 
   it('dead-letters a recipient-level rejection on the first response', async () => {

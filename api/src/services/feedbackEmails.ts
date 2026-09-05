@@ -20,6 +20,7 @@ import {
   serializeFeedbackRequest,
   MailerError,
 } from './feedbackMailer.js';
+import { alertDeadLetter, alertSendingPaused } from './feedbackAlerts.js';
 
 /** Only the two kinds the agent may ever ask for. */
 export type SendableKind = 'ack' | 'reply';
@@ -260,6 +261,12 @@ export async function replayPending(
         [row.id],
       );
       deadLettered += 1;
+      await alertDeadLetter({
+        feedbackId: row.feedback_id,
+        kind: row.kind,
+        recipient: row.user_email_at_submit ?? '(address gone)',
+        error: 'past the 24h idempotency window',
+      });
       continue;
     }
 
@@ -271,6 +278,12 @@ export async function replayPending(
         [row.id],
       );
       deadLettered += 1;
+      await alertDeadLetter({
+        feedbackId: row.feedback_id,
+        kind: row.kind,
+        recipient: '(address gone)',
+        error: 'recipient address is gone',
+      });
       continue;
     }
 
@@ -312,6 +325,12 @@ export async function replayPending(
         ]);
         if (cls === 'recipient') {
           await db.query(`UPDATE feedback_emails SET dead_lettered_at=now() WHERE id=$1`, [row.id]);
+          await alertDeadLetter({
+            feedbackId: row.feedback_id,
+            kind: row.kind,
+            recipient: to,
+            error: detail,
+          });
           return { kind: 'dead' as const };
         }
         if (cls === 'auth') return { kind: 'auth' as const };
@@ -323,6 +342,7 @@ export async function replayPending(
     else if (outcome.kind === 'dead') deadLettered += 1;
     else if (outcome.kind === 'auth') {
       // Halt. Nothing further is attempted or consumed this run.
+      await alertSendingPaused({ reason: 'Resend rejected our credentials (401/403)' });
       return { sent, deadLettered, paused: true };
     }
     // 'skipped': another runner already claimed this row. Counts toward
