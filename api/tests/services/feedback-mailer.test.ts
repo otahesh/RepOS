@@ -98,6 +98,13 @@ describe('assertFeedbackRequest', () => {
     expect(() => assertFeedbackRequest(r, 'sub@example.test', FROM)).toThrow(/sender/);
   });
 
+  it('rejects a rewritten reply_to', () => {
+    // A user replying to a tampered row must not reach an attacker.
+    const r = good() as { reply_to: string };
+    r.reply_to = 'attacker@example.test';
+    expect(() => assertFeedbackRequest(r, 'sub@example.test', FROM)).toThrow(/reply_to/);
+  });
+
   it('validates rather than defaulting a missing field', () => {
     const r = good() as Record<string, unknown>;
     delete r.subject;

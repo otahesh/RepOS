@@ -170,8 +170,10 @@ export function serializeFeedbackRequest(request: FeedbackRequest): string {
  * time it comes back. Validate, never default: sending a half-shaped body under
  * the original key is how a "replay" quietly becomes a different request.
  *
- * The recipient and the sender are the two fields where being wrong is actively
- * harmful, so both are checked against values derived outside the row.
+ * The recipient, the sender, and reply_to are the fields where being wrong is
+ * actively harmful, so all three are checked against values derived outside
+ * the row rather than merely required to be non-empty. A reply to a tampered
+ * row must reach a human at jpmtech, not whatever address the row now holds.
  */
 export function assertFeedbackRequest(
   r: unknown,
@@ -195,7 +197,13 @@ export function assertFeedbackRequest(
       'stored request sender is not FEEDBACK_FROM_EMAIL',
     );
   }
-  for (const field of ['reply_to', 'subject', 'html', 'text'] as const) {
+  if (o.reply_to !== FEEDBACK_REPLY_TO) {
+    throw new MailerError(
+      'mail_request_invalid',
+      'stored request reply_to is not FEEDBACK_REPLY_TO',
+    );
+  }
+  for (const field of ['subject', 'html', 'text'] as const) {
     if (!str(o[field])) {
       throw new MailerError('mail_request_invalid', `stored request ${field} is missing or empty`);
     }
