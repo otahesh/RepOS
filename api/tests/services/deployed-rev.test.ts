@@ -21,16 +21,21 @@ afterEach(() => {
 });
 
 describe('readDeployedRev', () => {
-  it('returns the trimmed SHA the container reports', async () => {
-    __setDeployedRevRunnerForTesting(async () => `${SHA}\n`);
+  it('returns the SHA when container is running', async () => {
+    __setDeployedRevRunnerForTesting(async () => `true\nAPP_SHA=${SHA}\n`);
     expect(await readDeployedRev()).toBe(SHA);
   });
 
-  it('builds an argv array with no shell metacharacter surface', async () => {
+  it('rejects when container is not running', async () => {
+    __setDeployedRevRunnerForTesting(async () => `false\nAPP_SHA=${SHA}\n`);
+    await expect(readDeployedRev()).rejects.toMatchObject({ code: 'unreadable' });
+  });
+
+  it('builds an argv array for docker inspect', async () => {
     let seen: string[] = [];
     __setDeployedRevRunnerForTesting(async (argv) => {
       seen = argv;
-      return SHA;
+      return `true\nAPP_SHA=${SHA}\n`;
     });
     await readDeployedRev();
 
@@ -40,14 +45,27 @@ describe('readDeployedRev', () => {
     expect(seen).toContain('root@192.168.88.2');
     expect(seen).toContain('BatchMode=yes');
     expect(seen).toContain('docker');
+    expect(seen).toContain('inspect');
+    expect(seen).toContain('--format');
     expect(seen).toContain('RepOS');
-    expect(seen.some((a) => a.includes('APP_SHA'))).toBe(true);
-    for (const arg of seen) expect(arg).not.toMatch(/[;&|`$(){}<>]/);
+    expect(seen).not.toContain('exec');
+    // Format argument must include .State.Running and .Config.Env
+    const formatArg = seen.find((a) => a.includes('.State.Running'));
+    expect(formatArg).toBeDefined();
+    expect(formatArg).toContain('.Config.Env');
+    // Metacharacter check applies to host/user/container args, not format string
+    const hostUserContainerArgs = [
+      seen.find((a) => a.includes('@')),
+      seen.find((a) => a === 'RepOS'),
+    ];
+    for (const arg of hostUserContainerArgs) {
+      if (arg) expect(arg).not.toMatch(/[;&|`$(){}<>]/);
+    }
   });
 
   it('rejects a malformed SHA rather than returning it', async () => {
     for (const bad of ['', 'unknown', 'C'.repeat(40), 'abc123', `${SHA} ${SHA}`]) {
-      __setDeployedRevRunnerForTesting(async () => bad);
+      __setDeployedRevRunnerForTesting(async () => `true\nAPP_SHA=${bad}\n`);
       await expect(readDeployedRev()).rejects.toMatchObject({ code: 'malformed' });
     }
   });
@@ -61,7 +79,7 @@ describe('readDeployedRev', () => {
 
   it('refuses when the host is not configured', async () => {
     delete process.env.UNRAID_SSH_HOST;
-    __setDeployedRevRunnerForTesting(async () => SHA);
+    __setDeployedRevRunnerForTesting(async () => `true\nAPP_SHA=${SHA}\n`);
     await expect(readDeployedRev()).rejects.toMatchObject({ code: 'not_configured' });
   });
 });

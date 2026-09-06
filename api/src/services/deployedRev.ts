@@ -62,6 +62,9 @@ export async function readDeployedRev(): Promise<string> {
 
   // Fixed argv. Nothing here is built by string concatenation, and the remote
   // command is a literal docker invocation with no user-supplied component.
+  // Format string includes .State.Running on first line (must be 'true' for
+  // running container), then environment variables.
+  const formatArg = '{{.State.Running}}\n{{range .Config.Env}}{{println .}}{{end}}';
   const argv = [
     'ssh',
     '-o', 'BatchMode=yes',
@@ -69,10 +72,10 @@ export async function readDeployedRev(): Promise<string> {
     '-o', `ConnectTimeout=10`,
     `${user}@${host}`,
     'docker',
-    'exec',
+    'inspect',
+    '--format',
+    formatArg,
     CONTAINER,
-    'printenv',
-    'APP_SHA',
   ];
 
   let raw: string;
@@ -82,11 +85,21 @@ export async function readDeployedRev(): Promise<string> {
     throw new DeployedRevError('unreadable', `could not read ${CONTAINER}'s env: ${String(err)}`);
   }
 
-  const line = raw
-    .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l.startsWith('APP_SHA='));
-  const value = (line ? line.slice('APP_SHA='.length) : raw).trim();
+  const lines = raw.split('\n').map((l) => l.trim());
+  const runningLine = lines[0];
+  if (runningLine !== 'true') {
+    throw new DeployedRevError('unreadable', `container ${CONTAINER} is not running`);
+  }
+
+  const envLines = lines.slice(1);
+  const appShaLine = envLines.find((l) => l.startsWith('APP_SHA='));
+  if (!appShaLine) {
+    throw new DeployedRevError(
+      'malformed',
+      `container ${CONTAINER} does not have APP_SHA in environment`,
+    );
+  }
+  const value = appShaLine.slice('APP_SHA='.length).trim();
 
   if (!SHA_RE.test(value)) {
     throw new DeployedRevError(
