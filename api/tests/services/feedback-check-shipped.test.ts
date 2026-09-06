@@ -1,0 +1,252 @@
+import 'dotenv/config';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import pg from 'pg';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createEphemeralDb } from '../helpers/ephemeral-db.js';
+import { runMigrations } from '../../src/db/runMigrations.js';
+
+const eph = await createEphemeralDb('fb-shipped');
+{
+  const bootstrap = new pg.Pool({ connectionString: eph.url, max: 4 });
+  await runMigrations(bootstrap);
+  await bootstrap.end();
+}
+process.env.DATABASE_URL = eph.url;
+process.env.FEEDBACK_FROM_EMAIL = 'feedback@send.jpmtech.com';
+process.env.RESEND_API_KEY = 'test-key';
+// readDeployedRev refuses to run at all without a configured host, before it
+// ever reaches the (overridden) runner.
+process.env.UNRAID_SSH_HOST = 'unraid.test';
+
+const { db } = await import('../../src/db/client.js');
+const { triage } = await import('../../src/services/feedbackTriage.js');
+const { link } = await import('../../src/services/fixLifecycle.js');
+const mailer = await import('../../src/services/feedbackMailer.js');
+const deployed = await import('../../src/services/deployedRev.js');
+const { checkShipped, isAncestor, __setAncestryForTesting } =
+  await import('../../src/services/checkShipped.js');
+
+// A real repository, because the ancestry rules are the thing under test and a
+// stub would only assert that the stub was called.
+const repo = await mkdtemp(join(tmpdir(), 'fb-shipped-repo-'));
+// Every git invocation ignores hooks and system/global config, so whatever is
+// on this machine (or CI runner) cannot influence the ancestry answer or run
+// arbitrary code on our behalf.
+const git = (...args: string[]) =>
+  execFileSync('git', ['-C', repo, '-c', 'core.hooksPath=/dev/null', ...args], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+    },
+  }).trim();
+
+git('init', '-q', '-b', 'main');
+git('config', 'user.email', 'test@example.test');
+git('config', 'user.name', 'Test');
+git('commit', '-q', '--allow-empty', '-m', 'base');
+const OLD = git('rev-parse', 'HEAD');
+git('commit', '-q', '--allow-empty', '-m', 'the fix');
+const FIX = git('rev-parse', 'HEAD');
+git('commit', '-q', '--allow-empty', '-m', 'deployed');
+const DEPLOYED = git('rev-parse', 'HEAD');
+git('checkout', '-q', '-b', 'side', OLD);
+git('commit', '-q', '--allow-empty', '-m', 'never merged');
+const SIDE = git('rev-parse', 'HEAD');
+
+afterAll(async () => {
+  await db.end();
+  await eph.drop();
+  await rm(repo, { recursive: true, force: true });
+});
+
+const ok = () => vi.fn(async () => new Response(JSON.stringify({ id: 'm1' }), { status: 200 }));
+
+// readDeployedRev requires line 0 to be exactly the container's
+// `.State.Running` value ('true') and a later `APP_SHA=<40hex>` line — a bare
+// SHA is no longer accepted and throws DeployedRevError('unreadable').
+const runnerFor = (sha: string) => async () => `true\nAPP_SHA=${sha}\n`;
+
+async function mkFixed(sha: string, email: string | null = 'sub@example.test'): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO feedback (body, user_email_at_submit) VALUES ('broke',$1) RETURNING id`,
+    [email],
+  );
+  await triage({ id: rows[0].id, category: 'bug', severity: 'p2', note: 'real' });
+  await link(rows[0].id, sha);
+  return rows[0].id;
+}
+
+beforeEach(async () => {
+  await db.query('DELETE FROM feedback_emails');
+  await db.query('DELETE FROM feedback');
+  mailer.__setMailFetchForTesting(null);
+  __setAncestryForTesting(null);
+  deployed.__setDeployedRevRunnerForTesting(runnerFor(DEPLOYED));
+});
+
+describe('isAncestor', () => {
+  it('is true for an ancestor and false for a sibling', async () => {
+    expect(await isAncestor(FIX, DEPLOYED, repo)).toBe(true);
+    expect(await isAncestor(SIDE, DEPLOYED, repo)).toBe(false);
+  });
+
+  it('is true for the deployed commit itself', async () => {
+    expect(await isAncestor(DEPLOYED, DEPLOYED, repo)).toBe(true);
+  });
+
+  it('is false for a descendant — direction matters', async () => {
+    expect(await isAncestor(DEPLOYED, FIX, repo)).toBe(false);
+  });
+
+  it('throws on an unknown object rather than answering false', async () => {
+    // Non-zero exit means BOTH "not an ancestor" and "no such object".
+    // Collapsing them would hide a broken clone forever.
+    await expect(isAncestor('0'.repeat(40), DEPLOYED, repo)).rejects.toThrow(/unknown object/i);
+  });
+
+  it('refuses a malformed SHA without invoking git', async () => {
+    await expect(isAncestor('not-a-sha', DEPLOYED, repo)).rejects.toThrow(/40-hex/);
+  });
+});
+
+describe('checkShipped', () => {
+  it('emails the submitter when the fix is an ancestor of the deployed SHA', async () => {
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    const id = await mkFixed(FIX);
+
+    const res = await checkShipped();
+    expect(res).toMatchObject({ deployedSha: DEPLOYED, considered: 1, shipped: 1, emailed: 1 });
+
+    const { rows } = await db.query(
+      `SELECT kind, sent_at FROM feedback_emails WHERE feedback_id=$1`,
+      [id],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe('resolved');
+    expect(rows[0].sent_at).not.toBeNull();
+  });
+
+  it('does not email when the fix is not deployed', async () => {
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    await mkFixed(SIDE);
+
+    const res = await checkShipped();
+    expect(res).toMatchObject({ shipped: 0, emailed: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('emails a duplicate submitter using the canonical row SHA', async () => {
+    mailer.__setMailFetchForTesting(ok());
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    const canonical = await mkFixed(FIX);
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO feedback (body, user_email_at_submit) VALUES ('same','dup@example.test') RETURNING id`,
+    );
+    await triage({
+      id: rows[0].id,
+      category: 'bug',
+      severity: 'p2',
+      note: 'dup',
+      dedupeOf: canonical,
+    });
+
+    const res = await checkShipped();
+    expect(res.emailed).toBe(2);
+    const { rows: sent } = await db.query(
+      `SELECT feedback_id FROM feedback_emails WHERE kind='resolved' ORDER BY feedback_id`,
+    );
+    expect(sent.map((r) => r.feedback_id).sort()).toEqual([canonical, rows[0].id].sort());
+  });
+
+  it('no-ops entirely when the deployed SHA is unreadable', async () => {
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+    __setAncestryForTesting(async () => true);
+    await mkFixed(FIX);
+    deployed.__setDeployedRevRunnerForTesting(async () => {
+      throw new Error('No route to host');
+    });
+
+    const res = await checkShipped();
+    expect(res).toMatchObject({ deployedSha: null, considered: 0, shipped: 0, emailed: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips a row whose object is unknown and still processes the rest', async () => {
+    // One broken row must not abandon the sweep.
+    mailer.__setMailFetchForTesting(ok());
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    await mkFixed('0'.repeat(40), 'ghost@example.test');
+    const good = await mkFixed(FIX);
+
+    const res = await checkShipped();
+    expect(res.skipped).toBe(1);
+    expect(res.emailed).toBe(1);
+    const { rows } = await db.query(
+      `SELECT feedback_id FROM feedback_emails WHERE kind='resolved'`,
+    );
+    expect(rows.map((r) => r.feedback_id)).toEqual([good]);
+  });
+
+  it('dryRun reports what would be sent and sends nothing', async () => {
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    await mkFixed(FIX);
+
+    const res = await checkShipped({ dryRun: true });
+    expect(res).toMatchObject({ shipped: 1, emailed: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const { rows } = await db.query(`SELECT 1 FROM feedback_emails`);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('is idempotent — a second run emails nobody twice', async () => {
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    await mkFixed(FIX);
+
+    await checkShipped();
+    const second = await checkShipped();
+    expect(second.emailed).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not abort the sweep when one send fails', async () => {
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    await mkFixed(FIX, 'a@example.test');
+    await mkFixed(FIX, 'b@example.test');
+    let n = 0;
+    mailer.__setMailFetchForTesting(
+      vi.fn(async () => {
+        n += 1;
+        return n === 1
+          ? new Response('nope', { status: 500 })
+          : new Response(JSON.stringify({ id: 'm2' }), { status: 200 });
+      }),
+    );
+    const res = await checkShipped();
+    expect(res.emailed).toBe(1);
+    expect(res.skipped).toBe(1);
+  });
+});
+
+describe('re-triage cannot undo a shipped decision', () => {
+  it('preserves merged across a re-triage', async () => {
+    // Ruling 5 from Plan 1: `decided` fix_status values survive re-triage.
+    const id = await mkFixed(FIX);
+    await triage({ id, category: 'ux', severity: 'p3', note: 'reclassified' });
+    const { rows } = await db.query(`SELECT fix_status FROM feedback WHERE id=$1`, [id]);
+    expect(rows[0].fix_status).toBe('merged');
+  });
+});
