@@ -206,12 +206,82 @@ describe('reconcileFixes', () => {
     }));
     gh.__setGithubFetchForTesting(spy);
     await reconcileFixes();
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
     for (const call of spy.mock.calls) {
-      const init = call[1] as RequestInit | undefined;
-      const headers = new Headers(init?.headers ?? {});
+      // Headers can arrive either as a second RequestInit argument or baked
+      // into a Request passed as the first argument — check whichever shape
+      // was actually used so a future switch to `fetch(new Request(...))`
+      // can't carry an Authorization header past this assertion unnoticed.
+      const [input, init] = call as [RequestInfo | URL, RequestInit | undefined];
+      const headers =
+        input instanceof Request ? input.headers : new Headers(init?.headers ?? {});
       expect(headers.get('authorization')).toBeNull();
     }
     expect(await state(id)).toBeTruthy();
+  });
+
+  it('prefers a merged PR over an open PR even when open is listed first', async () => {
+    // `/pulls?state=all&head=...` can return both once a bad-SHA merge left a
+    // row stuck in pr_open and a second attempt opened a fresh PR against the
+    // same derived branch. Naive `body.find(p => p.state === 'open')` would
+    // pick the open one first and silently drop the never-resolved merge.
+    const id = await mkNeeded();
+    await db.query(`UPDATE feedback SET fix_status='pr_open', fix_pr_number=91 WHERE id=$1`, [id]);
+    gh.__setGithubFetchForTesting(
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } },
+        '/pulls?': {
+          status: 200,
+          body: [
+            { number: 92, state: 'open', merged_at: null, merge_commit_sha: null },
+            { number: 91, state: 'closed', merged_at: '2026-09-05T00:00:00Z', merge_commit_sha: MERGE },
+          ],
+        },
+      }),
+    );
+    await reconcileFixes();
+    expect(await state(id)).toMatchObject({
+      fix_status: 'merged',
+      fix_pr_number: 91,
+      fix_commit_sha: MERGE,
+    });
+  });
+
+  it('prefers an open PR over a closed-unmerged PR even when open is listed second', async () => {
+    const id = await mkNeeded();
+    gh.__setGithubFetchForTesting(
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } },
+        '/pulls?': {
+          status: 200,
+          body: [
+            { number: 90, state: 'closed', merged_at: null, merge_commit_sha: null },
+            { number: 93, state: 'open', merged_at: null, merge_commit_sha: null },
+          ],
+        },
+      }),
+    );
+    await reconcileFixes();
+    expect(await state(id)).toMatchObject({ fix_status: 'pr_open', fix_pr_number: 93 });
+  });
+
+  it('falls back deterministically when only closed-unmerged PRs exist, and demotes to needed', async () => {
+    const id = await mkNeeded();
+    await db.query(`UPDATE feedback SET fix_status='pr_open', fix_pr_number=91 WHERE id=$1`, [id]);
+    gh.__setGithubFetchForTesting(
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 404, body: { message: 'Not Found' } },
+        '/pulls?': {
+          status: 200,
+          body: [
+            { number: 88, state: 'closed', merged_at: null, merge_commit_sha: null },
+            { number: 91, state: 'closed', merged_at: null, merge_commit_sha: null },
+          ],
+        },
+      }),
+    );
+    await reconcileFixes();
+    expect(await state(id)).toMatchObject({ fix_status: 'needed', fix_pr_number: null });
   });
 
   it('rejects a merge_commit_sha that is not 40-hex rather than storing it', async () => {

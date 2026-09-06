@@ -102,6 +102,8 @@ export async function reconcileFixes(): Promise<ReconcileResult> {
         result.errored += 1;
         continue;
       }
+      // Deliberate: any other error here aborts the sweep with no partial
+      // ReconcileResult, rather than swallowing a real bug to keep going.
       throw err;
     }
   }
