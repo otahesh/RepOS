@@ -92,7 +92,14 @@ export async function reconcileFixes(): Promise<ReconcileResult> {
             WHERE id=$1
               AND fix_status = ANY($6::text[])
               AND dedupe_of IS NULL`,
-          [row.id, next.status, next.status === 'needed' ? null : branch, next.pr, next.sha, OBSERVABLE],
+          [
+            row.id,
+            next.status,
+            next.status === 'needed' ? null : branch,
+            next.pr,
+            next.sha,
+            OBSERVABLE,
+          ],
         );
         if (rowCount === 1) result.changed += 1;
         else result.unchanged += 1;

@@ -147,7 +147,11 @@ describe('listResolvable', () => {
     const deferredCanonical = await mkBug();
     const dupOfDeferred = await mkBug('x@example.test');
     await triage({
-      id: dupOfDeferred, category: 'bug', severity: 'p2', note: 'dup', dedupeOf: deferredCanonical,
+      id: dupOfDeferred,
+      category: 'bug',
+      severity: 'p2',
+      note: 'dup',
+      dedupeOf: deferredCanonical,
     });
     await defer(deferredCanonical, 'wontfix');
 

@@ -46,9 +46,7 @@ async function get(path: string): Promise<Response> {
 }
 
 export async function lookupBranch(branch: string): Promise<BranchState> {
-  const res = await get(
-    `/repos/${repoSlug()}/git/ref/heads/${encodeURIComponent(branch)}`,
-  );
+  const res = await get(`/repos/${repoSlug()}/git/ref/heads/${encodeURIComponent(branch)}`);
   if (res.status === 404) return { exists: false, headSha: null };
   if (!res.ok) throw new Error(`github branch lookup failed: ${res.status}`);
   const body = (await res.json()) as { object?: { sha?: string } };

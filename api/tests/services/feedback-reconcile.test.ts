@@ -105,7 +105,12 @@ describe('reconcileFixes', () => {
         '/pulls?': {
           status: 200,
           body: [
-            { number: 91, state: 'closed', merged_at: '2026-09-05T00:00:00Z', merge_commit_sha: MERGE },
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: '2026-09-05T00:00:00Z',
+              merge_commit_sha: MERGE,
+            },
           ],
         },
       }),
@@ -122,7 +127,7 @@ describe('reconcileFixes', () => {
       `UPDATE feedback SET fix_status='merged', fix_commit_sha=$2, fix_pr_number=91 WHERE id=$1`,
       [id, MERGE],
     );
-    gh.__setGithubFetchForTesting(stub({}));  // everything 404s
+    gh.__setGithubFetchForTesting(stub({})); // everything 404s
     const res = await reconcileFixes();
     expect(res.examined).toBe(0);
     expect(await state(id)).toMatchObject({ fix_status: 'merged', fix_commit_sha: MERGE });
@@ -149,7 +154,9 @@ describe('reconcileFixes', () => {
     const id = await mkNeeded();
     await db.query(`UPDATE feedback SET fix_status='deferred' WHERE id=$1`, [id]);
     gh.__setGithubFetchForTesting(
-      stub({ [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } } }),
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } },
+      }),
     );
     const res = await reconcileFixes();
     expect(res.examined).toBe(0);
@@ -168,9 +175,7 @@ describe('reconcileFixes', () => {
 
   it('leaves the row untouched when GitHub errors, and reports it', async () => {
     const id = await mkNeeded();
-    gh.__setGithubFetchForTesting(
-      vi.fn(async () => new Response('boom', { status: 503 })),
-    );
+    gh.__setGithubFetchForTesting(vi.fn(async () => new Response('boom', { status: 503 })));
     const res = await reconcileFixes();
     expect(res).toMatchObject({ examined: 1, changed: 0, errored: 1 });
     expect(await state(id)).toMatchObject({ fix_status: 'needed' });
@@ -185,12 +190,15 @@ describe('reconcileFixes', () => {
         if (url.includes(`feedback%2F${bad}`)) return new Response('boom', { status: 503 });
         if (url.includes('/pulls?')) {
           return new Response(
-            JSON.stringify([{ number: 92, state: 'open', merged_at: null, merge_commit_sha: null }]),
+            JSON.stringify([
+              { number: 92, state: 'open', merged_at: null, merge_commit_sha: null },
+            ]),
             { status: 200, headers: { 'content-type': 'application/json' } },
           );
         }
         return new Response(JSON.stringify({ object: { sha: HEAD } }), {
-          status: 200, headers: { 'content-type': 'application/json' },
+          status: 200,
+          headers: { 'content-type': 'application/json' },
         });
       }),
     );
@@ -201,9 +209,13 @@ describe('reconcileFixes', () => {
 
   it('sends no Authorization header — the repository is public', async () => {
     const id = await mkNeeded();
-    const spy = vi.fn(async () => new Response('[]', {
-      status: 200, headers: { 'content-type': 'application/json' },
-    }));
+    const spy = vi.fn(
+      async () =>
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
     gh.__setGithubFetchForTesting(spy);
     await reconcileFixes();
     expect(spy.mock.calls.length).toBeGreaterThan(0);
@@ -213,8 +225,7 @@ describe('reconcileFixes', () => {
       // was actually used so a future switch to `fetch(new Request(...))`
       // can't carry an Authorization header past this assertion unnoticed.
       const [input, init] = call as [RequestInfo | URL, RequestInit | undefined];
-      const headers =
-        input instanceof Request ? input.headers : new Headers(init?.headers ?? {});
+      const headers = input instanceof Request ? input.headers : new Headers(init?.headers ?? {});
       expect(headers.get('authorization')).toBeNull();
     }
     expect(await state(id)).toBeTruthy();
@@ -234,7 +245,12 @@ describe('reconcileFixes', () => {
           status: 200,
           body: [
             { number: 92, state: 'open', merged_at: null, merge_commit_sha: null },
-            { number: 91, state: 'closed', merged_at: '2026-09-05T00:00:00Z', merge_commit_sha: MERGE },
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: '2026-09-05T00:00:00Z',
+              merge_commit_sha: MERGE,
+            },
           ],
         },
       }),
@@ -291,8 +307,14 @@ describe('reconcileFixes', () => {
       stub({
         '/pulls?': {
           status: 200,
-          body: [{ number: 91, state: 'closed', merged_at: '2026-09-05T00:00:00Z',
-                   merge_commit_sha: 'NOTASHA' }],
+          body: [
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: '2026-09-05T00:00:00Z',
+              merge_commit_sha: 'NOTASHA',
+            },
+          ],
         },
       }),
     );

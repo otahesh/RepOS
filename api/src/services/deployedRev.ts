@@ -67,9 +67,12 @@ export async function readDeployedRev(): Promise<string> {
   const formatArg = '{{.State.Running}}\n{{range .Config.Env}}{{println .}}{{end}}';
   const argv = [
     'ssh',
-    '-o', 'BatchMode=yes',
-    '-o', 'StrictHostKeyChecking=accept-new',
-    '-o', `ConnectTimeout=10`,
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'StrictHostKeyChecking=accept-new',
+    '-o',
+    `ConnectTimeout=10`,
     `${user}@${host}`,
     'docker',
     'inspect',
