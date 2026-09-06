@@ -187,9 +187,25 @@ function parseDiffGitHeader(line: string): [string, string] | null {
   const re = new RegExp(`^(${PATH_TOKEN})\\s+(${PATH_TOKEN})$`);
   const m = re.exec(rest);
   if (!m) return null;
-  const a = unquoteGitPath(m[1]).replace(/^a\//, '');
-  const b = unquoteGitPath(m[2]).replace(/^b\//, '');
+  const a = canonicalHeaderPath(m[1], 'a/');
+  const b = canonicalHeaderPath(m[2], 'b/');
+  if (a === null || b === null) return null;
   return [a, b];
+}
+
+/**
+ * Support only Git's standard a/ and b/ prefixes. `git apply` strips one
+ * component even for old/ and new/; retaining those components here would
+ * check a different path from the one Git writes. Refuse noncanonical
+ * components too, rather than depending on Git's path normalization.
+ */
+function canonicalHeaderPath(raw: string, prefix: 'a/' | 'b/'): string | null {
+  const decoded = unquoteGitPath(raw);
+  if (!decoded.startsWith(prefix)) return null;
+  const path = decoded.slice(prefix.length);
+  if (/[\x00-\x1f\x7f]/.test(path)) return null;
+  if (path.split('/').some((part) => part === '' || part === '.' || part === '..')) return null;
+  return path;
 }
 
 /**
@@ -199,7 +215,10 @@ function parseDiffGitHeader(line: string): [string, string] | null {
  * the latter — collapsing them back to a single nullable value is exactly
  * the "unparseable header, so skip it" bug this type prevents.
  */
-type SingleGitPathResult = { kind: 'path'; path: string } | { kind: 'devnull' } | { kind: 'invalid' };
+type SingleGitPathResult =
+  | { kind: 'path'; path: string }
+  | { kind: 'devnull' }
+  | { kind: 'invalid' };
 
 /**
  * Parses a `--- a/<path>` or `+++ b/<path>` line into its single path.
@@ -223,9 +242,8 @@ function parseSingleGitPath(line: string, prefix: 'a/' | 'b/'): SingleGitPathRes
   const re = new RegExp(`^(${PATH_TOKEN})$`);
   const m = re.exec(rest);
   if (!m) return { kind: 'invalid' };
-  const unquoted = unquoteGitPath(m[1]);
-  const path = unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : unquoted;
-  return { kind: 'path', path };
+  const path = canonicalHeaderPath(m[1], prefix);
+  return path === null ? { kind: 'invalid' } : { kind: 'path', path };
 }
 
 function checkForbiddenPath(path: string, reasons: string[]): void {
@@ -265,9 +283,40 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
 export function scanPatch(patch: string): string[] {
   const reasons: string[] = [];
   const lines = patch.split('\n');
+  let remaining: { old: number; next: number } | null = null;
 
   for (const line of lines) {
-    if (line.startsWith('diff --git ')) {
+    // A hunk can contain literal ---/+++ lines. Only its declared counts,
+    // not adjacent line prefixes, tell us when file headers resume.
+    let added: string | null = null;
+    if (remaining !== null) {
+      if (line.startsWith('+')) {
+        remaining.next--;
+        added = line.slice(1);
+      } else if (line.startsWith('-')) {
+        remaining.old--;
+      } else if (line.startsWith(' ')) {
+        remaining.old--;
+        remaining.next--;
+      } else if (line !== '\\ No newline at end of file' && line !== '') {
+        reasons.push('unparseable hunk, refusing');
+      }
+      if (remaining.old < 0 || remaining.next < 0) reasons.push('invalid hunk counts, refusing');
+      if (remaining.old === 0 && remaining.next === 0) remaining = null;
+    } else if (line.startsWith('@@')) {
+      const header = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?:.*)$/.exec(line);
+      if (!header) {
+        reasons.push('unparseable hunk header, refusing');
+      } else {
+        const old = Number(header[1] ?? 1);
+        const next = Number(header[2] ?? 1);
+        if (!Number.isSafeInteger(old) || !Number.isSafeInteger(next) || old + next === 0) {
+          reasons.push('invalid hunk counts, refusing');
+        } else {
+          remaining = { old, next };
+        }
+      }
+    } else if (line.startsWith('diff --git ')) {
       const parsed = parseDiffGitHeader(line);
       if (!parsed) {
         reasons.push(`unparseable diff header, refusing: ${line}`);
@@ -284,22 +333,15 @@ export function scanPatch(patch: string): string[] {
         // else that doesn't reduce to one clean path, must be refused,
         // not silently skipped.
         reasons.push(`unparseable diff header, refusing: ${line}`);
+        if (line.startsWith('+')) added = line.slice(1);
       }
       // 'devnull' is the legitimate marker for an added/deleted file — skip.
+    } else if (line.startsWith('+')) {
+      // Also scan additions in abbreviated patches. Only parsed file
+      // headers outside a hunk may bypass the content checks.
+      added = line.slice(1);
     }
-  }
-
-  // A "+++ b/<path>" line is only a file header when it directly follows a
-  // "--- a/<path>" line. A hunk *content* line that merely starts with "++"
-  // (e.g. an added line reading "++ contact someone@host") is not a header
-  // and must still be scanned — startsWith('+++') alone cannot tell these
-  // apart.
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.startsWith('+')) continue;
-    const isFileHeader = line.startsWith('+++ ') && i > 0 && lines[i - 1].startsWith('--- ');
-    if (isFileHeader) continue;
-    const added = line.slice(1);
+    if (added === null) continue;
 
     for (const m of added.matchAll(EMAIL_RE)) {
       if (!EXEMPT_EMAIL_DOMAIN_RE.test(m[1])) {
@@ -310,6 +352,8 @@ export function scanPatch(patch: string): string[] {
       if (rule.test(added)) reasons.push(`added line contains ${label}`);
     }
   }
+
+  if (remaining !== null) reasons.push('truncated hunk, refusing');
 
   return [...new Set(reasons)];
 }

