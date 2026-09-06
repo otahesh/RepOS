@@ -123,7 +123,10 @@ const FORBIDDEN_PATHS = [
   /(^|\/)\.env($|\.)/,
   /^docker\/root\/etc\/s6-overlay\//,
   /^docker\/Dockerfile$/,
-  /^package(-lock)?\.json$/,
+  // Anchored on either end so this matches the real manifests
+  // (api/package.json, frontend/package-lock.json, …), not just a
+  // hypothetical root-level package.json this repo does not have.
+  /(^|\/)package(-lock)?\.json$/,
   /(^|\/)\.ssh\//,
   /(^|\/)id_(rsa|ed25519|ecdsa)/,
 ];
@@ -190,20 +193,39 @@ function parseDiffGitHeader(line: string): [string, string] | null {
 }
 
 /**
+ * Result of parsing a `--- `/`+++ ` line. `devnull` (the legitimate marker
+ * for an added or deleted file) and `invalid` (anything else that fails to
+ * parse) are kept distinct so callers can skip the former and must refuse
+ * the latter — collapsing them back to a single nullable value is exactly
+ * the "unparseable header, so skip it" bug this type prevents.
+ */
+type SingleGitPathResult = { kind: 'path'; path: string } | { kind: 'devnull' } | { kind: 'invalid' };
+
+/**
  * Parses a `--- a/<path>` or `+++ b/<path>` line into its single path.
  * `git apply` prefers these over the `diff --git` header when they disagree,
  * so both must be checked against FORBIDDEN_PATHS independently.
+ *
+ * Traditional unified-diff headers (as `diff -u` emits, and as `git apply`
+ * still accepts) append a tab-separated timestamp after the path, e.g.
+ * `--- a/x.yml\t2026-01-01 00:00:00.000000000 +0000`. That must be stripped
+ * before parsing, or the timestamp defeats the path-token match and the
+ * header looks unparseable even though the path itself is plain.
  */
-function parseSingleGitPath(line: string, prefix: 'a/' | 'b/'): string | null {
+function parseSingleGitPath(line: string, prefix: 'a/' | 'b/'): SingleGitPathResult {
   const marker = line.startsWith('--- ') ? '--- ' : line.startsWith('+++ ') ? '+++ ' : null;
-  if (!marker) return null;
-  const rest = line.slice(marker.length).trim();
-  if (rest === '/dev/null') return null;
+  if (!marker) return { kind: 'invalid' };
+  let rest = line.slice(marker.length);
+  const tabIdx = rest.indexOf('\t');
+  if (tabIdx !== -1) rest = rest.slice(0, tabIdx);
+  rest = rest.trim();
+  if (rest === '/dev/null') return { kind: 'devnull' };
   const re = new RegExp(`^(${PATH_TOKEN})$`);
   const m = re.exec(rest);
-  if (!m) return null;
+  if (!m) return { kind: 'invalid' };
   const unquoted = unquoteGitPath(m[1]);
-  return unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : unquoted;
+  const path = unquoted.startsWith(prefix) ? unquoted.slice(prefix.length) : unquoted;
+  return { kind: 'path', path };
 }
 
 function checkForbiddenPath(path: string, reasons: string[]): void {
@@ -252,12 +274,18 @@ export function scanPatch(patch: string): string[] {
         continue;
       }
       for (const path of parsed) checkForbiddenPath(path, reasons);
-    } else if (line.startsWith('--- ')) {
-      const p = parseSingleGitPath(line, 'a/');
-      if (p !== null) checkForbiddenPath(p, reasons);
-    } else if (line.startsWith('+++ ')) {
-      const p = parseSingleGitPath(line, 'b/');
-      if (p !== null) checkForbiddenPath(p, reasons);
+    } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      const r = parseSingleGitPath(line, line.startsWith('--- ') ? 'a/' : 'b/');
+      if (r.kind === 'path') {
+        checkForbiddenPath(r.path, reasons);
+      } else if (r.kind === 'invalid') {
+        // Fail closed, same as an unparseable `diff --git` header: a
+        // traditional unified-diff header with a timestamp, or anything
+        // else that doesn't reduce to one clean path, must be refused,
+        // not silently skipped.
+        reasons.push(`unparseable diff header, refusing: ${line}`);
+      }
+      // 'devnull' is the legitimate marker for an added/deleted file — skip.
     }
   }
 
