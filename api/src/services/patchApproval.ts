@@ -203,6 +203,7 @@ function canonicalHeaderPath(raw: string, prefix: 'a/' | 'b/'): string | null {
   const decoded = unquoteGitPath(raw);
   if (!decoded.startsWith(prefix)) return null;
   const path = decoded.slice(prefix.length);
+  // eslint-disable-next-line no-control-regex -- Deliberately reject control characters in patch paths.
   if (/[\x00-\x1f\x7f]/.test(path)) return null;
   if (path.split('/').some((part) => part === '' || part === '.' || part === '..')) return null;
   return path;
