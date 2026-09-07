@@ -58,7 +58,9 @@ export async function isAncestor(
       throw new Error(`unknown object ${sha} in ${repoDir}`);
     }
   }
-  return (await runGit(['merge-base', '--is-ancestor', candidate, deployed], repoDir)) === 0;
+  const code = await runGit(['merge-base', '--is-ancestor', candidate, deployed], repoDir);
+  if (code !== 0 && code !== 1) throw new Error('ancestry check failed');
+  return code === 0;
 }
 
 export interface CheckShippedResult {
@@ -67,15 +69,23 @@ export interface CheckShippedResult {
   shipped: number;
   emailed: number;
   skipped: number;
+  diagnostics: Array<{
+    feedbackId?: string;
+    stage: 'deployment' | 'ancestry' | 'email';
+    code: string;
+  }>;
 }
 
-export async function checkShipped(opts: { dryRun?: boolean } = {}): Promise<CheckShippedResult> {
+export async function checkShipped(
+  opts: { dryRun?: boolean; repoDir?: string } = {},
+): Promise<CheckShippedResult> {
   const result: CheckShippedResult = {
     deployedSha: null,
     considered: 0,
     shipped: 0,
     emailed: 0,
     skipped: 0,
+    diagnostics: [],
   };
 
   let deployedSha: string;
@@ -84,11 +94,12 @@ export async function checkShipped(opts: { dryRun?: boolean } = {}): Promise<Che
   } catch {
     // Cannot read production: no-op. Guessing here is how somebody gets told
     // their bug shipped when it did not.
+    result.diagnostics.push({ stage: 'deployment', code: 'unreadable' });
     return result;
   }
   result.deployedSha = deployedSha;
 
-  const ancestry: Ancestry = ancestryOverride ?? ((a, d) => isAncestor(a, d));
+  const ancestry: Ancestry = ancestryOverride ?? ((a, d) => isAncestor(a, d, opts.repoDir));
   const rows = await listResolvable();
   result.considered = rows.length;
 
@@ -100,6 +111,7 @@ export async function checkShipped(opts: { dryRun?: boolean } = {}): Promise<Che
       // Unknown object or a broken clone — one bad row does not abandon the
       // sweep, and the row stays selectable for the next run.
       result.skipped += 1;
+      result.diagnostics.push({ feedbackId: row.id, stage: 'ancestry', code: 'unverifiable' });
       continue;
     }
     if (!shipped) continue;
@@ -109,9 +121,13 @@ export async function checkShipped(opts: { dryRun?: boolean } = {}): Promise<Che
     try {
       const res = await sendResolvedEmail({ id: row.id, bodyText: resolvedCopy(row.body) });
       if (res.status === 'sent') result.emailed += 1;
-      else result.skipped += 1;
+      else {
+        result.skipped += 1;
+        result.diagnostics.push({ feedbackId: row.id, stage: 'email', code: res.status });
+      }
     } catch {
       result.skipped += 1;
+      result.diagnostics.push({ feedbackId: row.id, stage: 'email', code: 'send_refused' });
     }
   }
 

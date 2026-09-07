@@ -115,6 +115,24 @@ describe('isAncestor', () => {
 });
 
 describe('checkShipped', () => {
+  it('uses the configured clone rather than the process working directory', async () => {
+    await mkFixed(FIX);
+    expect(process.cwd()).not.toBe(repo);
+    const res = await checkShipped({ repoDir: repo, dryRun: true });
+    expect(res).toMatchObject({ considered: 1, shipped: 1, skipped: 0, diagnostics: [] });
+  });
+
+  it('returns sanitized diagnostics for unverifiable ancestry', async () => {
+    const id = await mkFixed(FIX);
+    __setAncestryForTesting(async () => {
+      throw new Error('private-reporter@example.test secret');
+    });
+    const res = await checkShipped({ repoDir: repo, dryRun: true });
+    expect(res.diagnostics).toEqual([{ feedbackId: id, stage: 'ancestry', code: 'unverifiable' }]);
+    expect(JSON.stringify(res)).not.toContain('private-reporter');
+    expect(res.skipped).toBe(1);
+  });
+
   it('emails the submitter when the fix is an ancestor of the deployed SHA', async () => {
     const fetchMock = ok();
     mailer.__setMailFetchForTesting(fetchMock);
@@ -178,6 +196,7 @@ describe('checkShipped', () => {
 
     const res = await checkShipped();
     expect(res).toMatchObject({ deployedSha: null, considered: 0, shipped: 0, emailed: 0 });
+    expect(res.diagnostics).toEqual([{ stage: 'deployment', code: 'unreadable' }]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

@@ -12,6 +12,7 @@
 // before DATABASE_URL is set. `await import()` gives a value binding, which
 // cannot be used in type position.
 import type { FeedbackCategory, FeedbackSeverity } from './feedbackTriage.js';
+import type { Approval } from './patchApproval.js';
 
 /** Built before any module that opens a pool is imported. */
 export function buildDatabaseUrl(env: NodeJS.ProcessEnv): string | undefined {
@@ -31,9 +32,18 @@ const USAGE = `feedback-triage — operator commands
   defer  --id ID --reason TEXT
   email  --id ID --kind ack|reply --body TEXT
   replay-pending
+  check-shipped [--dry-run]
+  reconcile
+  link --id ID --sha SHA
+  approve-patch --id ID --base SHA < patch.diff
+  submit-patch --patch FILE < approval.json
+  open-pr --id ID
 
 Every verb is idempotent. 'email' cannot send a 'resolved' notice; that kind is
 created only by deployment verification.
+Approval/git commands do not require database credentials. FEEDBACK_REPO_DIR
+must name a trusted clone for submit-patch and check-shipped. These are operator
+commands, not the agent socket API; patch FILE is an operator-local path.
 `;
 
 function flag(argv: string[], name: string): string | undefined {
@@ -41,11 +51,142 @@ function flag(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+const MAX_INPUT = 1024 * 1024;
+const ID_RE = /^[1-9][0-9]{0,18}$/;
+function validId(value: unknown): value is string {
+  return typeof value === 'string' && ID_RE.test(value) && BigInt(value) <= 9223372036854775807n;
+}
+function required(value: string | undefined, label: string): string {
+  if (!value || value.startsWith('--')) throw new Error(`${label} is required`);
+  return value;
+}
+async function boundedText(input: AsyncIterable<Buffer | string>): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of input) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.length;
+    if (size > MAX_INPUT) throw new Error('input exceeds the 1 MiB limit');
+    chunks.push(bytes);
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
+}
+function envelope(value: unknown): { approval: Approval; signature: string } {
+  const v = value as { approval?: Partial<Approval>; signature?: unknown } | null;
+  const a = v?.approval;
+  if (
+    !a ||
+    !validId(a.feedbackId) ||
+    typeof a.baseSha !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(a.baseSha) ||
+    typeof a.patchDigest !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(a.patchDigest) ||
+    !Number.isSafeInteger(a.expiry) ||
+    typeof v?.signature !== 'string' ||
+    !/^[A-Za-z0-9+/]{86}==$/.test(v.signature)
+  ) {
+    throw new Error('malformed approval envelope');
+  }
+  return { approval: a as Approval, signature: v.signature };
+}
+
+async function runPureCommand(
+  cmd: string,
+  argv: string[],
+  out: (s: string) => void,
+): Promise<number> {
+  if (cmd === 'approve-patch') {
+    const id = required(flag(argv, 'id'), '--id');
+    const baseSha = required(flag(argv, 'base'), '--base');
+    if (!validId(id) || !/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('invalid id or base SHA');
+    const ttl = Number(process.env.FEEDBACK_APPROVAL_TTL_SECONDS ?? 900);
+    if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 86400)
+      throw new Error('approval TTL must be 1–86400 seconds');
+    const keyPath = required(process.env.FEEDBACK_APPROVAL_KEY, 'FEEDBACK_APPROVAL_KEY');
+    const { readFile } = await import('node:fs/promises');
+    const { patchDigest, scanPatch, signApproval } = await import('./patchApproval.js');
+    const patch = await boundedText(process.stdin);
+    const reasons = scanPatch(patch);
+    if (reasons.length) {
+      // Do not echo untrusted filenames/content returned by the scanner.
+      out(`refused: patch failed privacy/path checks (${reasons.length} reasons)`);
+      return 2;
+    }
+    const approval = {
+      feedbackId: id,
+      baseSha,
+      patchDigest: patchDigest(patch),
+      expiry: Math.floor(Date.now() / 1000) + ttl,
+    };
+    const signature = signApproval(approval, await readFile(keyPath, 'utf8'));
+    out(JSON.stringify({ approval, signature }));
+    return 0;
+  }
+  if (cmd === 'submit-patch') {
+    const patchPath = required(flag(argv, 'patch'), '--patch');
+    const repoDir = required(process.env.FEEDBACK_REPO_DIR, 'FEEDBACK_REPO_DIR');
+    const keyPath = required(process.env.FEEDBACK_APPROVAL_PUBKEY, 'FEEDBACK_APPROVAL_PUBKEY');
+    const { readFile } = await import('node:fs/promises');
+    const { createReadStream } = await import('node:fs');
+    const parsed = envelope(JSON.parse(await boundedText(process.stdin)));
+    const publicKeyPem = await readFile(keyPath, 'utf8');
+    const { verifyApproval } = await import('./patchApproval.js');
+    verifyApproval(parsed.approval, parsed.signature, publicKeyPem);
+    const patch = await boundedText(createReadStream(patchPath));
+    const { submitPatch } = await import('../reposGit/index.js');
+    const res = await submitPatch({
+      feedbackId: parsed.approval.feedbackId,
+      patch,
+      ...parsed,
+      repoDir,
+      publicKeyPem,
+    });
+    out(`pushed ${res.branch} @ ${res.headSha}${res.replaced ? ' (revision)' : ''}`);
+  } else {
+    const id = required(flag(argv, 'id'), '--id');
+    if (!validId(id)) throw new Error('invalid feedback id');
+    const { openPr } = await import('../reposGit/index.js');
+    const res = await openPr({ feedbackId: id });
+    out(`opened #${res.number} — ${res.url}`);
+  }
+  out('run `npm run feedback -- reconcile` to record the state');
+  return 0;
+}
+
 export async function runCli(argv: string[], out: (s: string) => void): Promise<number> {
   const cmd = argv[0];
   if (!cmd || cmd === '--help' || cmd === '-h') {
     out(USAGE);
     return cmd ? 0 : 1;
+  }
+
+  if (['approve-patch', 'submit-patch', 'open-pr'].includes(cmd)) {
+    try {
+      return await runPureCommand(cmd, argv, out);
+    } catch {
+      // Key parsers, filesystem errors and remote failures must not echo secrets.
+      out('command failed: check input, approval, and trusted operator configuration');
+      return 1;
+    }
+  }
+  if (
+    ![
+      'list',
+      'triage',
+      'defer',
+      'email',
+      'replay-pending',
+      'link',
+      'check-shipped',
+      'reconcile',
+    ].includes(cmd)
+  ) {
+    out(`unknown command\n\n${USAGE}`);
+    return 2;
+  }
+  if (cmd === 'check-shipped' && !process.env.FEEDBACK_REPO_DIR) {
+    out('FEEDBACK_REPO_DIR is required');
+    return 2;
   }
 
   const url = buildDatabaseUrl(process.env);
@@ -62,6 +203,30 @@ export async function runCli(argv: string[], out: (s: string) => void): Promise<
 
   try {
     switch (cmd) {
+      case 'check-shipped': {
+        const { checkShipped } = await import('./checkShipped.js');
+        const res = await checkShipped({
+          dryRun: argv.includes('--dry-run'),
+          repoDir: process.env.FEEDBACK_REPO_DIR,
+        });
+        out(JSON.stringify(res));
+        return res.diagnostics.some((d) => d.stage !== 'deployment') ? 1 : 0;
+      }
+      case 'reconcile': {
+        const { reconcileFixes } = await import('./reconcileFixes.js');
+        const res = await reconcileFixes();
+        out(JSON.stringify(res));
+        return res.errored ? 1 : 0;
+      }
+      case 'link': {
+        const id = required(flag(argv, 'id'), '--id');
+        const sha = required(flag(argv, 'sha'), '--sha');
+        if (!validId(id) || !/^[0-9a-f]{40}$/.test(sha)) throw new Error('invalid id or SHA');
+        const { link } = await import('./fixLifecycle.js');
+        await link(id, sha);
+        out(`linked ${id} -> ${sha} (merged)`);
+        return 0;
+      }
       case 'list': {
         const rows = argv.includes('--pending')
           ? await triageSvc.listPending()
