@@ -262,6 +262,40 @@ describe('checkShipped', () => {
     ]);
   });
 
+  it('does not abort the sweep when a send throws — the catch is defended, not deleted', async () => {
+    // Mutation check: deleting the body of checkShipped's catch block (which
+    // wraps sendResolvedEmail) leaves all other tests green, because none of
+    // them make sendResolvedEmail actually THROW — only return `failed`. This
+    // test forces a genuine thrown exception (EmailGateError('not_found'))
+    // by deleting the feedback row out from under the send, mid-sweep, the
+    // same race-simulation technique the "already-sent" test below uses.
+    // Rows are processed in listResolvable's created_at order, so the first
+    // ancestry() call is for `broken`.
+    const broken = await mkFixed(FIX, 'broken@example.test');
+    const good = await mkFixed(FIX, 'good@example.test');
+    let calls = 0;
+    __setAncestryForTesting(async (a, d) => {
+      calls += 1;
+      if (calls === 1) {
+        await db.query(`DELETE FROM feedback WHERE id=$1`, [broken]);
+      }
+      return isAncestor(a, d, repo);
+    });
+    mailer.__setMailFetchForTesting(ok());
+
+    const res = await checkShipped();
+
+    expect(res.emailed).toBe(1);
+    expect(res.skipped).toBe(1);
+    expect(res.diagnostics).toEqual([
+      { feedbackId: broken, stage: 'email', code: 'send_refused' },
+    ]);
+    const { rows } = await db.query(
+      `SELECT feedback_id FROM feedback_emails WHERE kind='resolved'`,
+    );
+    expect(rows.map((r) => r.feedback_id)).toEqual([good]);
+  });
+
   it('treats an already-sent notice as a successful no-op, not a skip', async () => {
     // listResolvable only excludes a row once a `resolved` feedback_emails
     // row exists, so the only way this row is still selected AND already
