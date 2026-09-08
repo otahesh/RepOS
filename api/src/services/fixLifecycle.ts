@@ -5,6 +5,7 @@
 // other transition into a remote-derived state.
 import { db } from '../db/client.js';
 import { withFeedbackLock } from './feedbackLock.js';
+import { FIXABLE } from './feedbackTriage.js';
 
 /** Full lowercase 40-hex. Anything else is refused rather than normalised. */
 export const SHA_RE = /^[0-9a-f]{40}$/;
@@ -82,6 +83,14 @@ export interface ResolvableRow {
  * never carries its own, so selecting on the row's own column would exclude
  * every duplicate from the step meant to include them — their submitters would
  * be acked and then never told.
+ *
+ * The category filter mirrors sendResolvedEmail's gate exactly: that gate
+ * throws for an unclassified row and for any category outside FIXABLE, and
+ * `link` does not require a triaged row. Selecting such a row would throw on
+ * every sweep, with no operator action that clears it — a permanently failing
+ * `check-shipped`. The category is read from the row itself, not the canonical
+ * dedupe target, because the email gate reads it from the row itself too and a
+ * duplicate is triaged in its own right.
  */
 export async function listResolvable(): Promise<ResolvableRow[]> {
   const { rows } = await db.query<ResolvableRow>(
@@ -94,11 +103,13 @@ export async function listResolvable(): Promise<ResolvableRow[]> {
        LEFT JOIN feedback c ON c.id = f.dedupe_of
       WHERE COALESCE(f.fix_commit_sha, c.fix_commit_sha) IS NOT NULL
         AND f.user_email_at_submit IS NOT NULL
+        AND f.category = ANY($1::text[])
         AND NOT EXISTS (
           SELECT 1 FROM feedback_emails e
            WHERE e.feedback_id = f.id AND e.kind IN ('resolved','reply')
         )
       ORDER BY f.created_at, f.id`,
+    [FIXABLE],
   );
   return rows;
 }

@@ -287,13 +287,58 @@ describe('checkShipped', () => {
 
     expect(res.emailed).toBe(1);
     expect(res.skipped).toBe(1);
-    expect(res.diagnostics).toEqual([
-      { feedbackId: broken, stage: 'email', code: 'send_refused' },
-    ]);
+    // The gate's own code is recorded, not a flat 'send_refused': the codes
+    // are non-secret enum strings and are the only signal saying WHICH gate
+    // refused. The message is never recorded — it can quote row content.
+    expect(res.diagnostics).toEqual([{ feedbackId: broken, stage: 'email', code: 'not_found' }]);
     const { rows } = await db.query(
       `SELECT feedback_id FROM feedback_emails WHERE kind='resolved'`,
     );
     expect(rows.map((r) => r.feedback_id)).toEqual([good]);
+  });
+
+  it('records send_refused for a throw that is not an EmailGateError', async () => {
+    // Every gate passes; the failure comes from the mailer (fromAddress()
+    // throws MailerError when FEEDBACK_FROM_EMAIL is unset), which carries no
+    // gate code. That case must still be reported, generically.
+    const id = await mkFixed(FIX);
+    __setAncestryForTesting(async (a, d) => {
+      vi.stubEnv('FEEDBACK_FROM_EMAIL', '');
+      return isAncestor(a, d, repo);
+    });
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+
+    let res;
+    try {
+      res = await checkShipped();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(res.skipped).toBe(1);
+    expect(res.emailed).toBe(0);
+    expect(res.diagnostics).toEqual([{ feedbackId: id, stage: 'email', code: 'send_refused' }]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never considers a row the resolved-email gate would refuse', async () => {
+    // A row linked before triage is exactly the shape that made check-shipped
+    // fail on every run: selected here, refused by the gate, exit 1 forever.
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO feedback (body, user_email_at_submit)
+       VALUES ('linked before triage','sub@example.test') RETURNING id`,
+    );
+    await link(rows[0].id, FIX);
+    __setAncestryForTesting(async (a, d) => isAncestor(a, d, repo));
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+
+    const first = await checkShipped();
+    const second = await checkShipped();
+    expect(first).toMatchObject({ considered: 0, skipped: 0, diagnostics: [] });
+    expect(second).toMatchObject({ considered: 0, skipped: 0, diagnostics: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('treats an already-sent notice as a successful no-op, not a skip', async () => {

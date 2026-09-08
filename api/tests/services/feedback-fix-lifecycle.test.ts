@@ -159,4 +159,46 @@ describe('listResolvable', () => {
     // duplicate resolves to an effective SHA. Nobody is told a fix shipped.
     expect(await listResolvable()).toHaveLength(0);
   });
+
+  // Selection must match sendResolvedEmail's gate exactly. That gate throws
+  // for an unclassified row and for any category outside FIXABLE, and `link`
+  // does not require a triaged row — so a row selected here that the gate
+  // refuses fails on EVERY sweep, with no operator action that clears it.
+  it('excludes a linked but untriaged row — the email gate would refuse it', async () => {
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO feedback (body, user_email_at_submit)
+       VALUES ('never triaged','sub@example.test') RETURNING id`,
+    );
+    await link(rows[0].id, SHA_A);
+    expect((await row(rows[0].id)).category).toBeNull();
+    expect(await listResolvable()).toHaveLength(0);
+  });
+
+  it('excludes a linked row whose category cannot produce a resolved email', async () => {
+    for (const category of ['question', 'noise'] as const) {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO feedback (body, user_email_at_submit)
+         VALUES ($1,'sub@example.test') RETURNING id`,
+        [category],
+      );
+      await triage({ id: rows[0].id, category, note: 'terminal' });
+      await link(rows[0].id, SHA_A);
+    }
+    expect(await listResolvable()).toHaveLength(0);
+  });
+
+  it('includes every fixable category', async () => {
+    const ids: string[] = [];
+    for (const category of ['bug', 'ux', 'feature'] as const) {
+      const { rows } = await db.query<{ id: string }>(
+        `INSERT INTO feedback (body, user_email_at_submit)
+         VALUES ($1,'sub@example.test') RETURNING id`,
+        [category],
+      );
+      await triage({ id: rows[0].id, category, severity: 'p2', note: 'real' });
+      await link(rows[0].id, SHA_A);
+      ids.push(rows[0].id);
+    }
+    expect((await listResolvable()).map((r) => r.id).sort()).toEqual([...ids].sort());
+  });
 });

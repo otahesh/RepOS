@@ -3,11 +3,13 @@
 // The question is never "was it merged?" — a commit can sit in main for days
 // without being deployed. It is "is the fix contained in what production is
 // running?", answered by ancestry against the SHA the container reports.
-// Ancestry is also monotone: once true it stays true, so a re-run cannot flip
-// a decision back and un-tell somebody.
+// Ancestry alone is NOT monotone — a rollback genuinely regresses the answer.
+// What makes a sweep safe to re-run is the `feedback_emails` ledger: a
+// `resolved` row is at-most-once, so once the notice is sent no later sweep
+// can send it again or un-tell somebody.
 import { spawn } from 'node:child_process';
 import { listResolvable, SHA_RE } from './fixLifecycle.js';
-import { sendResolvedEmail } from './feedbackEmails.js';
+import { EmailGateError, sendResolvedEmail } from './feedbackEmails.js';
 import { readDeployedRev } from './deployedRev.js';
 
 type Ancestry = (candidate: string, deployed: string) => Promise<boolean>;
@@ -128,9 +130,12 @@ export async function checkShipped(
         result.skipped += 1;
         result.diagnostics.push({ feedbackId: row.id, stage: 'email', code: res.status });
       }
-    } catch {
+    } catch (err) {
+      // Gate codes are non-secret enum strings and say WHICH gate refused.
+      // The message is never recorded: it can quote row content.
       result.skipped += 1;
-      result.diagnostics.push({ feedbackId: row.id, stage: 'email', code: 'send_refused' });
+      const code = err instanceof EmailGateError ? err.code : 'send_refused';
+      result.diagnostics.push({ feedbackId: row.id, stage: 'email', code });
     }
   }
 
