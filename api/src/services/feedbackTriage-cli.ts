@@ -44,6 +44,12 @@ created only by deployment verification.
 Approval/git commands do not require database credentials. FEEDBACK_REPO_DIR
 must name a trusted clone for submit-patch and check-shipped. These are operator
 commands, not the agent socket API; patch FILE is an operator-local path.
+
+check-shipped does NOT fetch: it reads FEEDBACK_REPO_DIR exactly as it finds it.
+Fetch that clone up to date before every run. A stale clone does not have the
+fix commit, so ancestry cannot be decided: every affected row reports
+{"stage":"ancestry","code":"unverifiable"} and the verb exits 1. That is the
+expected symptom of a stale clone, not of an undeployed fix.
 `;
 
 function flag(argv: string[], name: string): string | undefined {
@@ -163,9 +169,15 @@ export async function runCli(argv: string[], out: (s: string) => void): Promise<
   if (['approve-patch', 'submit-patch', 'open-pr'].includes(cmd)) {
     try {
       return await runPureCommand(cmd, argv, out);
-    } catch {
-      // Key parsers, filesystem errors and remote failures must not echo secrets.
-      out('command failed: check input, approval, and trusted operator configuration');
+    } catch (err) {
+      // Key parsers, filesystem errors and remote failures must not echo
+      // secrets, so the message and stack are never printed. The RepoGitError
+      // code is a fixed non-secret enum and is the only way an operator learns
+      // WHICH refusal happened — `pr_closed` in particular means a human must
+      // act, and was invisible before.
+      const { RepoGitError } = await import('../reposGit/errors.js');
+      const code = err instanceof RepoGitError ? ` [${err.code}]` : '';
+      out(`command failed${code}: check input, approval, and trusted operator configuration`);
       return 1;
     }
   }

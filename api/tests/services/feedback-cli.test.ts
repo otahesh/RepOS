@@ -158,6 +158,33 @@ describe('fix lifecycle CLI', () => {
     expect(await runCli(['approve-patch', '--id', '1', '--base', 'a'.repeat(40)], vi.fn())).toBe(1);
     expect(mocks.readFile).not.toHaveBeenCalled();
   });
+  it.each([
+    ['pr_closed', 'feedback pull request was closed; operator action required'],
+    ['not_configured', 'a valid FEEDBACK_GITHUB_TOKEN is required'],
+  ])('surfaces the RepoGitError code %s without its message', async (code, message) => {
+    noDatabase();
+    const { RepoGitError } = await import('../../src/reposGit/errors.js');
+    mocks.openPr.mockRejectedValueOnce(
+      new RepoGitError(code as ConstructorParameters<typeof RepoGitError>[0], message),
+    );
+    const out = vi.fn();
+    // Exit code is unchanged: these are still failures, just legible ones.
+    expect(await runCli(['open-pr', '--id', '1'], out)).toBe(1);
+    const printed = out.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toContain(code);
+    // The message and stack can carry transport detail; only the enum leaks.
+    expect(printed).not.toContain(message);
+  });
+  it('prints no code for a failure that is not a RepoGitError', async () => {
+    noDatabase();
+    mocks.openPr.mockRejectedValueOnce(new Error('ENOENT /home/operator/.ssh/id_ed25519'));
+    const out = vi.fn();
+    expect(await runCli(['open-pr', '--id', '1'], out)).toBe(1);
+    const printed = out.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(printed).toBe(
+      'command failed: check input, approval, and trusted operator configuration',
+    );
+  });
   it.each(['null', '{}', '{"approval":null}', '{"approval":{"feedbackId":1},"signature":42}'])(
     'refuses malformed envelope %s before reading files',
     async (text) => {
