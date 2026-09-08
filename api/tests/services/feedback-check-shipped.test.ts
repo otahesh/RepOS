@@ -257,6 +257,36 @@ describe('checkShipped', () => {
     const res = await checkShipped();
     expect(res.emailed).toBe(1);
     expect(res.skipped).toBe(1);
+    expect(res.diagnostics).toEqual([
+      { feedbackId: expect.any(String), stage: 'email', code: 'failed' },
+    ]);
+  });
+
+  it('treats an already-sent notice as a successful no-op, not a skip', async () => {
+    // listResolvable only excludes a row once a `resolved` feedback_emails
+    // row exists, so the only way this row is still selected AND already
+    // sent is a genuine overlapping sweep: another process wins the race and
+    // inserts+sends between our listResolvable() read and our
+    // sendResolvedEmail() call. The ancestry seam runs in exactly that
+    // window, so it stands in for the other process here.
+    const id = await mkFixed(FIX);
+    __setAncestryForTesting(async (a, d) => {
+      await db.query(
+        `INSERT INTO feedback_emails (feedback_id, kind, request, idempotency_key, sent_at, message_id)
+         VALUES ($1, 'resolved', '{}', 'already-sent-test', now(), 'earlier-run')`,
+        [id],
+      );
+      return isAncestor(a, d, repo);
+    });
+    const fetchMock = ok();
+    mailer.__setMailFetchForTesting(fetchMock);
+
+    const res = await checkShipped();
+    expect(res.shipped).toBe(1);
+    expect(res.skipped).toBe(0);
+    expect(res.emailed).toBe(0);
+    expect(res.diagnostics).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

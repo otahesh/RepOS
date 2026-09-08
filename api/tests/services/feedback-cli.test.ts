@@ -91,6 +91,29 @@ describe('fix lifecycle CLI', () => {
     });
     expect(await runCli(['check-shipped', '--dry-run'], vi.fn())).toBe(0);
   });
+  it('exits 0 when the only outcome is already_sent, and 1 on a genuine failure', async () => {
+    vi.stubEnv('DATABASE_URL', 'postgres://test/local');
+    vi.stubEnv('FEEDBACK_REPO_DIR', '/trusted/clone');
+    // An overlapping sweep produces no diagnostic for already_sent — this is
+    // the CLI's contract with checkShipped's fixed shape, not a failure.
+    mocks.check.mockResolvedValueOnce({
+      diagnostics: [],
+      shipped: 1,
+    });
+    expect(await runCli(['check-shipped', '--dry-run'], vi.fn())).toBe(0);
+
+    mocks.check.mockResolvedValueOnce({
+      diagnostics: [{ stage: 'email', code: 'failed' }],
+      shipped: 1,
+    });
+    expect(await runCli(['check-shipped', '--dry-run'], vi.fn())).toBe(1);
+
+    mocks.check.mockResolvedValueOnce({
+      diagnostics: [{ stage: 'email', code: 'send_refused' }],
+      shipped: 1,
+    });
+    expect(await runCli(['check-shipped', '--dry-run'], vi.fn())).toBe(1);
+  });
   it('wires link and reconcile using the existing flag convention', async () => {
     vi.stubEnv('DATABASE_URL', 'postgres://test/local');
     expect(await runCli(['link', '--id', '1', '--sha', 'a'.repeat(40)], vi.fn())).toBe(0);

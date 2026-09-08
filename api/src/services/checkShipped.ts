@@ -121,7 +121,10 @@ export async function checkShipped(
     try {
       const res = await sendResolvedEmail({ id: row.id, bodyText: resolvedCopy(row.body) });
       if (res.status === 'sent') result.emailed += 1;
-      else {
+      else if (res.status === 'already_sent') {
+        // Notice was delivered by an earlier overlapping sweep. This run did
+        // nothing wrong, so it is not a skip and not a diagnostic.
+      } else {
         result.skipped += 1;
         result.diagnostics.push({ feedbackId: row.id, stage: 'email', code: res.status });
       }
