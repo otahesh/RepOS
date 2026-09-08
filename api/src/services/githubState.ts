@@ -64,13 +64,22 @@ export async function lookupPrForBranch(branch: string): Promise<PrState | null>
     state: string;
     merged_at: string | null;
     merge_commit_sha: string | null;
+    base?: { ref?: string } | null;
   }>;
   if (!Array.isArray(body) || body.length === 0) return null;
 
+  // Only PRs targeting `main` count. openPr refuses to adopt any other base,
+  // and a PR merged into some other branch is not on the path to production —
+  // recording it as `merged` would leave the fix outside the observable set
+  // and could tell a submitter their fix is live off a branch that never
+  // reached the deployed image.
+  const candidates = body.filter((p) => p.base?.ref === 'main');
+  if (candidates.length === 0) return null;
+
   // Prefer a merged PR, then an open one, then the most recent closed one.
-  const merged = body.find((p) => p.merged_at !== null);
-  const open = body.find((p) => p.state === 'open');
-  const chosen = merged ?? open ?? body[0];
+  const merged = candidates.find((p) => p.merged_at !== null);
+  const open = candidates.find((p) => p.state === 'open');
+  const chosen = merged ?? open ?? candidates[0];
   return {
     number: chosen.number,
     state: chosen.state === 'open' ? 'open' : 'closed',

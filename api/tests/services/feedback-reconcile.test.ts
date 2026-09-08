@@ -88,7 +88,15 @@ describe('reconcileFixes', () => {
         [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } },
         '/pulls?': {
           status: 200,
-          body: [{ number: 91, state: 'open', merged_at: null, merge_commit_sha: null }],
+          body: [
+            {
+              number: 91,
+              state: 'open',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
+          ],
         },
       }),
     );
@@ -110,6 +118,7 @@ describe('reconcileFixes', () => {
               state: 'closed',
               merged_at: '2026-09-05T00:00:00Z',
               merge_commit_sha: MERGE,
+              base: { ref: 'main' },
             },
           ],
         },
@@ -142,7 +151,15 @@ describe('reconcileFixes', () => {
       stub({
         '/pulls?': {
           status: 200,
-          body: [{ number: 91, state: 'closed', merged_at: null, merge_commit_sha: null }],
+          body: [
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
+          ],
         },
       }),
     );
@@ -191,7 +208,13 @@ describe('reconcileFixes', () => {
         if (url.includes('/pulls?')) {
           return new Response(
             JSON.stringify([
-              { number: 92, state: 'open', merged_at: null, merge_commit_sha: null },
+              {
+                number: 92,
+                state: 'open',
+                merged_at: null,
+                merge_commit_sha: null,
+                base: { ref: 'main' },
+              },
             ]),
             { status: 200, headers: { 'content-type': 'application/json' } },
           );
@@ -244,12 +267,19 @@ describe('reconcileFixes', () => {
         '/pulls?': {
           status: 200,
           body: [
-            { number: 92, state: 'open', merged_at: null, merge_commit_sha: null },
+            {
+              number: 92,
+              state: 'open',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
             {
               number: 91,
               state: 'closed',
               merged_at: '2026-09-05T00:00:00Z',
               merge_commit_sha: MERGE,
+              base: { ref: 'main' },
             },
           ],
         },
@@ -271,8 +301,20 @@ describe('reconcileFixes', () => {
         '/pulls?': {
           status: 200,
           body: [
-            { number: 90, state: 'closed', merged_at: null, merge_commit_sha: null },
-            { number: 93, state: 'open', merged_at: null, merge_commit_sha: null },
+            {
+              number: 90,
+              state: 'closed',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
+            {
+              number: 93,
+              state: 'open',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
           ],
         },
       }),
@@ -290,14 +332,97 @@ describe('reconcileFixes', () => {
         '/pulls?': {
           status: 200,
           body: [
-            { number: 88, state: 'closed', merged_at: null, merge_commit_sha: null },
-            { number: 91, state: 'closed', merged_at: null, merge_commit_sha: null },
+            {
+              number: 88,
+              state: 'closed',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
           ],
         },
       }),
     );
     await reconcileFixes();
     expect(await state(id)).toMatchObject({ fix_status: 'needed', fix_pr_number: null });
+  });
+
+  it('ignores a merged PR based on a branch other than main', async () => {
+    // openPr only ever adopts a PR whose base is `main`, so a `feedback/N` PR
+    // merged into `staging` is not this fix reaching production. Recording it
+    // as `merged` would put the row OUTSIDE the observable set — no later
+    // sweep revisits `merged` — and check-shipped would then tell the
+    // submitter their fix is live off a branch that never got deployed.
+    const id = await mkNeeded();
+    await db.query(`UPDATE feedback SET fix_status='pr_open', fix_pr_number=91 WHERE id=$1`, [id]);
+    gh.__setGithubFetchForTesting(
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 200, body: { object: { sha: HEAD } } },
+        '/pulls?': {
+          status: 200,
+          body: [
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: '2026-09-05T00:00:00Z',
+              merge_commit_sha: MERGE,
+              base: { ref: 'staging' },
+            },
+            {
+              number: 93,
+              state: 'open',
+              merged_at: null,
+              merge_commit_sha: null,
+              base: { ref: 'main' },
+            },
+          ],
+        },
+      }),
+    );
+    await reconcileFixes();
+    // The qualifying open PR wins; the staging merge is not seen at all.
+    expect(await state(id)).toMatchObject({
+      fix_status: 'pr_open',
+      fix_pr_number: 93,
+      fix_commit_sha: null,
+    });
+  });
+
+  it('treats a lone non-main PR as no PR at all', async () => {
+    const id = await mkNeeded();
+    await db.query(`UPDATE feedback SET fix_status='pr_open', fix_pr_number=91 WHERE id=$1`, [id]);
+    gh.__setGithubFetchForTesting(
+      stub({
+        [`/git/ref/heads/feedback%2F${id}`]: { status: 404, body: { message: 'Not Found' } },
+        '/pulls?': {
+          status: 200,
+          body: [
+            {
+              number: 91,
+              state: 'closed',
+              merged_at: '2026-09-05T00:00:00Z',
+              merge_commit_sha: MERGE,
+              base: { ref: 'staging' },
+            },
+          ],
+        },
+      }),
+    );
+    await reconcileFixes();
+    // Identical to the existing "neither branch nor PR exists" outcome — no
+    // new state was invented for this case.
+    expect(await state(id)).toMatchObject({
+      fix_status: 'needed',
+      fix_pr_number: null,
+      fix_commit_sha: null,
+    });
   });
 
   it('rejects a merge_commit_sha that is not 40-hex rather than storing it', async () => {
@@ -313,6 +438,7 @@ describe('reconcileFixes', () => {
               state: 'closed',
               merged_at: '2026-09-05T00:00:00Z',
               merge_commit_sha: 'NOTASHA',
+              base: { ref: 'main' },
             },
           ],
         },
