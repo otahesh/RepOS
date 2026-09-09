@@ -1,6 +1,6 @@
 # Feedback triage agent — design
 
-**Status:** revised 2026-09-04 after review. Not implemented.
+**Status:** revised 2026-09-04 after review. Plans 1 and 2 implemented as operator tooling; not deployed. Agent infrastructure remains unimplemented.
 **Revision 1, 2026-09-04:** closes seven review findings — a trust boundary for
 the prompt-injection surface, a feedback-level advisory lock, queue membership by
 `category` rather than `triaged_at`, an explicit at-most-once delivery model,
@@ -204,6 +204,8 @@ Prose elsewhere in this document describes; **this table decides**.
 | `repos-broker` | `RESEND_API_KEY`, `FEEDBACK_WEBHOOK_URL`, Unraid SSH identity, `DATABASE_URL`, Ed25519 signing key | `list`, `triage`, `email`, `link`, `defer`, `replay-pending`, `check-shipped`, `reconcile-fixes`, `approve-patch` | agent, over `/run/repos-feedback/broker.sock` (`0660`, group `repos-agent`) |
 | `repos-git` | GitHub write token, and the broker's Ed25519 **public** key | `submit-patch`, `open-pr` | agent, over `/run/repos-git/git.sock` (`0660`, group `repos-agent`) |
 | model proxy | Anthropic credential | inference forwarding | agent, over loopback via `ANTHROPIC_BASE_URL` |
+
+> **Implementation status (2026-09-07):** Plan 1 (`502e96d`) implemented triage, the email ledger and delivery. Plan 2 implements ship detection, the fix lifecycle, patch approval and `repos-git` as tested libraries plus operator CLI verbs. Neither plan is deployed. The broker daemon, both sockets, separate OS principals, model proxy, agent and sweep remain Plan 3. Until then the CLI runs at operator trust level; its generic patch scan is not yet the broker's row-aware privacy check, and source import tests do not establish the OS credential boundary.
 
 **Two sockets, not one.** An earlier draft said every verb went to the broker
 socket while `repos-git` performed the git work, which would have meant the

@@ -5,8 +5,10 @@
 // code, rather than in the agent's reasoning — so the agent cannot double-send
 // even if it misbehaves or a run dies partway.
 //
-// There is deliberately NO way to send a `resolved` email from here. That kind
-// is created only by deployment verification (check-shipped, Plan 2).
+// There is deliberately no GENERAL-PURPOSE way to send a `resolved` email:
+// `sendFeedbackEmail`'s `SendableKind` excludes it. `sendResolvedEmail` below
+// is the one narrow, non-agent-facing entry point, called only by deployment
+// verification (check-shipped, Plan 2).
 import { db } from '../db/client.js';
 import { withFeedbackLock, LockTimeoutError } from './feedbackLock.js';
 import { FIXABLE, TERMINAL } from './feedbackTriage.js';
@@ -19,6 +21,7 @@ import {
   sendFeedbackRequest,
   serializeFeedbackRequest,
   MailerError,
+  type EmailKind,
 } from './feedbackMailer.js';
 import { alertDeadLetter, alertSendingPaused, assertAlertingConfigured } from './feedbackAlerts.js';
 
@@ -131,77 +134,94 @@ export async function sendFeedbackEmail(input: {
       );
     }
 
-    const key = idempotencyKeyFor(input.kind, input.id);
-    const from = fromAddress();
-
-    const { rows: existing } = await db.query<{
-      id: string;
-      request: string;
-      sent_at: Date | null;
-      dead_lettered_at: Date | null;
-    }>(
-      `SELECT id, request, sent_at, dead_lettered_at
-         FROM feedback_emails WHERE feedback_id=$1 AND kind=$2`,
-      [input.id, input.kind],
-    );
-
-    let rowId: string;
-    let requestJson: string;
-
-    if (existing.length > 0) {
-      if (existing[0].sent_at !== null) return { status: 'already_sent' };
-      if (existing[0].dead_lettered_at !== null) {
-        return { status: 'failed', error: 'dead-lettered; not retried' };
-      }
-      rowId = existing[0].id;
-      requestJson = existing[0].request;
-    } else {
-      const request = buildFeedbackRequest({
-        kind: input.kind,
-        toEmail: to,
-        feedbackId: input.id,
-        bodyText: input.bodyText,
-      });
-      requestJson = serializeFeedbackRequest(request);
-      const { rows: inserted } = await db.query<{ id: string }>(
-        `INSERT INTO feedback_emails (feedback_id, kind, request, idempotency_key)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
-        [input.id, input.kind, requestJson, key],
-      );
-      rowId = inserted[0].id;
-    }
-
-    // `db` is a Pool and each query auto-commits, so the row above is durable
-    // before the call below. Nothing here opens a transaction on purpose.
-    await db.query(
-      `UPDATE feedback_emails
-          SET attempts = attempts + 1,
-              first_attempt_at = COALESCE(first_attempt_at, now()),
-              last_attempt_at = now()
-        WHERE id = $1`,
-      [rowId],
-    );
-
-    try {
-      const request = parseFeedbackRequest(requestJson, to, from);
-      const { messageId } = await sendFeedbackRequest(request, key, to);
-      await db.query(
-        `UPDATE feedback_emails SET sent_at=now(), message_id=$2, error=NULL WHERE id=$1`,
-        [rowId, messageId],
-      );
-      return { status: 'sent', messageId };
-    } catch (err) {
-      const detail =
-        err instanceof MailerError
-          ? `${err.code}: ${err.message}${err.detail ? ` — ${err.detail}` : ''}`
-          : String(err);
-      await db.query(`UPDATE feedback_emails SET error=$2 WHERE id=$1`, [
-        rowId,
-        detail.slice(0, 500),
-      ]);
-      return { status: 'failed', error: detail };
-    }
+    return runLedgeredSend({ id: input.id, kind: input.kind, to, bodyText: input.bodyText });
   });
+}
+
+/**
+ * The ledger half of a send: freeze, commit, then attempt. Shared by
+ * sendFeedbackEmail and sendResolvedEmail so the commit-before-send ordering
+ * and the frozen-bytes replay exist in exactly one tested place.
+ *
+ * Callers MUST already hold this row's feedback lock and MUST have run their
+ * own gates — this function enforces neither.
+ */
+async function runLedgeredSend(input: {
+  id: string;
+  kind: EmailKind;
+  to: string;
+  bodyText: string;
+}): Promise<SendResult> {
+  const key = idempotencyKeyFor(input.kind, input.id);
+  const from = fromAddress();
+
+  const { rows: existing } = await db.query<{
+    id: string;
+    request: string;
+    sent_at: Date | null;
+    dead_lettered_at: Date | null;
+  }>(
+    `SELECT id, request, sent_at, dead_lettered_at
+       FROM feedback_emails WHERE feedback_id=$1 AND kind=$2`,
+    [input.id, input.kind],
+  );
+
+  let rowId: string;
+  let requestJson: string;
+
+  if (existing.length > 0) {
+    if (existing[0].sent_at !== null) return { status: 'already_sent' };
+    if (existing[0].dead_lettered_at !== null) {
+      return { status: 'failed', error: 'dead-lettered; not retried' };
+    }
+    rowId = existing[0].id;
+    requestJson = existing[0].request;
+  } else {
+    const request = buildFeedbackRequest({
+      kind: input.kind,
+      toEmail: input.to,
+      feedbackId: input.id,
+      bodyText: input.bodyText,
+    });
+    requestJson = serializeFeedbackRequest(request);
+    const { rows: inserted } = await db.query<{ id: string }>(
+      `INSERT INTO feedback_emails (feedback_id, kind, request, idempotency_key)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [input.id, input.kind, requestJson, key],
+    );
+    rowId = inserted[0].id;
+  }
+
+  // `db` is a Pool and each query auto-commits, so the row above is durable
+  // before the call below. Nothing here opens a transaction on purpose.
+  await db.query(
+    `UPDATE feedback_emails
+        SET attempts = attempts + 1,
+            first_attempt_at = COALESCE(first_attempt_at, now()),
+            last_attempt_at = now()
+      WHERE id = $1`,
+    [rowId],
+  );
+
+  try {
+    const request = parseFeedbackRequest(requestJson, input.to, from);
+    const { messageId } = await sendFeedbackRequest(request, key, input.to);
+    await db.query(
+      `UPDATE feedback_emails SET sent_at=now(), message_id=$2, error=NULL WHERE id=$1`,
+      [rowId, messageId],
+    );
+    return { status: 'sent', messageId };
+  } catch (err) {
+    const detail =
+      err instanceof MailerError
+        ? `${err.code}: ${err.message}${err.detail ? ` — ${err.detail}` : ''}`
+        : String(err);
+    await db.query(`UPDATE feedback_emails SET error=$2 WHERE id=$1`, [
+      rowId,
+      detail.slice(0, 500),
+    ]);
+    return { status: 'failed', error: detail };
+  }
 }
 
 /** Resend forgets an idempotency key after 24 hours. */
@@ -426,4 +446,57 @@ export async function replayPending(
   }
 
   return { sent, deadLettered, paused: false };
+}
+
+/**
+ * The ONLY path that creates a `resolved` email. Deliberately not reachable
+ * through `sendFeedbackEmail` — `SendableKind` excludes it — because there
+ * must be no general-purpose "tell them it's fixed" command an agent could
+ * call on a hunch. Ship detection calls this after an ancestry check.
+ *
+ * It does NOT require the `ack` to have been delivered: a dead-lettered ack
+ * still permits a resolved notice, because dead-lettering one email does not
+ * abandon the item.
+ */
+export async function sendResolvedEmail(input: {
+  id: string;
+  bodyText: string;
+}): Promise<SendResult> {
+  return withFeedbackLock(input.id, async () => {
+    const { rows } = await db.query<{
+      category: FeedbackCategory | null;
+      user_email_at_submit: string | null;
+    }>(`SELECT category, user_email_at_submit FROM feedback WHERE id=$1`, [input.id]);
+    if (rows.length === 0) {
+      throw new EmailGateError('not_found', `feedback ${input.id} not found`);
+    }
+    const { category, user_email_at_submit: to } = rows[0];
+    if (category === null) {
+      throw new EmailGateError('not_classified', 'classify the row before emailing');
+    }
+    if (!FIXABLE.includes(category)) {
+      throw new EmailGateError(
+        'kind_not_allowed_for_category',
+        `kind 'resolved' is not permitted for category '${category}'`,
+      );
+    }
+    if (!to) {
+      await appendSkipReason(input.id);
+      throw new EmailGateError('no_recipient', 'row has no submitter address');
+    }
+
+    // `resolved` is exclusive with `reply`, exactly as `ack` is.
+    const { rows: conflicting } = await db.query<{ kind: string }>(
+      `SELECT kind FROM feedback_emails WHERE feedback_id=$1 AND kind='reply'`,
+      [input.id],
+    );
+    if (conflicting.length > 0) {
+      throw new EmailGateError(
+        'exclusive_kind_present',
+        `a 'reply' email already exists for this row`,
+      );
+    }
+
+    return runLedgeredSend({ id: input.id, kind: 'resolved', to, bodyText: input.bodyText });
+  });
 }
